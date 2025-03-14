@@ -1,0 +1,9 @@
+[package]
+name = "hashsigs-rs"
+version = "0.0.1"
+edition = "2021"
+authors = ["Richard T. Carback III <rick.carback@gmail.com>"]
+description = "Hash based signatures, WOTS+"
+license = "AGPL-3.0"
+
+[dependencies]
