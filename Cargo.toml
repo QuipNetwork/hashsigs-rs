@@ -7,3 +7,9 @@ description = "Hash based signatures, WOTS+"
 license = "AGPL-3.0"
 
 [dependencies]
+solana-program = "1.17"
+serde_json = "1.0"
+
+[dev-dependencies]
+solana-program = "1.17"
+serde_json = "1.0"

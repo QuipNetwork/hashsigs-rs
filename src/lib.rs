@@ -226,19 +226,9 @@ impl WOTSPlus {
         chain_segments
     }
 
-    /// Generate a WOTS+ key pair
-    /// The process works as follows:
-    /// 1. Generate private key from seed
-    /// 2. Generate public seed from private key
-    /// 3. Generate randomization elements from public seed
-    /// 4. For each signature chunk:
-    ///    a. Generate a secret key segment
-    ///    b. Run the chain function to the end to get the public key segment
-    /// 5. Hash all public key segments together to get the final public key
-    pub fn generate_key_pair(&self, private_seed: &[u8; constants::HASH_LEN]) -> (PublicKey, [u8; constants::HASH_LEN]) {
-        let private_key = (self.hash_fn)(private_seed);
-        let public_seed = self.prf(&private_key, 0);
-        
+    /// Generate public key from a private key
+    pub fn get_public_key(&self, private_key: &[u8; constants::HASH_LEN]) -> PublicKey {
+        let public_seed = self.prf(private_key, 0);
         let randomization_elements = self.generate_randomization_elements(&public_seed);
         let function_key = randomization_elements[0];
 
@@ -247,7 +237,7 @@ impl WOTSPlus {
         for i in 0..constants::NUM_SIGNATURE_CHUNKS {
             let mut to_hash = [0u8; constants::HASH_LEN * 2];
             to_hash[..constants::HASH_LEN].copy_from_slice(&function_key);
-            to_hash[constants::HASH_LEN..].copy_from_slice(&self.prf(&private_key, (i + 1) as u16));
+            to_hash[constants::HASH_LEN..].copy_from_slice(&self.prf(private_key, (i + 1) as u16));
             
             let secret_key_segment = (self.hash_fn)(&to_hash);
             let segment = self.chain(
@@ -263,13 +253,25 @@ impl WOTSPlus {
 
         let public_key_hash = (self.hash_fn)(&public_key_segments);
         
-        (
-            PublicKey {
-                public_seed,
-                public_key_hash,
-            },
-            private_key,
-        )
+        PublicKey {
+            public_seed,
+            public_key_hash,
+        }
+    }
+
+    /// Generate a WOTS+ key pair
+    /// The process works as follows:
+    /// 1. Generate private key from seed
+    /// 2. Generate public seed from private key
+    /// 3. Generate randomization elements from public seed
+    /// 4. For each signature chunk:
+    ///    a. Generate a secret key segment
+    ///    b. Run the chain function to the end to get the public key segment
+    /// 5. Hash all public key segments together to get the final public key
+    pub fn generate_key_pair(&self, private_seed: &[u8; constants::HASH_LEN]) -> (PublicKey, [u8; constants::HASH_LEN]) {
+        let private_key = (self.hash_fn)(private_seed);
+        let public_key = self.get_public_key(&private_key);
+        (public_key, private_key)
     }
 
     /// Sign a message with a WOTS+ private key
