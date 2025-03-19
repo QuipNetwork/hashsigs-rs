@@ -123,9 +123,6 @@ impl PublicKey {
     }
 }
 
-#[cfg(target_arch = "bpf")]
-use solana_program::program_stubs::sol_get_random;
-
 pub struct WOTSPlus {
     hash_fn: HashFn,
 }
@@ -322,6 +319,7 @@ impl WOTSPlus {
     /// 5. Run the chain function on each segment to reproduce each public key segment
     /// 6. Hash all public key segments together to recreate the original public key
     pub fn verify(&self, public_key: &PublicKey, message: &[u8], signature: &Vec<[u8; constants::HASH_LEN]>) -> bool {
+        
         if message.len() != constants::MESSAGE_LEN {
             return false;
         }
@@ -330,10 +328,11 @@ impl WOTSPlus {
         }
 
         let randomization_elements = self.generate_randomization_elements(&public_key.public_seed);
+        
         let chain_segments = self.compute_message_hash_chain_indexes(message);
         
         let mut public_key_segments = Vec::with_capacity(constants::SIGNATURE_SIZE);
-        
+
         // Compute each public key segment. These are done by taking the signature, which is prevChainOut at chainIdx,
         // and completing the hash chain via the chain function to recompute the public key segment.
         for (i, &chain_idx) in chain_segments.iter().enumerate() {
@@ -350,7 +349,7 @@ impl WOTSPlus {
 
         // Hash all public key segments together to recreate the original public key
         let computed_hash = (self.hash_fn)(&public_key_segments);
-
+        
         // Compare computed hash with stored public key hash
         computed_hash == public_key.public_key_hash
     }
