@@ -196,7 +196,7 @@ impl WOTSPlus {
             panic!("Message length must be {} bytes", constants::MESSAGE_LEN);
         }
 
-        let mut chain_segments_indexes = Vec::with_capacity(constants::NUM_SIGNATURE_CHUNKS);
+        let mut chain_segments_indexes = vec![0u8; constants::NUM_SIGNATURE_CHUNKS];
         let mut idx = 0;
         
         // Convert message to base-w representation
