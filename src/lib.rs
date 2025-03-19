@@ -150,9 +150,11 @@ impl WOTSPlus {
         &self,
         public_seed: &[u8; constants::HASH_LEN]
     ) -> Vec<[u8; constants::HASH_LEN]> {
-        (0..constants::NUM_SIGNATURE_CHUNKS)
-            .map(|i| self.prf(public_seed, i as u16))
-            .collect()
+        let mut elements = Vec::with_capacity(constants::NUM_SIGNATURE_CHUNKS);
+        for i in 0..constants::NUM_SIGNATURE_CHUNKS {
+            elements.push(self.prf(public_seed, i as u16));
+        }
+        elements
     }
 
     /// XOR two 32-byte arrays
