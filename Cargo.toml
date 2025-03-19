@@ -2,9 +2,14 @@
 name = "hashsigs-rs"
 version = "0.0.1"
 edition = "2021"
-authors = ["Richard T. Carback III <rick.carback@gmail.com>"]
+authors = ["Richard T. Carback III <rick.rust.cargo.383d5@passmail.net>"]
 description = "Hash based signatures, WOTS+"
-license = "AGPL-3.0"
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/quipnetwork/hashsigs-rs"
+documentation = "https://docs.rs/hashsigs-rs"
+readme = "README.md"
+keywords = ["cryptography", "wots", "signature", "solana"]
+categories = ["cryptography", "authentication"]
 
 [lib]
 name = "hashsigs_rs"
@@ -16,9 +21,7 @@ members = [
 ]
 
 [dependencies]
-getrandom = { version = "0.2", features = ["custom"] }
 
 [dev-dependencies]
-solana-sdk="2.2"
 solana-program = "2.2"
 serde_json = "1.0.89"
