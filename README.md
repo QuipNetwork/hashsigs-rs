@@ -75,4 +75,4 @@ RUST_BACKTRACE=1 cargo test-sbf -- --no-capture 2>&1 | grep "compute units:"
 
 ## License
 
-AGPL-3.0
+AGPL-3.0, see COPYING
