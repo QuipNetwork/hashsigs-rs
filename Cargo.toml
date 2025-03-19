@@ -6,10 +6,19 @@ authors = ["Richard T. Carback III <rick.carback@gmail.com>"]
 description = "Hash based signatures, WOTS+"
 license = "AGPL-3.0"
 
+[lib]
+name = "hashsigs_rs"
+path = "src/lib.rs"
+
+[workspace]
+members = [
+    "solana"
+]
+
 [dependencies]
-solana-program = "1.17"
-serde_json = "1.0"
+getrandom = { version = "0.2", features = ["custom"] }
 
 [dev-dependencies]
-solana-program = "1.17"
-serde_json = "1.0"
+solana-sdk="2.2"
+solana-program = "2.2"
+serde_json = "1.0.89"

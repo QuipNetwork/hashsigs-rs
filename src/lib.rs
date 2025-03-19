@@ -123,6 +123,9 @@ impl PublicKey {
     }
 }
 
+#[cfg(target_arch = "bpf")]
+use solana_program::program_stubs::sol_get_random;
+
 pub struct WOTSPlus {
     hash_fn: HashFn,
 }
@@ -146,15 +149,13 @@ impl WOTSPlus {
 
     /// Generate randomization elements from public seed
     /// These elements are used in the chain function to randomize each hash
-    fn generate_randomization_elements(
+    pub fn generate_randomization_elements(
         &self,
         public_seed: &[u8; constants::HASH_LEN]
-    ) -> [[u8; constants::HASH_LEN]; constants::NUM_SIGNATURE_CHUNKS] {
-        let mut elements = [[0u8; constants::HASH_LEN]; constants::NUM_SIGNATURE_CHUNKS];
-        for i in 0..constants::NUM_SIGNATURE_CHUNKS {
-            elements[i] = self.prf(public_seed, i as u16);
-        }
-        elements
+    ) -> Vec<[u8; constants::HASH_LEN]> {
+        (0..constants::NUM_SIGNATURE_CHUNKS)
+            .map(|i| self.prf(public_seed, i as u16))
+            .collect()
     }
 
     /// XOR two 32-byte arrays
@@ -173,7 +174,7 @@ impl WOTSPlus {
     fn chain(
         &self,
         prev_chain_out: &[u8; constants::HASH_LEN],
-        randomization_elements: &[[u8; constants::HASH_LEN]; constants::NUM_SIGNATURE_CHUNKS],
+        randomization_elements: &[[u8; constants::HASH_LEN]],
         index: u16,
         steps: u16,
     ) -> [u8; constants::HASH_LEN] {
@@ -193,12 +194,12 @@ impl WOTSPlus {
     /// These numbers are used to index into each hash chain which is rooted at a secret key segment
     /// and produces a public key segment at the end of the chain. Verification of a signature means
     /// using these indexes into each hash chain to recompute the corresponding public key segment.
-    fn compute_message_hash_chain_indexes(&self, message: &[u8]) -> [u8; constants::NUM_SIGNATURE_CHUNKS] {
+    fn compute_message_hash_chain_indexes(&self, message: &[u8]) -> Vec<u8> {
         if message.len() != constants::MESSAGE_LEN {
             panic!("Message length must be {} bytes", constants::MESSAGE_LEN);
         }
 
-        let mut chain_segments = [0u8; constants::NUM_SIGNATURE_CHUNKS];
+        let mut chain_segments = vec![0u8; constants::NUM_SIGNATURE_CHUNKS];
         let mut idx = 0;
         
         // Convert message to base-w representation
@@ -232,10 +233,10 @@ impl WOTSPlus {
         let randomization_elements = self.generate_randomization_elements(&public_seed);
         let function_key = randomization_elements[0];
 
-        let mut public_key_segments = [0u8; constants::SIGNATURE_SIZE];
+        let mut public_key_segments = Vec::with_capacity(constants::SIGNATURE_SIZE);
 
         for i in 0..constants::NUM_SIGNATURE_CHUNKS {
-            let mut to_hash = [0u8; constants::HASH_LEN * 2];
+            let mut to_hash = vec![0u8; constants::HASH_LEN * 2];
             to_hash[..constants::HASH_LEN].copy_from_slice(&function_key);
             to_hash[constants::HASH_LEN..].copy_from_slice(&self.prf(private_key, (i + 1) as u16));
             
@@ -247,8 +248,7 @@ impl WOTSPlus {
                 (constants::CHAIN_LEN - 1) as u16,
             );
             
-            let offset = i * constants::HASH_LEN;
-            public_key_segments[offset..offset + constants::HASH_LEN].copy_from_slice(&segment);
+            public_key_segments.extend_from_slice(&segment);
         }
 
         let public_key_hash = (self.hash_fn)(&public_key_segments);
@@ -258,6 +258,7 @@ impl WOTSPlus {
             public_key_hash,
         }
     }
+
 
     /// Generate a WOTS+ key pair
     /// The process works as follows:
@@ -282,7 +283,7 @@ impl WOTSPlus {
     /// 4. For each chain index:
     ///    a. Generate the secret key segment
     ///    b. Run the chain function to the index position
-    pub fn sign(&self, private_key: &[u8; constants::HASH_LEN], message: &[u8]) -> [[u8; constants::HASH_LEN]; constants::NUM_SIGNATURE_CHUNKS] {
+    pub fn sign(&self, private_key: &[u8; constants::HASH_LEN], message: &[u8]) -> Vec<[u8; constants::HASH_LEN]> {
         if message.len() != constants::MESSAGE_LEN {
             panic!("Message length must be {} bytes", constants::MESSAGE_LEN);
         }
@@ -292,20 +293,21 @@ impl WOTSPlus {
         let function_key = randomization_elements[0];
         
         let chain_segments = self.compute_message_hash_chain_indexes(message);
-        let mut signature = [[0u8; constants::HASH_LEN]; constants::NUM_SIGNATURE_CHUNKS];
+        let mut signature = Vec::with_capacity(constants::NUM_SIGNATURE_CHUNKS);
 
         for (i, &chain_idx) in chain_segments.iter().enumerate() {
-            let mut to_hash = [0u8; constants::HASH_LEN * 2];
+            let mut to_hash = vec![0u8; constants::HASH_LEN * 2];
             to_hash[..constants::HASH_LEN].copy_from_slice(&function_key);
             to_hash[constants::HASH_LEN..].copy_from_slice(&self.prf(private_key, (i + 1) as u16));
             
             let secret_key_segment = (self.hash_fn)(&to_hash);
-            signature[i] = self.chain(
+            let sig_segment = self.chain(
                 &secret_key_segment,
                 &randomization_elements,
                 0,
                 chain_idx as u16,
             );
+            signature.push(sig_segment);
         }
 
         signature
@@ -319,15 +321,18 @@ impl WOTSPlus {
     /// 4. Compute and add the checksum
     /// 5. Run the chain function on each segment to reproduce each public key segment
     /// 6. Hash all public key segments together to recreate the original public key
-    pub fn verify(&self, public_key: &PublicKey, message: &[u8], signature: &[[u8; constants::HASH_LEN]; constants::NUM_SIGNATURE_CHUNKS]) -> bool {
+    pub fn verify(&self, public_key: &PublicKey, message: &[u8], signature: &Vec<[u8; constants::HASH_LEN]>) -> bool {
         if message.len() != constants::MESSAGE_LEN {
+            return false;
+        }
+        if signature.len() != constants::NUM_SIGNATURE_CHUNKS {
             return false;
         }
 
         let randomization_elements = self.generate_randomization_elements(&public_key.public_seed);
         let chain_segments = self.compute_message_hash_chain_indexes(message);
         
-        let mut public_key_segments = [0u8; constants::SIGNATURE_SIZE];
+        let mut public_key_segments = Vec::with_capacity(constants::SIGNATURE_SIZE);
         
         // Compute each public key segment. These are done by taking the signature, which is prevChainOut at chainIdx,
         // and completing the hash chain via the chain function to recompute the public key segment.
@@ -340,8 +345,7 @@ impl WOTSPlus {
                 num_iterations,
             );
             
-            let offset = i * constants::HASH_LEN;
-            public_key_segments[offset..offset + constants::HASH_LEN].copy_from_slice(&segment);
+            public_key_segments.extend_from_slice(&segment);
         }
 
         // Hash all public key segments together to recreate the original public key
@@ -358,10 +362,16 @@ impl WOTSPlus {
         &self,
         public_key_hash: &[u8; constants::HASH_LEN],
         message: &[u8],
-        signature: &[[u8; constants::HASH_LEN]; constants::NUM_SIGNATURE_CHUNKS],
-        randomization_elements: &[[u8; constants::HASH_LEN]; constants::NUM_SIGNATURE_CHUNKS],
+        signature: &Vec<[u8; constants::HASH_LEN]>,
+        randomization_elements: &Vec<[u8; constants::HASH_LEN]>,
     ) -> bool {
         if message.len() != constants::MESSAGE_LEN {
+            return false;
+        }
+        if signature.len() != constants::NUM_SIGNATURE_CHUNKS {
+            return false;
+        }
+        if randomization_elements.len() != constants::NUM_SIGNATURE_CHUNKS {
             return false;
         }
 
@@ -430,7 +440,7 @@ mod tests {
         let (public_key, _) = wots.generate_key_pair(&private_seed);
         
         let invalid_message = [2u8; constants::MESSAGE_LEN + 1];
-        let signature = [[0u8; 32]; constants::NUM_SIGNATURE_CHUNKS];
+        let signature: Vec<[u8; 32]> = vec![[0u8; 32]; constants::NUM_SIGNATURE_CHUNKS];
         assert!(!wots.verify(&public_key, &invalid_message, &signature));
     }
 
@@ -441,7 +451,7 @@ mod tests {
         let (public_key, _) = wots.generate_key_pair(&private_seed);
         
         let message = [2u8; constants::MESSAGE_LEN];
-        let signature = [[0u8; 32]; constants::NUM_SIGNATURE_CHUNKS];        
+        let signature: Vec<[u8; 32]> = vec![[0u8; 32]; constants::NUM_SIGNATURE_CHUNKS];
         assert!(!wots.verify(&public_key, &message, &signature));
     }
 
