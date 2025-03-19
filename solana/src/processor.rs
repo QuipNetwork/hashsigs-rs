@@ -113,9 +113,7 @@ fn process_generate_keypair(
         .map_err(|_| ProgramError::InvalidInstructionData)?;
     private_key.serialize(&mut result_data)
         .map_err(|_| ProgramError::InvalidInstructionData)?;
-    
-    msg!("Result data size: {} bytes", result_data.len());
-    
+        
     solana_program::program::set_return_data(&result_data);
     msg!("Generated key pair successfully");
     Ok(())
@@ -209,18 +207,20 @@ fn process_verify(
     message: &[u8],
     signature: Vec<[u8; constants::HASH_LEN]>,
 ) -> ProgramResult {
+    msg!("Processing Verify instruction with message length: {}", message.len());
     if message.len() != constants::MESSAGE_LEN {
         return Err(ProgramError::InvalidInstructionData);
     }
-    
+
     let public_key = PublicKey::from(public_key);
-    
+    msg!("Verifying signature...");
     let is_valid = wots.verify(&public_key, message, &signature);
-    
+    msg!("Signature is valid: {}", is_valid);
     if !is_valid {
-        return Err(ProgramError::InvalidArgument);
+        set_return_data(&[0]);
+    } else {
+        set_return_data(&[1]);
     }
-    set_return_data(&[1]);
     msg!("Signature verified successfully");
     Ok(())
 }
@@ -244,9 +244,10 @@ fn process_verify_with_randomization(
     );
     
     if !is_valid {
-        return Err(ProgramError::InvalidArgument);
+        set_return_data(&[0]);
+    } else {
+        set_return_data(&[1]);
     }
-    set_return_data(&[1]);
     msg!("Signature verified with randomization successfully");
     Ok(())
 }
@@ -256,19 +257,8 @@ pub fn process_instruction(
     accounts: &[AccountInfo],
     instruction_data: &[u8],
 ) -> ProgramResult {
-    // Add debug logging for instruction data
-    msg!("Received instruction data length: {}", instruction_data.len());
-    msg!("Raw instruction data (hex): {:?}", instruction_data.iter()
-        .map(|b| format!("{:02x}", b))
-        .collect::<Vec<String>>()
-        .join(""));
-
-    // Log account info
-    msg!("Number of accounts: {}", accounts.len());
-    for (i, account) in accounts.iter().enumerate() {
-        msg!("Account[{}] key: {}", i, account.key);
-        msg!("Account[{}] is_signer: {}", i, account.is_signer);
-        msg!("Account[{}] is_writable: {}", i, account.is_writable);
+    if instruction_data.is_empty() {
+        return Err(ProgramError::InvalidInstructionData);
     }
 
     // Only verify signatures for accounts that are marked as signers
@@ -284,7 +274,6 @@ pub fn process_instruction(
     // Try to deserialize and log any errors
     let instruction = match WOTSPlusInstruction::try_from_slice(instruction_data) {
         Ok(inst) => {
-            msg!("Successfully deserialized instruction: {:?}", inst);
             inst
         },
         Err(e) => {
@@ -296,15 +285,12 @@ pub fn process_instruction(
     // Process the instruction with minimal stack usage
     match instruction {
         WOTSPlusInstruction::GenerateKeyPair { private_seed } => {
-            msg!("Processing GenerateKeyPair instruction");
             process_generate_keypair(&wots, private_seed)
         },
         WOTSPlusInstruction::Sign { private_key, message } => {
-            msg!("Processing Sign instruction with message length: {}", message.len());
             process_sign(program_id, accounts, private_key, &message)
         },
         WOTSPlusInstruction::Verify { public_key, message, signature } => {
-            msg!("Processing Verify instruction with message length: {}", message.len());
             process_verify(&wots, public_key, &message, signature)
         },
         WOTSPlusInstruction::VerifyWithRandomization { 
@@ -313,7 +299,6 @@ pub fn process_instruction(
             signature, 
             randomization_elements 
         } => {
-            msg!("Processing VerifyWithRandomization instruction with message length: {}", message.len());
             process_verify_with_randomization(
                 &wots,
                 public_key_hash,

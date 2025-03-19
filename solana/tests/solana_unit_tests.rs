@@ -189,21 +189,10 @@ pub mod wotsplus_solana_test {
     #[tokio::test]
     async fn test_sign_and_verify_empty_signature() {
         let (program_test, program_id) = setup_test().await;
-        let context = program_test.start_with_context().await;
+        let mut context = program_test.start_with_context().await;
         
-        let signer = Keypair::new();
         let message = (0..constants::MESSAGE_LEN).map(|i| i as u8).collect::<Vec<u8>>();
         
-        // Create PDA for signature storage
-        let (signature_pda, _bump_seed) = Pubkey::find_program_address(
-            &[
-                b"signature",
-                signer.pubkey().as_ref(),
-                message.as_ref(),
-            ],
-            &program_id.pubkey()
-        );
-
         let wots = WOTSPlus::new(processor::keccak256);
         let private_seed = [1u8; 32];
         let (public_key, _) = wots.generate_key_pair(&private_seed);
@@ -218,35 +207,37 @@ pub mod wotsplus_solana_test {
             })
             .collect();
 
-        let instruction = Instruction {
-            program_id: program_id.pubkey(),
-            accounts: vec![
-                AccountMeta::new(context.payer.pubkey(), true),  // Changed to use context.payer as signer
-                AccountMeta::new(signature_pda, false),
-                AccountMeta::new_readonly(solana_program::system_program::id(), false),
-            ],
-            data: {
-                let mut instruction_data = Vec::new();
-                processor::WOTSPlusInstruction::Verify {
-                    public_key: PublicKeyWrapper::from(public_key),
-                    message: message.clone(),
-                    signature: empty_signature_chunks,
-                }
-                .serialize(&mut instruction_data)
-                .unwrap();
-                instruction_data
-            }
+        let instruction = processor::WOTSPlusInstruction::Verify {
+            public_key: PublicKeyWrapper::from(public_key),
+            message: message.clone(),
+            signature: empty_signature_chunks
         };
+    
+        let mut instruction_data: Vec<u8> = Vec::new();
+        instruction.serialize(&mut instruction_data).unwrap();
 
-        let transaction = Transaction::new_signed_with_payer(
-            &[instruction],
-            Some(&context.payer.pubkey()),
-            &[&context.payer],  // Only include context.payer as signer
-            context.last_blockhash,
-        );
+        let transaction = execute_transaction(
+            &mut context,
+            &program_id.pubkey(),
+            instruction_data,
+        ).await.unwrap();
 
-        let result = context.banks_client.process_transaction(transaction).await;
-        assert!(result.is_err()); // Empty signature should fail verification
+        let result = context.banks_client.process_transaction_with_metadata(transaction).await;
+
+        match result {
+            Ok(result) => {
+                let metadata = result.metadata.unwrap();
+                let compute_units = metadata.compute_units_consumed;
+                msg!("Verify Empty Signature compute units: {}", compute_units);
+                msg!("Verify Empty Signature return data: {:?}", metadata.return_data);
+                let binding = metadata.return_data.unwrap();
+                assert_eq!(binding.data, vec![0]);
+            }
+            Err(err) => {
+                msg!("Transaction failed: {:?}", err);
+                panic!("Transaction should have succeeded");
+            }
+        }
     }
 
     #[tokio::test]
@@ -391,8 +382,8 @@ pub mod wotsplus_solana_test {
 
     #[tokio::test]
     async fn test_randomization_elements() {
-        let (mut program_test, program_id) = setup_test().await;
-        let mut context = program_test.start_with_context().await;
+        let (program_test, _program_id) = setup_test().await;
+        let _context = program_test.start_with_context().await;
         let wots = WOTSPlus::new(processor::keccak256);
 
         let private_seed = [1u8; 32];
@@ -415,8 +406,8 @@ pub mod wotsplus_solana_test {
 
     #[tokio::test]
     async fn test_verify_many_with_randomization() {
-        let (mut program_test, program_id) = setup_test().await;
-        let mut context = program_test.start_with_context().await;
+        let (program_test, _program_id) = setup_test().await;
+        let _context = program_test.start_with_context().await;
         let wots = WOTSPlus::new(processor::keccak256);
         
         // Test with a smaller number of iterations to stay within compute limits
@@ -429,7 +420,7 @@ pub mod wotsplus_solana_test {
             let signature = wots.sign(&private_key, &message);
             let randomization_elements = wots.generate_randomization_elements(&public_key.public_seed);
             
-            let verify_instruction = processor::WOTSPlusInstruction::VerifyWithRandomization {
+            let _verify_instruction = processor::WOTSPlusInstruction::VerifyWithRandomization {
                 public_key_hash: public_key.public_key_hash,
                 message,
                 signature: signature.to_vec(),
