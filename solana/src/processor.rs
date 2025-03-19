@@ -115,7 +115,6 @@ fn process_generate_keypair(
         .map_err(|_| ProgramError::InvalidInstructionData)?;
         
     solana_program::program::set_return_data(&result_data);
-    msg!("Generated key pair successfully");
     Ok(())
 }
 
@@ -197,7 +196,6 @@ fn process_sign(
 
     signature_account_data.serialize(&mut &mut signature_account.try_borrow_mut_data()?[..])?;
     
-    msg!("Signature stored in PDA successfully");
     Ok(())
 }
 
@@ -207,21 +205,17 @@ fn process_verify(
     message: &[u8],
     signature: Vec<[u8; constants::HASH_LEN]>,
 ) -> ProgramResult {
-    msg!("Processing Verify instruction with message length: {}", message.len());
     if message.len() != constants::MESSAGE_LEN {
         return Err(ProgramError::InvalidInstructionData);
     }
 
     let public_key = PublicKey::from(public_key);
-    msg!("Verifying signature...");
     let is_valid = wots.verify(&public_key, message, &signature);
-    msg!("Signature is valid: {}", is_valid);
     if !is_valid {
         set_return_data(&[0]);
     } else {
         set_return_data(&[1]);
     }
-    msg!("Signature verified successfully");
     Ok(())
 }
 
@@ -248,7 +242,6 @@ fn process_verify_with_randomization(
     } else {
         set_return_data(&[1]);
     }
-    msg!("Signature verified with randomization successfully");
     Ok(())
 }
 

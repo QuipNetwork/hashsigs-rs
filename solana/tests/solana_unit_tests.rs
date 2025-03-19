@@ -281,7 +281,7 @@ pub mod wotsplus_solana_test {
     }
 
     #[tokio::test]
-    async fn test_verify_with_randomization() {
+    async fn test_verify_with_randomization_elements() {
         let (program_test, program_id) = setup_test().await;
         let mut context = program_test.start_with_context().await;
         
@@ -323,95 +323,58 @@ pub mod wotsplus_solana_test {
     }
 
     #[tokio::test]
-    async fn test_verify_valid_signature_randomization_elements() {
-        let wots = WOTSPlus::new(processor::keccak256);
-        let private_seed = [1u8; 32];
-        let (public_key, private_key) = wots.generate_key_pair(&private_seed);
-        
-        let message = (0..constants::MESSAGE_LEN).map(|i| i as u8).collect::<Vec<u8>>();
-        let signature = wots.sign(&private_key, &message);
-        
-        let randomization_elements = wots.generate_randomization_elements(&public_key.public_seed);
-        
-        assert!(wots.verify_with_randomization_elements(
-            &public_key.public_key_hash,
-            &message,
-            &signature,
-            &randomization_elements
-        ));
-    }
-
-    #[tokio::test]
     async fn test_verify_many() {
+        let (program_test, program_id) = setup_test().await;
+        let mut context = program_test.start_with_context().await;
         let wots = WOTSPlus::new(processor::keccak256);
-        
-        for i in 1..200 {
+        let mut compute_units_total: u64 = 0;   
+        let num_runs = 10;
+        for i in 1..num_runs {
             let mut private_seed = [0u8; 32];
             private_seed[0] = i as u8;
             
             let (public_key, private_key) = wots.generate_key_pair(&private_seed);
             let message = processor::keccak256(format!("Hello World{}", i).as_bytes()).to_vec();
             let signature = wots.sign(&private_key, &message);
+
+            let instruction = processor::WOTSPlusInstruction::Verify {
+                public_key: PublicKeyWrapper::from(public_key),
+                message: message.clone(),
+                signature: signature.to_vec(),
+            };
             
-            assert!(wots.verify(&public_key, &message, &signature));
+            let mut instruction_data = Vec::new();
+            instruction.serialize(&mut instruction_data).unwrap();
+                  
+            let transaction = execute_transaction(
+                &mut context,
+                &program_id.pubkey(),
+                instruction_data,
+            ).await.unwrap();
+           
+            let transaction_result = context.banks_client.process_transaction_with_metadata(transaction).await.unwrap();
+            let metadata = transaction_result.metadata.unwrap();
+            let compute_units = metadata.compute_units_consumed;
+            compute_units_total += compute_units;
+            let return_data = metadata.return_data;
+       
+            // Check return data indicates success
+            let binding = return_data.unwrap();
+            assert_eq!(binding.data, vec![1]);
+            
         }
+
+        msg!("Verify many average compute units: {}", compute_units_total as f64 / num_runs as f64);
     }
 
     #[tokio::test]
     async fn test_verify_many_with_randomization_elements() {
+        let (program_test, program_id) = setup_test().await;
+        let mut context = program_test.start_with_context().await;
         let wots = WOTSPlus::new(processor::keccak256);
-        
-        for i in 1..200 {
-            let mut private_seed = [0u8; 32];
-            private_seed[0] = i as u8;
-            
-            let (public_key, private_key) = wots.generate_key_pair(&private_seed);
-            let message = processor::keccak256(format!("Hello World{}", i).as_bytes()).to_vec();
-            let signature = wots.sign(&private_key, &message);
-            
-            let randomization_elements = wots.generate_randomization_elements(&public_key.public_seed);
-            
-            assert!(wots.verify_with_randomization_elements(
-                &public_key.public_key_hash,
-                &message,
-                &signature,
-                &randomization_elements
-            ));
-        }
-    }
-
-    #[tokio::test]
-    async fn test_randomization_elements() {
-        let (program_test, _program_id) = setup_test().await;
-        let _context = program_test.start_with_context().await;
-        let wots = WOTSPlus::new(processor::keccak256);
-
-        let private_seed = [1u8; 32];
-        let (public_key, private_key) = wots.generate_key_pair(&private_seed);
-        let message = (0..constants::MESSAGE_LEN).map(|i| i as u8).collect::<Vec<u8>>();
-        
-        let randomization_elements = wots.generate_randomization_elements(&public_key.public_seed);
-        
-        let signature = wots.sign(&private_key, &message);
-
-        let is_valid = wots.verify_with_randomization_elements(
-            &public_key.public_key_hash,
-            &message,
-            &signature,
-            &randomization_elements
-        );
-        
-        assert!(is_valid, "Signature verification with randomization failed");
-    }
-
-    #[tokio::test]
-    async fn test_verify_many_with_randomization() {
-        let (program_test, _program_id) = setup_test().await;
-        let _context = program_test.start_with_context().await;
-        let wots = WOTSPlus::new(processor::keccak256);
-        
-        // Test with a smaller number of iterations to stay within compute limits
-        for i in 1..5 {
+        let mut compute_units_total: u64 = 0;
+        let num_runs = 10;
+        for i in 1..num_runs {
             let mut private_seed = [0u8; 32];
             private_seed[0] = i as u8;
             
@@ -420,14 +383,34 @@ pub mod wotsplus_solana_test {
             let signature = wots.sign(&private_key, &message);
             let randomization_elements = wots.generate_randomization_elements(&public_key.public_seed);
             
-            let _verify_instruction = processor::WOTSPlusInstruction::VerifyWithRandomization {
+            let instruction = processor::WOTSPlusInstruction::VerifyWithRandomization {
                 public_key_hash: public_key.public_key_hash,
-                message,
+                message: message.clone(),
                 signature: signature.to_vec(),
                 randomization_elements: randomization_elements.to_vec(),
             };
             
+            let mut instruction_data = Vec::new();
+            instruction.serialize(&mut instruction_data).unwrap();
+            
+            let transaction = execute_transaction(
+                &mut context,
+                &program_id.pubkey(),
+                instruction_data,
+            ).await.unwrap();
+           
+            let transaction_result = context.banks_client.process_transaction_with_metadata(transaction).await.unwrap();
+            let metadata = transaction_result.metadata.unwrap();
+            let compute_units = metadata.compute_units_consumed;
+            compute_units_total += compute_units;
+            let return_data = metadata.return_data;
+       
+            // Check return data indicates success
+            let binding = return_data.unwrap();
+            assert_eq!(binding.data, vec![1]);
         }
+
+        msg!("Verify many with randomization average compute units: {}", compute_units_total as f64 / num_runs as f64);
     }
 
 }
