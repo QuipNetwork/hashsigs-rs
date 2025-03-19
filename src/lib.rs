@@ -196,19 +196,19 @@ impl WOTSPlus {
             panic!("Message length must be {} bytes", constants::MESSAGE_LEN);
         }
 
-        let mut chain_segments = vec![0u8; constants::NUM_SIGNATURE_CHUNKS];
+        let mut chain_segments_indexes = Vec::with_capacity(constants::NUM_SIGNATURE_CHUNKS);
         let mut idx = 0;
         
         // Convert message to base-w representation
         for byte in message {
-            chain_segments[idx] = byte >> 4;
-            chain_segments[idx + 1] = byte & 0x0f;
+            chain_segments_indexes[idx] = byte >> 4;
+            chain_segments_indexes[idx + 1] = byte & 0x0f;
             idx += 2;
         }
 
         // Compute checksum
         let mut checksum: u32 = 0;
-        for &value in &chain_segments[..constants::NUM_MESSAGE_CHUNKS] {
+        for &value in &chain_segments_indexes[..constants::NUM_MESSAGE_CHUNKS] {
             checksum += constants::CHAIN_LEN as u32 - 1 - value as u32
         }
 
@@ -217,11 +217,11 @@ impl WOTSPlus {
         // converting to base-w representation
         for i in (0..constants::NUM_CHECKSUM_CHUNKS).rev() {
             let shift = i * constants::LG_CHAIN_LEN as usize;
-            chain_segments[idx] = ((checksum >> shift) & (constants::CHAIN_LEN as u32 - 1)) as u8;
+            chain_segments_indexes[idx] = ((checksum >> shift) & (constants::CHAIN_LEN as u32 - 1)) as u8;
             idx += 1;
         }
 
-        chain_segments
+        chain_segments_indexes
     }
 
     /// Generate public key from a private key
