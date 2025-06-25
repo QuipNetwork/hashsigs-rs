@@ -246,6 +246,9 @@ impl WOTSPlus {
     /// Generate public key from a private key
     pub fn get_public_key(&self, private_key: &[u8; constants::HASH_LEN]) -> PublicKey {
         let public_seed = self.prf(private_key, 0);
+        self.get_public_key_with_public_seed(private_key, &public_seed)
+    }
+    pub fn get_public_key_with_public_seed(&self, private_key: &[u8; constants::HASH_LEN], public_seed: &[u8; constants::HASH_LEN]) -> PublicKey {
         let randomization_elements = self.generate_randomization_elements(&public_seed);
         let function_key = randomization_elements[0];
 
@@ -270,7 +273,7 @@ impl WOTSPlus {
         let public_key_hash = (self.hash_fn)(&public_key_segments);
         
         PublicKey {
-            public_seed,
+            public_seed: *public_seed,
             public_key_hash,
         }
     }

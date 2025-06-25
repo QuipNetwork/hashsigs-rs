@@ -614,9 +614,9 @@ dependencies = [
 
 [[package]]
 name = "bytemuck_derive"
-version = "1.9.2"
+version = "1.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2ff22c2722516255d1823ce3cc4bc0b154dbc9364be5c905d6baa6eccbbc8774"
+checksum = "3fa76293b4f7bb636ab88fd78228235b5248b4d05cc589aed610f954af5d7c7a"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1642,6 +1642,8 @@ name = "hashsigs-rs-solana"
 version = "0.0.1"
 dependencies = [
  "borsh 1.5.6",
+ "bytemuck",
+ "bytemuck_derive",
  "getrandom 0.1.16",
  "hashsigs-rs",
  "solana-logger",

@@ -17,6 +17,8 @@ solana-program = "2.2"
 hashsigs-rs = { path = ".." }
 borsh = "1.5"
 getrandom = { version = "0.1.16", features = ["dummy"] }
+bytemuck = "1.13"
+bytemuck_derive = "=1.8.1"  # Pin to version required by solana-hash
 
 [dev-dependencies]
 solana-program-test = "2.2"

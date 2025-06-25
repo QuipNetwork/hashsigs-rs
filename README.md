@@ -47,13 +47,13 @@ cargo test-sbf
 For test output and backtrace:
 
 ```
-RUST_BACKTRACE=1 cargo test-sbf -- --no-capture 2>&1
+RUST_BACKTRACE=1 cargo test-sbf -- --nocapture 2>&1
 ```
 
 Show compute units only:
 
 ```
-RUST_BACKTRACE=1 cargo test-sbf -- --no-capture 2>&1 | grep "compute units:"
+RUST_BACKTRACE=1 cargo test-sbf -- --nocapture 2>&1 | grep "compute units:"
 ```
 
 ## Development Requirements
