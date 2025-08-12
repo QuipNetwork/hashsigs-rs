@@ -1,0 +1,21 @@
+version: 2
+updates:
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    # Ignore specific vulnerabilities that we've assessed and documented
+    ignore:
+      # Timing variability in curve25519-dalek - transitive from Solana
+      - dependency-name: "curve25519-dalek"
+        versions: ["3.2.0"]
+      # Double Public Key Signing Function Oracle Attack - transitive from Solana  
+      - dependency-name: "ed25519-dalek"
+        versions: ["1.0.1"]
+      # Unmaintained crates - transitive from Solana, low risk
+      - dependency-name: "atty"
+        versions: ["0.2.14"]
+      - dependency-name: "derivative" 
+        versions: ["2.2.0"]
+      - dependency-name: "paste"
+        versions: ["1.0.15"]
