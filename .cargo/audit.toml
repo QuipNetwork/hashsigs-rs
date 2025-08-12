@@ -1,0 +1,30 @@
+# Cargo audit configuration
+# This file documents known security advisories that we are aware of but cannot
+# immediately fix due to transitive dependencies from third-party crates.
+
+[advisories]
+# Known security advisories that we are aware of but cannot immediately fix
+# due to transitive dependencies from third-party crates (primarily Solana).
+ignore = [
+    # Timing variability in curve25519-dalek's Scalar29::sub/Scalar52::sub
+    # This vulnerability comes from Solana's dependency on ed25519-dalek 1.0.1
+    # which uses curve25519-dalek 3.2.0. We are waiting for Solana to update
+    # their cryptographic dependencies to newer versions.
+    # Risk assessment: Low - This is a timing side-channel attack that would
+    # require local access and precise timing measurements to exploit.
+    "RUSTSEC-2024-0344",
+
+    # Double Public Key Signing Function Oracle Attack on ed25519-dalek
+    # This vulnerability also comes from Solana's dependency on ed25519-dalek 1.0.1.
+    # Risk assessment: Low - This attack requires the ability to get signatures
+    # on crafted messages, which is not possible in our use case.
+    "RUSTSEC-2022-0093",
+
+    # Unmaintained crates - these are warnings, not vulnerabilities
+    # These come from Solana's transitive dependencies and don't pose immediate
+    # security risks, just maintenance concerns.
+    "RUSTSEC-2024-0375",  # atty is unmaintained
+    "RUSTSEC-2024-0388",  # derivative is unmaintained
+    "RUSTSEC-2024-0436",  # paste is unmaintained
+    "RUSTSEC-2021-0145"   # atty potential unaligned read (unsound)
+]
