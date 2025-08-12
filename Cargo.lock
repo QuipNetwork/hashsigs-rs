@@ -1699,6 +1699,7 @@ dependencies = [
  "solana-program",
  "solana-program-test",
  "solana-sdk",
+ "solana-system-interface",
  "tokio",
 ]
 
