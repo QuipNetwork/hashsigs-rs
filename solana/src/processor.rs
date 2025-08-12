@@ -20,10 +20,10 @@ use solana_program::{
     msg,
     program_error::ProgramError,
     pubkey::Pubkey,
-    system_instruction,
     program::invoke_signed,
     sysvar::{rent::Rent, Sysvar},
 };
+use solana_system_interface::instruction as system_instruction;
 use hashsigs_rs::{WOTSPlus, PublicKey, constants};
 use borsh::{BorshSerialize, BorshDeserialize};
 use solana_program::keccak::hash as keccak256_hash;
