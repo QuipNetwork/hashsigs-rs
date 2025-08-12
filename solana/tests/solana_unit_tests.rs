@@ -38,13 +38,7 @@ pub mod wotsplus_solana_test {
         let compute_max_units = 1_400_000;  // Increased from 200,000
         program_test.set_compute_max_units(compute_max_units);
         
-        // Add program data to the test environment
-        program_test.add_program(
-            "hashsigs_rs_solana",
-            program_id.pubkey(),
-            None,
-        );
-        
+
         (program_test, program_id)
     }
 

@@ -13,15 +13,13 @@ crate-type = ["cdylib", "lib"]
 no-entrypoint = []
 
 [dependencies]
-solana-program = "2.2"
+solana-program = "2.3"
 hashsigs-rs = { path = ".." }
 borsh = "1.5"
-getrandom = { version = "0.1.16", features = ["dummy"] }
 bytemuck = "1.13"
-bytemuck_derive = "=1.8.1"  # Pin to version required by solana-hash
+bytemuck_derive = "1.10.1"  # Updated to satisfy Solana 2.3
 
 [dev-dependencies]
-solana-program-test = "2.2"
-solana-sdk = "2.2"
-tokio = { version = "1.44", features = ["full"] }
-solana-logger = "2.2"
+solana-program-test = "2.3"
+solana-sdk = "2.3"
+tokio = { version = "1.47", features = ["full"] }
