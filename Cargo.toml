@@ -1,6 +1,6 @@
 [package]
 name = "hashsigs-rs"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2021"
 authors = ["Richard T. Carback III <rick.rust.cargo.383d5@passmail.net>"]
 description = "Hash based signatures, WOTS+"
@@ -23,5 +23,5 @@ members = [
 [dependencies]
 
 [dev-dependencies]
-solana-program = "2.2"
-serde_json = "1.0.89"
+solana-program = "2.3"
+serde_json = "1.0.142"
