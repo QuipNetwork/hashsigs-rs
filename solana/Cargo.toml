@@ -18,7 +18,7 @@ hashsigs-rs = { path = ".." }
 borsh = "1.5.7"
 bytemuck = "1.23"
 bytemuck_derive = "1.10.1"  # Updated to satisfy Solana 2.3
-solana-system-interface = "1.0"
+solana-system-interface = "2.0"
 
 [dev-dependencies]
 solana-program-test = "2.3"
