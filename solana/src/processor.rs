@@ -23,11 +23,11 @@ use solana_program::{
     program::invoke_signed,
     sysvar::{rent::Rent, Sysvar},
 };
-use solana_system_interface::instruction as system_instruction;
 use hashsigs_rs::{WOTSPlus, PublicKey, constants};
 use borsh::{BorshSerialize, BorshDeserialize};
 use solana_program::keccak::hash as keccak256_hash;
 use solana_program::program::set_return_data;
+use solana_program::system_instruction::create_account;
 use solana_program::account_info::next_account_info;
 
 // NOTE: The following is supposed to increase the stack size but it does not work in practice.
@@ -176,7 +176,7 @@ fn process_sign(
 
     // Create the account if it doesn't exist
     if signature_account.data_is_empty() {
-        let create_account_ix = system_instruction::create_account(
+        let create_account_ix = create_account(
             signer.key,
             &pda,
             rent_lamports,
