@@ -59,10 +59,9 @@ RUST_BACKTRACE=1 cargo test-sbf -- --nocapture 2>&1 | grep "compute units:"
 ## Development Requirements
 
 - Rust 1.70 or later
-- Solana CLI tools (for Solana program development)
-  ```bash
-  sh -c "$(curl -sSfL https://release.solana.com/v2.2/install)"
-  ```
+- Solana CLI tools (for Solana program development): https://solana.com/docs/intro/installation
+
+NOTE: if on Mac, do not use brew to install rust and instead use https://www.rust-lang.org/tools/install
 
 ## Project Structure
 
