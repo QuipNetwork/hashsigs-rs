@@ -23,5 +23,5 @@ members = [
 [dependencies]
 
 [dev-dependencies]
-solana-program = "2.3"
+solana-program = "3.0"
 serde_json = "1.0.143"
