@@ -23,4 +23,4 @@ solana-system-interface = "2.0"
 [dev-dependencies]
 solana-program-test = "2.3"
 solana-sdk = "2.3"
-tokio = { version = "1.47.1", features = ["full"] }
+tokio = { version = "1.48.0", features = ["full"] }
