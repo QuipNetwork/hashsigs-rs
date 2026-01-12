@@ -14,8 +14,66 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
-
 //! WOTS+ (Winternitz One-Time Signature Plus) implementation
+
+
+enum SignatureBufferEnum {
+    #[cfg(feature = "solana")]
+    Array {
+        buf: [u8; constants::SIGNATURE_SIZE],
+        len: usize,
+    },
+
+    #[cfg(not(feature = "solana"))]
+    Vec(Vec<u8>),
+}
+
+impl SignatureBufferEnum {
+    fn new() -> Self {
+        #[cfg(feature = "solana")]
+        {
+            Self::Array {
+                buf: [0u8; constants::SIGNATURE_SIZE],
+                len: 0,
+            }
+        }
+
+        #[cfg(not(feature = "solana"))]
+        {
+            Self::Vec(Vec::with_capacity(constants::SIGNATURE_SIZE))
+        }
+    }
+
+    fn push_slice(&mut self, data: &[u8]) {
+        #[cfg(feature = "solana")]
+        {
+            let Self::Array { buf, len } = self;
+            let end = *len + data.len();
+            buf[*len..end].copy_from_slice(data);
+            *len = end;
+        }
+
+        #[cfg(not(feature = "solana"))]
+        {
+            let Self::Vec(v) = self;
+            v.extend_from_slice(data);
+        }
+    }
+
+    fn as_slice(&self) -> &[u8] {
+        #[cfg(feature = "solana")]
+        {
+            let Self::Array { buf, len } = self;
+            &buf[..*len]
+        }
+
+        #[cfg(not(feature = "solana"))]
+        {
+            let Self::Vec(v) = self;
+            v.as_slice()
+        }
+    }
+}
 
 /// Hash function type for WOTS+
 type HashFn = fn(&[u8]) -> [u8; 32];
@@ -252,7 +310,7 @@ impl WOTSPlus {
         let randomization_elements = self.generate_randomization_elements(&public_seed);
         let function_key = randomization_elements[0];
 
-        let mut public_key_segments = Vec::with_capacity(constants::SIGNATURE_SIZE);
+        let mut public_key_segments = SignatureBufferEnum::new();
 
         for i in 0..constants::NUM_SIGNATURE_CHUNKS {
             let mut to_hash = vec![0u8; constants::HASH_LEN * 2];
@@ -267,10 +325,10 @@ impl WOTSPlus {
                 (constants::CHAIN_LEN - 1) as u16,
             );
             
-            public_key_segments.extend_from_slice(&segment);
+            public_key_segments.push_slice(&segment);
         }
 
-        let public_key_hash = (self.hash_fn)(&public_key_segments);
+        let public_key_hash = (self.hash_fn)(public_key_segments.as_slice());
         
         PublicKey {
             public_seed: *public_seed,
@@ -353,7 +411,7 @@ impl WOTSPlus {
         
         let chain_segments = self.compute_message_hash_chain_indexes(message);
         
-        let mut public_key_segments = Vec::with_capacity(constants::SIGNATURE_SIZE);
+        let mut public_key_segments = SignatureBufferEnum::new();
 
         // Compute each public key segment. These are done by taking the signature, which is prevChainOut at chainIdx,
         // and completing the hash chain via the chain function to recompute the public key segment.
@@ -366,11 +424,11 @@ impl WOTSPlus {
                 num_iterations,
             );
             
-            public_key_segments.extend_from_slice(&segment);
+            public_key_segments.push_slice(&segment);
         }
 
         // Hash all public key segments together to recreate the original public key
-        let computed_hash = (self.hash_fn)(&public_key_segments);
+        let computed_hash = (self.hash_fn)(public_key_segments.as_slice());
         
         // Compare computed hash with stored public key hash
         computed_hash == public_key.public_key_hash
@@ -397,7 +455,7 @@ impl WOTSPlus {
         }
 
         let chain_segments = self.compute_message_hash_chain_indexes(message);
-        let mut public_key_segments = [0u8; constants::SIGNATURE_SIZE];
+        let mut public_key_segments = SignatureBufferEnum::new();
         
         // Compute each public key segment using the pre-computed randomization elements
         for (i, &chain_idx) in chain_segments.iter().enumerate() {
@@ -409,12 +467,12 @@ impl WOTSPlus {
                 num_iterations,
             );
             
-            let offset = i * constants::HASH_LEN;
-            public_key_segments[offset..offset + constants::HASH_LEN].copy_from_slice(&segment);
+            // let offset = i * constants::HASH_LEN;
+            public_key_segments.push_slice(&segment);
         }
 
         // Hash all public key segments together and compare with the provided hash
-        let computed_hash = (self.hash_fn)(&public_key_segments);
+        let computed_hash = (self.hash_fn)(public_key_segments.as_slice());
         computed_hash == *public_key_hash
     }
 }
