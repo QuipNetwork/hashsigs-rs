@@ -17,7 +17,7 @@
 //! WOTS+ (Winternitz One-Time Signature Plus) implementation
 
 
-enum SignatureBufferEnum {
+enum SignatureBuffer {
     #[cfg(feature = "solana")]
     Array {
         buf: [u8; constants::SIGNATURE_SIZE],
@@ -28,7 +28,7 @@ enum SignatureBufferEnum {
     Vec(Vec<u8>),
 }
 
-impl SignatureBufferEnum {
+impl SignatureBuffer {
     fn new() -> Self {
         #[cfg(feature = "solana")]
         {
@@ -310,7 +310,7 @@ impl WOTSPlus {
         let randomization_elements = self.generate_randomization_elements(&public_seed);
         let function_key = randomization_elements[0];
 
-        let mut public_key_segments = SignatureBufferEnum::new();
+        let mut public_key_segments = SignatureBuffer::new();
 
         for i in 0..constants::NUM_SIGNATURE_CHUNKS {
             let mut to_hash = vec![0u8; constants::HASH_LEN * 2];
@@ -411,7 +411,7 @@ impl WOTSPlus {
         
         let chain_segments = self.compute_message_hash_chain_indexes(message);
         
-        let mut public_key_segments = SignatureBufferEnum::new();
+        let mut public_key_segments = SignatureBuffer::new();
 
         // Compute each public key segment. These are done by taking the signature, which is prevChainOut at chainIdx,
         // and completing the hash chain via the chain function to recompute the public key segment.
@@ -455,7 +455,7 @@ impl WOTSPlus {
         }
 
         let chain_segments = self.compute_message_hash_chain_indexes(message);
-        let mut public_key_segments = SignatureBufferEnum::new();
+        let mut public_key_segments = SignatureBuffer::new();
         
         // Compute each public key segment using the pre-computed randomization elements
         for (i, &chain_idx) in chain_segments.iter().enumerate() {
@@ -548,6 +548,65 @@ mod tests {
         assert_eq!(recovered.public_key_hash, public_key.public_key_hash);
     }
 
+    #[test]
+    fn signatures_are_deterministic() {
+        let wots = WOTSPlus::new(mock_hash);
+
+        let seed = [9u8; 32];
+        let (_, sk) = wots.generate_key_pair(&seed);
+        let msg = [1u8; constants::MESSAGE_LEN];
+
+        let sig1 = wots.sign(&sk, &msg);
+        let sig2 = wots.sign(&sk, &msg);
+
+        assert_eq!(sig1, sig2);
+    }
+
+
+    #[test]
+    fn sigbuf_appends_correctly() {
+        let mut buf = SignatureBuffer::new();
+
+        let a = [1u8; constants::HASH_LEN];
+        let b = [2u8; constants::HASH_LEN];
+
+        buf.push_slice(&a);
+        buf.push_slice(&b);
+
+        let out = buf.as_slice();
+        assert_eq!(out.len(), 2 * constants::HASH_LEN);
+        assert_eq!(&out[..constants::HASH_LEN], &a);
+        assert_eq!(&out[constants::HASH_LEN..], &b);
+    }
+
+    #[cfg(feature = "solana")]
+    #[test]
+    #[should_panic]
+    fn sigbuf_panics_on_overflow() {
+        let mut buf = SignatureBuffer::new();
+        let chunk = [0u8; constants::HASH_LEN];
+
+        for _ in 0..(constants::NUM_SIGNATURE_CHUNKS + 1) {
+            buf.push_slice(&chunk);
+        }
+    }
+
+    #[cfg(not(feature = "solana"))]
+    #[test]
+    fn sigbuf_allows_growth_on_heap() {
+        let mut buf = SignatureBuffer::new();
+        let chunk = [0u8; constants::HASH_LEN];
+
+        for _ in 0..(constants::NUM_SIGNATURE_CHUNKS + 10) {
+            buf.push_slice(&chunk);
+        }
+
+        assert_eq!(
+            buf.as_slice().len(),
+            (constants::NUM_SIGNATURE_CHUNKS + 10) * constants::HASH_LEN
+        );
+    }
+    
     #[cfg(test)]
     mod tests {
         use super::*;
