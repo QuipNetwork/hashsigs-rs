@@ -18,59 +18,65 @@
 
 
 enum SignatureBuffer {
+
     #[cfg(feature = "solana")]
+    Vec(Vec<u8>),
+
+    #[cfg(not(feature = "solana"))]
     Array {
         buf: [u8; constants::SIGNATURE_SIZE],
         len: usize,
     },
-
-    #[cfg(not(feature = "solana"))]
-    Vec(Vec<u8>),
 }
 
 impl SignatureBuffer {
     fn new() -> Self {
         #[cfg(feature = "solana")]
         {
-            Self::Array {
-                buf: [0u8; constants::SIGNATURE_SIZE],
-                len: 0,
-            }
+            Self::Vec(Vec::with_capacity(constants::SIGNATURE_SIZE))
         }
 
         #[cfg(not(feature = "solana"))]
         {
-            Self::Vec(Vec::with_capacity(constants::SIGNATURE_SIZE))
+            Self::Array {
+                buf: [0u8; constants::SIGNATURE_SIZE],
+                len: 0,
+            }
         }
     }
 
     fn push_slice(&mut self, data: &[u8]) {
         #[cfg(feature = "solana")]
         {
-            let Self::Array { buf, len } = self;
-            let end = *len + data.len();
-            buf[*len..end].copy_from_slice(data);
-            *len = end;
+            let Self::Vec(v) = self;
+            let new_len = v.len() + data.len();
+            assert!(
+                new_len <= constants::SIGNATURE_SIZE,
+                "SignatureBuffer overflow"
+            );
+            v.extend_from_slice(data);
         }
 
         #[cfg(not(feature = "solana"))]
         {
-            let Self::Vec(v) = self;
-            v.extend_from_slice(data);
+            let Self::Array { buf, len } = self;
+            let end = *len + data.len();
+            buf[*len..end].copy_from_slice(data);
+            *len = end;
         }
     }
 
     fn as_slice(&self) -> &[u8] {
         #[cfg(feature = "solana")]
         {
-            let Self::Array { buf, len } = self;
-            &buf[..*len]
+            let Self::Vec(v) = self;
+            v.as_slice()
         }
 
         #[cfg(not(feature = "solana"))]
         {
-            let Self::Vec(v) = self;
-            v.as_slice()
+            let Self::Array { buf, len } = self;
+            &buf[..*len]
         }
     }
 }
@@ -579,10 +585,10 @@ mod tests {
         assert_eq!(&out[constants::HASH_LEN..], &b);
     }
 
-    #[cfg(feature = "solana")]
+    #[cfg(not(feature = "solana"))]
     #[test]
     #[should_panic]
-    fn sigbuf_panics_on_overflow() {
+    fn sigbuf_panics_on_overflow_non_solana() {
         let mut buf = SignatureBuffer::new();
         let chunk = [0u8; constants::HASH_LEN];
 
@@ -591,22 +597,18 @@ mod tests {
         }
     }
 
-    #[cfg(not(feature = "solana"))]
+    #[cfg(feature = "solana")]
     #[test]
-    fn sigbuf_allows_growth_on_heap() {
+    #[should_panic]
+    fn sigbuf_panics_on_overflow_solana() {
         let mut buf = SignatureBuffer::new();
         let chunk = [0u8; constants::HASH_LEN];
 
-        for _ in 0..(constants::NUM_SIGNATURE_CHUNKS + 10) {
+        for _ in 0..(constants::NUM_SIGNATURE_CHUNKS + 1) {
             buf.push_slice(&chunk);
         }
-
-        assert_eq!(
-            buf.as_slice().len(),
-            (constants::NUM_SIGNATURE_CHUNKS + 10) * constants::HASH_LEN
-        );
     }
-    
+
     #[cfg(test)]
     mod tests {
         use super::*;
