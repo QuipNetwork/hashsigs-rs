@@ -79,6 +79,32 @@ impl SignatureBuffer {
             &buf[..*len]
         }
     }
+
+    /// Consume the buffer and return its contents as a Vec<u8>
+    fn as_signature_chunks(self) -> Vec<[u8; constants::HASH_LEN]> {
+        let slice = match self {
+            #[cfg(feature = "solana")]
+            SignatureBuffer::Vec(v) => v,
+
+            #[cfg(not(feature = "solana"))]
+            SignatureBuffer::Array { buf, len } => buf[..len].to_vec(),
+        };
+        // Enforce chunk alignment invariant
+        assert!(
+            slice.len() % constants::HASH_LEN == 0,
+            "SignatureBuffer length is not chunk-aligned"
+        );
+
+        slice
+            .chunks_exact(constants::HASH_LEN)
+            .map(|chunk| {
+                let mut arr = [0u8; constants::HASH_LEN];
+                arr.copy_from_slice(chunk);
+                arr
+            })
+            .collect()
+    }
+
 }
 
 /// Hash function type for WOTS+
@@ -231,11 +257,13 @@ impl WOTSPlus {
         &self,
         public_seed: &[u8; constants::HASH_LEN]
     ) -> Vec<[u8; constants::HASH_LEN]> {
-        let mut elements = Vec::with_capacity(constants::NUM_SIGNATURE_CHUNKS);
+              
+        let mut elements = SignatureBuffer::new();
         for i in 0..constants::NUM_SIGNATURE_CHUNKS {
-            elements.push(self.prf(public_seed, i as u16));
+            elements.push_slice(&self.prf(public_seed, i as u16));
         }
-        elements
+        elements.as_signature_chunks()
+        
     }
 
     /// XOR two 32-byte arrays
@@ -376,7 +404,7 @@ impl WOTSPlus {
         let function_key = randomization_elements[0];
         
         let chain_segments = self.compute_message_hash_chain_indexes(message);
-        let mut signature = Vec::with_capacity(constants::NUM_SIGNATURE_CHUNKS);
+        let mut signature = SignatureBuffer::new();
 
         for (i, &chain_idx) in chain_segments.iter().enumerate() {
             let mut to_hash = vec![0u8; constants::HASH_LEN * 2];
@@ -390,10 +418,10 @@ impl WOTSPlus {
                 0,
                 chain_idx as u16,
             );
-            signature.push(sig_segment);
+            signature.push_slice(&sig_segment);
         }
 
-        signature
+        signature.as_signature_chunks()
     }
 
     /// Verify a WOTS+ signature
