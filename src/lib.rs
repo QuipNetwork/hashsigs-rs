@@ -16,6 +16,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! WOTS+ (Winternitz One-Time Signature Plus) implementation
 
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
+
+#[cfg(all(feature = "parallel", feature = "solana"))]
+compile_error!("parallel and solana cannot be enabled at the same time");
 
 enum SignatureBuffer {
 
@@ -30,6 +35,8 @@ enum SignatureBuffer {
 }
 
 impl SignatureBuffer {
+
+
     fn new() -> Self {
         #[cfg(feature = "solana")]
         {
@@ -42,6 +49,20 @@ impl SignatureBuffer {
                 buf: [0u8; constants::SIGNATURE_SIZE],
                 len: 0,
             }
+        }
+    }
+
+    fn len(&self) -> usize {
+        #[cfg(feature = "solana")]
+        {
+            let Self::Vec(v) = self;
+            v.len()
+        }
+
+        #[cfg(not(feature = "solana"))]
+        {
+            let Self::Array { len, .. } = self;
+            *len
         }
     }
 
@@ -269,9 +290,11 @@ impl WOTSPlus {
     /// XOR two 32-byte arrays
     fn xor(a: &[u8; constants::HASH_LEN], b: &[u8; constants::HASH_LEN]) -> [u8; constants::HASH_LEN] {
         let mut result = [0u8; constants::HASH_LEN];
+
         for i in 0..constants::HASH_LEN {
             result[i] = a[i] ^ b[i];
         }
+
         result
     }
 
@@ -292,6 +315,34 @@ impl WOTSPlus {
             chain_out = (self.hash_fn)(&xored);
         }
         chain_out
+    }
+
+    fn compute_chain_segment(
+        &self,
+        i: u16,
+        private_key: &[u8; constants::HASH_LEN],
+        randomization_elements: &[[u8; constants::HASH_LEN]],
+        chain_idx: u16,
+        steps: u16,
+    ) -> [u8; constants::HASH_LEN] {
+        let function_key = randomization_elements[0];
+
+        let mut to_hash = vec![0u8; constants::HASH_LEN * 2];
+
+        to_hash[..constants::HASH_LEN]
+            .copy_from_slice(&function_key);
+
+        to_hash[constants::HASH_LEN..]
+            .copy_from_slice(&self.prf(private_key, (i + 1) as u16));
+
+        let secret_key_segment = (self.hash_fn)(&to_hash);
+
+        self.chain(
+            &secret_key_segment,
+            &randomization_elements,
+            chain_idx as u16, 
+            steps,
+        )
     }
 
     /// Compute message hash chain indexes
@@ -401,25 +452,50 @@ impl WOTSPlus {
 
         let public_seed = self.prf(private_key, 0);
         let randomization_elements = self.generate_randomization_elements(&public_seed);
-        let function_key = randomization_elements[0];
         
         let chain_segments = self.compute_message_hash_chain_indexes(message);
+        
         let mut signature = SignatureBuffer::new();
 
-        for (i, &chain_idx) in chain_segments.iter().enumerate() {
-            let mut to_hash = vec![0u8; constants::HASH_LEN * 2];
-            to_hash[..constants::HASH_LEN].copy_from_slice(&function_key);
-            to_hash[constants::HASH_LEN..].copy_from_slice(&self.prf(private_key, (i + 1) as u16));
+        #[cfg(feature = "parallel")]{      
+
+            let segments: Vec<[u8; constants::HASH_LEN]> = 
+            chain_segments
+                .par_iter()
+                .enumerate()
+                .map(|(i, &chain_idx)| {
+
+                    self.compute_chain_segment(
+                        i as u16,
+                        private_key,
+                        &randomization_elements,
+                        0,
+                        chain_idx as u16,
+                    )
+
+                }).collect();
+
             
-            let secret_key_segment = (self.hash_fn)(&to_hash);
-            let sig_segment = self.chain(
-                &secret_key_segment,
-                &randomization_elements,
-                0,
-                chain_idx as u16,
-            );
-            signature.push_slice(&sig_segment);
+            for segment in segments {
+               signature.push_slice(&segment);
+            }
         }
+
+        #[cfg(not(feature = "parallel"))]
+        {
+            for (i, &chain_idx) in chain_segments.iter().enumerate() {
+
+                let sig_segment = self.compute_chain_segment(
+                        i as u16,
+                        private_key,
+                        &randomization_elements,
+                        0,
+                        chain_idx as u16,
+                    );
+                signature.push_slice(&sig_segment);
+            }
+        }
+
 
         signature.as_signature_chunks()
     }
@@ -433,7 +509,7 @@ impl WOTSPlus {
     /// 5. Run the chain function on each segment to reproduce each public key segment
     /// 6. Hash all public key segments together to recreate the original public key
     pub fn verify(&self, public_key: &PublicKey, message: &[u8], signature: &Vec<[u8; constants::HASH_LEN]>) -> bool {
-        
+
         if message.len() != constants::MESSAGE_LEN {
             return false;
         }
@@ -443,29 +519,12 @@ impl WOTSPlus {
 
         let randomization_elements = self.generate_randomization_elements(&public_key.public_seed);
         
-        let chain_segments = self.compute_message_hash_chain_indexes(message);
-        
-        let mut public_key_segments = SignatureBuffer::new();
-
-        // Compute each public key segment. These are done by taking the signature, which is prevChainOut at chainIdx,
-        // and completing the hash chain via the chain function to recompute the public key segment.
-        for (i, &chain_idx) in chain_segments.iter().enumerate() {
-            let num_iterations = (constants::CHAIN_LEN - 1 - chain_idx as usize) as u16;
-            let segment = self.chain(
-                &signature[i],
-                &randomization_elements,
-                chain_idx as u16,
-                num_iterations,
-            );
-            
-            public_key_segments.push_slice(&segment);
-        }
-
-        // Hash all public key segments together to recreate the original public key
-        let computed_hash = (self.hash_fn)(public_key_segments.as_slice());
-        
-        // Compare computed hash with stored public key hash
-        computed_hash == public_key.public_key_hash
+        self.verify_with_randomization_elements(
+            &public_key.public_key_hash,
+            message,
+            signature,
+            &randomization_elements,
+        )
     }
 
     /// Verify a WOTS+ signature using pre-computed randomization elements
@@ -491,18 +550,45 @@ impl WOTSPlus {
         let chain_segments = self.compute_message_hash_chain_indexes(message);
         let mut public_key_segments = SignatureBuffer::new();
         
-        // Compute each public key segment using the pre-computed randomization elements
-        for (i, &chain_idx) in chain_segments.iter().enumerate() {
-            let num_iterations = (constants::CHAIN_LEN - 1 - chain_idx as usize) as u16;
-            let segment = self.chain(
-                &signature[i],
-                randomization_elements,
-                chain_idx as u16,
-                num_iterations,
-            );
-            
-            // let offset = i * constants::HASH_LEN;
-            public_key_segments.push_slice(&segment);
+
+        #[cfg(feature = "parallel")]{      
+            let segments: Vec<[u8; constants::HASH_LEN]> = 
+            chain_segments
+                .par_iter()
+                .enumerate()
+                .map(|(i, &chain_idx)| {
+
+                    let num_iterations = (constants::CHAIN_LEN - 1 - chain_idx as usize) as u16;
+                    self.chain(
+                        &signature[i],
+                        &randomization_elements,
+                        chain_idx as u16,
+                        num_iterations,
+                    )
+                }).collect();
+
+
+            for segment in segments {
+               public_key_segments.push_slice(&segment);
+            }
+        }
+
+        #[cfg(not(feature = "parallel"))]
+        {
+            // Compute each public key segment. These are done by taking the signature, which is prevChainOut at chainIdx,
+            // and completing the hash chain via the chain function to recompute the public key segment.
+            for (i, &chain_idx) in chain_segments.iter().enumerate() {
+                let num_iterations = (constants::CHAIN_LEN - 1 - chain_idx as usize) as u16;
+                let segment = self.chain(
+                    &signature[i],
+                    &randomization_elements,
+                    chain_idx as u16,
+                    num_iterations,
+                );
+                
+                public_key_segments.push_slice(&segment);
+            }
+
         }
 
         // Hash all public key segments together and compare with the provided hash
