@@ -22,6 +22,7 @@ members = [
 
 [dependencies]
 rayon = { version = "1.8", optional = true }
+sha3 = "0.10"
 
 [dev-dependencies]
 solana-program = "2.3"

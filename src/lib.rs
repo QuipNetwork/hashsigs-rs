@@ -18,9 +18,7 @@
 
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
-
-#[cfg(all(feature = "parallel", feature = "solana"))]
-compile_error!("parallel and solana cannot be enabled at the same time");
+use std::time::Instant;
 
 enum SignatureBuffer {
 
@@ -610,6 +608,18 @@ mod tests {
         output
     }
 
+    use sha3::{Digest, Keccak256};
+
+    fn keccak256_hash(data: &[u8]) -> [u8; 32] {
+        let mut hasher = Keccak256::new();
+        hasher.update(data);
+        let result = hasher.finalize();
+
+        let mut output = [0u8; 32];
+        output.copy_from_slice(&result);
+        output
+    }
+
     #[test]
     fn test_constants() {
         assert_eq!(constants::HASH_LEN, 32);
@@ -622,7 +632,8 @@ mod tests {
 
     #[test]
     fn test_key_generation_and_signing() {
-        let wots = WOTSPlus::new(mock_hash);
+        let start = Instant::now();
+        let wots = WOTSPlus::new(keccak256_hash);
         let private_seed = [1u8; 32];
         let (public_key, private_key) = wots.generate_key_pair(&private_seed);
         
@@ -630,6 +641,8 @@ mod tests {
         let signature = wots.sign(&private_key, &message);
         
         assert!(wots.verify(&public_key, &message, &signature));
+
+        println!("Time with Keccak256 : {:?}", start.elapsed());
     }
 
     #[test]
