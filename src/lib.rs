@@ -18,7 +18,7 @@
 //! WOTS+ (Winternitz One-Time Signature Plus) implementation
 
 /// Hash function type for WOTS+
-type HashFn = fn(&[u8]) -> [u8; 32];
+pub type HashFn = fn(&[u8]) -> [u8; 32];
 
 /// Constants from the WOTS+ implementation
 pub mod constants {
