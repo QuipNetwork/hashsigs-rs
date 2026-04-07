@@ -21,7 +21,14 @@ members = [
 ]
 
 [dependencies]
+rayon = { version = "1.8", optional = true }
+sha3 = "0.10"
 
 [dev-dependencies]
 solana-program = "2.3"
 serde_json = "1.0.143"
+
+[features]
+default = ["solana"]
+solana = []
+parallel = ["rayon"]

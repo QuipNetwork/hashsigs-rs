@@ -14,8 +14,117 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
-
 //! WOTS+ (Winternitz One-Time Signature Plus) implementation
+
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
+use std::time::Instant;
+
+enum SignatureBuffer {
+
+    #[cfg(feature = "solana")]
+    Vec(Vec<u8>),
+
+    #[cfg(not(feature = "solana"))]
+    Array {
+        buf: [u8; constants::SIGNATURE_SIZE],
+        len: usize,
+    },
+}
+
+impl SignatureBuffer {
+
+
+    fn new() -> Self {
+        #[cfg(feature = "solana")]
+        {
+            Self::Vec(Vec::with_capacity(constants::SIGNATURE_SIZE))
+        }
+
+        #[cfg(not(feature = "solana"))]
+        {
+            Self::Array {
+                buf: [0u8; constants::SIGNATURE_SIZE],
+                len: 0,
+            }
+        }
+    }
+
+    fn len(&self) -> usize {
+        #[cfg(feature = "solana")]
+        {
+            let Self::Vec(v) = self;
+            v.len()
+        }
+
+        #[cfg(not(feature = "solana"))]
+        {
+            let Self::Array { len, .. } = self;
+            *len
+        }
+    }
+
+    fn push_slice(&mut self, data: &[u8]) {
+        #[cfg(feature = "solana")]
+        {
+            let Self::Vec(v) = self;
+            let new_len = v.len() + data.len();
+            assert!(
+                new_len <= constants::SIGNATURE_SIZE,
+                "SignatureBuffer overflow"
+            );
+            v.extend_from_slice(data);
+        }
+
+        #[cfg(not(feature = "solana"))]
+        {
+            let Self::Array { buf, len } = self;
+            let end = *len + data.len();
+            buf[*len..end].copy_from_slice(data);
+            *len = end;
+        }
+    }
+
+    fn as_slice(&self) -> &[u8] {
+        #[cfg(feature = "solana")]
+        {
+            let Self::Vec(v) = self;
+            v.as_slice()
+        }
+
+        #[cfg(not(feature = "solana"))]
+        {
+            let Self::Array { buf, len } = self;
+            &buf[..*len]
+        }
+    }
+
+    /// Consume the buffer and return its contents as a Vec<u8>
+    fn as_signature_chunks(self) -> Vec<[u8; constants::HASH_LEN]> {
+        let slice = match self {
+            #[cfg(feature = "solana")]
+            SignatureBuffer::Vec(v) => v,
+
+            #[cfg(not(feature = "solana"))]
+            SignatureBuffer::Array { buf, len } => buf[..len].to_vec(),
+        };
+        // Enforce chunk alignment invariant
+        assert!(
+            slice.len() % constants::HASH_LEN == 0,
+            "SignatureBuffer length is not chunk-aligned"
+        );
+
+        slice
+            .chunks_exact(constants::HASH_LEN)
+            .map(|chunk| {
+                let mut arr = [0u8; constants::HASH_LEN];
+                arr.copy_from_slice(chunk);
+                arr
+            })
+            .collect()
+    }
+
+}
 
 /// Hash function type for WOTS+
 pub type HashFn = fn(&[u8]) -> [u8; 32];
@@ -167,19 +276,23 @@ impl WOTSPlus {
         &self,
         public_seed: &[u8; constants::HASH_LEN]
     ) -> Vec<[u8; constants::HASH_LEN]> {
-        let mut elements = Vec::with_capacity(constants::NUM_SIGNATURE_CHUNKS);
+              
+        let mut elements = SignatureBuffer::new();
         for i in 0..constants::NUM_SIGNATURE_CHUNKS {
-            elements.push(self.prf(public_seed, i as u16));
+            elements.push_slice(&self.prf(public_seed, i as u16));
         }
-        elements
+        elements.as_signature_chunks()
+        
     }
 
     /// XOR two 32-byte arrays
     fn xor(a: &[u8; constants::HASH_LEN], b: &[u8; constants::HASH_LEN]) -> [u8; constants::HASH_LEN] {
         let mut result = [0u8; constants::HASH_LEN];
+
         for i in 0..constants::HASH_LEN {
             result[i] = a[i] ^ b[i];
         }
+
         result
     }
 
@@ -200,6 +313,34 @@ impl WOTSPlus {
             chain_out = (self.hash_fn)(&xored);
         }
         chain_out
+    }
+
+    fn compute_chain_segment(
+        &self,
+        i: u16,
+        private_key: &[u8; constants::HASH_LEN],
+        randomization_elements: &[[u8; constants::HASH_LEN]],
+        chain_idx: u16,
+        steps: u16,
+    ) -> [u8; constants::HASH_LEN] {
+        let function_key = randomization_elements[0];
+
+        let mut to_hash = vec![0u8; constants::HASH_LEN * 2];
+
+        to_hash[..constants::HASH_LEN]
+            .copy_from_slice(&function_key);
+
+        to_hash[constants::HASH_LEN..]
+            .copy_from_slice(&self.prf(private_key, (i + 1) as u16));
+
+        let secret_key_segment = (self.hash_fn)(&to_hash);
+
+        self.chain(
+            &secret_key_segment,
+            &randomization_elements,
+            chain_idx as u16, 
+            steps,
+        )
     }
 
     /// Compute message hash chain indexes
@@ -252,7 +393,7 @@ impl WOTSPlus {
         let randomization_elements = self.generate_randomization_elements(&public_seed);
         let function_key = randomization_elements[0];
 
-        let mut public_key_segments = Vec::with_capacity(constants::SIGNATURE_SIZE);
+        let mut public_key_segments = SignatureBuffer::new();
 
         for i in 0..constants::NUM_SIGNATURE_CHUNKS {
             let mut to_hash = vec![0u8; constants::HASH_LEN * 2];
@@ -267,10 +408,10 @@ impl WOTSPlus {
                 (constants::CHAIN_LEN - 1) as u16,
             );
             
-            public_key_segments.extend_from_slice(&segment);
+            public_key_segments.push_slice(&segment);
         }
 
-        let public_key_hash = (self.hash_fn)(&public_key_segments);
+        let public_key_hash = (self.hash_fn)(public_key_segments.as_slice());
         
         PublicKey {
             public_seed: *public_seed,
@@ -309,27 +450,52 @@ impl WOTSPlus {
 
         let public_seed = self.prf(private_key, 0);
         let randomization_elements = self.generate_randomization_elements(&public_seed);
-        let function_key = randomization_elements[0];
         
         let chain_segments = self.compute_message_hash_chain_indexes(message);
-        let mut signature = Vec::with_capacity(constants::NUM_SIGNATURE_CHUNKS);
+        
+        let mut signature = SignatureBuffer::new();
 
-        for (i, &chain_idx) in chain_segments.iter().enumerate() {
-            let mut to_hash = vec![0u8; constants::HASH_LEN * 2];
-            to_hash[..constants::HASH_LEN].copy_from_slice(&function_key);
-            to_hash[constants::HASH_LEN..].copy_from_slice(&self.prf(private_key, (i + 1) as u16));
+        #[cfg(feature = "parallel")]{      
+
+            let segments: Vec<[u8; constants::HASH_LEN]> = 
+            chain_segments
+                .par_iter()
+                .enumerate()
+                .map(|(i, &chain_idx)| {
+
+                    self.compute_chain_segment(
+                        i as u16,
+                        private_key,
+                        &randomization_elements,
+                        0,
+                        chain_idx as u16,
+                    )
+
+                }).collect();
+
             
-            let secret_key_segment = (self.hash_fn)(&to_hash);
-            let sig_segment = self.chain(
-                &secret_key_segment,
-                &randomization_elements,
-                0,
-                chain_idx as u16,
-            );
-            signature.push(sig_segment);
+            for segment in segments {
+               signature.push_slice(&segment);
+            }
         }
 
-        signature
+        #[cfg(not(feature = "parallel"))]
+        {
+            for (i, &chain_idx) in chain_segments.iter().enumerate() {
+
+                let sig_segment = self.compute_chain_segment(
+                        i as u16,
+                        private_key,
+                        &randomization_elements,
+                        0,
+                        chain_idx as u16,
+                    );
+                signature.push_slice(&sig_segment);
+            }
+        }
+
+
+        signature.as_signature_chunks()
     }
 
     /// Verify a WOTS+ signature
@@ -341,7 +507,7 @@ impl WOTSPlus {
     /// 5. Run the chain function on each segment to reproduce each public key segment
     /// 6. Hash all public key segments together to recreate the original public key
     pub fn verify(&self, public_key: &PublicKey, message: &[u8], signature: &Vec<[u8; constants::HASH_LEN]>) -> bool {
-        
+
         if message.len() != constants::MESSAGE_LEN {
             return false;
         }
@@ -351,29 +517,12 @@ impl WOTSPlus {
 
         let randomization_elements = self.generate_randomization_elements(&public_key.public_seed);
         
-        let chain_segments = self.compute_message_hash_chain_indexes(message);
-        
-        let mut public_key_segments = Vec::with_capacity(constants::SIGNATURE_SIZE);
-
-        // Compute each public key segment. These are done by taking the signature, which is prevChainOut at chainIdx,
-        // and completing the hash chain via the chain function to recompute the public key segment.
-        for (i, &chain_idx) in chain_segments.iter().enumerate() {
-            let num_iterations = (constants::CHAIN_LEN - 1 - chain_idx as usize) as u16;
-            let segment = self.chain(
-                &signature[i],
-                &randomization_elements,
-                chain_idx as u16,
-                num_iterations,
-            );
-            
-            public_key_segments.extend_from_slice(&segment);
-        }
-
-        // Hash all public key segments together to recreate the original public key
-        let computed_hash = (self.hash_fn)(&public_key_segments);
-        
-        // Compare computed hash with stored public key hash
-        computed_hash == public_key.public_key_hash
+        self.verify_with_randomization_elements(
+            &public_key.public_key_hash,
+            message,
+            signature,
+            &randomization_elements,
+        )
     }
 
     /// Verify a WOTS+ signature using pre-computed randomization elements
@@ -397,24 +546,51 @@ impl WOTSPlus {
         }
 
         let chain_segments = self.compute_message_hash_chain_indexes(message);
-        let mut public_key_segments = [0u8; constants::SIGNATURE_SIZE];
+        let mut public_key_segments = SignatureBuffer::new();
         
-        // Compute each public key segment using the pre-computed randomization elements
-        for (i, &chain_idx) in chain_segments.iter().enumerate() {
-            let num_iterations = (constants::CHAIN_LEN - 1 - chain_idx as usize) as u16;
-            let segment = self.chain(
-                &signature[i],
-                randomization_elements,
-                chain_idx as u16,
-                num_iterations,
-            );
-            
-            let offset = i * constants::HASH_LEN;
-            public_key_segments[offset..offset + constants::HASH_LEN].copy_from_slice(&segment);
+
+        #[cfg(feature = "parallel")]{      
+            let segments: Vec<[u8; constants::HASH_LEN]> = 
+            chain_segments
+                .par_iter()
+                .enumerate()
+                .map(|(i, &chain_idx)| {
+
+                    let num_iterations = (constants::CHAIN_LEN - 1 - chain_idx as usize) as u16;
+                    self.chain(
+                        &signature[i],
+                        &randomization_elements,
+                        chain_idx as u16,
+                        num_iterations,
+                    )
+                }).collect();
+
+
+            for segment in segments {
+               public_key_segments.push_slice(&segment);
+            }
+        }
+
+        #[cfg(not(feature = "parallel"))]
+        {
+            // Compute each public key segment. These are done by taking the signature, which is prevChainOut at chainIdx,
+            // and completing the hash chain via the chain function to recompute the public key segment.
+            for (i, &chain_idx) in chain_segments.iter().enumerate() {
+                let num_iterations = (constants::CHAIN_LEN - 1 - chain_idx as usize) as u16;
+                let segment = self.chain(
+                    &signature[i],
+                    &randomization_elements,
+                    chain_idx as u16,
+                    num_iterations,
+                );
+                
+                public_key_segments.push_slice(&segment);
+            }
+
         }
 
         // Hash all public key segments together and compare with the provided hash
-        let computed_hash = (self.hash_fn)(&public_key_segments);
+        let computed_hash = (self.hash_fn)(public_key_segments.as_slice());
         computed_hash == *public_key_hash
     }
 }
@@ -432,6 +608,18 @@ mod tests {
         output
     }
 
+    use sha3::{Digest, Keccak256};
+
+    fn keccak256_hash(data: &[u8]) -> [u8; 32] {
+        let mut hasher = Keccak256::new();
+        hasher.update(data);
+        let result = hasher.finalize();
+
+        let mut output = [0u8; 32];
+        output.copy_from_slice(&result);
+        output
+    }
+
     #[test]
     fn test_constants() {
         assert_eq!(constants::HASH_LEN, 32);
@@ -444,7 +632,8 @@ mod tests {
 
     #[test]
     fn test_key_generation_and_signing() {
-        let wots = WOTSPlus::new(mock_hash);
+        let start = Instant::now();
+        let wots = WOTSPlus::new(keccak256_hash);
         let private_seed = [1u8; 32];
         let (public_key, private_key) = wots.generate_key_pair(&private_seed);
         
@@ -452,6 +641,8 @@ mod tests {
         let signature = wots.sign(&private_key, &message);
         
         assert!(wots.verify(&public_key, &message, &signature));
+
+        println!("Time with Keccak256 : {:?}", start.elapsed());
     }
 
     #[test]
@@ -488,6 +679,61 @@ mod tests {
         
         assert_eq!(recovered.public_seed, public_key.public_seed);
         assert_eq!(recovered.public_key_hash, public_key.public_key_hash);
+    }
+
+    #[test]
+    fn signatures_are_deterministic() {
+        let wots = WOTSPlus::new(mock_hash);
+
+        let seed = [9u8; 32];
+        let (_, sk) = wots.generate_key_pair(&seed);
+        let msg = [1u8; constants::MESSAGE_LEN];
+
+        let sig1 = wots.sign(&sk, &msg);
+        let sig2 = wots.sign(&sk, &msg);
+
+        assert_eq!(sig1, sig2);
+    }
+
+
+    #[test]
+    fn sigbuf_appends_correctly() {
+        let mut buf = SignatureBuffer::new();
+
+        let a = [1u8; constants::HASH_LEN];
+        let b = [2u8; constants::HASH_LEN];
+
+        buf.push_slice(&a);
+        buf.push_slice(&b);
+
+        let out = buf.as_slice();
+        assert_eq!(out.len(), 2 * constants::HASH_LEN);
+        assert_eq!(&out[..constants::HASH_LEN], &a);
+        assert_eq!(&out[constants::HASH_LEN..], &b);
+    }
+
+    #[cfg(not(feature = "solana"))]
+    #[test]
+    #[should_panic]
+    fn sigbuf_panics_on_overflow_non_solana() {
+        let mut buf = SignatureBuffer::new();
+        let chunk = [0u8; constants::HASH_LEN];
+
+        for _ in 0..(constants::NUM_SIGNATURE_CHUNKS + 1) {
+            buf.push_slice(&chunk);
+        }
+    }
+
+    #[cfg(feature = "solana")]
+    #[test]
+    #[should_panic]
+    fn sigbuf_panics_on_overflow_solana() {
+        let mut buf = SignatureBuffer::new();
+        let chunk = [0u8; constants::HASH_LEN];
+
+        for _ in 0..(constants::NUM_SIGNATURE_CHUNKS + 1) {
+            buf.push_slice(&chunk);
+        }
     }
 
     #[cfg(test)]
