@@ -423,7 +423,7 @@ impl ShrincsVerifier {
     /// Build the canonical message hash for full key-bundle rotation.
     ///
     /// The next key bundle is first compressed into `next_key_bundle_hash`, then
-    /// that hash is included in the signed rotation message. 
+    /// that hash is included in the signed rotation message.
     pub fn full_rotation_message_hash(
         &self,
         parameter_set_id: ParameterSetId,

@@ -37,6 +37,27 @@ Run specific test vectors:
 cargo test test_wotsplus_keccak256_vectors
 ```
 
+Generate SHRINCS vectors for the Solidity verifier:
+
+```bash
+cargo test --test generate_shrincs_vectors -- --ignored --nocapture
+```
+
+The generator writes the SHRINCS vector JSON inside this Rust repository:
+
+```text
+tests/test_vectors/shrincs_sphincs_256s_keccak.json
+```
+
+To use those vectors with the Solidity verifier tests, copy the generated file
+into the Solidity repository's expected fixture path:
+
+```bash
+# copy the generated JSON to the Solidity repository's expected fixture path
+cp tests/test_vectors/shrincs_sphincs_256s_keccak.json \
+  /path/to/hashsigs-solidity/test/test_vectors/shrincs_sphincs_256s_keccak.json
+```
+
 Run Solana program tests:
 
 ```bash

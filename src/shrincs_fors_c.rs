@@ -17,8 +17,8 @@
 
 //! FORS-C verification.
 //!
-//! Derive the FORS digest, verify every revealed FORS tree entry, compress those 
-// roots into the FORS public key, and ensure that value equals the FORS root 
+//! Derive the FORS digest, verify every revealed FORS tree entry, compress those
+// roots into the FORS public key, and ensure that value equals the FORS root
 // committed by the composite public key.
 
 use super::shrincs_types::{ForsEntry, ForsSignature, ParamsView, PublicKey, HASH_LEN};

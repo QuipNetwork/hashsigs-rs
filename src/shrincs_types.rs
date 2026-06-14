@@ -15,7 +15,6 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-
 pub const HASH_LEN: usize = 32;
 pub const HASH_SUITE_KECCAK_256: u32 = 1;
 

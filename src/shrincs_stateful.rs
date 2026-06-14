@@ -17,7 +17,7 @@
 
 //! Stateful SHRINCS verification.
 //!
-//! Validate the stateful public key binding, reconstruct a compact WOTS-C public key 
+//! Validate the stateful public key binding, reconstruct a compact WOTS-C public key
 // from the signature, then climb the unbalanced stateful Merkle path back to the pinned root.
 
 use super::shrincs_types::{
