@@ -89,7 +89,7 @@ pub(crate) fn verify_fors_c_and_return_root(
         )?;
         let root = fors_entry_root32(
             fors_tree_height as u32,
-            &public_key.fors_pk_seed,
+            &public_key.pk_seed,
             tree_index,
             leaf_index,
             fors_tree_index as u32,
@@ -103,7 +103,7 @@ pub(crate) fn verify_fors_c_and_return_root(
     // tag `fors-pk`. In the SPHINCS-style composition, this is a per-signature
     // value consumed by the hypertree rather than a field of the long-lived
     // public key.
-    Some(hash_packed(&[b"fors-pk", &public_key.fors_pk_seed, &roots]))
+    Some(hash_packed(&[b"fors-pk", &public_key.pk_seed, &roots]))
 }
 
 fn fors_entry_root32(
@@ -199,7 +199,7 @@ fn fors_digest(
     let tree_bits = u32::from(params.hypertree_height) - subtree_height;
     let digest_bytes = ((index_bits + u32::from(params.hypertree_height) + 7) / 8) as usize;
     let digest = fors_digest_bytes(
-        &public_key.fors_pk_seed,
+        &public_key.pk_seed,
         &public_key.hypertree_root,
         randomizer,
         counter,

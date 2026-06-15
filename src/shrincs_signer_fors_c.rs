@@ -52,16 +52,16 @@ pub(crate) fn sign_fors_c(
     let signed_trees = params.num_fors_trees as usize - 1;
 
     // This is the FORS-C local message randomizer. It is deterministic for the
-    // same FORS secret seed and message, which makes signing reproducible while
-    // still separating the digest from raw message bytes.
-    let randomizer = hash_packed(&[b"fors-randomizer", &signing_key.fors_sk_seed, message]);
+    // same stateless PRF seed and message, matching the SPHINCS-style separation
+    // between SK.seed-derived signing secrets and SK.prf-derived randomness.
+    let randomizer = hash_packed(&[b"fors-randomizer", &signing_key.stateless_prf_seed, message]);
 
     for counter in 0..FORS_C_MAX_GRIND_COUNTER {
         // The counter is public and stored in the signature. Its only job is to
         // find a digest whose omitted final FORS tree opens leaf zero.
         let Some(digest) = fors_digest(
             params,
-            &signing_key.fors_pk_seed,
+            &signing_key.pk_seed,
             &signing_key.hypertree_root,
             message,
             &randomizer,
@@ -81,8 +81,8 @@ pub(crate) fn sign_fors_c(
             let leaf = digest.indices[fors_tree];
             let (root, auth_path) = fors_tree_root_and_auth_path(
                 params,
-                &signing_key.fors_pk_seed,
-                &signing_key.fors_sk_seed,
+                &signing_key.pk_seed,
+                &signing_key.stateless_sk_seed,
                 digest.tree_index,
                 digest.leaf_index,
                 fors_tree as u32,
@@ -92,8 +92,8 @@ pub(crate) fn sign_fors_c(
             entries.push(ForsEntry {
                 secret_leaf: fors_leaf_secret(
                     params,
-                    &signing_key.fors_pk_seed,
-                    &signing_key.fors_sk_seed,
+                    &signing_key.pk_seed,
+                    &signing_key.stateless_sk_seed,
                     digest.tree_index,
                     digest.leaf_index,
                     fors_tree as u32,
@@ -108,7 +108,7 @@ pub(crate) fn sign_fors_c(
         // The public seed is included so roots from a different FORS key cannot
         // be transplanted into this key.
         return Some(SignedForsC {
-            root: hash_packed(&[b"fors-pk", &signing_key.fors_pk_seed, &roots]),
+            root: hash_packed(&[b"fors-pk", &signing_key.pk_seed, &roots]),
             signature: ForsSignature {
                 randomizer: randomizer.to_vec(),
                 counter,

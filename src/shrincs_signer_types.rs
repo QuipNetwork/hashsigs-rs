@@ -34,6 +34,8 @@ pub struct ShrincsSigningKey {
     pub parameter_set_id: ParameterSetId,
     /// Secret seed used to derive stateful WOTS-C chain secrets.
     pub stateful_sk_seed: [u8; HASH_LEN],
+    /// Secret PRF seed used to derive stateful WOTS-C message randomizers.
+    pub stateful_prf_seed: [u8; HASH_LEN],
     /// Public seed used in stateful WOTS-C and stateful tree hashing.
     pub stateful_pk_seed: [u8; HASH_LEN],
     /// Root of the stateful unbalanced tree committed in the public key.
@@ -42,14 +44,12 @@ pub struct ShrincsSigningKey {
     pub max_stateful_signatures: u32,
     /// Next monotonic stateful leaf index. Persist this after each stateful signature.
     pub next_stateful_leaf_index: u32,
-    /// Secret seed used to derive FORS-C secret leaves.
-    pub fors_sk_seed: [u8; HASH_LEN],
-    /// Public seed used in FORS-C leaf/node hashing.
-    pub fors_pk_seed: [u8; HASH_LEN],
-    /// Master seed for deriving per-layer hypertree WOTS-C signing keys.
-    pub hypertree_seed: [u8; HASH_LEN],
-    /// Public seed used in hypertree WOTS-C and Merkle node hashing.
-    pub hypertree_pk_seed: [u8; HASH_LEN],
+    /// Stateless SK.seed-style material used to derive FORS-C and hypertree WOTS-C secrets.
+    pub stateless_sk_seed: [u8; HASH_LEN],
+    /// Stateless SK.prf-style material used to derive stateless message randomizers.
+    pub stateless_prf_seed: [u8; HASH_LEN],
+    /// Global public seed used in FORS-C, hypertree WOTS-C, and Merkle node hashing.
+    pub pk_seed: [u8; HASH_LEN],
     /// Top hypertree root committed in the public key.
     pub hypertree_root: [u8; HASH_LEN],
 }

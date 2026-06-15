@@ -49,6 +49,12 @@ The generator writes the SHRINCS vector JSON inside this Rust repository:
 tests/test_vectors/shrincs_sphincs_256s_keccak.json
 ```
 
+SHRINCS public keys use one stateless `pkSeed` and one `hypertreeRoot`, matching
+the SPHINCS+/FIPS-style `PK = (PK.seed, PK.root)` abstraction for the stateless
+path. The removed composite commitment means callers that persist only the
+public root must keep the corresponding `statefulPublicKey` and stateless
+components together at the integration layer.
+
 To use those vectors with the Solidity verifier tests, copy the generated file
 into the Solidity repository's expected fixture path:
 

@@ -77,10 +77,10 @@ pub(crate) fn matches_expected_composite_public_key(
     public_key: &PublicKey,
     expected_composite_public_key: [u8; HASH_LEN],
 ) -> bool {
-    // The account or caller stores one 32-byte composite commitment. The supplied
-    // expanded public key must open to exactly that commitment.
+    // The account or caller stores the stateless SPHINCS-style public root.
+    // The supplied public key must carry the same hypertree root.
     expected_composite_public_key != [0u8; HASH_LEN]
-        && word32(&public_key.composite_public_key) == Some(expected_composite_public_key)
+        && word32(&public_key.hypertree_root) == Some(expected_composite_public_key)
 }
 
 pub(crate) fn valid_params(params: &ParamsView, public_key: &PublicKey) -> bool {
@@ -112,47 +112,9 @@ pub(crate) fn valid_params(params: &ParamsView, public_key: &PublicKey) -> bool 
 }
 
 pub(crate) fn valid_stateful_composite_public_key(public_key: &PublicKey) -> bool {
-    // Before using any public-key component, check both its raw length and the
-    // composite commitment. The commitment prevents an attacker from mixing a
-    // stateful key from one bundle with FORS/hypertree roots from another bundle.
-    if public_key.composite_public_key.len() != HASH_LEN
-        || public_key.stateful_public_key.len() != STATEFUL_PUBLIC_KEY_BYTES
-        || public_key.fors_pk_seed.len() != HASH_LEN
-        || public_key.hypertree_pk_seed.len() != HASH_LEN
-        || public_key.hypertree_root.len() != HASH_LEN
-    {
-        return false;
-    }
-    let Some(expected) = word32(&public_key.composite_public_key) else {
-        return false;
-    };
-    composite_public_key_commitment(
-        public_key.parameter_set_id,
-        &public_key.stateful_public_key,
-        &public_key.fors_pk_seed,
-        &public_key.hypertree_pk_seed,
-        &public_key.hypertree_root,
-    ) == expected
-}
-
-pub(crate) fn composite_public_key_commitment(
-    parameter_set_id: ParameterSetId,
-    stateful_public_key: &[u8],
-    fors_pk_seed: &[u8],
-    hypertree_pk_seed: &[u8],
-    hypertree_root: &[u8],
-) -> [u8; HASH_LEN] {
-    // Domain-separated public-key commitment:
-    // keccak256("shrincs-public-key" || parameterSet || stateful || forsSeed || htSeed || htRoot)
-    // This is the single 32-byte value accounts can store on-chain.
-    hash_packed(&[
-        b"shrincs-public-key",
-        &[parameter_set_id.packed_byte()],
-        stateful_public_key,
-        fors_pk_seed,
-        hypertree_pk_seed,
-        hypertree_root,
-    ])
+    public_key.stateful_public_key.len() == STATEFUL_PUBLIC_KEY_BYTES
+        && public_key.pk_seed.len() == HASH_LEN
+        && public_key.hypertree_root.len() == HASH_LEN
 }
 
 pub(crate) fn decode_stateful_public_key(encoded: &[u8]) -> Option<StatefulPublicKey> {

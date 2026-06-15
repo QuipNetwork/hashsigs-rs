@@ -61,8 +61,8 @@ fn generate_shrincs_sphincs_256s_keccak_vectors() {
     let mut tampered_auth = stateless_signature.clone();
     tampered_auth.hypertree[0].auth_path[0][0] ^= 1;
 
-    let mut wrong_composite_public_key = stateless_public_key.clone();
-    wrong_composite_public_key.composite_public_key[0] ^= 1;
+    let mut wrong_public_root = stateless_public_key.clone();
+    wrong_public_root.hypertree_root[0] ^= 1;
 
     let mut tampered_component_public_key = stateless_public_key.clone();
     tampered_component_public_key.hypertree_root[0] ^= 1;
@@ -101,7 +101,7 @@ fn generate_shrincs_sphincs_256s_keccak_vectors() {
                 "tamperedFors": stateless_case(&stateless_public_key, &stateless_message, &tampered_fors),
                 "tamperedHypertreeWotsPkHash": stateless_case(&stateless_public_key, &stateless_message, &tampered_wots_pk_hash),
                 "tamperedHypertreeAuth": stateless_case(&stateless_public_key, &stateless_message, &tampered_auth),
-                "wrongCompositePublicKey": stateless_case(&wrong_composite_public_key, &stateless_message, &stateless_signature),
+                "wrongPublicRoot": stateless_case(&wrong_public_root, &stateless_message, &stateless_signature),
                 "tamperedComponentPublicKey": stateless_case(&tampered_component_public_key, &stateless_message, &stateless_signature)
             }
         }
@@ -166,16 +166,15 @@ fn stateless_calldata(
 ) -> String {
     let params = "(32,64,8,14,22,16,64,480)".to_string();
     let public_key = format!(
-        "({},{},{},{},{})",
-        hex(&public_key.composite_public_key),
+        "({},{},{},{})",
+        "0",
         hex(&public_key.stateful_public_key),
-        hex(&public_key.fors_pk_seed),
-        hex(&public_key.hypertree_pk_seed),
+        hex(&public_key.pk_seed),
         hex(&public_key.hypertree_root)
     );
     let sig = stateless_signature_cast(signature);
     cast_calldata(
-        "f((uint16,uint8,uint8,uint8,uint8,uint16,uint16,uint32),(bytes,bytes,bytes,bytes,bytes),bytes,((bytes,uint32,(bytes,bytes[])[]),(uint64,uint32,bytes,(bytes,uint32,bytes[]),bytes[])[]))",
+        "f((uint16,uint8,uint8,uint8,uint8,uint16,uint16,uint32),(uint8,bytes,bytes,bytes),bytes,((bytes,uint32,(bytes,bytes[])[]),(uint64,uint32,bytes,(bytes,uint32,bytes[]),bytes[])[]))",
         &[params, public_key, hex(message), sig],
     )
 }
@@ -248,10 +247,8 @@ fn stateful_public_key_json(public_key: &PublicKey) -> Value {
 
 fn public_key_json(public_key: &PublicKey) -> Value {
     json!({
-        "compositePublicKey": hex(&public_key.composite_public_key),
         "statefulPublicKey": hex(&public_key.stateful_public_key),
-        "forsPkSeed": hex(&public_key.fors_pk_seed),
-        "hypertreePkSeed": hex(&public_key.hypertree_pk_seed),
+        "pkSeed": hex(&public_key.pk_seed),
         "hypertreeRoot": hex(&public_key.hypertree_root)
     })
 }

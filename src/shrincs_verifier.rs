@@ -39,9 +39,9 @@ use self::shrincs_fors_c::verify_fors_c_and_return_root;
 use self::shrincs_hypertree::verify_hypertree;
 use self::shrincs_stateful::verify_stateful_unsafe_raw as verify_stateful_raw_component;
 use self::shrincs_utils::{
-    composite_public_key_commitment, decode_stateful_public_key, hash_packed,
-    matches_expected_composite_public_key, valid_action_context, valid_parameter_set_binding,
-    valid_params, valid_rotation_context, word32,
+    decode_stateful_public_key, hash_packed, matches_expected_composite_public_key,
+    valid_action_context, valid_parameter_set_binding, valid_params, valid_rotation_context,
+    word32,
 };
 
 pub struct ShrincsVerifier;
@@ -128,10 +128,9 @@ impl ShrincsVerifier {
     /// Rotate only the stateful key using a stateless recovery signature.
     ///
     /// The stateless key material remains unchanged. The recovery signature must
-    /// authorize a message that binds the current composite key, rotation context,
+    /// authorize a message that binds the current public root, rotation context,
     /// and the next encoded stateful key. If verification succeeds, the returned
-    /// value is the new composite commitment formed from the next stateful key
-    /// and the existing stateless key components.
+    /// value is the unchanged stateless public root.
     pub fn rotate_stateful_via_stateless(
         &self,
         parameter_set_id: ParameterSetId,
@@ -144,7 +143,7 @@ impl ShrincsVerifier {
         let params = Self::default_params_view(parameter_set_id);
         // First prove that the current public key is the key the caller intended:
         // same requested parameter set, same declared parameter set, and same
-        // expected composite commitment.
+        // expected public root.
         if !valid_parameter_set_binding(
             &params,
             parameter_set_id,
@@ -195,23 +194,14 @@ impl ShrincsVerifier {
             return None;
         }
 
-        // The Solidity helper returns the commitment the account should install.
-        // It reuses the current FORS/hypertree fields and swaps only the stateful key.
-        Some(composite_public_key_commitment(
-            current_public_key.parameter_set_id,
-            &next_stateful_key.stateful_public_key,
-            &current_public_key.fors_pk_seed,
-            &current_public_key.hypertree_pk_seed,
-            &current_public_key.hypertree_root,
-        ))
+        word32(&current_public_key.hypertree_root)
     }
 
     /// Rotate the full SHRINCS key bundle using a stateless recovery signature.
     ///
-    /// This is stricter than `rotate_stateful_via_stateless`: every component of
-    /// the next bundle is supplied, recomputed into a composite commitment, and
-    /// checked against `next_key.composite_public_key` before the recovery
-    /// signature is accepted.
+    /// This is stricter than `rotate_stateful_via_stateless`: every public
+    /// component of the next bundle is supplied and signed into the recovery
+    /// message before the next public root is returned.
     pub fn stateless_rotate(
         &self,
         parameter_set_id: ParameterSetId,
@@ -240,9 +230,7 @@ impl ShrincsVerifier {
             return None;
         }
         if next_key.stateful_public_key.len() != STATEFUL_PUBLIC_KEY_BYTES
-            || next_key.composite_public_key.len() != HASH_LEN
-            || next_key.fors_pk_seed.len() != HASH_LEN
-            || next_key.hypertree_pk_seed.len() != HASH_LEN
+            || next_key.pk_seed.len() != HASH_LEN
             || next_key.hypertree_root.len() != HASH_LEN
         {
             return None;
@@ -252,20 +240,8 @@ impl ShrincsVerifier {
             return None;
         }
 
-        let next_composite_public_key = composite_public_key_commitment(
-            next_key.parameter_set_id,
-            &next_key.stateful_public_key,
-            &next_key.fors_pk_seed,
-            &next_key.hypertree_pk_seed,
-            &next_key.hypertree_root,
-        );
-        if word32(&next_key.composite_public_key)? != next_composite_public_key {
-            return None;
-        }
-
-        // The recovery message signs the hash of the whole replacement bundle,
-        // not each field loosely. This prevents mixing a signature for one bundle
-        // with a different composite key.
+        // The recovery message signs the replacement bundle fields so callers do
+        // not authorize a different stateful/stateless tuple accidentally.
         let recovery_message = self.full_rotation_message_hash(
             parameter_set_id,
             expected_composite_public_key,
@@ -282,7 +258,7 @@ impl ShrincsVerifier {
         ) {
             return None;
         }
-        Some(next_composite_public_key)
+        word32(&next_key.hypertree_root)
     }
 
     /// Verify a raw stateful message.
@@ -394,7 +370,7 @@ impl ShrincsVerifier {
 
     /// Build the canonical message hash for stateful-only rotation.
     ///
-    /// This binds the current composite key and the next encoded stateful key.
+    /// This binds the current public root and the next encoded stateful key.
     /// A signature over this hash cannot authorize a full bundle rotation.
     pub fn stateful_rotation_message_hash(
         &self,
@@ -414,7 +390,7 @@ impl ShrincsVerifier {
             &context.domain_separator,
             &context.nonce,
             &context.key_version,
-            &current_public_key.composite_public_key,
+            &current_public_key.hypertree_root,
             &next_stateful_key.stateful_public_key,
         ])
     }
@@ -434,10 +410,8 @@ impl ShrincsVerifier {
         let params = Self::default_params_view(parameter_set_id);
         let op = hash_packed(&[b"shrincs-rotate-full"]);
         let next_key_bundle_hash = hash_packed(&[
-            &next_key.composite_public_key,
             &next_key.stateful_public_key,
-            &next_key.fors_pk_seed,
-            &next_key.hypertree_pk_seed,
+            &next_key.pk_seed,
             &next_key.hypertree_root,
         ]);
         hash_packed(&[
@@ -448,7 +422,7 @@ impl ShrincsVerifier {
             &context.domain_separator,
             &context.nonce,
             &context.key_version,
-            &current_public_key.composite_public_key,
+            &current_public_key.hypertree_root,
             &next_key_bundle_hash,
         ])
     }

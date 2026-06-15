@@ -78,14 +78,10 @@ pub struct ParamsView {
 pub struct PublicKey {
     /// Parameter profile declared by this public key.
     pub parameter_set_id: ParameterSetId,
-    /// 32-byte hash to every public-key component below.
-    pub composite_public_key: Vec<u8>,
     /// Encoded stateful key: `pk_seed || root || max_signatures`.
     pub stateful_public_key: Vec<u8>,
-    /// Public seed for FORS-C address-domain hashing.
-    pub fors_pk_seed: Vec<u8>,
-    /// Public seed for hypertree and WOTS-C address-domain hashing.
-    pub hypertree_pk_seed: Vec<u8>,
+    /// Global stateless public seed used for FORS-C, hypertree, and WOTS-C hashing.
+    pub pk_seed: Vec<u8>,
     /// Expected final hypertree root.
     pub hypertree_root: Vec<u8>,
 }
@@ -174,14 +170,10 @@ pub struct StatefulRotationTarget {
 pub struct RotationTarget {
     /// Parameter set declared by the replacement full key bundle.
     pub parameter_set_id: ParameterSetId,
-    /// 32-byte commitment to the replacement bundle fields below.
-    pub composite_public_key: Vec<u8>,
     /// Replacement encoded stateful public key.
     pub stateful_public_key: Vec<u8>,
-    /// Replacement FORS-C public seed.
-    pub fors_pk_seed: Vec<u8>,
-    /// Replacement hypertree public seed.
-    pub hypertree_pk_seed: Vec<u8>,
+    /// Replacement global stateless public seed.
+    pub pk_seed: Vec<u8>,
     /// Replacement hypertree root.
     pub hypertree_root: Vec<u8>,
 }

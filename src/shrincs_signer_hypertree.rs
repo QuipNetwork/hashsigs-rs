@@ -36,9 +36,10 @@ pub(crate) fn sign_hypertree(
     // upper-layer tree/leaf positions.
     let subtree_height = u32::from(params.hypertree_height / params.num_hypertree_layers);
     let leaf_mask = (1u64 << subtree_height) - 1;
-    //hypertree_seed is the master seed for deriving all per-layer seeds
-    //hypertree_pk_seed is used for hashing in all layers, but not for leaf secret derivation
-    let layer_seeds = hypertree_layer_seeds(params, &signing_key.hypertree_seed);
+    // `stateless_sk_seed` is the shared SK.seed-style master for FORS-C and
+    // hypertree WOTS-C signing secrets.
+    // `pk_seed` is the global public seed used for stateless hashing.
+    let layer_seeds = hypertree_layer_seeds(params, &signing_key.stateless_sk_seed);
     let mut layers = Vec::with_capacity(params.num_hypertree_layers as usize);
 
     // `current` is the value being authenticated by the current layer. At layer
@@ -63,7 +64,7 @@ pub(crate) fn sign_hypertree(
         // chain reconstruction to the auth path that follows.
         let pk_hash = stateless_wots_c_public_key(
             params,
-            &signing_key.hypertree_pk_seed,
+            &signing_key.pk_seed,
             &sk_seed,
             layer,
             tree,
@@ -71,8 +72,9 @@ pub(crate) fn sign_hypertree(
         );
         let wots_c_signature = sign_stateless_wots_c(
             params,
-            &signing_key.hypertree_pk_seed,
+            &signing_key.pk_seed,
             &sk_seed,
+            &signing_key.stateless_prf_seed,
             &pk_hash,
             layer,
             tree,
@@ -84,7 +86,7 @@ pub(crate) fn sign_hypertree(
         // current layer's XMSS-like subtree at `tree`.
         let auth_path = hypertree_auth_path(
             params,
-            &signing_key.hypertree_pk_seed,
+            &signing_key.pk_seed,
             &layer_seeds[layer as usize],
             layer,
             tree,
@@ -95,7 +97,7 @@ pub(crate) fn sign_hypertree(
         // is also what the verifier obtains after it applies the auth path.
         current = hypertree_virtual_node(
             params,
-            &signing_key.hypertree_pk_seed,
+            &signing_key.pk_seed,
             &layer_seeds[layer as usize],
             layer,
             tree,
@@ -124,7 +126,7 @@ pub(crate) fn sign_hypertree(
 
 pub(crate) fn hypertree_public_root(
     params: &ParamsView,
-    hypertree_seed: &[u8; HASH_LEN],
+    stateless_sk_seed: &[u8; HASH_LEN],
     pk_seed: &[u8; HASH_LEN],
 ) -> [u8; HASH_LEN] {
     // With a 64-bit hypertree split into eight 8-bit layers, the layer-0 tree
@@ -132,7 +134,7 @@ pub(crate) fn hypertree_public_root(
     // therefore zero for the public root.
     //A full bottom-layer position needs 64 bits: [ L7 ][ L6 ][ L5 ][ L4 ][ L3 ][ L2 ][ L1 ][ L0 ]
     // Lowest layer has 2^64/2^8 = 2^56 subtrees so 7 of 8 bits are used for the tree index
-    let layer_seeds = hypertree_layer_seeds(params, hypertree_seed);
+    let layer_seeds = hypertree_layer_seeds(params, stateless_sk_seed);
     let top_layer = u32::from(params.num_hypertree_layers - 1);
     let subtree_height = u32::from(params.hypertree_height / params.num_hypertree_layers);
     hypertree_virtual_node(
@@ -148,12 +150,12 @@ pub(crate) fn hypertree_public_root(
 
 fn hypertree_layer_seeds(
     params: &ParamsView,
-    hypertree_seed: &[u8; HASH_LEN],
+    stateless_sk_seed: &[u8; HASH_LEN],
 ) -> Vec<[u8; HASH_LEN]> {
     // One seed per hypertree layer keeps the subtrees domain-separated while
-    // still deriving the entire stateless tree from a single hypertree seed.
+    // still deriving the entire stateless tree from one SK.seed-style seed.
     (0..params.num_hypertree_layers)
-        .map(|layer| derive32(b"hypertree-layer-seed", hypertree_seed, &[layer]))
+        .map(|layer| derive32(b"hypertree-layer-seed", stateless_sk_seed, &[layer]))
         .collect()
 }
 
@@ -266,6 +268,7 @@ fn sign_stateless_wots_c(
     params: &ParamsView,
     pk_seed: &[u8; HASH_LEN],
     sk_seed: &[u8; HASH_LEN],
+    stateless_prf_seed: &[u8; HASH_LEN],
     pk_hash: &[u8; HASH_LEN],
     layer: u32,
     tree: u64,
@@ -275,7 +278,7 @@ fn sign_stateless_wots_c(
     // The WOTS-C challenge signs the current root for this layer. The expected
     // WOTS public-key hash is included in the digest, binding the challenge to
     // the key whose Merkle path is supplied next.
-    let randomizer = hash_packed(&[b"wots-c-randomizer", sk_seed, message]);
+    let randomizer = hash_packed(&[b"wots-c-randomizer", stateless_prf_seed, message]);
     let digest_bytes = wots_digest_bytes(params);
 
     for counter in 0..WOTS_C_MAX_GRIND_COUNTER {

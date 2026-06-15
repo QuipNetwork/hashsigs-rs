@@ -60,6 +60,7 @@ pub(crate) fn sign_stateful_raw_at_leaf(
     }
     let mut signature = sign_stateful_wots_c(
         &signing_key.stateful_sk_seed,
+        &signing_key.stateful_prf_seed,
         &signing_key.stateful_pk_seed,
         leaf_index,
         message,
@@ -94,6 +95,7 @@ pub(crate) fn stateful_subtree_root(
 
 fn sign_stateful_wots_c(
     sk_seed: &[u8; HASH_LEN],
+    prf_seed: &[u8; HASH_LEN],
     pk_seed: &[u8; HASH_LEN],
     leaf_index: u32,
     message: &[u8],
@@ -106,7 +108,7 @@ fn sign_stateful_wots_c(
     // itself does not change inside the grinding loop.
     let randomizer = hash_packed(&[
         b"uxmss-wots-randomizer",
-        sk_seed,
+        prf_seed,
         &leaf_index.to_be_bytes(),
         message,
     ]);

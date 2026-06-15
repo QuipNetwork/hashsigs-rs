@@ -54,26 +54,13 @@ pub(crate) fn ensure_supported_params(params: &ParamsView) -> ShrincsSignerResul
 pub(crate) fn public_key_from_components(
     parameter_set_id: ParameterSetId,
     stateful_public_key: Vec<u8>,
-    fors_pk_seed: [u8; HASH_LEN],
-    hypertree_pk_seed: [u8; HASH_LEN],
+    pk_seed: [u8; HASH_LEN],
     hypertree_root: [u8; HASH_LEN],
 ) -> PublicKey {
-    // The public key contains the components separately for the verifier, plus a
-    // compact commitment over the same components. That commitment is what a
-    // caller can store or compare when it wants one stable public-key identifier.
-    let composite_public_key = composite_public_key_commitment(
-        parameter_set_id,
-        &stateful_public_key,
-        &fors_pk_seed,
-        &hypertree_pk_seed,
-        &hypertree_root,
-    );
     PublicKey {
         parameter_set_id,
-        composite_public_key: composite_public_key.to_vec(),
         stateful_public_key,
-        fors_pk_seed: fors_pk_seed.to_vec(),
-        hypertree_pk_seed: hypertree_pk_seed.to_vec(),
+        pk_seed: pk_seed.to_vec(),
         hypertree_root: hypertree_root.to_vec(),
     }
 }
@@ -127,25 +114,6 @@ pub(crate) fn word32(input: &[u8]) -> Option<[u8; HASH_LEN]> {
     // `None` instead of padding/truncating prevents malformed keys from being
     // accidentally accepted by the signer.
     input.try_into().ok()
-}
-
-pub(crate) fn composite_public_key_commitment(
-    parameter_set_id: ParameterSetId,
-    stateful_public_key: &[u8],
-    fors_pk_seed: &[u8],
-    hypertree_pk_seed: &[u8],
-    hypertree_root: &[u8],
-) -> [u8; HASH_LEN] {
-    // Domain separation is part of the commitment. A 32-byte collision here would
-    // need to collide the whole SHRINCS public-key tuple, not just one component.
-    hash_packed(&[
-        b"shrincs-public-key",
-        &[parameter_set_id.packed_byte()],
-        stateful_public_key,
-        fors_pk_seed,
-        hypertree_pk_seed,
-        hypertree_root,
-    ])
 }
 
 pub(crate) fn base_w16_digit(digest: &[u8; HASH_LEN], index: usize) -> u32 {

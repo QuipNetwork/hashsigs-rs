@@ -63,10 +63,9 @@ pub struct ShrincsSigner;
 impl ShrincsSigner {
     /// Deterministically derive signing material and a public key from seed material.
     ///
-    /// The public key contains one stateful tree, one FORS public seed, and one
-    /// hypertree public seed/root. The message-specific FORS root is derived
-    /// during signing and authenticated by the hypertree; it is not a field of
-    /// the long-lived public key.
+    /// The public key contains one stateful tree plus one stateless `PK.seed`
+    /// and hypertree `PK.root`. The message-specific FORS root is derived
+    /// during signing and authenticated by the hypertree.
     pub fn keygen(
         parameter_set_id: ParameterSetId,
         seed_material: &[u8],
@@ -79,6 +78,7 @@ impl ShrincsSigner {
         }
 
         let stateful_sk_seed = derive32(b"shrincs-stateful-sk-seed", seed_material, &[]);
+        let stateful_prf_seed = derive32(b"shrincs-stateful-prf-seed", seed_material, &[]);
         let stateful_pk_seed = derive32(b"shrincs-stateful-pk-seed", seed_material, &[]);
         let stateful_root = stateful_subtree_root(
             &stateful_sk_seed,
@@ -86,30 +86,28 @@ impl ShrincsSigner {
             1,
             max_stateful_signatures,
         );
-        let fors_sk_seed = derive32(b"shrincs-fors-sk-seed", seed_material, &[]);
-        let fors_pk_seed = derive32(b"shrincs-fors-pk-seed", seed_material, &[]);
-        let hypertree_seed = derive32(b"shrincs-hypertree-seed", seed_material, &[]);
-        let hypertree_pk_seed = derive32(b"hypertree-pk-seed", &hypertree_seed, &[]);
-        let hypertree_root = hypertree_public_root(&params, &hypertree_seed, &hypertree_pk_seed);
+        let stateless_sk_seed = derive32(b"shrincs-stateless-sk-seed", seed_material, &[]);
+        let stateless_prf_seed = derive32(b"shrincs-stateless-prf-seed", seed_material, &[]);
+        let pk_seed = derive32(b"shrincs-pk-seed", seed_material, &[]);
+        let hypertree_root = hypertree_public_root(&params, &stateless_sk_seed, &pk_seed);
 
         let signing_key = ShrincsSigningKey {
             parameter_set_id,
             stateful_sk_seed,
+            stateful_prf_seed,
             stateful_pk_seed,
             stateful_root,
             max_stateful_signatures,
             next_stateful_leaf_index: 1,
-            fors_sk_seed,
-            fors_pk_seed,
-            hypertree_seed,
-            hypertree_pk_seed,
+            stateless_sk_seed,
+            stateless_prf_seed,
+            pk_seed,
             hypertree_root,
         };
         let public_key = public_key_from_components(
             parameter_set_id,
             encode_stateful_public_key(stateful_pk_seed, stateful_root, max_stateful_signatures),
-            fors_pk_seed,
-            hypertree_pk_seed,
+            pk_seed,
             hypertree_root,
         );
 
@@ -122,7 +120,7 @@ impl ShrincsSigner {
         public_key: &PublicKey,
         context: &ActionContext,
     ) -> ShrincsSignerResult<StatefulSignature> {
-        let expected = word32(&public_key.composite_public_key)?;
+        let expected = word32(&public_key.hypertree_root)?;
         let verifier = ShrincsVerifier::new();
         let message =
             verifier.stateful_action_message_hash(signing_key.parameter_set_id, expected, context);
@@ -177,7 +175,6 @@ impl ShrincsSigner {
 mod tests {
     use self::verifier::{HASH_LEN, WOTS_CHAINS_STATEFUL};
     use super::*;
-    use super::shrincs_signer_utils::composite_public_key_commitment;
 
     fn action_context() -> ActionContext {
         ActionContext {
@@ -190,7 +187,7 @@ mod tests {
     }
 
     fn expected_key(public_key: &PublicKey) -> [u8; HASH_LEN] {
-        word32(&public_key.composite_public_key).unwrap()
+        word32(&public_key.hypertree_root).unwrap()
     }
 
     #[test]
@@ -230,7 +227,7 @@ mod tests {
     }
 
     #[test]
-    fn keygen_public_key_commits_only_stable_fields() {
+    fn keygen_public_key_uses_single_stateless_seed_and_root() {
         let (_, public_key) = ShrincsSigner::keygen(
             ParameterSetId::Sphincs256sKeccakQ20,
             b"public key structure seed",
@@ -239,18 +236,8 @@ mod tests {
         .unwrap();
 
         assert_eq!(public_key.stateful_public_key.len(), verifier::STATEFUL_PUBLIC_KEY_BYTES);
-        assert_eq!(public_key.fors_pk_seed.len(), HASH_LEN);
-        assert_eq!(public_key.hypertree_pk_seed.len(), HASH_LEN);
+        assert_eq!(public_key.pk_seed.len(), HASH_LEN);
         assert_eq!(public_key.hypertree_root.len(), HASH_LEN);
-
-        let expected_commitment = composite_public_key_commitment(
-            public_key.parameter_set_id,
-            &public_key.stateful_public_key,
-            &public_key.fors_pk_seed,
-            &public_key.hypertree_pk_seed,
-            &public_key.hypertree_root,
-        );
-        assert_eq!(word32(&public_key.composite_public_key), Some(expected_commitment));
     }
 
     #[test]

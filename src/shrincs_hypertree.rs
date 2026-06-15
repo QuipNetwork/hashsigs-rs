@@ -69,7 +69,7 @@ pub(crate) fn verify_hypertree(
         // by the previous layer's Merkle path.
         if !verify_wots_c32(
             params,
-            &public_key.hypertree_pk_seed,
+            &public_key.pk_seed,
             layer_index as u32,
             layer_signature.tree_index,
             layer_signature.leaf_index,
@@ -86,7 +86,7 @@ pub(crate) fn verify_hypertree(
         // and climb the layer-local authentication path.
         let Some(next_root) = hypertree_root_from_path32(
             subtree_height,
-            &public_key.hypertree_pk_seed,
+            &public_key.pk_seed,
             layer_index as u32,
             layer_signature.tree_index,
             layer_signature.leaf_index,
