@@ -26,13 +26,12 @@ use super::shrincs_types::{
 };
 use super::shrincs_utils::{
     address_word32, base_w16_digit, decode_stateful_public_key, hash_packed,
-    matches_expected_composite_public_key, valid_parameter_set_binding,
-    valid_stateful_composite_public_key,
+    matches_expected_public_key_commitment, valid_parameter_set_binding, valid_public_key,
 };
 
 pub(crate) fn verify_stateful_unsafe_raw(
     parameter_set_id: ParameterSetId,
-    expected_composite_public_key: [u8; HASH_LEN],
+    expected_public_key_commitment: [u8; HASH_LEN],
     public_key: &PublicKey,
     message: &[u8],
     signature: &StatefulSignature,
@@ -44,10 +43,10 @@ pub(crate) fn verify_stateful_unsafe_raw(
     if !valid_parameter_set_binding(&params, parameter_set_id, public_key.parameter_set_id) {
         return false;
     }
-    if !matches_expected_composite_public_key(public_key, expected_composite_public_key) {
+    if !matches_expected_public_key_commitment(public_key, expected_public_key_commitment) {
         return false;
     }
-    if !valid_stateful_composite_public_key(public_key) {
+    if !valid_public_key(public_key) {
         return false;
     }
     let Some(stateful_key) = decode_stateful_public_key(&public_key.stateful_public_key) else {

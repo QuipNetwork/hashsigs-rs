@@ -62,14 +62,8 @@ pub(crate) fn sign_hypertree(
         // The WOTS public-key hash is the Merkle leaf for this coordinate. It is
         // included in the layer signature so the verifier can bind the WOTS-C
         // chain reconstruction to the auth path that follows.
-        let pk_hash = stateless_wots_c_public_key(
-            params,
-            &signing_key.pk_seed,
-            &sk_seed,
-            layer,
-            tree,
-            leaf,
-        );
+        let pk_hash =
+            stateless_wots_c_public_key(params, &signing_key.pk_seed, &sk_seed, layer, tree, leaf);
         let wots_c_signature = sign_stateless_wots_c(
             params,
             &signing_key.pk_seed,

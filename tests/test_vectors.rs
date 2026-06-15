@@ -14,7 +14,7 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
-use hashsigs_rs::{WOTSPlus, PublicKey};
+use hashsigs_rs::{PublicKey, WOTSPlus};
 use serde_json::Value;
 use solana_program::keccak::hash as keccak256_hash;
 use std::fs;
@@ -27,7 +27,7 @@ fn hex_to_bytes(hex: &str) -> [u8; 32] {
     let hex = hex.trim_start_matches("0x");
     let mut result = [0u8; 32];
     for i in 0..32 {
-        let byte_str = &hex[i*2..i*2+2];
+        let byte_str = &hex[i * 2..i * 2 + 2];
         result[i] = u8::from_str_radix(byte_str, 16).unwrap();
     }
     result
@@ -38,8 +38,8 @@ fn test_wotsplus_keccak256_vectors() {
     // Read the test vectors file
     let test_vectors = fs::read_to_string("tests/test_vectors/wotsplus_keccak256.json")
         .expect("Failed to read test vectors file");
-    let vectors: Value = serde_json::from_str(&test_vectors)
-        .expect("Failed to parse test vectors JSON");
+    let vectors: Value =
+        serde_json::from_str(&test_vectors).expect("Failed to parse test vectors JSON");
 
     let wots = WOTSPlus::new(keccak256);
 
@@ -52,19 +52,19 @@ fn test_wotsplus_keccak256_vectors() {
         let message = hex_to_bytes(vector["message"].as_str().unwrap());
         let expected_public_key_hex = vector["publicKey"].as_str().unwrap();
         let expected_public_key_hex = expected_public_key_hex.trim_start_matches("0x");
-        
+
         // Split into public seed and public key hash
         let mut public_seed = [0u8; 32];
         let mut public_key_hash = [0u8; 32];
-        
+
         for i in 0..32 {
-            let byte_str = &expected_public_key_hex[i*2..i*2+2];
+            let byte_str = &expected_public_key_hex[i * 2..i * 2 + 2];
             public_seed[i] = u8::from_str_radix(byte_str, 16).unwrap();
-            
-            let byte_str = &expected_public_key_hex[(i+32)*2..(i+32)*2+2];
+
+            let byte_str = &expected_public_key_hex[(i + 32) * 2..(i + 32) * 2 + 2];
             public_key_hash[i] = u8::from_str_radix(byte_str, 16).unwrap();
         }
-        
+
         let expected_public_key = PublicKey {
             public_seed,
             public_key_hash,
@@ -98,6 +98,10 @@ fn test_wotsplus_keccak256_vectors() {
 
         // Verify signature
         let is_valid = wots.verify(&public_key, &message, &signature);
-        assert!(is_valid, "Signature verification failed for {}", vector_name);
+        assert!(
+            is_valid,
+            "Signature verification failed for {}",
+            vector_name
+        );
     }
 }

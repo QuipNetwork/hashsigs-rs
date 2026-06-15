@@ -80,6 +80,8 @@ pub struct PublicKey {
     pub parameter_set_id: ParameterSetId,
     /// Encoded stateful key: `pk_seed || root || max_signatures`.
     pub stateful_public_key: Vec<u8>,
+    /// Commitment to the installed hybrid public-key bundle.
+    pub public_key_commitment: Vec<u8>,
     /// Global stateless public seed used for FORS-C, hypertree, and WOTS-C hashing.
     pub pk_seed: Vec<u8>,
     /// Expected final hypertree root.
@@ -164,6 +166,8 @@ pub struct StatefulRotationTarget {
     pub parameter_set_id: ParameterSetId,
     /// Encoded replacement stateful public key.
     pub stateful_public_key: Vec<u8>,
+    /// Commitment to the replacement installed public-key bundle.
+    pub public_key_commitment: Vec<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -172,6 +176,8 @@ pub struct RotationTarget {
     pub parameter_set_id: ParameterSetId,
     /// Replacement encoded stateful public key.
     pub stateful_public_key: Vec<u8>,
+    /// Commitment to the replacement installed public-key bundle.
+    pub public_key_commitment: Vec<u8>,
     /// Replacement global stateless public seed.
     pub pk_seed: Vec<u8>,
     /// Replacement hypertree root.

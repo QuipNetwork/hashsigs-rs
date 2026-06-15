@@ -26,9 +26,8 @@ fn generate_shrincs_sphincs_256s_keccak_vectors() {
     )
     .expect("stateful keygen");
     let stateful_message = hash_word(b"shrincs solidity stateful message").to_vec();
-    let stateful_signature =
-        ShrincsSigner::sign_stateful_raw(&mut stateful_key, &stateful_message)
-            .expect("stateful signature");
+    let stateful_signature = ShrincsSigner::sign_stateful_raw(&mut stateful_key, &stateful_message)
+        .expect("stateful signature");
 
     let (stateless_key, stateless_public_key) = ShrincsSigner::keygen(
         ParameterSetId::Sphincs256sKeccakQ20,
@@ -37,9 +36,8 @@ fn generate_shrincs_sphincs_256s_keccak_vectors() {
     )
     .expect("stateless keygen");
     let stateless_message = hash_word(b"shrincs solidity stateless message").to_vec();
-    let stateless_signature =
-        ShrincsSigner::sign_stateless_raw(&stateless_key, &stateless_message)
-            .expect("stateless signature");
+    let stateless_signature = ShrincsSigner::sign_stateless_raw(&stateless_key, &stateless_message)
+        .expect("stateless signature");
 
     let mut wrong_stateful_message = stateful_message.clone();
     wrong_stateful_message[0] ^= 1;
@@ -65,7 +63,7 @@ fn generate_shrincs_sphincs_256s_keccak_vectors() {
     wrong_public_root.hypertree_root[0] ^= 1;
 
     let mut tampered_component_public_key = stateless_public_key.clone();
-    tampered_component_public_key.hypertree_root[0] ^= 1;
+    tampered_component_public_key.stateful_public_key[0] ^= 1;
 
     let vectors = json!({
         "params": {
@@ -180,17 +178,13 @@ fn stateless_calldata(
 }
 
 fn stateless_signature_cast(signature: &StatelessSignature) -> String {
-    let fors_entries = signature
-        .fors
-        .entries
-        .iter()
-        .map(|entry| {
-            format!(
-                "({},{})",
-                hex(&entry.secret_leaf),
-                fixed_array(entry.auth_path.iter().map(hex))
-            )
-        });
+    let fors_entries = signature.fors.entries.iter().map(|entry| {
+        format!(
+            "({},{})",
+            hex(&entry.secret_leaf),
+            fixed_array(entry.auth_path.iter().map(hex))
+        )
+    });
     let fors = format!(
         "({},{},{})",
         hex(&signature.fors.randomizer),
@@ -248,6 +242,7 @@ fn stateful_public_key_json(public_key: &PublicKey) -> Value {
 fn public_key_json(public_key: &PublicKey) -> Value {
     json!({
         "statefulPublicKey": hex(&public_key.stateful_public_key),
+        "publicKeyCommitment": hex(&public_key.public_key_commitment),
         "pkSeed": hex(&public_key.pk_seed),
         "hypertreeRoot": hex(&public_key.hypertree_root)
     })

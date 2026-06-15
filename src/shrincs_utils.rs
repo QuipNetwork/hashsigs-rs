@@ -73,14 +73,56 @@ pub(crate) fn valid_rotation_context(context: &RotationContext) -> bool {
     context.domain_separator != [0u8; HASH_LEN]
 }
 
-pub(crate) fn matches_expected_composite_public_key(
+pub(crate) fn public_key_commitment(public_key: &PublicKey) -> Option<[u8; HASH_LEN]> {
+    let pk_seed = word32(&public_key.pk_seed)?;
+    let hypertree_root = word32(&public_key.hypertree_root)?;
+    Some(hash_packed(&[
+        b"shrincs-public-key",
+        &[public_key.parameter_set_id.packed_byte()],
+        &public_key.stateful_public_key,
+        &pk_seed,
+        &hypertree_root,
+    ]))
+}
+
+pub(crate) fn stateful_rotation_target_commitment(
+    parameter_set_id: ParameterSetId,
+    stateful_public_key: &[u8],
+    pk_seed: &[u8; HASH_LEN],
+    hypertree_root: &[u8; HASH_LEN],
+) -> [u8; HASH_LEN] {
+    hash_packed(&[
+        b"shrincs-public-key",
+        &[parameter_set_id.packed_byte()],
+        stateful_public_key,
+        pk_seed,
+        hypertree_root,
+    ])
+}
+
+pub(crate) fn rotation_target_commitment(
+    target: &super::shrincs_types::RotationTarget,
+) -> Option<[u8; HASH_LEN]> {
+    let pk_seed = word32(&target.pk_seed)?;
+    let hypertree_root = word32(&target.hypertree_root)?;
+    Some(stateful_rotation_target_commitment(
+        target.parameter_set_id,
+        &target.stateful_public_key,
+        &pk_seed,
+        &hypertree_root,
+    ))
+}
+
+pub(crate) fn matches_expected_public_key_commitment(
     public_key: &PublicKey,
-    expected_composite_public_key: [u8; HASH_LEN],
+    expected_public_key_commitment: [u8; HASH_LEN],
 ) -> bool {
-    // The account or caller stores the stateless SPHINCS-style public root.
-    // The supplied public key must carry the same hypertree root.
-    expected_composite_public_key != [0u8; HASH_LEN]
-        && word32(&public_key.hypertree_root) == Some(expected_composite_public_key)
+    // The account or caller stores the installed hybrid-key commitment. The
+    // supplied bundle must match that commitment exactly, not just the stateless
+    // hypertree root inside it.
+    expected_public_key_commitment != [0u8; HASH_LEN]
+        && word32(&public_key.public_key_commitment) == Some(expected_public_key_commitment)
+        && public_key_commitment(public_key) == Some(expected_public_key_commitment)
 }
 
 pub(crate) fn valid_params(params: &ParamsView, public_key: &PublicKey) -> bool {
@@ -105,16 +147,18 @@ pub(crate) fn valid_params(params: &ParamsView, public_key: &PublicKey) -> bool 
     if params.wots_target_sum != WOTS_TARGET_SUM_STATEFUL {
         return false;
     }
-    if !valid_stateful_composite_public_key(public_key) {
+    if !valid_public_key(public_key) {
         return false;
     }
     (params.num_fors_trees as u64) * (1u64 << params.fors_tree_height) <= u32::MAX as u64
 }
 
-pub(crate) fn valid_stateful_composite_public_key(public_key: &PublicKey) -> bool {
+pub(crate) fn valid_public_key(public_key: &PublicKey) -> bool {
     public_key.stateful_public_key.len() == STATEFUL_PUBLIC_KEY_BYTES
+        && public_key.public_key_commitment.len() == HASH_LEN
         && public_key.pk_seed.len() == HASH_LEN
         && public_key.hypertree_root.len() == HASH_LEN
+        && public_key_commitment(public_key) == word32(&public_key.public_key_commitment)
 }
 
 pub(crate) fn decode_stateful_public_key(encoded: &[u8]) -> Option<StatefulPublicKey> {

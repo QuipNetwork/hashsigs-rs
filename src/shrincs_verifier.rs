@@ -39,9 +39,9 @@ use self::shrincs_fors_c::verify_fors_c_and_return_root;
 use self::shrincs_hypertree::verify_hypertree;
 use self::shrincs_stateful::verify_stateful_unsafe_raw as verify_stateful_raw_component;
 use self::shrincs_utils::{
-    decode_stateful_public_key, hash_packed, matches_expected_composite_public_key,
-    valid_action_context, valid_parameter_set_binding, valid_params, valid_rotation_context,
-    word32,
+    decode_stateful_public_key, hash_packed, matches_expected_public_key_commitment,
+    rotation_target_commitment, stateful_rotation_target_commitment, valid_action_context,
+    valid_parameter_set_binding, valid_params, valid_rotation_context, word32,
 };
 
 pub struct ShrincsVerifier;
@@ -69,11 +69,11 @@ impl ShrincsVerifier {
     /// context rather than raw bytes, and the verifier hashes that context into
     /// the exact message that must have been signed. This binds replay-control
     /// fields (`nonce`, `key_version`), domain separation, action type, payload,
-    /// parameter set, hash suite, and expected composite public key.
+    /// parameter set, hash suite, and expected installed public-key commitment.
     pub fn verify_stateful(
         &self,
         parameter_set_id: ParameterSetId,
-        expected_composite_public_key: [u8; HASH_LEN],
+        expected_public_key_commitment: [u8; HASH_LEN],
         public_key: &PublicKey,
         context: &ActionContext,
         signature: &StatefulSignature,
@@ -83,12 +83,12 @@ impl ShrincsVerifier {
         }
         let message = self.stateful_action_message_hash(
             parameter_set_id,
-            expected_composite_public_key,
+            expected_public_key_commitment,
             context,
         );
         self.verify_stateful_unsafe_raw(
             parameter_set_id,
-            expected_composite_public_key,
+            expected_public_key_commitment,
             public_key,
             &message,
             signature,
@@ -103,7 +103,7 @@ impl ShrincsVerifier {
     pub fn verify_stateless(
         &self,
         parameter_set_id: ParameterSetId,
-        expected_composite_public_key: [u8; HASH_LEN],
+        expected_public_key_commitment: [u8; HASH_LEN],
         public_key: &PublicKey,
         context: &ActionContext,
         signature: &StatelessSignature,
@@ -113,12 +113,12 @@ impl ShrincsVerifier {
         }
         let message = self.stateless_action_message_hash(
             parameter_set_id,
-            expected_composite_public_key,
+            expected_public_key_commitment,
             context,
         );
         self.verify_stateless_raw_memory(
             parameter_set_id,
-            expected_composite_public_key,
+            expected_public_key_commitment,
             public_key,
             &message,
             signature,
@@ -128,13 +128,13 @@ impl ShrincsVerifier {
     /// Rotate only the stateful key using a stateless recovery signature.
     ///
     /// The stateless key material remains unchanged. The recovery signature must
-    /// authorize a message that binds the current public root, rotation context,
-    /// and the next encoded stateful key. If verification succeeds, the returned
-    /// value is the unchanged stateless public root.
+    /// authorize a message that binds the current installed-key commitment,
+    /// rotation context, and the next installed-key commitment. If verification
+    /// succeeds, the returned value is the replacement installed-key commitment.
     pub fn rotate_stateful_via_stateless(
         &self,
         parameter_set_id: ParameterSetId,
-        expected_composite_public_key: [u8; HASH_LEN],
+        expected_public_key_commitment: [u8; HASH_LEN],
         current_public_key: &PublicKey,
         context: &RotationContext,
         recovery_signature: &StatelessSignature,
@@ -143,7 +143,7 @@ impl ShrincsVerifier {
         let params = Self::default_params_view(parameter_set_id);
         // First prove that the current public key is the key the caller intended:
         // same requested parameter set, same declared parameter set, and same
-        // expected public root.
+        // expected installed-key commitment.
         if !valid_parameter_set_binding(
             &params,
             parameter_set_id,
@@ -151,8 +151,10 @@ impl ShrincsVerifier {
         ) {
             return None;
         }
-        if !matches_expected_composite_public_key(current_public_key, expected_composite_public_key)
-        {
+        if !matches_expected_public_key_commitment(
+            current_public_key,
+            expected_public_key_commitment,
+        ) {
             return None;
         }
         if !valid_rotation_context(context) || !valid_params(&params, current_public_key) {
@@ -176,17 +178,28 @@ impl ShrincsVerifier {
         if decoded_next_stateful_key.max_signatures == 0 {
             return None;
         }
+        let current_pk_seed = word32(&current_public_key.pk_seed)?;
+        let current_hypertree_root = word32(&current_public_key.hypertree_root)?;
+        let next_public_key_commitment = stateful_rotation_target_commitment(
+            next_stateful_key.parameter_set_id,
+            &next_stateful_key.stateful_public_key,
+            &current_pk_seed,
+            &current_hypertree_root,
+        );
+        if word32(&next_stateful_key.public_key_commitment) != Some(next_public_key_commitment) {
+            return None;
+        }
 
         let recovery_message = self.stateful_rotation_message_hash(
             parameter_set_id,
-            expected_composite_public_key,
+            expected_public_key_commitment,
             current_public_key,
             context,
             next_stateful_key,
         );
         if !self.verify_stateless_raw_memory(
             parameter_set_id,
-            expected_composite_public_key,
+            expected_public_key_commitment,
             current_public_key,
             &recovery_message,
             recovery_signature,
@@ -194,18 +207,18 @@ impl ShrincsVerifier {
             return None;
         }
 
-        word32(&current_public_key.hypertree_root)
+        Some(next_public_key_commitment)
     }
 
     /// Rotate the full SHRINCS key bundle using a stateless recovery signature.
     ///
     /// This is stricter than `rotate_stateful_via_stateless`: every public
     /// component of the next bundle is supplied and signed into the recovery
-    /// message before the next public root is returned.
+    /// message before the next installed-key commitment is returned.
     pub fn stateless_rotate(
         &self,
         parameter_set_id: ParameterSetId,
-        expected_composite_public_key: [u8; HASH_LEN],
+        expected_public_key_commitment: [u8; HASH_LEN],
         current_public_key: &PublicKey,
         context: &RotationContext,
         recovery_signature: &StatelessSignature,
@@ -219,8 +232,10 @@ impl ShrincsVerifier {
         ) {
             return None;
         }
-        if !matches_expected_composite_public_key(current_public_key, expected_composite_public_key)
-        {
+        if !matches_expected_public_key_commitment(
+            current_public_key,
+            expected_public_key_commitment,
+        ) {
             return None;
         }
         if !valid_rotation_context(context) || !valid_params(&params, current_public_key) {
@@ -239,26 +254,30 @@ impl ShrincsVerifier {
         if decoded_next_stateful_key.max_signatures == 0 {
             return None;
         }
+        let next_public_key_commitment = rotation_target_commitment(next_key)?;
+        if word32(&next_key.public_key_commitment) != Some(next_public_key_commitment) {
+            return None;
+        }
 
         // The recovery message signs the replacement bundle fields so callers do
         // not authorize a different stateful/stateless tuple accidentally.
         let recovery_message = self.full_rotation_message_hash(
             parameter_set_id,
-            expected_composite_public_key,
+            expected_public_key_commitment,
             current_public_key,
             context,
             next_key,
         );
         if !self.verify_stateless_raw_memory(
             parameter_set_id,
-            expected_composite_public_key,
+            expected_public_key_commitment,
             current_public_key,
             &recovery_message,
             recovery_signature,
         ) {
             return None;
         }
-        word32(&next_key.hypertree_root)
+        Some(next_public_key_commitment)
     }
 
     /// Verify a raw stateful message.
@@ -270,7 +289,7 @@ impl ShrincsVerifier {
     pub fn verify_stateful_unsafe_raw(
         &self,
         parameter_set_id: ParameterSetId,
-        expected_composite_public_key: [u8; HASH_LEN],
+        expected_public_key_commitment: [u8; HASH_LEN],
         public_key: &PublicKey,
         message: &[u8],
         signature: &StatefulSignature,
@@ -279,7 +298,7 @@ impl ShrincsVerifier {
         // so replay protection and domain separation are entirely caller-managed.
         verify_stateful_raw_component(
             parameter_set_id,
-            expected_composite_public_key,
+            expected_public_key_commitment,
             public_key,
             message,
             signature,
@@ -293,7 +312,7 @@ impl ShrincsVerifier {
     pub fn verify_stateless_unsafe_raw(
         &self,
         parameter_set_id: ParameterSetId,
-        expected_composite_public_key: [u8; HASH_LEN],
+        expected_public_key_commitment: [u8; HASH_LEN],
         public_key: &PublicKey,
         message: &[u8],
         signature: &StatelessSignature,
@@ -304,12 +323,12 @@ impl ShrincsVerifier {
         if !valid_parameter_set_binding(&params, parameter_set_id, public_key.parameter_set_id) {
             return false;
         }
-        if !matches_expected_composite_public_key(public_key, expected_composite_public_key) {
+        if !matches_expected_public_key_commitment(public_key, expected_public_key_commitment) {
             return false;
         }
         self.verify_stateless_raw_memory(
             parameter_set_id,
-            expected_composite_public_key,
+            expected_public_key_commitment,
             public_key,
             message,
             signature,
@@ -319,12 +338,12 @@ impl ShrincsVerifier {
     /// Build the canonical message hash for a stateful action.
     ///
     /// This mirrors Solidity `abi.encodePacked` exactly: operation tag, parameter
-    /// set byte, hash suite, expected composite key, and action context fields are
+    /// set byte, hash suite, expected installed-key commitment, and action context fields are
     /// concatenated and Keccak-hashed.
     pub fn stateful_action_message_hash(
         &self,
         parameter_set_id: ParameterSetId,
-        expected_composite_public_key: [u8; HASH_LEN],
+        expected_public_key_commitment: [u8; HASH_LEN],
         context: &ActionContext,
     ) -> [u8; HASH_LEN] {
         let params = Self::default_params_view(parameter_set_id);
@@ -333,7 +352,7 @@ impl ShrincsVerifier {
             &op,
             &[parameter_set_id.packed_byte()],
             &params.hash_suite_id.to_be_bytes(),
-            &expected_composite_public_key,
+            &expected_public_key_commitment,
             &context.domain_separator,
             &context.nonce,
             &context.key_version,
@@ -350,7 +369,7 @@ impl ShrincsVerifier {
     pub fn stateless_action_message_hash(
         &self,
         parameter_set_id: ParameterSetId,
-        expected_composite_public_key: [u8; HASH_LEN],
+        expected_public_key_commitment: [u8; HASH_LEN],
         context: &ActionContext,
     ) -> [u8; HASH_LEN] {
         let params = Self::default_params_view(parameter_set_id);
@@ -359,7 +378,7 @@ impl ShrincsVerifier {
             &op,
             &[parameter_set_id.packed_byte()],
             &params.hash_suite_id.to_be_bytes(),
-            &expected_composite_public_key,
+            &expected_public_key_commitment,
             &context.domain_separator,
             &context.nonce,
             &context.key_version,
@@ -370,12 +389,13 @@ impl ShrincsVerifier {
 
     /// Build the canonical message hash for stateful-only rotation.
     ///
-    /// This binds the current public root and the next encoded stateful key.
-    /// A signature over this hash cannot authorize a full bundle rotation.
+    /// This binds the current installed-key commitment and the replacement
+    /// installed-key commitment. A signature over this hash cannot authorize a
+    /// different replacement bundle.
     pub fn stateful_rotation_message_hash(
         &self,
         parameter_set_id: ParameterSetId,
-        expected_composite_public_key: [u8; HASH_LEN],
+        expected_public_key_commitment: [u8; HASH_LEN],
         current_public_key: &PublicKey,
         context: &RotationContext,
         next_stateful_key: &StatefulRotationTarget,
@@ -386,12 +406,12 @@ impl ShrincsVerifier {
             &op,
             &[parameter_set_id.packed_byte()],
             &params.hash_suite_id.to_be_bytes(),
-            &expected_composite_public_key,
+            &expected_public_key_commitment,
             &context.domain_separator,
             &context.nonce,
             &context.key_version,
-            &current_public_key.hypertree_root,
-            &next_stateful_key.stateful_public_key,
+            &current_public_key.public_key_commitment,
+            &next_stateful_key.public_key_commitment,
         ])
     }
 
@@ -402,35 +422,30 @@ impl ShrincsVerifier {
     pub fn full_rotation_message_hash(
         &self,
         parameter_set_id: ParameterSetId,
-        expected_composite_public_key: [u8; HASH_LEN],
+        expected_public_key_commitment: [u8; HASH_LEN],
         current_public_key: &PublicKey,
         context: &RotationContext,
         next_key: &RotationTarget,
     ) -> [u8; HASH_LEN] {
         let params = Self::default_params_view(parameter_set_id);
         let op = hash_packed(&[b"shrincs-rotate-full"]);
-        let next_key_bundle_hash = hash_packed(&[
-            &next_key.stateful_public_key,
-            &next_key.pk_seed,
-            &next_key.hypertree_root,
-        ]);
         hash_packed(&[
             &op,
             &[parameter_set_id.packed_byte()],
             &params.hash_suite_id.to_be_bytes(),
-            &expected_composite_public_key,
+            &expected_public_key_commitment,
             &context.domain_separator,
             &context.nonce,
             &context.key_version,
-            &current_public_key.hypertree_root,
-            &next_key_bundle_hash,
+            &current_public_key.public_key_commitment,
+            &next_key.public_key_commitment,
         ])
     }
 
     fn verify_stateless_raw_memory(
         &self,
         parameter_set_id: ParameterSetId,
-        expected_composite_public_key: [u8; HASH_LEN],
+        expected_public_key_commitment: [u8; HASH_LEN],
         public_key: &PublicKey,
         message: &[u8],
         signature: &StatelessSignature,
@@ -438,7 +453,7 @@ impl ShrincsVerifier {
         // The stateless verifier has two phases:
         // 1. FORS-C verifies the external message and yields a FORS root.
         // 2. The hypertree verifies that FORS root up to the committed hypertree root.
-        if !matches_expected_composite_public_key(public_key, expected_composite_public_key) {
+        if !matches_expected_public_key_commitment(public_key, expected_public_key_commitment) {
             return false;
         }
         let params = Self::default_params_view(parameter_set_id);

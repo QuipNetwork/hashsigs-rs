@@ -22,30 +22,30 @@ pub type HashFn = fn(&[u8]) -> [u8; 32];
 
 /// Constants from the WOTS+ implementation
 pub mod constants {
-    /// HashLen: The WOTS+ `n` security parameter which is the size 
+    /// HashLen: The WOTS+ `n` security parameter which is the size
     /// of the hash function output in bytes.
     /// This is 32 for keccak256 (256 / 8 = 32)
     pub const HASH_LEN: usize = 32;
 
-    /// MessageLen: The WOTS+ `m` parameter which is the size 
-    /// of the message to be signed in bytes 
+    /// MessageLen: The WOTS+ `m` parameter which is the size
+    /// of the message to be signed in bytes
     /// (and also the size of our hash function)
     ///
     /// This is 32 for keccak256 (256 / 8 = 32)
     ///
-    /// Note that this is not the message length itself as, like 
+    /// Note that this is not the message length itself as, like
     /// with most signatures, we hash the message and then compute
     /// the signature on the hash of the message.
     pub const MESSAGE_LEN: usize = HASH_LEN;
 
-    /// ChainLen: The WOTS+ `w`(internitz) parameter. 
+    /// ChainLen: The WOTS+ `w`(internitz) parameter.
     /// This corresponds to the number of hash chains for each public
     /// key segment and the base-w representation of the message
     /// and checksum.
-    /// 
+    ///
     /// A larger value means a smaller signature size but a longer
     /// computation time.
-    /// 
+    ///
     /// For XMSS (rfc8391) this value is limited to 4 or 16 because
     /// they simplify the algorithm and offer the best trade-offs.
     pub const CHAIN_LEN: usize = 16;
@@ -57,7 +57,7 @@ pub mod constants {
     };
 
     /// NumMessageChunks: the `len_1` parameter which is the number of
-    /// message chunks. This is 
+    /// message chunks. This is
     /// ceil(8n / lg(w)) -> ceil(8 * HASH_LEN / lg(CHAIN_LEN))
     /// or ceil(32*8 / lg(16)) -> 256 / 4 = 64
     /// Python:  math.ceil(32*8 / math.log(16,2))
@@ -129,10 +129,10 @@ impl PublicKey {
         }
         let mut public_seed = [0u8; constants::HASH_LEN];
         let mut public_key_hash = [0u8; constants::HASH_LEN];
-        
+
         public_seed.copy_from_slice(&bytes[..constants::HASH_LEN]);
         public_key_hash.copy_from_slice(&bytes[constants::HASH_LEN..]);
-        
+
         Some(PublicKey {
             public_seed,
             public_key_hash,
@@ -165,7 +165,7 @@ impl WOTSPlus {
     /// These elements are used in the chain function to randomize each hash
     pub fn generate_randomization_elements(
         &self,
-        public_seed: &[u8; constants::HASH_LEN]
+        public_seed: &[u8; constants::HASH_LEN],
     ) -> Vec<[u8; constants::HASH_LEN]> {
         let mut elements = Vec::with_capacity(constants::NUM_SIGNATURE_CHUNKS);
         for i in 0..constants::NUM_SIGNATURE_CHUNKS {
@@ -175,7 +175,10 @@ impl WOTSPlus {
     }
 
     /// XOR two 32-byte arrays
-    fn xor(a: &[u8; constants::HASH_LEN], b: &[u8; constants::HASH_LEN]) -> [u8; constants::HASH_LEN] {
+    fn xor(
+        a: &[u8; constants::HASH_LEN],
+        b: &[u8; constants::HASH_LEN],
+    ) -> [u8; constants::HASH_LEN] {
         let mut result = [0u8; constants::HASH_LEN];
         for i in 0..constants::HASH_LEN {
             result[i] = a[i] ^ b[i];
@@ -206,7 +209,7 @@ impl WOTSPlus {
     /// This function performs two main tasks:
     /// 1. Convert the message to base-w representation (or base of CHAIN_LEN representation)
     /// 2. Compute and append the checksum in base-w representation
-    /// 
+    ///
     /// These numbers are used to index into each hash chain which is rooted at a secret key segment
     /// and produces a public key segment at the end of the chain. Verification of a signature means
     /// using these indexes into each hash chain to recompute the corresponding public key segment.
@@ -217,7 +220,7 @@ impl WOTSPlus {
 
         let mut chain_segments_indexes = vec![0u8; constants::NUM_SIGNATURE_CHUNKS];
         let mut idx = 0;
-        
+
         // Convert message to base-w representation
         for byte in message {
             chain_segments_indexes[idx] = byte >> 4;
@@ -236,7 +239,8 @@ impl WOTSPlus {
         // converting to base-w representation
         for i in (0..constants::NUM_CHECKSUM_CHUNKS).rev() {
             let shift = i * constants::LG_CHAIN_LEN as usize;
-            chain_segments_indexes[idx] = ((checksum >> shift) & (constants::CHAIN_LEN as u32 - 1)) as u8;
+            chain_segments_indexes[idx] =
+                ((checksum >> shift) & (constants::CHAIN_LEN as u32 - 1)) as u8;
             idx += 1;
         }
 
@@ -248,7 +252,11 @@ impl WOTSPlus {
         let public_seed = self.prf(private_key, 0);
         self.get_public_key_with_public_seed(private_key, &public_seed)
     }
-    pub fn get_public_key_with_public_seed(&self, private_key: &[u8; constants::HASH_LEN], public_seed: &[u8; constants::HASH_LEN]) -> PublicKey {
+    pub fn get_public_key_with_public_seed(
+        &self,
+        private_key: &[u8; constants::HASH_LEN],
+        public_seed: &[u8; constants::HASH_LEN],
+    ) -> PublicKey {
         let randomization_elements = self.generate_randomization_elements(&public_seed);
         let function_key = randomization_elements[0];
 
@@ -258,7 +266,7 @@ impl WOTSPlus {
             let mut to_hash = vec![0u8; constants::HASH_LEN * 2];
             to_hash[..constants::HASH_LEN].copy_from_slice(&function_key);
             to_hash[constants::HASH_LEN..].copy_from_slice(&self.prf(private_key, (i + 1) as u16));
-            
+
             let secret_key_segment = (self.hash_fn)(&to_hash);
             let segment = self.chain(
                 &secret_key_segment,
@@ -266,18 +274,17 @@ impl WOTSPlus {
                 0,
                 (constants::CHAIN_LEN - 1) as u16,
             );
-            
+
             public_key_segments.extend_from_slice(&segment);
         }
 
         let public_key_hash = (self.hash_fn)(&public_key_segments);
-        
+
         PublicKey {
             public_seed: *public_seed,
             public_key_hash,
         }
     }
-
 
     /// Generate a WOTS+ key pair
     /// The process works as follows:
@@ -288,7 +295,10 @@ impl WOTSPlus {
     ///    a. Generate a secret key segment
     ///    b. Run the chain function to the end to get the public key segment
     /// 5. Hash all public key segments together to get the final public key
-    pub fn generate_key_pair(&self, private_seed: &[u8; constants::HASH_LEN]) -> (PublicKey, [u8; constants::HASH_LEN]) {
+    pub fn generate_key_pair(
+        &self,
+        private_seed: &[u8; constants::HASH_LEN],
+    ) -> (PublicKey, [u8; constants::HASH_LEN]) {
         let private_key = (self.hash_fn)(private_seed);
         let public_key = self.get_public_key(&private_key);
         (public_key, private_key)
@@ -302,7 +312,11 @@ impl WOTSPlus {
     /// 4. For each chain index:
     ///    a. Generate the secret key segment
     ///    b. Run the chain function to the index position
-    pub fn sign(&self, private_key: &[u8; constants::HASH_LEN], message: &[u8]) -> Vec<[u8; constants::HASH_LEN]> {
+    pub fn sign(
+        &self,
+        private_key: &[u8; constants::HASH_LEN],
+        message: &[u8],
+    ) -> Vec<[u8; constants::HASH_LEN]> {
         if message.len() != constants::MESSAGE_LEN {
             panic!("Message length must be {} bytes", constants::MESSAGE_LEN);
         }
@@ -310,7 +324,7 @@ impl WOTSPlus {
         let public_seed = self.prf(private_key, 0);
         let randomization_elements = self.generate_randomization_elements(&public_seed);
         let function_key = randomization_elements[0];
-        
+
         let chain_segments = self.compute_message_hash_chain_indexes(message);
         let mut signature = Vec::with_capacity(constants::NUM_SIGNATURE_CHUNKS);
 
@@ -318,7 +332,7 @@ impl WOTSPlus {
             let mut to_hash = vec![0u8; constants::HASH_LEN * 2];
             to_hash[..constants::HASH_LEN].copy_from_slice(&function_key);
             to_hash[constants::HASH_LEN..].copy_from_slice(&self.prf(private_key, (i + 1) as u16));
-            
+
             let secret_key_segment = (self.hash_fn)(&to_hash);
             let sig_segment = self.chain(
                 &secret_key_segment,
@@ -340,8 +354,12 @@ impl WOTSPlus {
     /// 4. Compute and add the checksum
     /// 5. Run the chain function on each segment to reproduce each public key segment
     /// 6. Hash all public key segments together to recreate the original public key
-    pub fn verify(&self, public_key: &PublicKey, message: &[u8], signature: &Vec<[u8; constants::HASH_LEN]>) -> bool {
-        
+    pub fn verify(
+        &self,
+        public_key: &PublicKey,
+        message: &[u8],
+        signature: &Vec<[u8; constants::HASH_LEN]>,
+    ) -> bool {
         if message.len() != constants::MESSAGE_LEN {
             return false;
         }
@@ -350,9 +368,9 @@ impl WOTSPlus {
         }
 
         let randomization_elements = self.generate_randomization_elements(&public_key.public_seed);
-        
+
         let chain_segments = self.compute_message_hash_chain_indexes(message);
-        
+
         let mut public_key_segments = Vec::with_capacity(constants::SIGNATURE_SIZE);
 
         // Compute each public key segment. These are done by taking the signature, which is prevChainOut at chainIdx,
@@ -365,13 +383,13 @@ impl WOTSPlus {
                 chain_idx as u16,
                 num_iterations,
             );
-            
+
             public_key_segments.extend_from_slice(&segment);
         }
 
         // Hash all public key segments together to recreate the original public key
         let computed_hash = (self.hash_fn)(&public_key_segments);
-        
+
         // Compare computed hash with stored public key hash
         computed_hash == public_key.public_key_hash
     }
@@ -398,7 +416,7 @@ impl WOTSPlus {
 
         let chain_segments = self.compute_message_hash_chain_indexes(message);
         let mut public_key_segments = [0u8; constants::SIGNATURE_SIZE];
-        
+
         // Compute each public key segment using the pre-computed randomization elements
         for (i, &chain_idx) in chain_segments.iter().enumerate() {
             let num_iterations = (constants::CHAIN_LEN - 1 - chain_idx as usize) as u16;
@@ -408,7 +426,7 @@ impl WOTSPlus {
                 chain_idx as u16,
                 num_iterations,
             );
-            
+
             let offset = i * constants::HASH_LEN;
             public_key_segments[offset..offset + constants::HASH_LEN].copy_from_slice(&segment);
         }
@@ -447,10 +465,10 @@ mod tests {
         let wots = WOTSPlus::new(mock_hash);
         let private_seed = [1u8; 32];
         let (public_key, private_key) = wots.generate_key_pair(&private_seed);
-        
+
         let message = [2u8; constants::MESSAGE_LEN];
         let signature = wots.sign(&private_key, &message);
-        
+
         assert!(wots.verify(&public_key, &message, &signature));
     }
 
@@ -459,7 +477,7 @@ mod tests {
         let wots = WOTSPlus::new(mock_hash);
         let private_seed = [1u8; 32];
         let (public_key, _) = wots.generate_key_pair(&private_seed);
-        
+
         let invalid_message = [2u8; constants::MESSAGE_LEN + 1];
         let signature: Vec<[u8; 32]> = vec![[0u8; 32]; constants::NUM_SIGNATURE_CHUNKS];
         assert!(!wots.verify(&public_key, &invalid_message, &signature));
@@ -470,7 +488,7 @@ mod tests {
         let wots = WOTSPlus::new(mock_hash);
         let private_seed = [1u8; 32];
         let (public_key, _) = wots.generate_key_pair(&private_seed);
-        
+
         let message = [2u8; constants::MESSAGE_LEN];
         let signature: Vec<[u8; 32]> = vec![[0u8; 32]; constants::NUM_SIGNATURE_CHUNKS];
         assert!(!wots.verify(&public_key, &message, &signature));
@@ -482,10 +500,10 @@ mod tests {
             public_seed: [1u8; constants::HASH_LEN],
             public_key_hash: [2u8; constants::HASH_LEN],
         };
-        
+
         let bytes = public_key.to_bytes();
         let recovered = PublicKey::from_bytes(&bytes).unwrap();
-        
+
         assert_eq!(recovered.public_seed, public_key.public_seed);
         assert_eq!(recovered.public_key_hash, public_key.public_key_hash);
     }

@@ -57,12 +57,34 @@ pub(crate) fn public_key_from_components(
     pk_seed: [u8; HASH_LEN],
     hypertree_root: [u8; HASH_LEN],
 ) -> PublicKey {
+    let public_key_commitment = public_key_commitment(
+        parameter_set_id,
+        &stateful_public_key,
+        &pk_seed,
+        &hypertree_root,
+    );
     PublicKey {
         parameter_set_id,
         stateful_public_key,
+        public_key_commitment: public_key_commitment.to_vec(),
         pk_seed: pk_seed.to_vec(),
         hypertree_root: hypertree_root.to_vec(),
     }
+}
+
+pub(crate) fn public_key_commitment(
+    parameter_set_id: ParameterSetId,
+    stateful_public_key: &[u8],
+    pk_seed: &[u8; HASH_LEN],
+    hypertree_root: &[u8; HASH_LEN],
+) -> [u8; HASH_LEN] {
+    hash_packed(&[
+        b"shrincs-public-key",
+        &[parameter_set_id.packed_byte()],
+        stateful_public_key,
+        pk_seed,
+        hypertree_root,
+    ])
 }
 
 pub(crate) fn encode_stateful_public_key(

@@ -21,7 +21,6 @@
 //! - `shrincs_signer_fors_c` opens the fixed FORS forest for a message digest.
 //! - `shrincs_signer_hypertree` carries the FORS root to the hypertree root.
 
-
 #[cfg(test)]
 #[path = "shrincs_verifier.rs"]
 pub(crate) mod verifier;
@@ -46,12 +45,11 @@ use self::shrincs_signer_fors_c::sign_fors_c;
 use self::shrincs_signer_hypertree::{hypertree_public_root, sign_hypertree};
 use self::shrincs_signer_stateful::{
     sign_stateful_raw as sign_stateful_raw_inner,
-    sign_stateful_raw_at_leaf as sign_stateful_raw_at_leaf_inner,
-    stateful_subtree_root,
+    sign_stateful_raw_at_leaf as sign_stateful_raw_at_leaf_inner, stateful_subtree_root,
 };
 use self::shrincs_signer_utils::{
-    derive32, encode_stateful_public_key, ensure_supported_params, hash_packed, public_key_from_components,
-    word32,
+    derive32, encode_stateful_public_key, ensure_supported_params, hash_packed,
+    public_key_from_components, word32,
 };
 use self::verifier::{
     ActionContext, ParameterSetId, PublicKey, ShrincsVerifier, StatefulSignature,
@@ -120,7 +118,7 @@ impl ShrincsSigner {
         public_key: &PublicKey,
         context: &ActionContext,
     ) -> ShrincsSignerResult<StatefulSignature> {
-        let expected = word32(&public_key.hypertree_root)?;
+        let expected = word32(&public_key.public_key_commitment)?;
         let verifier = ShrincsVerifier::new();
         let message =
             verifier.stateful_action_message_hash(signing_key.parameter_set_id, expected, context);
@@ -187,7 +185,7 @@ mod tests {
     }
 
     fn expected_key(public_key: &PublicKey) -> [u8; HASH_LEN] {
-        word32(&public_key.hypertree_root).unwrap()
+        word32(&public_key.public_key_commitment).unwrap()
     }
 
     #[test]
@@ -199,10 +197,7 @@ mod tests {
         assert_eq!(params.hash_len as usize, HASH_LEN);
         assert_eq!(params.hypertree_height, 64);
         assert_eq!(params.num_hypertree_layers, 8);
-        assert_eq!(
-            params.hypertree_height / params.num_hypertree_layers,
-            8
-        );
+        assert_eq!(params.hypertree_height / params.num_hypertree_layers, 8);
         assert_eq!(params.num_wots_chains as usize, WOTS_CHAINS_STATEFUL);
         assert_eq!(params.chain_len, 16);
     }
@@ -235,7 +230,11 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(public_key.stateful_public_key.len(), verifier::STATEFUL_PUBLIC_KEY_BYTES);
+        assert_eq!(
+            public_key.stateful_public_key.len(),
+            verifier::STATEFUL_PUBLIC_KEY_BYTES
+        );
+        assert_eq!(public_key.public_key_commitment.len(), HASH_LEN);
         assert_eq!(public_key.pk_seed.len(), HASH_LEN);
         assert_eq!(public_key.hypertree_root.len(), HASH_LEN);
     }
@@ -315,12 +314,7 @@ mod tests {
         // Negative examples mirroring the invalid-input checks in `lib.rs`: the
         // signer should not silently produce keys outside its supported profile.
         assert!(ShrincsSigner::keygen(ParameterSetId::Unsupported, b"seed", 4).is_none());
-        assert!(ShrincsSigner::keygen(
-            ParameterSetId::Sphincs256sKeccakQ20,
-            b"seed",
-            0
-        )
-        .is_none());
+        assert!(ShrincsSigner::keygen(ParameterSetId::Sphincs256sKeccakQ20, b"seed", 0).is_none());
     }
 
     #[test]
