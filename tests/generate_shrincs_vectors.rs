@@ -30,14 +30,14 @@ fn generate_shrincs_sphincs_256s_keccak_vectors() {
         ShrincsSigner::sign_stateful_raw(&mut stateful_key, &stateful_message)
             .expect("stateful signature");
 
-    let (stateless_key, _) = ShrincsSigner::keygen(
+    let (stateless_key, stateless_public_key) = ShrincsSigner::keygen(
         ParameterSetId::Sphincs256sKeccakQ20,
         b"shrincs solidity vector stateless seed",
         256,
     )
     .expect("stateless keygen");
     let stateless_message = hash_word(b"shrincs solidity stateless message").to_vec();
-    let (stateless_public_key, stateless_signature) =
+    let stateless_signature =
         ShrincsSigner::sign_stateless_raw(&stateless_key, &stateless_message)
             .expect("stateless signature");
 
@@ -166,17 +166,16 @@ fn stateless_calldata(
 ) -> String {
     let params = "(32,64,8,14,22,16,64,480)".to_string();
     let public_key = format!(
-        "({},{},{},{},{},{})",
+        "({},{},{},{},{})",
         hex(&public_key.composite_public_key),
         hex(&public_key.stateful_public_key),
         hex(&public_key.fors_pk_seed),
-        hex(&public_key.fors_root),
         hex(&public_key.hypertree_pk_seed),
         hex(&public_key.hypertree_root)
     );
     let sig = stateless_signature_cast(signature);
     cast_calldata(
-        "f((uint16,uint8,uint8,uint8,uint8,uint16,uint16,uint32),(bytes,bytes,bytes,bytes,bytes,bytes),bytes,((bytes,uint32,(bytes,bytes[])[]),(uint64,uint32,bytes,(bytes,uint32,bytes[]),bytes[])[]))",
+        "f((uint16,uint8,uint8,uint8,uint8,uint16,uint16,uint32),(bytes,bytes,bytes,bytes,bytes),bytes,((bytes,uint32,(bytes,bytes[])[]),(uint64,uint32,bytes,(bytes,uint32,bytes[]),bytes[])[]))",
         &[params, public_key, hex(message), sig],
     )
 }
@@ -252,7 +251,6 @@ fn public_key_json(public_key: &PublicKey) -> Value {
         "compositePublicKey": hex(&public_key.composite_public_key),
         "statefulPublicKey": hex(&public_key.stateful_public_key),
         "forsPkSeed": hex(&public_key.fors_pk_seed),
-        "forsRoot": hex(&public_key.fors_root),
         "hypertreePkSeed": hex(&public_key.hypertree_pk_seed),
         "hypertreeRoot": hex(&public_key.hypertree_root)
     })

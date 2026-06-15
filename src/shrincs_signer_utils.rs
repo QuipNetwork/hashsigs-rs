@@ -55,7 +55,6 @@ pub(crate) fn public_key_from_components(
     parameter_set_id: ParameterSetId,
     stateful_public_key: Vec<u8>,
     fors_pk_seed: [u8; HASH_LEN],
-    fors_root: [u8; HASH_LEN],
     hypertree_pk_seed: [u8; HASH_LEN],
     hypertree_root: [u8; HASH_LEN],
 ) -> PublicKey {
@@ -63,9 +62,9 @@ pub(crate) fn public_key_from_components(
     // compact commitment over the same components. That commitment is what a
     // caller can store or compare when it wants one stable public-key identifier.
     let composite_public_key = composite_public_key_commitment(
+        parameter_set_id,
         &stateful_public_key,
         &fors_pk_seed,
-        &fors_root,
         &hypertree_pk_seed,
         &hypertree_root,
     );
@@ -74,7 +73,6 @@ pub(crate) fn public_key_from_components(
         composite_public_key: composite_public_key.to_vec(),
         stateful_public_key,
         fors_pk_seed: fors_pk_seed.to_vec(),
-        fors_root: fors_root.to_vec(),
         hypertree_pk_seed: hypertree_pk_seed.to_vec(),
         hypertree_root: hypertree_root.to_vec(),
     }
@@ -132,9 +130,9 @@ pub(crate) fn word32(input: &[u8]) -> Option<[u8; HASH_LEN]> {
 }
 
 pub(crate) fn composite_public_key_commitment(
+    parameter_set_id: ParameterSetId,
     stateful_public_key: &[u8],
     fors_pk_seed: &[u8],
-    fors_root: &[u8],
     hypertree_pk_seed: &[u8],
     hypertree_root: &[u8],
 ) -> [u8; HASH_LEN] {
@@ -142,9 +140,9 @@ pub(crate) fn composite_public_key_commitment(
     // need to collide the whole SHRINCS public-key tuple, not just one component.
     hash_packed(&[
         b"shrincs-public-key",
+        &[parameter_set_id.packed_byte()],
         stateful_public_key,
         fors_pk_seed,
-        fors_root,
         hypertree_pk_seed,
         hypertree_root,
     ])

@@ -17,9 +17,9 @@
 
 //! FORS-C verification.
 //!
-//! Derive the FORS digest, verify every revealed FORS tree entry, compress those
-// roots into the FORS public key, and ensure that value equals the FORS root
-// committed by the composite public key.
+//! Derive the FORS digest, verify every revealed FORS tree entry, and compress
+//! those roots into the per-signature FORS output carried into hypertree
+//! verification.
 
 use super::shrincs_types::{ForsEntry, ForsSignature, ParamsView, PublicKey, HASH_LEN};
 use super::shrincs_utils::{
@@ -99,14 +99,11 @@ pub(crate) fn verify_fors_c_and_return_root(
         roots.extend_from_slice(&root);
     }
 
-    // The FORS public key is the hash of all verified FORS roots under the
-    // domain tag `fors-pk`. It must equal the FORS root committed in the public key.
-    let computed_root = hash_packed(&[b"fors-pk", &public_key.fors_pk_seed, &roots]);
-    if word32(&public_key.fors_root)? == computed_root {
-        Some(computed_root)
-    } else {
-        None
-    }
+    // The FORS output is the hash of all verified FORS roots under the domain
+    // tag `fors-pk`. In the SPHINCS-style composition, this is a per-signature
+    // value consumed by the hypertree rather than a field of the long-lived
+    // public key.
+    Some(hash_packed(&[b"fors-pk", &public_key.fors_pk_seed, &roots]))
 }
 
 fn fors_entry_root32(

@@ -84,8 +84,6 @@ pub struct PublicKey {
     pub stateful_public_key: Vec<u8>,
     /// Public seed for FORS-C address-domain hashing.
     pub fors_pk_seed: Vec<u8>,
-    /// Expected FORS-C public root.
-    pub fors_root: Vec<u8>,
     /// Public seed for hypertree and WOTS-C address-domain hashing.
     pub hypertree_pk_seed: Vec<u8>,
     /// Expected final hypertree root.
@@ -182,8 +180,6 @@ pub struct RotationTarget {
     pub stateful_public_key: Vec<u8>,
     /// Replacement FORS-C public seed.
     pub fors_pk_seed: Vec<u8>,
-    /// Replacement FORS-C root.
-    pub fors_root: Vec<u8>,
     /// Replacement hypertree public seed.
     pub hypertree_pk_seed: Vec<u8>,
     /// Replacement hypertree root.

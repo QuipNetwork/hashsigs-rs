@@ -118,7 +118,6 @@ pub(crate) fn valid_stateful_composite_public_key(public_key: &PublicKey) -> boo
     if public_key.composite_public_key.len() != HASH_LEN
         || public_key.stateful_public_key.len() != STATEFUL_PUBLIC_KEY_BYTES
         || public_key.fors_pk_seed.len() != HASH_LEN
-        || public_key.fors_root.len() != HASH_LEN
         || public_key.hypertree_pk_seed.len() != HASH_LEN
         || public_key.hypertree_root.len() != HASH_LEN
     {
@@ -128,29 +127,29 @@ pub(crate) fn valid_stateful_composite_public_key(public_key: &PublicKey) -> boo
         return false;
     };
     composite_public_key_commitment(
+        public_key.parameter_set_id,
         &public_key.stateful_public_key,
         &public_key.fors_pk_seed,
-        &public_key.fors_root,
         &public_key.hypertree_pk_seed,
         &public_key.hypertree_root,
     ) == expected
 }
 
 pub(crate) fn composite_public_key_commitment(
+    parameter_set_id: ParameterSetId,
     stateful_public_key: &[u8],
     fors_pk_seed: &[u8],
-    fors_root: &[u8],
     hypertree_pk_seed: &[u8],
     hypertree_root: &[u8],
 ) -> [u8; HASH_LEN] {
     // Domain-separated public-key commitment:
-    // keccak256("shrincs-public-key" || stateful || forsSeed || forsRoot || htSeed || htRoot)
+    // keccak256("shrincs-public-key" || parameterSet || stateful || forsSeed || htSeed || htRoot)
     // This is the single 32-byte value accounts can store on-chain.
     hash_packed(&[
         b"shrincs-public-key",
+        &[parameter_set_id.packed_byte()],
         stateful_public_key,
         fors_pk_seed,
-        fors_root,
         hypertree_pk_seed,
         hypertree_root,
     ])

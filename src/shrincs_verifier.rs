@@ -198,9 +198,9 @@ impl ShrincsVerifier {
         // The Solidity helper returns the commitment the account should install.
         // It reuses the current FORS/hypertree fields and swaps only the stateful key.
         Some(composite_public_key_commitment(
+            current_public_key.parameter_set_id,
             &next_stateful_key.stateful_public_key,
             &current_public_key.fors_pk_seed,
-            &current_public_key.fors_root,
             &current_public_key.hypertree_pk_seed,
             &current_public_key.hypertree_root,
         ))
@@ -242,7 +242,6 @@ impl ShrincsVerifier {
         if next_key.stateful_public_key.len() != STATEFUL_PUBLIC_KEY_BYTES
             || next_key.composite_public_key.len() != HASH_LEN
             || next_key.fors_pk_seed.len() != HASH_LEN
-            || next_key.fors_root.len() != HASH_LEN
             || next_key.hypertree_pk_seed.len() != HASH_LEN
             || next_key.hypertree_root.len() != HASH_LEN
         {
@@ -254,9 +253,9 @@ impl ShrincsVerifier {
         }
 
         let next_composite_public_key = composite_public_key_commitment(
+            next_key.parameter_set_id,
             &next_key.stateful_public_key,
             &next_key.fors_pk_seed,
-            &next_key.fors_root,
             &next_key.hypertree_pk_seed,
             &next_key.hypertree_root,
         );
@@ -438,7 +437,6 @@ impl ShrincsVerifier {
             &next_key.composite_public_key,
             &next_key.stateful_public_key,
             &next_key.fors_pk_seed,
-            &next_key.fors_root,
             &next_key.hypertree_pk_seed,
             &next_key.hypertree_root,
         ]);
