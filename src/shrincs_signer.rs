@@ -59,6 +59,7 @@ use self::verifier::{
 pub struct ShrincsSigner;
 
 const INITIAL_STATEFUL_LEAF_INDEX: u32 = 1;
+const MAX_STATEFUL_SIGNATURES_LIMIT: u32 = 4096;
 
 impl ShrincsSigner {
     /// Deterministically derive signing material and a public key from seed material.
@@ -74,6 +75,9 @@ impl ShrincsSigner {
         let params = ShrincsVerifier::default_params_view(parameter_set_id);
         ensure_supported_params(&params)?;
         if max_stateful_signatures == 0 {
+            return None;
+        }
+        if max_stateful_signatures > MAX_STATEFUL_SIGNATURES_LIMIT {
             return None;
         }
 
@@ -332,6 +336,14 @@ mod tests {
         // signer should not silently produce keys outside its supported profile.
         assert!(ShrincsSigner::keygen(ParameterSetId::Unsupported, b"seed", 4).is_none());
         assert!(ShrincsSigner::keygen(ParameterSetId::Sphincs256sKeccakQ20, b"seed", 0).is_none());
+        assert!(
+            ShrincsSigner::keygen(
+                ParameterSetId::Sphincs256sKeccakQ20,
+                b"seed",
+                MAX_STATEFUL_SIGNATURES_LIMIT + 1,
+            )
+            .is_none()
+        );
     }
 
     #[test]

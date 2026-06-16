@@ -17,6 +17,8 @@
 
 //! Signer-owned secret-key types.
 
+use core::fmt;
+
 use super::verifier::{ParameterSetId, HASH_LEN};
 
 /// Signer operations return `None` when inputs are outside the supported
@@ -28,7 +30,7 @@ pub type ShrincsSignerResult<T> = Option<T>;
 ///
 /// These fields are deterministic derivations from seed material. Treat this as
 /// private key material: anyone with these seeds can sign.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(PartialEq, Eq)]
 pub struct ShrincsSigningKey {
     /// Parameter profile this secret key was generated for.
     pub parameter_set_id: ParameterSetId,
@@ -52,4 +54,22 @@ pub struct ShrincsSigningKey {
     pub pk_seed: [u8; HASH_LEN],
     /// Top hypertree root committed in the public key.
     pub hypertree_root: [u8; HASH_LEN],
+}
+
+impl fmt::Debug for ShrincsSigningKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ShrincsSigningKey")
+            .field("parameter_set_id", &self.parameter_set_id)
+            .field("stateful_sk_seed", &"<redacted>")
+            .field("stateful_prf_seed", &"<redacted>")
+            .field("stateful_pk_seed", &"<redacted>")
+            .field("stateful_root", &"<redacted>")
+            .field("max_stateful_signatures", &self.max_stateful_signatures)
+            .field("next_stateful_leaf_index", &self.next_stateful_leaf_index)
+            .field("stateless_sk_seed", &"<redacted>")
+            .field("stateless_prf_seed", &"<redacted>")
+            .field("pk_seed", &"<redacted>")
+            .field("hypertree_root", &"<redacted>")
+            .finish()
+    }
 }

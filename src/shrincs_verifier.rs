@@ -292,7 +292,7 @@ impl ShrincsVerifier {
     /// cryptographically valid, but it does not add nonce/domain/payload binding.
     /// Use `verify_stateful` unless the caller has already constructed a safe
     /// signed message externally.
-    pub fn verify_stateful_unsafe_raw(
+    pub(crate) fn verify_stateful_unsafe_raw(
         &self,
         parameter_set_id: ParameterSetId,
         expected_public_key_commitment: [u8; HASH_LEN],
@@ -315,7 +315,7 @@ impl ShrincsVerifier {
     ///
     /// Same warning as `verify_stateful_unsafe_raw`: callers own replay
     /// protection and domain separation when they use this path.
-    pub fn verify_stateless_unsafe_raw(
+    pub(crate) fn verify_stateless_unsafe_raw(
         &self,
         parameter_set_id: ParameterSetId,
         expected_public_key_commitment: [u8; HASH_LEN],

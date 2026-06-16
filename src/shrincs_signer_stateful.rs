@@ -86,17 +86,15 @@ pub(crate) fn stateful_subtree_root(
     leaf_index: u32,
     max_signatures: u32,
 ) -> [u8; HASH_LEN] {
-    // The stateful tree is unbalanced: leaf 1 is the leftmost live
-    // leaf, and each parent combines that leaf with the subtree to its right.
-    // The root therefore commits to the exact maximum number of stateful
-    // signatures. If the key is exhausted, the caller rotates the stateful key.
-    let leaf = stateful_wots_pk_hash(sk_seed, pk_seed, leaf_index);
-    let right = if leaf_index == max_signatures {
-        stateful_empty_tail(pk_seed, leaf_index)
-    } else {
-        stateful_subtree_root(sk_seed, pk_seed, leaf_index + 1, max_signatures)
-    };
-    stateful_parent_hash(pk_seed, leaf_index, leaf, right)
+    // The stateful tree is unbalanced: leaf 1 is the leftmost live leaf, and
+    // each parent combines that leaf with the subtree to its right. Build that
+    // chain iteratively so large-but-valid budgets do not recurse once per leaf.
+    let mut right = stateful_empty_tail(pk_seed, max_signatures);
+    for current_leaf in (leaf_index..=max_signatures).rev() {
+        let leaf = stateful_wots_pk_hash(sk_seed, pk_seed, current_leaf);
+        right = stateful_parent_hash(pk_seed, current_leaf, leaf, right);
+    }
+    right
 }
 
 fn sign_stateful_wots_c(
