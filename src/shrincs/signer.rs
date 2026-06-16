@@ -22,11 +22,11 @@
 //! - `shrincs_signer_hypertree` carries the FORS root to the hypertree root.
 
 #[cfg(test)]
-#[path = "shrincs_verifier.rs"]
+#[path = "verifier.rs"]
 pub(crate) mod verifier;
 
 #[cfg(not(test))]
-pub(crate) use super::shrincs_verifier as verifier;
+pub(crate) use super::verifier;
 
 #[path = "shrincs_signer_fors_c.rs"]
 mod shrincs_signer_fors_c;
@@ -48,8 +48,8 @@ use self::shrincs_signer_stateful::{
     sign_stateful_raw_at_leaf as sign_stateful_raw_at_leaf_inner, stateful_subtree_root,
 };
 use self::shrincs_signer_utils::{
-    derive32, encode_stateful_public_key, ensure_supported_params, hash_packed,
-    public_key_from_components, word32,
+    derive32, encode_stateful_public_key, ensure_supported_params, public_key_from_components,
+    word32,
 };
 use self::verifier::{
     ActionContext, ParameterSetId, PublicKey, ShrincsVerifier, StatefulSignature,
@@ -177,6 +177,7 @@ impl ShrincsSigner {
 
 #[cfg(test)]
 mod tests {
+    use super::shrincs_signer_utils::hash_packed;
     use self::verifier::{HASH_LEN, WOTS_CHAINS_STATEFUL};
     use super::*;
 

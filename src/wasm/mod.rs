@@ -1,4 +1,4 @@
-// Copyright (C) 2024 quip.network
+// Copyright (C) 2026 quip.network
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Affero General Public License as published by
@@ -15,17 +15,11 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Core hash-based signature library.
+//! WASM-oriented surface for `hashsigs-rs`.
 //!
-//! This crate exports:
-//!
-//! - WOTS+ primitives
-//! - SHRINCS signer / verifier primitives
-//! - shared SHRINCS types used by higher-level wrappers
+//! This module stays thin on purpose. It re-exports the verifier-facing WOTS+
+//! and SHRINCS APIs now, and can later grow dedicated `wasm-bindgen` bindings
+//! without moving the core cryptographic logic out of the main crate.
 
-pub mod account;
-pub mod shrincs;
-pub mod wasm;
-pub mod wotsplus;
-
-pub use wotsplus::{constants, HashFn, PublicKey, WOTSPlus};
+pub use crate::shrincs;
+pub use crate::wotsplus;

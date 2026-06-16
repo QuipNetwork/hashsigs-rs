@@ -3,12 +3,12 @@ name = "hashsigs-rs"
 version = "0.0.3"
 edition = "2021"
 authors = ["Richard T. Carback III <rick.rust.cargo.383d5@passmail.net>"]
-description = "Hash based signatures, WOTS+"
+description = "Hash-based signatures core library with WOTS+ and SHRINCS primitives"
 license = "AGPL-3.0-or-later"
 repository = "https://github.com/quipnetwork/hashsigs-rs"
 documentation = "https://docs.rs/hashsigs-rs"
 readme = "README.md"
-keywords = ["cryptography", "wots", "signature", "solana"]
+keywords = ["cryptography", "wots", "shrincs", "signature", "solana"]
 categories = ["cryptography", "authentication"]
 
 [lib]
@@ -19,9 +19,10 @@ path = "src/lib.rs"
 members = [
     "solana"
 ]
+resolver = "2"
 
 [dependencies]
+solana-program = "2.3"
 
 [dev-dependencies]
-solana-program = "2.3"
 serde_json = "1.0.143"

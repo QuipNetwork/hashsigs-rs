@@ -2,14 +2,10 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-#[path = "../src/shrincs_signer.rs"]
-mod shrincs_signer;
-
-use serde_json::{json, Value};
-use shrincs_signer::verifier::{
-    ParameterSetId, PublicKey, StatefulSignature, StatelessSignature, HASH_LEN,
+use hashsigs_rs::shrincs::{
+    ParameterSetId, PublicKey, ShrincsSigner, StatefulSignature, StatelessSignature, HASH_LEN,
 };
-use shrincs_signer::ShrincsSigner;
+use serde_json::{json, Value};
 use std::fs;
 use std::path::Path;
 use std::process::Command;

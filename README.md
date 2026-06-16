@@ -1,6 +1,13 @@
 # hashsigs-rs
 
-A Rust implementation of WOTS+ (Winternitz One-Time Signature) scheme, with Solana program support.
+Core Rust hash-signature workspace with:
+
+- `hashsigs-rs`: one crate containing:
+  - `wotsplus` primitives
+  - `shrincs` signer / verifier primitives
+  - `account` scaffolding
+  - `wasm`-oriented exports
+- `solana/`: Solana program integration
 
 ## Building
 
@@ -51,9 +58,8 @@ tests/test_vectors/shrincs_sphincs_256s_keccak.json
 
 SHRINCS public keys use one stateless `pkSeed` and one `hypertreeRoot`, matching
 the SPHINCS+/FIPS-style `PK = (PK.seed, PK.root)` abstraction for the stateless
-path. The removed composite commitment means callers that persist only the
-public root must keep the corresponding `statefulPublicKey` and stateless
-components together at the integration layer.
+path, while the full hybrid bundle stays bound together by
+`public_key_commitment`.
 
 To use those vectors with the Solidity verifier tests, copy the generated file
 into the Solidity repository's expected fixture path:
@@ -94,7 +100,11 @@ NOTE: if on Mac, do not use brew to install rust and instead use https://www.rus
 
 ```
 .
-├── src/           # Core WOTS+ implementation
+├── src/
+│   ├── wotsplus/  # WOTS+ primitives
+│   ├── shrincs/   # SHRINCS signer / verifier primitives
+│   ├── account/   # Future account-policy module
+│   └── wasm/      # WASM-oriented re-export module
 ├── solana/        # Solana program implementation
 └── tests/         # Test vectors and unit tests
 ```
