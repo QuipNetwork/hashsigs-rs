@@ -21,8 +21,8 @@
 //! those roots into the per-signature FORS output carried into hypertree
 //! verification.
 
-use super::shrincs_types::{ForsEntry, ForsSignature, ParamsView, PublicKey, HASH_LEN};
-use super::shrincs_utils::{
+use super::shrincs_verifier_types::{ForsEntry, ForsSignature, ParamsView, PublicKey, HASH_LEN};
+use super::shrincs_verifier_utils::{
     fors_address_word, hash_packed, pack, read_bits32, read_bits64, word32,
 };
 
@@ -45,7 +45,10 @@ pub(crate) fn verify_fors_c_and_return_root(
     // Verification therefore expects only k - 1 revealed entries and rejects any digest
     // whose omitted final tree would require a nonzero leaf.
     let signed_trees = params.num_fors_trees as usize - 1;
-    if signature.randomizer.len() != HASH_LEN || signature.entries.len() != signed_trees {
+    if signature.randomizer.len() != HASH_LEN {
+        return None;
+    }
+    if signature.entries.len() != signed_trees {
         return None;
     }
 
@@ -70,14 +73,20 @@ pub(crate) fn verify_fors_c_and_return_root(
     {
         return None;
     }
-    if digest.tree_index != tree_index || digest.leaf_index != leaf_index {
+    if digest.tree_index != tree_index {
+        return None;
+    }
+    if digest.leaf_index != leaf_index {
         return None;
     }
 
     let mut roots = Vec::with_capacity(signed_trees * HASH_LEN);
     for fors_tree_index in 0..signed_trees {
         let entry = &signature.entries[fors_tree_index];
-        if entry.secret_leaf.len() != HASH_LEN || entry.auth_path.len() != fors_tree_height {
+        if entry.secret_leaf.len() != HASH_LEN {
+            return None;
+        }
+        if entry.auth_path.len() != fors_tree_height {
             return None;
         }
         // Each FORS tree consumes `fors_tree_height` bits from the digest. Those
@@ -117,14 +126,11 @@ fn fors_entry_root32(
 ) -> Option<[u8; HASH_LEN]> {
     // Start from the revealed secret leaf, domain-separate it as a FORS leaf,
     // then climb the authentication path to this FORS tree's root.
+    let shifted_fors_tree = u64::from(fors_tree_index) << height;
+    let leaf_low_index = shifted_fors_tree + u64::from(entry_leaf_index);
     let mut node = hash_fors_leaf32(
         pk_seed,
-        fors_address_word(
-            tree_index,
-            leaf_index,
-            0,
-            (u64::from(fors_tree_index) << height) + u64::from(entry_leaf_index),
-        ),
+        fors_address_word(tree_index, leaf_index, 0, leaf_low_index),
         &entry.secret_leaf,
     )?;
     let mut index = entry_leaf_index;
@@ -141,14 +147,10 @@ fn fors_entry_root32(
         // Base offset at the current height
         let shifted_tree = u64::from(fors_tree_index) << (height - node_height);
         let parent_index = u64::from(index >> 1);
+        let parent_low_index = shifted_tree + parent_index;
         // The address binds this parent to the FORS tree number, node height,
         // and parent index inside the tree.
-        let address_word = fors_address_word(
-            tree_index,
-            leaf_index,
-            node_height,
-            shifted_tree + parent_index,
-        );
+        let address_word = fors_address_word(tree_index, leaf_index, node_height, parent_low_index);
         node = hash_fors_node32(pk_seed, address_word, left, right)?;
         index >>= 1;
     }
@@ -160,7 +162,10 @@ fn hash_fors_leaf32(
     address_word: [u8; HASH_LEN],
     sk: &[u8],
 ) -> Option<[u8; HASH_LEN]> {
-    if pk_seed.len() != HASH_LEN || sk.len() != HASH_LEN {
+    if pk_seed.len() != HASH_LEN {
+        return None;
+    }
+    if sk.len() != HASH_LEN {
         return None;
     }
     Some(hash_packed(&[b"fors-leaf", pk_seed, &address_word, sk]))

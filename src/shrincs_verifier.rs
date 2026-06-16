@@ -22,23 +22,23 @@
 //! as the Solidity verifier (`ShrincsStateful`, `ShrincsForsC`, and
 //! `ShrincsHypertree`).
 
-#[path = "shrincs_fors_c.rs"]
-mod shrincs_fors_c;
-#[path = "shrincs_hypertree.rs"]
-mod shrincs_hypertree;
-#[path = "shrincs_stateful.rs"]
-mod shrincs_stateful;
-#[path = "shrincs_types.rs"]
-mod shrincs_types;
-#[path = "shrincs_utils.rs"]
-mod shrincs_utils;
+#[path = "shrincs_verifier_fors_c.rs"]
+mod shrincs_verifier_fors_c;
+#[path = "shrincs_verifier_hypertree.rs"]
+mod shrincs_verifier_hypertree;
+#[path = "shrincs_verifier_stateful.rs"]
+mod shrincs_verifier_stateful;
+#[path = "shrincs_verifier_types.rs"]
+mod shrincs_verifier_types;
+#[path = "shrincs_verifier_utils.rs"]
+mod shrincs_verifier_utils;
 
-pub use self::shrincs_types::*;
+pub use self::shrincs_verifier_types::*;
 
-use self::shrincs_fors_c::verify_fors_c_and_return_root;
-use self::shrincs_hypertree::verify_hypertree;
-use self::shrincs_stateful::verify_stateful_unsafe_raw as verify_stateful_raw_component;
-use self::shrincs_utils::{
+use self::shrincs_verifier_fors_c::verify_fors_c_and_return_root;
+use self::shrincs_verifier_hypertree::verify_hypertree;
+use self::shrincs_verifier_stateful::verify_stateful_unsafe_raw as verify_stateful_raw_component;
+use self::shrincs_verifier_utils::{
     decode_stateful_public_key, hash_packed, matches_expected_public_key_commitment,
     rotation_target_commitment, stateful_rotation_target_commitment, valid_action_context,
     valid_parameter_set_binding, valid_params, valid_rotation_context, word32,
@@ -60,7 +60,7 @@ impl ShrincsVerifier {
     /// Keeping this as an associated function matches the Solidity facade and
     /// makes call sites read as "this verifier's parameters".
     pub fn default_params_view(parameter_set_id: ParameterSetId) -> ParamsView {
-        shrincs_types::default_params_view(parameter_set_id)
+        shrincs_verifier_types::default_params_view(parameter_set_id)
     }
 
     /// Verify a stateful signature over an action context.
@@ -157,7 +157,10 @@ impl ShrincsVerifier {
         ) {
             return None;
         }
-        if !valid_rotation_context(context) || !valid_params(&params, current_public_key) {
+        if !valid_rotation_context(context) {
+            return None;
+        }
+        if !valid_params(&params, current_public_key) {
             return None;
         }
         // The next stateful key is not trusted just because it was supplied. It
@@ -238,7 +241,10 @@ impl ShrincsVerifier {
         ) {
             return None;
         }
-        if !valid_rotation_context(context) || !valid_params(&params, current_public_key) {
+        if !valid_rotation_context(context) {
+            return None;
+        }
+        if !valid_params(&params, current_public_key) {
             return None;
         }
         if !valid_parameter_set_binding(&params, parameter_set_id, next_key.parameter_set_id) {
@@ -457,7 +463,10 @@ impl ShrincsVerifier {
             return false;
         }
         let params = Self::default_params_view(parameter_set_id);
-        if !valid_params(&params, public_key) || signature.hypertree.is_empty() {
+        if !valid_params(&params, public_key) {
+            return false;
+        }
+        if signature.hypertree.is_empty() {
             return false;
         }
 

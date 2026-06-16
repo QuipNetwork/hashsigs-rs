@@ -32,7 +32,10 @@ pub(crate) fn sign_stateful_raw(
     // The verifier derives the stateful leaf index from auth_path.len(), so the
     // signer must advance one leaf at a time and must never reuse a prior leaf.
     let leaf_index = signing_key.next_stateful_leaf_index;
-    if leaf_index == 0 || leaf_index > signing_key.max_stateful_signatures {
+    if leaf_index == 0 {
+        return None;
+    }
+    if leaf_index > signing_key.max_stateful_signatures {
         return None;
     }
 
@@ -55,7 +58,10 @@ pub(crate) fn sign_stateful_raw_at_leaf(
     // This deterministic entry point is useful for tests and vector generation.
     // Production signing should use `sign_stateful_raw`, which advances the
     // monotonic `next_stateful_leaf_index` and avoids accidental leaf reuse.
-    if leaf_index == 0 || leaf_index > signing_key.max_stateful_signatures {
+    if leaf_index == 0 {
+        return None;
+    }
+    if leaf_index > signing_key.max_stateful_signatures {
         return None;
     }
     let mut signature = sign_stateful_wots_c(

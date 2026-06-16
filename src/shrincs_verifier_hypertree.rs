@@ -22,10 +22,10 @@
 // to produce the message for the next layer. The final layer must close at the
 // hypertree root in the public key.
 
-use super::shrincs_types::{
+use super::shrincs_verifier_types::{
     HypertreeLayerSignature, ParamsView, PublicKey, WotsCSignature, HASH_LEN,
 };
-use super::shrincs_utils::{
+use super::shrincs_verifier_utils::{
     base_w_digit, hash_packed, hypertree_address_word, word32, wots_address_base,
     wots_chain_address_word, wots_digest_bytes,
 };
@@ -42,7 +42,10 @@ pub(crate) fn verify_hypertree(
     // The hypertree is split evenly into `num_hypertree_layers`. For the current
     // profile that is 64 / 8 = 8 levels per layer.
     let subtree_height = u32::from(params.hypertree_height / params.num_hypertree_layers);
-    if subtree_height == 0 || subtree_height >= u64::BITS {
+    if subtree_height == 0 {
+        return false;
+    }
+    if subtree_height >= u64::BITS {
         return false;
     }
     let leaf_count = 1u32 << subtree_height;

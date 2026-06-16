@@ -194,7 +194,9 @@ fn read_bits(input: &[u8], start_bit: usize, bit_len: u32) -> Option<u64> {
         let absolute = start_bit + bit;
         let byte = *input.get(absolute >> 3)?;
         let bit_in_byte = 7 - (absolute & 7);
-        out = (out << 1) | u64::from((byte >> bit_in_byte) & 1);
+        let shifted_out = out << 1;
+        let bit = u64::from((byte >> bit_in_byte) & 1);
+        out = shifted_out | bit;
     }
     Some(out)
 }

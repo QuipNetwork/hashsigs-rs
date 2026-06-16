@@ -177,6 +177,7 @@ fn hypertree_virtual_node(
         height - 1,
         index << 1,
     );
+    let right_index = (index << 1) | 1;
     let right = hypertree_virtual_node(
         params,
         pk_seed,
@@ -184,7 +185,7 @@ fn hypertree_virtual_node(
         layer,
         tree,
         height - 1,
-        (index << 1) | 1,
+        right_index,
     );
     let address_word = hypertree_address_word(layer, tree, height, u64::from(index));
     hash_packed(&[b"hypertree-node", pk_seed, &address_word, &left, &right])

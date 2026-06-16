@@ -254,12 +254,9 @@ fn fors_tree_root_and_auth_path(
             // within that level, so identical child pairs in different trees hash
             // to different parents.
             let shifted_tree = u64::from(fors_tree) << (height - node_height);
-            let address_word = fors_address_word(
-                tree_index,
-                leaf_index,
-                node_height,
-                shifted_tree + parent_index as u64,
-            );
+            let parent_low_index = shifted_tree + parent_index as u64;
+            let address_word =
+                fors_address_word(tree_index, leaf_index, node_height, parent_low_index);
             parents.push(hash_packed(&[
                 b"fors-node",
                 pk_seed,

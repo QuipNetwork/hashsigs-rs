@@ -19,7 +19,7 @@
 
 use solana_program::keccak::hash as keccak256_hash;
 
-use super::shrincs_types::{
+use super::shrincs_verifier_types::{
     ActionContext, ParameterSetId, ParamsView, PublicKey, RotationContext, StatefulPublicKey,
     ADDRESS_TYPE_FORS_TREE, ADDRESS_TYPE_TREE, HASH_LEN, HASH_SUITE_KECCAK_256,
     STATEFUL_PUBLIC_KEY_BYTES, WOTS_TARGET_SUM_STATEFUL,
@@ -101,7 +101,7 @@ pub(crate) fn stateful_rotation_target_commitment(
 }
 
 pub(crate) fn rotation_target_commitment(
-    target: &super::shrincs_types::RotationTarget,
+    target: &super::shrincs_verifier_types::RotationTarget,
 ) -> Option<[u8; HASH_LEN]> {
     let pk_seed = word32(&target.pk_seed)?;
     let hypertree_root = word32(&target.hypertree_root)?;
@@ -132,7 +132,10 @@ pub(crate) fn valid_params(params: &ParamsView, public_key: &PublicKey) -> bool 
     if params.parameter_set_id != ParameterSetId::Sphincs256sKeccakQ20 {
         return false;
     }
-    if params.hash_len != 32 || params.parameter_set_id != public_key.parameter_set_id {
+    if params.hash_len != 32 {
+        return false;
+    }
+    if params.parameter_set_id != public_key.parameter_set_id {
         return false;
     }
     if params.hypertree_height != 64
@@ -141,7 +144,13 @@ pub(crate) fn valid_params(params: &ParamsView, public_key: &PublicKey) -> bool 
     {
         return false;
     }
-    if params.num_fors_trees != 22 || params.chain_len != 16 || params.num_wots_chains != 64 {
+    if params.num_fors_trees != 22 {
+        return false;
+    }
+    if params.chain_len != 16 {
+        return false;
+    }
+    if params.num_wots_chains != 64 {
         return false;
     }
     if params.wots_target_sum != WOTS_TARGET_SUM_STATEFUL {
@@ -234,7 +243,9 @@ fn read_bits(input: &[u8], start_bit: usize, bit_len: u32) -> Option<u64> {
         let absolute = start_bit + bit;
         let byte = *input.get(absolute >> 3)?;
         let bit_in_byte = 7 - (absolute & 7);
-        out = (out << 1) | u64::from((byte >> bit_in_byte) & 1);
+        let shifted_out = out << 1;
+        let bit = u64::from((byte >> bit_in_byte) & 1);
+        out = shifted_out | bit;
     }
     Some(out)
 }
