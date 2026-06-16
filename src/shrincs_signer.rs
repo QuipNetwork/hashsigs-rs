@@ -58,6 +58,8 @@ use self::verifier::{
 
 pub struct ShrincsSigner;
 
+const INITIAL_STATEFUL_LEAF_INDEX: u32 = 1;
+
 impl ShrincsSigner {
     /// Deterministically derive signing material and a public key from seed material.
     ///
@@ -81,7 +83,7 @@ impl ShrincsSigner {
         let stateful_root = stateful_subtree_root(
             &stateful_sk_seed,
             &stateful_pk_seed,
-            1,
+            INITIAL_STATEFUL_LEAF_INDEX,
             max_stateful_signatures,
         );
         let stateless_sk_seed = derive32(b"shrincs-stateless-sk-seed", seed_material, &[]);
@@ -96,7 +98,7 @@ impl ShrincsSigner {
             stateful_pk_seed,
             stateful_root,
             max_stateful_signatures,
-            next_stateful_leaf_index: 1,
+            next_stateful_leaf_index: INITIAL_STATEFUL_LEAF_INDEX,
             stateless_sk_seed,
             stateless_prf_seed,
             pk_seed,
@@ -240,6 +242,21 @@ mod tests {
     }
 
     #[test]
+    fn keygen_starts_stateful_signer_at_leaf_one() {
+        let (signing_key, _) = ShrincsSigner::keygen(
+            ParameterSetId::Sphincs256sKeccakQ20,
+            b"initial stateful leaf seed",
+            8,
+        )
+        .unwrap();
+
+        assert_eq!(
+            signing_key.next_stateful_leaf_index,
+            INITIAL_STATEFUL_LEAF_INDEX
+        );
+    }
+
+    #[test]
     fn generated_stateful_signature_verifies() {
         let (mut signing_key, public_key) = ShrincsSigner::keygen(
             ParameterSetId::Sphincs256sKeccakQ20,
@@ -329,6 +346,10 @@ mod tests {
         let message = hash_packed(&[b"first and only stateful signature"]);
 
         let signature = ShrincsSigner::sign_stateful_raw(&mut signing_key, &message).unwrap();
+        assert_eq!(
+            signing_key.next_stateful_leaf_index,
+            INITIAL_STATEFUL_LEAF_INDEX + 1
+        );
         assert!(ShrincsVerifier::new().verify_stateful_unsafe_raw(
             ParameterSetId::Sphincs256sKeccakQ20,
             expected,
