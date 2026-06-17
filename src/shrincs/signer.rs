@@ -177,8 +177,8 @@ impl ShrincsSigner {
 
 #[cfg(test)]
 mod tests {
-    use super::shrincs_signer_utils::hash_packed;
     use self::verifier::{HASH_LEN, WOTS_CHAINS_STATEFUL};
+    use super::shrincs_signer_utils::hash_packed;
     use super::*;
 
     fn action_context() -> ActionContext {
@@ -337,14 +337,12 @@ mod tests {
         // signer should not silently produce keys outside its supported profile.
         assert!(ShrincsSigner::keygen(ParameterSetId::Unsupported, b"seed", 4).is_none());
         assert!(ShrincsSigner::keygen(ParameterSetId::Sphincs256sKeccakQ20, b"seed", 0).is_none());
-        assert!(
-            ShrincsSigner::keygen(
-                ParameterSetId::Sphincs256sKeccakQ20,
-                b"seed",
-                MAX_STATEFUL_SIGNATURES_LIMIT + 1,
-            )
-            .is_none()
-        );
+        assert!(ShrincsSigner::keygen(
+            ParameterSetId::Sphincs256sKeccakQ20,
+            b"seed",
+            MAX_STATEFUL_SIGNATURES_LIMIT + 1,
+        )
+        .is_none());
     }
 
     #[test]
