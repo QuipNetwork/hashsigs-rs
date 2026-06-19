@@ -949,6 +949,11 @@ mod tests {
         StatefulSignature as SignerStatefulSignature,
     };
     use crate::shrincs::{ShrincsSigner, ShrincsSigningKey};
+    #[cfg(all(feature = "wasm-bindings", target_arch = "wasm32"))]
+    use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
+
+    #[cfg(all(feature = "wasm-bindings", target_arch = "wasm32"))]
+    wasm_bindgen_test_configure!(run_in_browser);
 
     fn hex(bytes: &[u8]) -> String {
         let mut out = String::from("0x");
@@ -1138,7 +1143,7 @@ mod tests {
     }
 
     #[cfg(all(feature = "wasm-bindings", target_arch = "wasm32"))]
-    #[test]
+    #[wasm_bindgen_test]
     fn wasm_keypair_binding_signs_and_exports_public_key() {
         let mut keypair = shrincs_keygen(
             "sphincs-256s-keccak-q20",
@@ -1168,7 +1173,7 @@ mod tests {
     }
 
     #[cfg(all(feature = "wasm-bindings", target_arch = "wasm32"))]
-    #[test]
+    #[wasm_bindgen_test]
     fn wasm_account_binding_tracks_policy_changes() {
         let keypair = shrincs_keygen(
             "sphincs-256s-keccak-q20",
