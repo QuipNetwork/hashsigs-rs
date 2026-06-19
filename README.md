@@ -6,7 +6,7 @@ Core Rust hash-signature workspace with:
   - `wotsplus` primitives
   - `shrincs` signer / verifier primitives
   - `account` policy wrapper
-  - `wasm` verifier bindings
+  - `wasm` verifier / signer / account bindings
 - `solana/`: Solana program integration
 
 ## Building
@@ -91,11 +91,187 @@ Current WASM scope:
 
 - supported now:
   - verifier-oriented SHRINCS bindings
+  - SHRINCS key generation and raw signing bindings
+  - account-layer wrapper bindings
   - hex/JSON-friendly JS entry points
 - not implemented yet:
-  - signer bindings
-  - account-layer bindings
   - published npm package flow
+  - browser/node integration tests on a real wasm target
+  - WOTS-specific bindings
+
+## WASM API
+
+The generated package exports three categories of APIs:
+
+- verifier functions
+- signer/keypair APIs
+- account-wrapper APIs
+
+The current JS-facing data model uses:
+
+- hex strings for byte arrays
+- plain JS objects for public keys, signatures, contexts, and rotation targets
+
+### Verifier exports
+
+Available verifier exports:
+
+- `supported_parameter_sets()`
+- `shrincs_verify_stateful_raw(...)`
+- `shrincs_verify_stateful_action(...)`
+- `shrincs_verify_stateless_raw(...)`
+- `shrincs_verify_stateless_action(...)`
+
+Minimal TS example:
+
+```ts
+import {
+  supported_parameter_sets,
+  shrincs_verify_stateless_action,
+} from "./pkg/bundler/hashsigs_rs";
+
+console.log(supported_parameter_sets());
+
+const ok = shrincs_verify_stateless_action(
+  "sphincs-256s-keccak-q20",
+  publicKey.publicKeyCommitment,
+  publicKey,
+  {
+    domainSeparator: "0x...",
+    nonce: "0x...",
+    keyVersion: "0x...",
+    actionType: "0x...",
+    payloadHash: "0x...",
+  },
+  signature,
+);
+```
+
+### Signer exports
+
+Available signer exports:
+
+- `shrincsKeygen(...)`
+- `WasmShrincsKeypair.publicKey()`
+- `WasmShrincsKeypair.signStatefulRaw(...)`
+- `WasmShrincsKeypair.signStatelessRaw(...)`
+- `WasmShrincsKeypair.exportSigningKey()`
+
+Minimal TS example:
+
+```ts
+import { shrincsKeygen } from "./pkg/bundler/hashsigs_rs";
+
+const keypair = shrincsKeygen(
+  "sphincs-256s-keccak-q20",
+  "0x00112233445566778899aabbccddeeff",
+  16,
+);
+
+const publicKey = keypair.publicKey();
+const statefulSignature = keypair.signStatefulRaw("0xdeadbeef");
+const statelessSignature = keypair.signStatelessRaw("0xdeadbeef");
+const signingKeySnapshot = keypair.exportSigningKey();
+```
+
+`exportSigningKey()` returns secret material. Treat it as private key data.
+
+### Account exports
+
+Available account exports:
+
+- `new WasmShrincsAccount(...)`
+- `snapshot()`
+- `verifyStatefulAction(...)`
+- `verifyStatelessAction(...)`
+- `rotateToFreshKey(...)`
+- `rotateFullKey(...)`
+- `setStatefulPolicyMonotonicIndex(...)`
+- `setStatefulPolicyRecoveryRotation(...)`
+- `setStatefulPolicyLeafBitmap(...)`
+- `enterRecoveryMode(...)`
+
+Minimal TS example:
+
+```ts
+import {
+  WasmShrincsAccount,
+  shrincsKeygen,
+} from "./pkg/bundler/hashsigs_rs";
+
+const owner = "0x" + "11".repeat(32);
+const chainId = "0x" + "22".repeat(32);
+const contractAddress = "0x" + "33".repeat(20);
+
+const keypair = shrincsKeygen(
+  "sphincs-256s-keccak-q20",
+  "0x1234",
+  8,
+);
+const publicKey = keypair.publicKey();
+
+const account = new WasmShrincsAccount(
+  owner,
+  chainId,
+  contractAddress,
+  publicKey.publicKeyCommitment,
+);
+
+account.setStatefulPolicyRecoveryRotation(owner);
+account.enterRecoveryMode(owner);
+
+console.log(account.snapshot());
+```
+
+### Object shapes
+
+The current JS object shapes follow camelCase field names.
+
+Public key:
+
+```ts
+type WasmPublicKey = {
+  parameterSetId: string;
+  statefulPublicKey: string;
+  publicKeyCommitment: string;
+  pkSeed: string;
+  hypertreeRoot: string;
+};
+```
+
+Action context:
+
+```ts
+type WasmActionContext = {
+  domainSeparator: string;
+  nonce: string;
+  keyVersion: string;
+  actionType: string;
+  payloadHash: string;
+};
+```
+
+Stateful rotation target:
+
+```ts
+type WasmStatefulRotationTarget = {
+  parameterSetId: string;
+  statefulPublicKey: string;
+  publicKeyCommitment: string;
+};
+```
+
+Full rotation target:
+
+```ts
+type WasmRotationTarget = {
+  parameterSetId: string;
+  statefulPublicKey: string;
+  publicKeyCommitment: string;
+  pkSeed: string;
+  hypertreeRoot: string;
+};
+```
 
 ## Testing
 
@@ -173,7 +349,7 @@ NOTE: if on Mac, do not use brew to install rust and instead use https://www.rus
 │   ├── wotsplus/  # WOTS+ primitives
 │   ├── shrincs/   # SHRINCS signer / verifier primitives
 │   ├── account/   # Rust account-policy wrapper
-│   └── wasm/      # Verifier-oriented wasm-bindgen surface
+│   └── wasm/      # Verifier / signer / account wasm-bindgen surface
 ├── solana/        # Solana program implementation
 └── tests/         # Test vectors and unit tests
 ```
