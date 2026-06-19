@@ -99,6 +99,47 @@ Current WASM scope:
   - browser/node integration tests on a real wasm target
   - WOTS-specific bindings
 
+## WASM Testing
+
+There are two different WASM-related test layers in this repo:
+
+- native host tests
+- real wasm-target binding tests
+
+Native host tests are still useful, but they only validate Rust-side helper
+logic and feature-gated conversion code. They do not execute the exported
+`wasm-bindgen` bindings inside a real wasm runtime.
+
+To run the real binding-runtime tests, install the wasm target first:
+
+```bash
+rustup target add wasm32-unknown-unknown
+```
+
+Then run:
+
+```bash
+cargo test --features wasm-bindings --target wasm32-unknown-unknown
+```
+
+Why both layers exist:
+
+- native host tests
+  - faster
+  - good for DTO parsing and helper logic
+  - do not exercise `JsValue` / `wasm-bindgen` runtime behavior
+- wasm-target tests via `wasm-bindgen-test`
+  - exercise real exported binding behavior on a wasm target
+  - validate JS-facing class/method/runtime conversion paths
+
+If you are changing:
+
+- `WasmShrincsKeypair`
+- `WasmShrincsAccount`
+- verifier exports in `src/wasm/`
+
+you should treat the wasm-target test run as the authoritative binding check.
+
 ## WASM API
 
 The generated package exports three categories of APIs:
