@@ -642,12 +642,13 @@ fn increment_u256_be(value: &mut [u8; HASH_LEN]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shrincs::{ForsEntry, ForsSignature, HypertreeLayerSignature, WotsCSignature};
     use crate::shrincs::signer::verifier::{
         ParameterSetId as SignerParameterSetId, PublicKey as SignerPublicKey,
-        StatefulSignature as SignerStatefulSignature, StatelessSignature as SignerStatelessSignature,
+        StatefulSignature as SignerStatefulSignature,
+        StatelessSignature as SignerStatelessSignature,
     };
     use crate::shrincs::ShrincsSigner;
+    use crate::shrincs::{ForsEntry, ForsSignature, HypertreeLayerSignature, WotsCSignature};
     use solana_program::keccak::hash as keccak256_hash;
 
     fn id(byte: u8) -> [u8; HASH_LEN] {
@@ -745,7 +746,10 @@ mod tests {
             ShrincsAccountVerifierExample::computeDomainSeparator(id(2), address(7))
         );
         assert_eq!(account.currentShrincsPublicKey(), id(3));
-        assert_eq!(account.parameterSetId(), ParameterSetId::Sphincs256sKeccakQ20);
+        assert_eq!(
+            account.parameterSetId(),
+            ParameterSetId::Sphincs256sKeccakQ20
+        );
         assert_eq!(account.statefulPolicy(), StatefulPolicy::MonotonicIndex);
         assert_eq!(account.nextStatefulLeafIndex(), INITIAL_STATEFUL_LEAF_INDEX);
         assert_eq!(account.nonce(), [0u8; HASH_LEN]);
@@ -888,8 +892,11 @@ mod tests {
             action_type,
             payload_hash,
         };
-        let message =
-            verifier.stateful_action_message_hash(ParameterSetId::Sphincs256sKeccakQ20, expected, &context);
+        let message = verifier.stateful_action_message_hash(
+            ParameterSetId::Sphincs256sKeccakQ20,
+            expected,
+            &context,
+        );
         let signature = ShrincsSigner::sign_stateful_raw(&mut signing_key, &message).unwrap();
         let signature = to_stateful_signature(&signature);
 
@@ -919,8 +926,11 @@ mod tests {
             action_type,
             payload_hash,
         };
-        let message =
-            verifier.stateless_action_message_hash(ParameterSetId::Sphincs256sKeccakQ20, expected, &context);
+        let message = verifier.stateless_action_message_hash(
+            ParameterSetId::Sphincs256sKeccakQ20,
+            expected,
+            &context,
+        );
         let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &message).unwrap();
         let signature = to_stateless_signature(&signature);
 

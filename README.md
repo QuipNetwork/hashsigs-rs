@@ -232,6 +232,13 @@ Available account exports:
 - `setStatefulPolicyLeafBitmap(...)`
 - `enterRecoveryMode(...)`
 
+Canonical message helpers:
+
+- `shrincsStatefulActionMessageHash(...)`
+- `shrincsStatelessActionMessageHash(...)`
+- `shrincsStatefulRotationMessageHash(...)`
+- `shrincsFullRotationMessageHash(...)`
+
 Minimal TS example:
 
 ```ts
@@ -264,6 +271,245 @@ account.enterRecoveryMode(owner);
 console.log(account.snapshot());
 ```
 
+Stateful action verification example:
+
+```ts
+import {
+  WasmShrincsAccount,
+  shrincsStatefulActionMessageHash,
+  shrincsKeygen,
+} from "./pkg/bundler/hashsigs_rs";
+
+const owner = "0x" + "11".repeat(32);
+const chainId = "0x" + "22".repeat(32);
+const contractAddress = "0x" + "33".repeat(20);
+const actionType = "0x" + "44".repeat(32);
+const payloadHash = "0x" + "55".repeat(32);
+
+const keypair = shrincsKeygen(
+  "sphincs-256s-keccak-q20",
+  "0x0011223344",
+  8,
+);
+const publicKey = keypair.publicKey();
+const account = new WasmShrincsAccount(
+  owner,
+  chainId,
+  contractAddress,
+  publicKey.publicKeyCommitment,
+);
+
+const snapshot = account.snapshot();
+const message = shrincsStatefulActionMessageHash(
+  publicKey.parameterSetId,
+  publicKey.publicKeyCommitment,
+  {
+    domainSeparator: snapshot.domainSeparator,
+    nonce: snapshot.nonce,
+    keyVersion: snapshot.keyVersion,
+    actionType,
+    payloadHash,
+  },
+);
+const signature = keypair.signStatefulRaw(message);
+const ok = account.verifyStatefulAction(
+  publicKey,
+  actionType,
+  payloadHash,
+  signature,
+);
+
+console.log({ ok, snapshot: account.snapshot() });
+```
+
+Stateless action verification example:
+
+```ts
+import {
+  WasmShrincsAccount,
+  shrincsStatelessActionMessageHash,
+  shrincsKeygen,
+} from "./pkg/bundler/hashsigs_rs";
+
+const owner = "0x" + "11".repeat(32);
+const chainId = "0x" + "22".repeat(32);
+const contractAddress = "0x" + "33".repeat(20);
+const actionType = "0x" + "66".repeat(32);
+const payloadHash = "0x" + "77".repeat(32);
+
+const keypair = shrincsKeygen(
+  "sphincs-256s-keccak-q20",
+  "0xabcdef",
+  8,
+);
+const publicKey = keypair.publicKey();
+const account = new WasmShrincsAccount(
+  owner,
+  chainId,
+  contractAddress,
+  publicKey.publicKeyCommitment,
+);
+
+const snapshot = account.snapshot();
+const message = shrincsStatelessActionMessageHash(
+  publicKey.parameterSetId,
+  publicKey.publicKeyCommitment,
+  {
+    domainSeparator: snapshot.domainSeparator,
+    nonce: snapshot.nonce,
+    keyVersion: snapshot.keyVersion,
+    actionType,
+    payloadHash,
+  },
+);
+const signature = keypair.signStatelessRaw(message);
+const ok = account.verifyStatelessAction(
+  publicKey,
+  actionType,
+  payloadHash,
+  signature,
+);
+
+console.log({ ok, snapshot: account.snapshot() });
+```
+
+Stateful-only rotation example:
+
+```ts
+import {
+  WasmShrincsAccount,
+  shrincsStatefulRotationMessageHash,
+  shrincsKeygen,
+} from "./pkg/bundler/hashsigs_rs";
+
+const owner = "0x" + "11".repeat(32);
+const chainId = "0x" + "22".repeat(32);
+const contractAddress = "0x" + "33".repeat(20);
+
+const currentKeypair = shrincsKeygen(
+  "sphincs-256s-keccak-q20",
+  "0x1111",
+  8,
+);
+const nextKeypair = shrincsKeygen(
+  "sphincs-256s-keccak-q20",
+  "0x2222",
+  16,
+);
+
+const currentPublicKey = currentKeypair.publicKey();
+const nextPublicKey = nextKeypair.publicKey();
+const account = new WasmShrincsAccount(
+  owner,
+  chainId,
+  contractAddress,
+  currentPublicKey.publicKeyCommitment,
+);
+
+account.setStatefulPolicyRecoveryRotation(owner);
+account.enterRecoveryMode(owner);
+
+const snapshot = account.snapshot();
+const nextStatefulTarget = {
+  parameterSetId: nextPublicKey.parameterSetId,
+  statefulPublicKey: nextPublicKey.statefulPublicKey,
+  publicKeyCommitment: nextPublicKey.publicKeyCommitment,
+};
+
+const recoveryMessage = shrincsStatefulRotationMessageHash(
+  currentPublicKey.parameterSetId,
+  currentPublicKey.publicKeyCommitment,
+  currentPublicKey,
+  {
+    domainSeparator: snapshot.domainSeparator,
+    nonce: snapshot.nonce,
+    keyVersion: snapshot.keyVersion,
+  },
+  nextStatefulTarget,
+);
+const recoverySignature = currentKeypair.signStatelessRaw(recoveryMessage);
+const rotated = account.rotateToFreshKey(
+  currentPublicKey,
+  recoverySignature,
+  nextStatefulTarget,
+);
+
+console.log({ rotated, snapshot: account.snapshot() });
+```
+
+Full rotation example:
+
+```ts
+import {
+  WasmShrincsAccount,
+  shrincsFullRotationMessageHash,
+  shrincsKeygen,
+} from "./pkg/bundler/hashsigs_rs";
+
+const owner = "0x" + "11".repeat(32);
+const chainId = "0x" + "22".repeat(32);
+const contractAddress = "0x" + "33".repeat(20);
+
+const currentKeypair = shrincsKeygen(
+  "sphincs-256s-keccak-q20",
+  "0xaaaa",
+  8,
+);
+const nextKeypair = shrincsKeygen(
+  "sphincs-256s-keccak-q20",
+  "0xbbbb",
+  16,
+);
+
+const currentPublicKey = currentKeypair.publicKey();
+const nextPublicKey = nextKeypair.publicKey();
+const account = new WasmShrincsAccount(
+  owner,
+  chainId,
+  contractAddress,
+  currentPublicKey.publicKeyCommitment,
+);
+
+account.setStatefulPolicyRecoveryRotation(owner);
+account.enterRecoveryMode(owner);
+
+const snapshot = account.snapshot();
+const nextFullTarget = {
+  parameterSetId: nextPublicKey.parameterSetId,
+  statefulPublicKey: nextPublicKey.statefulPublicKey,
+  publicKeyCommitment: nextPublicKey.publicKeyCommitment,
+  pkSeed: nextPublicKey.pkSeed,
+  hypertreeRoot: nextPublicKey.hypertreeRoot,
+};
+
+const recoveryMessage = shrincsFullRotationMessageHash(
+  currentPublicKey.parameterSetId,
+  currentPublicKey.publicKeyCommitment,
+  currentPublicKey,
+  {
+    domainSeparator: snapshot.domainSeparator,
+    nonce: snapshot.nonce,
+    keyVersion: snapshot.keyVersion,
+  },
+  nextFullTarget,
+);
+const recoverySignature = currentKeypair.signStatelessRaw(recoveryMessage);
+const rotated = account.rotateFullKey(
+  currentPublicKey,
+  recoverySignature,
+  nextFullTarget,
+);
+
+console.log({ rotated, snapshot: account.snapshot() });
+```
+
+The examples above are canonical end-to-end flows:
+
+- the account snapshot exposes `domainSeparator`, `nonce`, and `keyVersion`
+- derive the message bytes with the exported helper that matches the intended wrapper path
+- sign those exact bytes with `signStatefulRaw(...)` or `signStatelessRaw(...)`
+- submit the signature through the corresponding account verification or rotation method
+
 ### Object shapes
 
 The current JS object shapes follow camelCase field names.
@@ -289,6 +535,25 @@ type WasmActionContext = {
   keyVersion: string;
   actionType: string;
   payloadHash: string;
+};
+```
+
+Account snapshot:
+
+```ts
+type WasmAccountSnapshot = {
+  currentShrincsPublicKey: string;
+  owner: string;
+  chainId: string;
+  contractAddress: string;
+  domainSeparator: string;
+  parameterSetId: string;
+  nonce: string;
+  keyVersion: string;
+  statelessSignaturesUsed: number;
+  statefulPolicy: string;
+  nextStatefulLeafIndex: number;
+  recoveryMode: boolean;
 };
 ```
 

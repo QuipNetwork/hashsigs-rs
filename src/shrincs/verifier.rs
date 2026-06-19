@@ -549,7 +549,11 @@ mod tests {
         hypertree_root: &[u8],
     ) -> [u8; HASH_LEN] {
         let mut packed = Vec::with_capacity(
-            b"shrincs-public-key".len() + 1 + stateful_public_key.len() + pk_seed.len() + hypertree_root.len(),
+            b"shrincs-public-key".len()
+                + 1
+                + stateful_public_key.len()
+                + pk_seed.len()
+                + hypertree_root.len(),
         );
         packed.extend_from_slice(b"shrincs-public-key");
         packed.push(parameter_set_id.packed_byte());
@@ -660,7 +664,8 @@ mod tests {
             &context,
             &next_target,
         );
-        let recovery_signature = ShrincsSigner::sign_stateless_raw(&signing_key, &recovery_message).unwrap();
+        let recovery_signature =
+            ShrincsSigner::sign_stateless_raw(&signing_key, &recovery_message).unwrap();
         let recovery_signature = to_stateless_signature(&recovery_signature);
 
         assert_eq!(
@@ -711,7 +716,8 @@ mod tests {
             &context,
             &next_target,
         );
-        let recovery_signature = ShrincsSigner::sign_stateless_raw(&signing_key, &recovery_message).unwrap();
+        let recovery_signature =
+            ShrincsSigner::sign_stateless_raw(&signing_key, &recovery_message).unwrap();
         let recovery_signature = to_stateless_signature(&recovery_signature);
 
         assert_eq!(
