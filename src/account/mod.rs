@@ -23,7 +23,7 @@ use solana_program::keccak::hash as keccak256_hash;
 
 use crate::shrincs::{
     ActionContext, ParameterSetId, PublicKey, RotationContext, RotationTarget, ShrincsVerifier,
-    StatefulSignature, StatelessSignature, HASH_LEN,
+    StatefulRotationTarget, StatefulSignature, StatelessSignature, HASH_LEN,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,8 +55,10 @@ pub struct ShrincsAccountVerifierExample {
     pub currentShrincsPublicKey: [u8; HASH_LEN],
     // Account owner allowed to change wrapper policy and enter recovery mode.
     pub owner: [u8; HASH_LEN],
-    // Canonical signing domain derived from DOMAIN_TAG, chain id, and this account address.
-    pub domainSeparator: [u8; HASH_LEN],
+    // Chain identity used when deriving the canonical signing domain.
+    pub chainId: [u8; HASH_LEN],
+    // Contract/account identity used when deriving the canonical signing domain.
+    pub contractAddress: [u8; 20],
     // Active SHRINCS parameter profile for the installed key bundle.
     pub parameterSetId: ParameterSetId,
     // Canonical action/rotation nonce consumed on successful wrapper operations.
@@ -93,8 +95,9 @@ impl ShrincsAccountVerifierExample {
             owner,
             // Install the first trusted SHRINCS public-key commitment.
             currentShrincsPublicKey: initialShrincsPublicKey,
-            // Bind wrapper signatures to this product tag, chain, and account instance.
-            domainSeparator: Self::computeDomainSeparator(chainId, contractAddress),
+            // Preserve the deployment identity that defines the canonical signing domain.
+            chainId,
+            contractAddress,
             // Start the example wrapper on its default SHRINCS parameter profile.
             parameterSetId: ParameterSetId::Sphincs256sKeccakQ20,
             nonce: [0u8; HASH_LEN],
@@ -115,7 +118,7 @@ impl ShrincsAccountVerifierExample {
     // 3. Verify the caller-supplied message directly without building canonical action context.
     // 4. Commit the consumed leaf only after signature verification succeeds.
     // 5. Emit the usual stateful verification event without advancing the wrapper nonce.
-    pub fn verifyStatefulUncheckedMessage(
+    pub(crate) fn verifyStatefulUncheckedMessage(
         &mut self,
         publicKey: &PublicKey,
         message: &[u8],
@@ -259,7 +262,7 @@ impl ShrincsAccountVerifierExample {
         &mut self,
         currentPublicKey: &PublicKey,
         recoverySignature: &StatelessSignature,
-        nextKey: &RotationTarget,
+        nextKey: &StatefulRotationTarget,
     ) -> bool {
         // Fresh-key rotation is available only in the dedicated recovery policy.
         if self.statefulPolicy != StatefulPolicy::RecoveryRotation {
@@ -284,7 +287,7 @@ impl ShrincsAccountVerifierExample {
         };
 
         // Verify the stateless recovery signature and derive the next installed commitment.
-        let Some(nextCompositePublicKey) = ShrincsVerifier::new().stateless_rotate(
+        let Some(nextCompositePublicKey) = ShrincsVerifier::new().rotate_stateful_via_stateless(
             self.parameterSetId,
             self.currentShrincsPublicKey,
             currentPublicKey,
@@ -501,7 +504,7 @@ impl ShrincsAccountVerifierExample {
     // 3. Bind the separator to this contract instance.
     pub fn domainSeparator(&self) -> [u8; HASH_LEN] {
         // Bind wrapper signatures to this product tag, chain, and deployed contract instance.
-        self.domainSeparator
+        Self::computeDomainSeparator(self.chainId, self.contractAddress)
     }
 
     // computeDomainSeparator: Rust compatibility helper for Solidity domainSeparator().

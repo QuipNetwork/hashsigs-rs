@@ -109,6 +109,39 @@ NOTE: if on Mac, do not use brew to install rust and instead use https://www.rus
 └── tests/         # Test vectors and unit tests
 ```
 
+## Account Layer Notes
+
+The `account` module is an off-chain Rust policy wrapper that tracks nonce,
+key-version, stateful-leaf use, and recovery-mode transitions around the core
+SHRINCS primitives. It is intentionally close to the Solidity example account
+wrapper, but it is not a literal runtime-equivalent copy.
+
+Current intentional differences:
+
+- Owner / caller model:
+  Rust stores `owner` as a generic 32-byte value and takes an explicit
+  `caller` argument for owner-gated methods. Solidity stores `owner` as an
+  `address` and relies on `msg.sender`. The Rust model is therefore an
+  integration-supplied authority check, not a chain-enforced caller model.
+
+- Event semantics:
+  Solidity emits wrapper events such as policy changes, recovery-mode entry,
+  key rotation, and successful signature verification. Rust currently mutates
+  wrapper state and returns `bool` / `Result` values, but does not emit
+  first-class event records. Treat this as an observability difference rather
+  than a cryptographic or policy-enforcement difference.
+
+- Constructor / account identity model:
+  Rust account initialization takes `owner`, `chainId`, `contractAddress`, and
+  the initial SHRINCS public-key commitment as explicit inputs. Solidity gets
+  owner, chain id, and contract identity from the live execution environment.
+  The Rust constructor should therefore be understood as an off-chain
+  simulation/adaptation surface, not a one-to-one deployment API mirror.
+
+The account module now recomputes its domain separator from stored `chainId`
+and `contractAddress`, and `rotateToFreshKey(...)` is narrowed to a dedicated
+stateful-only recovery-rotation target.
+
 ## License
 
 AGPL-3.0, see COPYING
