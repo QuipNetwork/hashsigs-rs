@@ -311,6 +311,28 @@ mod tests {
     }
 
     #[test]
+    fn explicit_leaf_test_helper_verifies_for_requested_leaf() {
+        let (signing_key, public_key) = ShrincsSigner::keygen(
+            ParameterSetId::Sphincs256sKeccakQ20,
+            b"explicit leaf helper seed",
+            4,
+        )
+        .unwrap();
+        let expected = expected_key(&public_key);
+        let message = hash_packed(&[b"explicit leaf test message"]);
+        let signature = ShrincsSigner::sign_stateful_raw_at_leaf(&signing_key, 2, &message).unwrap();
+
+        assert_eq!(signature.auth_path.len(), 2);
+        assert!(ShrincsVerifier::new().verify_stateful_unsafe_raw(
+            ParameterSetId::Sphincs256sKeccakQ20,
+            expected,
+            &public_key,
+            &message,
+            &signature,
+        ));
+    }
+
+    #[test]
     fn generated_stateless_raw_signature_verifies() {
         let (signing_key, public_key) = ShrincsSigner::keygen(
             ParameterSetId::Sphincs256sKeccakQ20,

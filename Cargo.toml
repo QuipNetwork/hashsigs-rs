@@ -14,6 +14,7 @@ categories = ["cryptography", "authentication"]
 [lib]
 name = "hashsigs_rs"
 path = "src/lib.rs"
+crate-type = ["rlib", "cdylib"]
 
 [workspace]
 members = [
@@ -21,8 +22,18 @@ members = [
 ]
 resolver = "2"
 
+[features]
+default = []
+wasm-bindings = [
+    "dep:serde-wasm-bindgen",
+    "dep:wasm-bindgen",
+]
+
 [dependencies]
 solana-program = "2.3"
+serde = { version = "1.0.219", features = ["derive"] }
+serde-wasm-bindgen = { version = "0.6.5", optional = true }
+wasm-bindgen = { version = "0.2.100", optional = true }
 
 [dev-dependencies]
 serde_json = "1.0.143"

@@ -162,6 +162,7 @@ impl ShrincsAccountVerifierExample {
     // 3. Verify the caller-supplied message directly without building canonical action context.
     // 4. Commit the consumed leaf only after signature verification succeeds.
     // 5. Emit the usual stateful verification event without advancing the wrapper nonce.
+    #[cfg(test)]
     pub(crate) fn verifyStatefulUncheckedMessage(
         &mut self,
         publicKey: &PublicKey,
@@ -641,6 +642,13 @@ fn increment_u256_be(value: &mut [u8; HASH_LEN]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shrincs::{ForsEntry, ForsSignature, HypertreeLayerSignature, WotsCSignature};
+    use crate::shrincs::signer::verifier::{
+        ParameterSetId as SignerParameterSetId, PublicKey as SignerPublicKey,
+        StatefulSignature as SignerStatefulSignature, StatelessSignature as SignerStatelessSignature,
+    };
+    use crate::shrincs::ShrincsSigner;
+    use solana_program::keccak::hash as keccak256_hash;
 
     fn id(byte: u8) -> [u8; HASH_LEN] {
         [byte; HASH_LEN]
@@ -648,6 +656,83 @@ mod tests {
 
     fn address(byte: u8) -> [u8; 20] {
         [byte; 20]
+    }
+
+    fn to_public_key(input: &SignerPublicKey) -> PublicKey {
+        PublicKey {
+            parameter_set_id: match input.parameter_set_id {
+                SignerParameterSetId::Sphincs256sKeccakQ20 => ParameterSetId::Sphincs256sKeccakQ20,
+                SignerParameterSetId::Unsupported => ParameterSetId::Unsupported,
+            },
+            stateful_public_key: input.stateful_public_key.clone(),
+            public_key_commitment: input.public_key_commitment.clone(),
+            pk_seed: input.pk_seed.clone(),
+            hypertree_root: input.hypertree_root.clone(),
+        }
+    }
+
+    fn to_stateful_signature(input: &SignerStatefulSignature) -> StatefulSignature {
+        StatefulSignature {
+            randomizer: input.randomizer,
+            counter: input.counter,
+            chains: input.chains.clone(),
+            auth_path: input.auth_path.clone(),
+        }
+    }
+
+    fn to_stateless_signature(input: &SignerStatelessSignature) -> StatelessSignature {
+        StatelessSignature {
+            fors: ForsSignature {
+                randomizer: input.fors.randomizer.clone(),
+                counter: input.fors.counter,
+                entries: input
+                    .fors
+                    .entries
+                    .iter()
+                    .map(|entry| ForsEntry {
+                        secret_leaf: entry.secret_leaf.clone(),
+                        auth_path: entry.auth_path.clone(),
+                    })
+                    .collect(),
+            },
+            hypertree: input
+                .hypertree
+                .iter()
+                .map(|layer| HypertreeLayerSignature {
+                    tree_index: layer.tree_index,
+                    leaf_index: layer.leaf_index,
+                    wots_c_pk_hash: layer.wots_c_pk_hash.clone(),
+                    wots_c_signature: WotsCSignature {
+                        randomizer: layer.wots_c_signature.randomizer.clone(),
+                        counter: layer.wots_c_signature.counter,
+                        chains: layer.wots_c_signature.chains.clone(),
+                    },
+                    auth_path: layer.auth_path.clone(),
+                })
+                .collect(),
+        }
+    }
+
+    fn public_key_commitment(
+        parameter_set_id: ParameterSetId,
+        stateful_public_key: &[u8],
+        pk_seed: &[u8],
+        hypertree_root: &[u8],
+    ) -> [u8; HASH_LEN] {
+        let mut packed = Vec::new();
+        packed.extend_from_slice(b"shrincs-public-key");
+        packed.push(match parameter_set_id {
+            ParameterSetId::Sphincs256sKeccakQ20 => 0,
+            ParameterSetId::Unsupported => 1,
+        });
+        packed.extend_from_slice(stateful_public_key);
+        packed.extend_from_slice(pk_seed);
+        packed.extend_from_slice(hypertree_root);
+        keccak256_hash(&packed).to_bytes()
+    }
+
+    fn expected_key(public_key: &PublicKey) -> [u8; HASH_LEN] {
+        public_key.public_key_commitment.clone().try_into().unwrap()
     }
 
     #[test]
@@ -759,6 +844,202 @@ mod tests {
         assert_eq!(account.statelessSignaturesUsed(), 0);
         assert_eq!(account.statefulPolicy(), StatefulPolicy::MonotonicIndex);
         assert_eq!(account.nextStatefulLeafIndex(), INITIAL_STATEFUL_LEAF_INDEX);
+        assert!(!account.recoveryMode());
+    }
+
+    #[test]
+    fn raw_stateful_helper_verifies_message_without_advancing_nonce() {
+        let (mut signing_key, public_key) = ShrincsSigner::keygen(
+            SignerParameterSetId::Sphincs256sKeccakQ20,
+            b"account raw helper seed",
+            4,
+        )
+        .unwrap();
+        let public_key = to_public_key(&public_key);
+        let expected = expected_key(&public_key);
+        let mut account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), expected);
+        let message = b"account raw helper message";
+        let signature = ShrincsSigner::sign_stateful_raw(&mut signing_key, message).unwrap();
+        let signature = to_stateful_signature(&signature);
+
+        assert!(account.verifyStatefulUncheckedMessage(&public_key, message, &signature));
+        assert_eq!(account.nonce(), [0u8; HASH_LEN]);
+        assert_eq!(account.nextStatefulLeafIndex(), 2);
+    }
+
+    #[test]
+    fn verify_stateful_action_advances_nonce_and_leaf() {
+        let verifier = ShrincsVerifier::new();
+        let (mut signing_key, public_key) = ShrincsSigner::keygen(
+            SignerParameterSetId::Sphincs256sKeccakQ20,
+            b"account stateful action seed",
+            4,
+        )
+        .unwrap();
+        let public_key = to_public_key(&public_key);
+        let expected = expected_key(&public_key);
+        let mut account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), expected);
+        let action_type = [3u8; HASH_LEN];
+        let payload_hash = [4u8; HASH_LEN];
+        let context = ActionContext {
+            domain_separator: account.domainSeparator(),
+            nonce: account.nonce(),
+            key_version: account.keyVersion(),
+            action_type,
+            payload_hash,
+        };
+        let message =
+            verifier.stateful_action_message_hash(ParameterSetId::Sphincs256sKeccakQ20, expected, &context);
+        let signature = ShrincsSigner::sign_stateful_raw(&mut signing_key, &message).unwrap();
+        let signature = to_stateful_signature(&signature);
+
+        assert!(account.verifyStatefulAction(&public_key, action_type, payload_hash, &signature));
+        assert_eq!(account.nonce()[HASH_LEN - 1], 1);
+        assert_eq!(account.nextStatefulLeafIndex(), 2);
+    }
+
+    #[test]
+    fn verify_stateless_action_advances_nonce_and_usage_counter() {
+        let verifier = ShrincsVerifier::new();
+        let (signing_key, public_key) = ShrincsSigner::keygen(
+            SignerParameterSetId::Sphincs256sKeccakQ20,
+            b"account stateless action seed",
+            4,
+        )
+        .unwrap();
+        let public_key = to_public_key(&public_key);
+        let expected = expected_key(&public_key);
+        let mut account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), expected);
+        let action_type = [5u8; HASH_LEN];
+        let payload_hash = [6u8; HASH_LEN];
+        let context = ActionContext {
+            domain_separator: account.domainSeparator(),
+            nonce: account.nonce(),
+            key_version: account.keyVersion(),
+            action_type,
+            payload_hash,
+        };
+        let message =
+            verifier.stateless_action_message_hash(ParameterSetId::Sphincs256sKeccakQ20, expected, &context);
+        let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &message).unwrap();
+        let signature = to_stateless_signature(&signature);
+
+        assert!(account.verifyStatelessAction(&public_key, action_type, payload_hash, &signature));
+        assert_eq!(account.nonce()[HASH_LEN - 1], 1);
+        assert_eq!(account.statelessSignaturesUsed(), 1);
+    }
+
+    #[test]
+    fn rotate_to_fresh_key_installs_next_stateful_commitment() {
+        let verifier = ShrincsVerifier::new();
+        let (signing_key, public_key) = ShrincsSigner::keygen(
+            SignerParameterSetId::Sphincs256sKeccakQ20,
+            b"account rotate stateful current seed",
+            4,
+        )
+        .unwrap();
+        let (_, next_public_key) = ShrincsSigner::keygen(
+            SignerParameterSetId::Sphincs256sKeccakQ20,
+            b"account rotate stateful next seed",
+            8,
+        )
+        .unwrap();
+        let public_key = to_public_key(&public_key);
+        let expected = expected_key(&public_key);
+        let next_commitment = public_key_commitment(
+            ParameterSetId::Sphincs256sKeccakQ20,
+            &next_public_key.stateful_public_key,
+            &public_key.pk_seed,
+            &public_key.hypertree_root,
+        );
+        let next_target = StatefulRotationTarget {
+            parameter_set_id: ParameterSetId::Sphincs256sKeccakQ20,
+            stateful_public_key: next_public_key.stateful_public_key.clone(),
+            public_key_commitment: next_commitment.to_vec(),
+        };
+        let mut account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), expected);
+        account
+            .setStatefulPolicyRecoveryRotation(id(1))
+            .expect("owner can select recovery policy");
+        account
+            .enterRecoveryMode(id(1))
+            .expect("owner can arm recovery mode");
+        let context = RotationContext {
+            domain_separator: account.domainSeparator(),
+            nonce: account.nonce(),
+            key_version: account.keyVersion(),
+        };
+        let message = verifier.stateful_rotation_message_hash(
+            ParameterSetId::Sphincs256sKeccakQ20,
+            expected,
+            &public_key,
+            &context,
+            &next_target,
+        );
+        let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &message).unwrap();
+        let signature = to_stateless_signature(&signature);
+
+        assert!(account.rotateToFreshKey(&public_key, &signature, &next_target));
+        assert_eq!(account.currentShrincsPublicKey(), next_commitment);
+        assert_eq!(account.keyVersion()[HASH_LEN - 1], 1);
+        assert_eq!(account.nonce()[HASH_LEN - 1], 1);
+        assert_eq!(account.statefulPolicy(), StatefulPolicy::MonotonicIndex);
+        assert!(!account.recoveryMode());
+    }
+
+    #[test]
+    fn rotate_full_key_installs_next_full_commitment() {
+        let verifier = ShrincsVerifier::new();
+        let (signing_key, public_key) = ShrincsSigner::keygen(
+            SignerParameterSetId::Sphincs256sKeccakQ20,
+            b"account rotate full current seed",
+            4,
+        )
+        .unwrap();
+        let (_, next_public_key) = ShrincsSigner::keygen(
+            SignerParameterSetId::Sphincs256sKeccakQ20,
+            b"account rotate full next seed",
+            8,
+        )
+        .unwrap();
+        let public_key = to_public_key(&public_key);
+        let next_public_key = to_public_key(&next_public_key);
+        let expected = expected_key(&public_key);
+        let next_commitment = expected_key(&next_public_key);
+        let next_target = RotationTarget {
+            parameter_set_id: ParameterSetId::Sphincs256sKeccakQ20,
+            stateful_public_key: next_public_key.stateful_public_key.clone(),
+            public_key_commitment: next_public_key.public_key_commitment.clone(),
+            pk_seed: next_public_key.pk_seed.clone(),
+            hypertree_root: next_public_key.hypertree_root.clone(),
+        };
+        let mut account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), expected);
+        account
+            .setStatefulPolicyRecoveryRotation(id(1))
+            .expect("owner can select recovery policy");
+        account
+            .enterRecoveryMode(id(1))
+            .expect("owner can arm recovery mode");
+        let context = RotationContext {
+            domain_separator: account.domainSeparator(),
+            nonce: account.nonce(),
+            key_version: account.keyVersion(),
+        };
+        let message = verifier.full_rotation_message_hash(
+            ParameterSetId::Sphincs256sKeccakQ20,
+            expected,
+            &public_key,
+            &context,
+            &next_target,
+        );
+        let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &message).unwrap();
+        let signature = to_stateless_signature(&signature);
+
+        assert!(account.rotateFullKey(&public_key, &signature, &next_target));
+        assert_eq!(account.currentShrincsPublicKey(), next_commitment);
+        assert_eq!(account.keyVersion()[HASH_LEN - 1], 1);
+        assert_eq!(account.nonce()[HASH_LEN - 1], 1);
+        assert_eq!(account.statefulPolicy(), StatefulPolicy::MonotonicIndex);
         assert!(!account.recoveryMode());
     }
 }
