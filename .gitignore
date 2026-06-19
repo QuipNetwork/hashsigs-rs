@@ -4,3 +4,5 @@
 
 .cache
 test-ledger
+pkg
+node_modules

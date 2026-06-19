@@ -5,8 +5,8 @@ Core Rust hash-signature workspace with:
 - `hashsigs-rs`: one crate containing:
   - `wotsplus` primitives
   - `shrincs` signer / verifier primitives
-  - `account` scaffolding
-  - `wasm`-oriented exports
+  - `account` policy wrapper
+  - `wasm` verifier bindings
 - `solana/`: Solana program integration
 
 ## Building
@@ -29,6 +29,73 @@ To build the Solana program:
 cd solana
 cargo build-sbf
 ```
+
+## WASM Packaging
+
+The repo now includes an initial verifier-oriented WASM surface in
+`src/wasm/`. Build it with `wasm-pack` and the `wasm-bindings` feature.
+
+Install `wasm-pack` once:
+
+```bash
+cargo install wasm-pack
+```
+
+Use the helper script from the crate root:
+
+```bash
+bin/build-wasm.sh bundler
+```
+
+The script accepts these targets:
+
+- `bundler`
+- `web`
+- `nodejs`
+
+Examples:
+
+```bash
+bin/build-wasm.sh bundler
+bin/build-wasm.sh web
+bin/build-wasm.sh nodejs
+```
+
+Generated package output goes to:
+
+```text
+pkg/<target>/
+```
+
+For example:
+
+```text
+pkg/bundler/
+pkg/web/
+pkg/nodejs/
+```
+
+The generated package contains the `.wasm` binary, JS wrapper, and `.d.ts`
+files emitted by `wasm-pack`.
+
+Target guidance:
+
+- `bundler`
+  - use this for Vite, webpack, Rollup, and most TS application builds
+- `web`
+  - use this for direct browser loading without a bundler
+- `nodejs`
+  - use this for server-side Node integrations
+
+Current WASM scope:
+
+- supported now:
+  - verifier-oriented SHRINCS bindings
+  - hex/JSON-friendly JS entry points
+- not implemented yet:
+  - signer bindings
+  - account-layer bindings
+  - published npm package flow
 
 ## Testing
 
@@ -100,11 +167,13 @@ NOTE: if on Mac, do not use brew to install rust and instead use https://www.rus
 
 ```
 .
+├── bin/
+│   └── build-wasm.sh  # wasm-pack helper for bundler/web/nodejs builds
 ├── src/
 │   ├── wotsplus/  # WOTS+ primitives
 │   ├── shrincs/   # SHRINCS signer / verifier primitives
-│   ├── account/   # Future account-policy module
-│   └── wasm/      # WASM-oriented re-export module
+│   ├── account/   # Rust account-policy wrapper
+│   └── wasm/      # Verifier-oriented wasm-bindgen surface
 ├── solana/        # Solana program implementation
 └── tests/         # Test vectors and unit tests
 ```
