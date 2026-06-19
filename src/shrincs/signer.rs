@@ -44,9 +44,10 @@ pub use self::shrincs_signer_types::{ShrincsSignerResult, ShrincsSigningKey};
 use self::shrincs_signer_fors_c::sign_fors_c;
 use self::shrincs_signer_hypertree::{hypertree_public_root, sign_hypertree};
 use self::shrincs_signer_stateful::{
-    sign_stateful_raw as sign_stateful_raw_inner,
-    sign_stateful_raw_at_leaf as sign_stateful_raw_at_leaf_inner, stateful_subtree_root,
+    sign_stateful_raw as sign_stateful_raw_inner, stateful_subtree_root,
 };
+#[cfg(test)]
+use self::shrincs_signer_stateful::sign_stateful_raw_at_leaf as sign_stateful_raw_at_leaf_inner;
 use self::shrincs_signer_utils::{
     derive32, encode_stateful_public_key, ensure_supported_params, public_key_from_components,
     word32,
@@ -139,8 +140,9 @@ impl ShrincsSigner {
         sign_stateful_raw_inner(signing_key, message)
     }
 
-    /// Sign raw bytes with a specific stateful leaf for deterministic vectors.
-    pub fn sign_stateful_raw_at_leaf(
+    /// Sign raw bytes with a specific stateful leaf for deterministic tests.
+    #[cfg(test)]
+    pub(crate) fn sign_stateful_raw_at_leaf(
         signing_key: &ShrincsSigningKey,
         leaf_index: u32,
         message: &[u8],

@@ -52,29 +52,29 @@ pub enum AccountError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShrincsAccountVerifierExample {
     // Installed bundle commitment currently trusted by the wrapper.
-    pub currentShrincsPublicKey: [u8; HASH_LEN],
+    currentShrincsPublicKey: [u8; HASH_LEN],
     // Account owner allowed to change wrapper policy and enter recovery mode.
-    pub owner: [u8; HASH_LEN],
+    owner: [u8; HASH_LEN],
     // Chain identity used when deriving the canonical signing domain.
-    pub chainId: [u8; HASH_LEN],
+    chainId: [u8; HASH_LEN],
     // Contract/account identity used when deriving the canonical signing domain.
-    pub contractAddress: [u8; 20],
+    contractAddress: [u8; 20],
     // Active SHRINCS parameter profile for the installed key bundle.
-    pub parameterSetId: ParameterSetId,
+    parameterSetId: ParameterSetId,
     // Canonical action/rotation nonce consumed on successful wrapper operations.
-    pub nonce: [u8; HASH_LEN],
+    nonce: [u8; HASH_LEN],
     // Installed-key epoch incremented whenever a fresh key bundle is installed.
-    pub keyVersion: [u8; HASH_LEN],
+    keyVersion: [u8; HASH_LEN],
     // Number of stateless signatures consumed under the current installed key.
-    pub statelessSignaturesUsed: u64,
+    statelessSignaturesUsed: u64,
     // Current stateful leaf-tracking / recovery policy enforced by the wrapper.
-    pub statefulPolicy: StatefulPolicy,
+    statefulPolicy: StatefulPolicy,
     // Next expected stateful leaf when monotonic tracking is active.
-    pub nextStatefulLeafIndex: u32,
+    nextStatefulLeafIndex: u32,
     // Whether the wrapper is currently in recovery mode for stateless rotation.
-    pub recoveryMode: bool,
+    recoveryMode: bool,
 
-    pub usedLeafBitmap: HashMap<([u8; HASH_LEN], u64), U256>,
+    usedLeafBitmap: HashMap<([u8; HASH_LEN], u64), U256>,
 }
 
 impl ShrincsAccountVerifierExample {
@@ -110,6 +110,50 @@ impl ShrincsAccountVerifierExample {
             recoveryMode: false,
             usedLeafBitmap: HashMap::new(),
         }
+    }
+
+    pub fn currentShrincsPublicKey(&self) -> [u8; HASH_LEN] {
+        self.currentShrincsPublicKey
+    }
+
+    pub fn owner(&self) -> [u8; HASH_LEN] {
+        self.owner
+    }
+
+    pub fn chainId(&self) -> [u8; HASH_LEN] {
+        self.chainId
+    }
+
+    pub fn contractAddress(&self) -> [u8; 20] {
+        self.contractAddress
+    }
+
+    pub fn parameterSetId(&self) -> ParameterSetId {
+        self.parameterSetId
+    }
+
+    pub fn nonce(&self) -> [u8; HASH_LEN] {
+        self.nonce
+    }
+
+    pub fn keyVersion(&self) -> [u8; HASH_LEN] {
+        self.keyVersion
+    }
+
+    pub fn statelessSignaturesUsed(&self) -> u64 {
+        self.statelessSignaturesUsed
+    }
+
+    pub fn statefulPolicy(&self) -> StatefulPolicy {
+        self.statefulPolicy
+    }
+
+    pub fn nextStatefulLeafIndex(&self) -> u32 {
+        self.nextStatefulLeafIndex
+    }
+
+    pub fn recoveryMode(&self) -> bool {
+        self.recoveryMode
     }
 
     // verifyStatefulUncheckedMessage: Internal raw stateful verification for tests and support harnesses only.
@@ -534,7 +578,7 @@ impl ShrincsAccountVerifierExample {
     // 4. Reset stateless usage and stateful leaf tracking for the new key.
     // 5. Return the wrapper to the default monotonic non-recovery policy.
     // 6. Emit rotation and policy-reset events for off-chain observers.
-    pub fn installFreshKey(
+    fn installFreshKey(
         &mut self,
         nextCompositePublicKey: [u8; HASH_LEN],
         nextParameterSetId: ParameterSetId,
@@ -610,19 +654,19 @@ mod tests {
     fn initializes_account_state_with_default_policy() {
         let account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), id(3));
 
-        assert_eq!(account.owner, id(1));
+        assert_eq!(account.owner(), id(1));
         assert_eq!(
             account.domainSeparator(),
             ShrincsAccountVerifierExample::computeDomainSeparator(id(2), address(7))
         );
-        assert_eq!(account.currentShrincsPublicKey, id(3));
-        assert_eq!(account.parameterSetId, ParameterSetId::Sphincs256sKeccakQ20);
-        assert_eq!(account.statefulPolicy, StatefulPolicy::MonotonicIndex);
-        assert_eq!(account.nextStatefulLeafIndex, INITIAL_STATEFUL_LEAF_INDEX);
-        assert_eq!(account.nonce, [0u8; HASH_LEN]);
-        assert_eq!(account.keyVersion, [0u8; HASH_LEN]);
-        assert_eq!(account.statelessSignaturesUsed, 0);
-        assert!(!account.recoveryMode);
+        assert_eq!(account.currentShrincsPublicKey(), id(3));
+        assert_eq!(account.parameterSetId(), ParameterSetId::Sphincs256sKeccakQ20);
+        assert_eq!(account.statefulPolicy(), StatefulPolicy::MonotonicIndex);
+        assert_eq!(account.nextStatefulLeafIndex(), INITIAL_STATEFUL_LEAF_INDEX);
+        assert_eq!(account.nonce(), [0u8; HASH_LEN]);
+        assert_eq!(account.keyVersion(), [0u8; HASH_LEN]);
+        assert_eq!(account.statelessSignaturesUsed(), 0);
+        assert!(!account.recoveryMode());
     }
 
     #[test]
@@ -645,8 +689,8 @@ mod tests {
             .enterRecoveryMode(id(1))
             .expect("owner can arm recovery mode");
 
-        assert_eq!(account.statefulPolicy, StatefulPolicy::RecoveryRotation);
-        assert!(account.recoveryMode);
+        assert_eq!(account.statefulPolicy(), StatefulPolicy::RecoveryRotation);
+        assert!(account.recoveryMode());
     }
 
     #[test]
@@ -655,7 +699,7 @@ mod tests {
 
         assert!(account.precheckStatefulLeafUse(1));
         account.commitStatefulLeafUse(1);
-        assert_eq!(account.nextStatefulLeafIndex, 2);
+        assert_eq!(account.nextStatefulLeafIndex(), 2);
         assert!(!account.precheckStatefulLeafUse(1));
         assert!(account.precheckStatefulLeafUse(2));
     }
@@ -690,10 +734,10 @@ mod tests {
         assert!(account.isLeafUsed(256));
         assert!(account
             .usedLeafBitmap
-            .contains_key(&(account.keyVersion, 0)));
+            .contains_key(&(account.keyVersion(), 0)));
         assert!(account
             .usedLeafBitmap
-            .contains_key(&(account.keyVersion, 1)));
+            .contains_key(&(account.keyVersion(), 1)));
     }
 
     #[test]
@@ -709,12 +753,12 @@ mod tests {
 
         account.installFreshKey(id(4), ParameterSetId::Sphincs256sKeccakQ20);
 
-        assert_eq!(account.currentShrincsPublicKey, id(4));
-        assert_eq!(account.nonce[HASH_LEN - 1], 1);
-        assert_eq!(account.keyVersion[HASH_LEN - 1], 1);
-        assert_eq!(account.statelessSignaturesUsed, 0);
-        assert_eq!(account.statefulPolicy, StatefulPolicy::MonotonicIndex);
-        assert_eq!(account.nextStatefulLeafIndex, INITIAL_STATEFUL_LEAF_INDEX);
-        assert!(!account.recoveryMode);
+        assert_eq!(account.currentShrincsPublicKey(), id(4));
+        assert_eq!(account.nonce()[HASH_LEN - 1], 1);
+        assert_eq!(account.keyVersion()[HASH_LEN - 1], 1);
+        assert_eq!(account.statelessSignaturesUsed(), 0);
+        assert_eq!(account.statefulPolicy(), StatefulPolicy::MonotonicIndex);
+        assert_eq!(account.nextStatefulLeafIndex(), INITIAL_STATEFUL_LEAF_INDEX);
+        assert!(!account.recoveryMode());
     }
 }
