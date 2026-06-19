@@ -17,67 +17,31 @@
 
 pub const HASH_LEN: usize = 32;
 pub const HASH_SUITE_KECCAK_256: u32 = 1;
+pub const STATELESS_SIGNATURE_LIMIT: u64 = 1_048_576;
+pub const HYPERTREE_HEIGHT: u8 = 64;
+pub const NUM_HYPERTREE_LAYERS: u8 = 8;
+pub const FORS_TREE_HEIGHT: u8 = 14;
+pub const NUM_FORS_TREES: u8 = 22;
+pub const WOTS_CHAIN_LEN: u16 = 16;
+pub const NUM_WOTS_CHAINS: u16 = 64;
 
 // Encoded stateful public key layout:
 // 32-byte pkSeed || 32-byte root || 4-byte maxSignatures.
 pub const STATEFUL_PUBLIC_KEY_BYTES: usize = 68;
-// Stateful WOTS-C uses 64 chains in the current supported profile.
+// Stateful WOTS-C uses 64 chains.
 pub const WOTS_CHAINS_STATEFUL: usize = 64;
 // Stateful WOTS-C uses base-16 digits for message expansion.
 pub const WOTS_BASE_STATEFUL: u32 = 16;
 // The 64 base-16 digits reconstructed from the stateful message digest must
-// sum to 480 in the current supported profile.
+// sum to 480.
 pub const WOTS_TARGET_SUM_STATEFUL: u32 = 480;
 
 pub const ADDRESS_TYPE_WOTS_HASH: u32 = 0;
 pub const ADDRESS_TYPE_TREE: u32 = 2;
 pub const ADDRESS_TYPE_FORS_TREE: u32 = 3;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ParameterSetId {
-    Sphincs256sKeccakQ20,
-    Unsupported,
-}
-
-impl ParameterSetId {
-    pub(crate) fn packed_byte(self) -> u8 {
-        match self {
-            Self::Sphincs256sKeccakQ20 => 0,
-            Self::Unsupported => 1,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ParamsView {
-    /// Parameter profile selected by the caller and declared by the public key.
-    pub parameter_set_id: ParameterSetId,
-    /// Hash suite identifier bound into action and rotation message hashes.
-    pub hash_suite_id: u32,
-    /// Maximum stateless signatures accepted for this profile.
-    pub stateless_signature_limit: u64,
-    /// Hash output length. The supported Solidity profile fixes this to 32.
-    pub hash_len: u16,
-    /// Total height of the hypertree across all layers.
-    pub hypertree_height: u8,
-    /// Number of hypertree layers. Each layer has `hypertree_height / num_hypertree_layers` levels.
-    pub num_hypertree_layers: u8,
-    /// Height of each FORS tree.
-    pub fors_tree_height: u8,
-    /// Number of FORS trees. FORS-C signs `num_fors_trees - 1` entries.
-    pub num_fors_trees: u8,
-    /// WOTS-C base. The current profile uses base 16.
-    pub chain_len: u16,
-    /// Number of WOTS-C chains used by stateless and stateful WOTS-C.
-    pub num_wots_chains: u16,
-    /// Required sum of reconstructed WOTS-C digits.
-    pub wots_target_sum: u32,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicKey {
-    /// Parameter profile declared by this public key.
-    pub parameter_set_id: ParameterSetId,
     /// Encoded stateful key: `pk_seed || root || max_signatures`.
     pub stateful_public_key: Vec<u8>,
     /// Commitment to the installed hybrid public-key bundle.
@@ -162,8 +126,6 @@ pub struct StatelessSignature {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatefulRotationTarget {
-    /// Parameter set declared by the replacement stateful key.
-    pub parameter_set_id: ParameterSetId,
     /// Encoded replacement stateful public key.
     pub stateful_public_key: Vec<u8>,
     /// Commitment to the replacement installed public-key bundle.
@@ -172,8 +134,6 @@ pub struct StatefulRotationTarget {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RotationTarget {
-    /// Parameter set declared by the replacement full key bundle.
-    pub parameter_set_id: ParameterSetId,
     /// Replacement encoded stateful public key.
     pub stateful_public_key: Vec<u8>,
     /// Commitment to the replacement installed public-key bundle.
@@ -206,37 +166,4 @@ pub struct ActionContext {
     pub action_type: [u8; HASH_LEN],
     /// Hash of the action payload being authorized.
     pub payload_hash: [u8; HASH_LEN],
-}
-
-pub fn default_params_view(parameter_set_id: ParameterSetId) -> ParamsView {
-    // Keep this table in lockstep with `ShrincsTypes.defaultParamsView` in Solidity.
-    // All downstream verifiers rely on these dimensions for fixed-length checks and bit slicing.
-    match parameter_set_id {
-        ParameterSetId::Sphincs256sKeccakQ20 => ParamsView {
-            parameter_set_id,
-            hash_suite_id: HASH_SUITE_KECCAK_256,
-            stateless_signature_limit: 1_048_576,
-            hash_len: 32,
-            hypertree_height: 64,
-            num_hypertree_layers: 8,
-            fors_tree_height: 14,
-            num_fors_trees: 22,
-            chain_len: 16,
-            num_wots_chains: 64,
-            wots_target_sum: WOTS_TARGET_SUM_STATEFUL,
-        },
-        ParameterSetId::Unsupported => ParamsView {
-            parameter_set_id,
-            hash_suite_id: 0,
-            stateless_signature_limit: 0,
-            hash_len: 0,
-            hypertree_height: 0,
-            num_hypertree_layers: 0,
-            fors_tree_height: 0,
-            num_fors_trees: 0,
-            chain_len: 0,
-            num_wots_chains: 0,
-            wots_target_sum: 0,
-        },
-    }
 }

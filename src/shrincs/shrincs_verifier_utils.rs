@@ -20,9 +20,8 @@
 use solana_program::keccak::hash as keccak256_hash;
 
 use super::shrincs_verifier_types::{
-    ActionContext, ParameterSetId, ParamsView, PublicKey, RotationContext, StatefulPublicKey,
-    ADDRESS_TYPE_FORS_TREE, ADDRESS_TYPE_TREE, HASH_LEN, HASH_SUITE_KECCAK_256,
-    STATEFUL_PUBLIC_KEY_BYTES, WOTS_TARGET_SUM_STATEFUL,
+    ActionContext, PublicKey, RotationContext, StatefulPublicKey, ADDRESS_TYPE_FORS_TREE,
+    ADDRESS_TYPE_TREE, HASH_LEN, NUM_WOTS_CHAINS, STATEFUL_PUBLIC_KEY_BYTES, WOTS_CHAIN_LEN,
 };
 
 pub(crate) fn keccak256(data: &[u8]) -> [u8; HASH_LEN] {
@@ -47,20 +46,6 @@ pub(crate) fn pack(parts: &[&[u8]]) -> Vec<u8> {
     out
 }
 
-pub(crate) fn valid_parameter_set_binding(
-    params: &ParamsView,
-    requested_parameter_set_id: ParameterSetId,
-    declared_parameter_set_id: ParameterSetId,
-) -> bool {
-    // There are three things to bind:
-    // - the caller-requested profile,
-    // - the profile declared by the public key,
-    // - the concrete hash suite used inside signed messages.
-    params.parameter_set_id == requested_parameter_set_id
-        && declared_parameter_set_id == requested_parameter_set_id
-        && params.hash_suite_id == HASH_SUITE_KECCAK_256
-}
-
 pub(crate) fn valid_action_context(context: &ActionContext) -> bool {
     // Zero domain/action/payload values are rejected so integrations cannot
     // accidentally verify under an unscoped or empty authorization domain.
@@ -78,7 +63,6 @@ pub(crate) fn public_key_commitment(public_key: &PublicKey) -> Option<[u8; HASH_
     let hypertree_root = word32(&public_key.hypertree_root)?;
     Some(hash_packed(&[
         b"shrincs-public-key",
-        &[public_key.parameter_set_id.packed_byte()],
         &public_key.stateful_public_key,
         &pk_seed,
         &hypertree_root,
@@ -86,14 +70,12 @@ pub(crate) fn public_key_commitment(public_key: &PublicKey) -> Option<[u8; HASH_
 }
 
 pub(crate) fn stateful_rotation_target_commitment(
-    parameter_set_id: ParameterSetId,
     stateful_public_key: &[u8],
     pk_seed: &[u8; HASH_LEN],
     hypertree_root: &[u8; HASH_LEN],
 ) -> [u8; HASH_LEN] {
     hash_packed(&[
         b"shrincs-public-key",
-        &[parameter_set_id.packed_byte()],
         stateful_public_key,
         pk_seed,
         hypertree_root,
@@ -106,7 +88,6 @@ pub(crate) fn rotation_target_commitment(
     let pk_seed = word32(&target.pk_seed)?;
     let hypertree_root = word32(&target.hypertree_root)?;
     Some(stateful_rotation_target_commitment(
-        target.parameter_set_id,
         &target.stateful_public_key,
         &pk_seed,
         &hypertree_root,
@@ -123,43 +104,6 @@ pub(crate) fn matches_expected_public_key_commitment(
     expected_public_key_commitment != [0u8; HASH_LEN]
         && word32(&public_key.public_key_commitment) == Some(expected_public_key_commitment)
         && public_key_commitment(public_key) == Some(expected_public_key_commitment)
-}
-
-pub(crate) fn valid_params(params: &ParamsView, public_key: &PublicKey) -> bool {
-    // The current verifier is intentionally profile-specific. These checks make
-    // accidental cross-profile verification fail closed instead of interpreting
-    // byte arrays with the wrong dimensions.
-    if params.parameter_set_id != ParameterSetId::Sphincs256sKeccakQ20 {
-        return false;
-    }
-    if params.hash_len != 32 {
-        return false;
-    }
-    if params.parameter_set_id != public_key.parameter_set_id {
-        return false;
-    }
-    if params.hypertree_height != 64
-        || params.num_hypertree_layers != 8
-        || params.fors_tree_height != 14
-    {
-        return false;
-    }
-    if params.num_fors_trees != 22 {
-        return false;
-    }
-    if params.chain_len != 16 {
-        return false;
-    }
-    if params.num_wots_chains != 64 {
-        return false;
-    }
-    if params.wots_target_sum != WOTS_TARGET_SUM_STATEFUL {
-        return false;
-    }
-    if !valid_public_key(public_key) {
-        return false;
-    }
-    (params.num_fors_trees as u64) * (1u64 << params.fors_tree_height) <= u32::MAX as u64
 }
 
 pub(crate) fn valid_public_key(public_key: &PublicKey) -> bool {
@@ -203,8 +147,8 @@ pub(crate) fn base_w16_digit(digest: &[u8; HASH_LEN], index: usize) -> u32 {
 }
 
 pub(crate) fn base_w_digit(w: u16, digest: &[u8], index: usize) -> u32 {
-    // The supported profile uses base 16. The base-256 branch is retained to
-    // match Solidity's helper and make future parameter expansion obvious.
+    // The compiled constants use base 16. The base-256 branch is retained to
+    // match Solidity's helper if the chain length is widened later.
     if w == 256 {
         return u32::from(digest[index]);
     }
@@ -216,9 +160,9 @@ pub(crate) fn base_w_digit(w: u16, digest: &[u8], index: usize) -> u32 {
     }
 }
 
-pub(crate) fn wots_digest_bytes(params: &ParamsView) -> usize {
-    let bits_per_digit = if params.chain_len == 256 { 8 } else { 4 };
-    (params.num_wots_chains as usize * bits_per_digit + 7) / 8
+pub(crate) fn wots_digest_bytes() -> usize {
+    let bits_per_digit = if WOTS_CHAIN_LEN == 256 { 8 } else { 4 };
+    (NUM_WOTS_CHAINS as usize * bits_per_digit + 7) / 8
 }
 
 pub(crate) fn read_bits32(input: &[u8], start_bit: usize, bit_len: u32) -> Option<u32> {

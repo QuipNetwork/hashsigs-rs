@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 use hashsigs_rs::shrincs::{
-    ParameterSetId, PublicKey, ShrincsSigner, StatefulSignature, StatelessSignature, HASH_LEN,
+    PublicKey, ShrincsSigner, StatefulSignature, StatelessSignature, HASH_LEN,
 };
 use serde_json::{json, Value};
 use std::fs;
@@ -15,22 +15,16 @@ const OUT_PATH: &str = "tests/test_vectors/shrincs_sphincs_256s_keccak.json";
 #[test]
 #[ignore = "run explicitly to refresh Solidity SHRINCS vectors"]
 fn generate_shrincs_sphincs_256s_keccak_vectors() {
-    let (mut stateful_key, stateful_public_key) = ShrincsSigner::keygen(
-        ParameterSetId::Sphincs256sKeccakQ20,
-        b"shrincs solidity vector stateful seed",
-        4,
-    )
-    .expect("stateful keygen");
+    let (mut stateful_key, stateful_public_key) =
+        ShrincsSigner::keygen(b"shrincs solidity vector stateful seed", 4)
+            .expect("stateful keygen");
     let stateful_message = hash_word(b"shrincs solidity stateful message").to_vec();
     let stateful_signature = ShrincsSigner::sign_stateful_raw(&mut stateful_key, &stateful_message)
         .expect("stateful signature");
 
-    let (stateless_key, stateless_public_key) = ShrincsSigner::keygen(
-        ParameterSetId::Sphincs256sKeccakQ20,
-        b"shrincs solidity vector stateless seed",
-        256,
-    )
-    .expect("stateless keygen");
+    let (stateless_key, stateless_public_key) =
+        ShrincsSigner::keygen(b"shrincs solidity vector stateless seed", 256)
+            .expect("stateless keygen");
     let stateless_message = hash_word(b"shrincs solidity stateless message").to_vec();
     let stateless_signature = ShrincsSigner::sign_stateless_raw(&stateless_key, &stateless_message)
         .expect("stateless signature");
@@ -62,18 +56,6 @@ fn generate_shrincs_sphincs_256s_keccak_vectors() {
     tampered_component_public_key.stateful_public_key[0] ^= 1;
 
     let vectors = json!({
-        "params": {
-            "name": "sphincs-256s",
-            "h": 64,
-            "d": 8,
-            "subtreeHeight": 8,
-            "a": 14,
-            "k": 22,
-            "nBits": 256,
-            "wotsW": 16,
-            "l": 64,
-            "targetSum": 480
-        },
         "stateful": {
             "publicKey": stateful_public_key_json(&stateful_public_key),
             "message": hex(&stateful_message),
@@ -158,18 +140,16 @@ fn stateless_calldata(
     message: &[u8],
     signature: &StatelessSignature,
 ) -> String {
-    let params = "(32,64,8,14,22,16,64,480)".to_string();
     let public_key = format!(
-        "({},{},{},{})",
-        "0",
+        "({},{},{})",
         hex(&public_key.stateful_public_key),
         hex(&public_key.pk_seed),
         hex(&public_key.hypertree_root)
     );
     let sig = stateless_signature_cast(signature);
     cast_calldata(
-        "f((uint16,uint8,uint8,uint8,uint8,uint16,uint16,uint32),(uint8,bytes,bytes,bytes),bytes,((bytes,uint32,(bytes,bytes[])[]),(uint64,uint32,bytes,(bytes,uint32,bytes[]),bytes[])[]))",
-        &[params, public_key, hex(message), sig],
+        "f((bytes,bytes,bytes),bytes,((bytes,uint32,(bytes,bytes[])[]),(uint64,uint32,bytes,(bytes,uint32,bytes[]),bytes[])[]))",
+        &[public_key, hex(message), sig],
     )
 }
 

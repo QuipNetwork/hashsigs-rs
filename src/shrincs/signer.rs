@@ -49,12 +49,10 @@ use self::shrincs_signer_stateful::{
     sign_stateful_raw as sign_stateful_raw_inner, stateful_subtree_root,
 };
 use self::shrincs_signer_utils::{
-    derive32, encode_stateful_public_key, ensure_supported_params, public_key_from_components,
-    word32,
+    derive32, encode_stateful_public_key, public_key_from_components, word32,
 };
 use self::verifier::{
-    ActionContext, ParameterSetId, PublicKey, ShrincsVerifier, StatefulSignature,
-    StatelessSignature,
+    ActionContext, PublicKey, ShrincsVerifier, StatefulSignature, StatelessSignature,
 };
 
 pub struct ShrincsSigner;
@@ -69,12 +67,9 @@ impl ShrincsSigner {
     /// and hypertree `PK.root`. The message-specific FORS root is derived
     /// during signing and authenticated by the hypertree.
     pub fn keygen(
-        parameter_set_id: ParameterSetId,
         seed_material: &[u8],
         max_stateful_signatures: u32,
     ) -> ShrincsSignerResult<(ShrincsSigningKey, PublicKey)> {
-        let params = ShrincsVerifier::default_params_view(parameter_set_id);
-        ensure_supported_params(&params)?;
         if max_stateful_signatures == 0 {
             return None;
         }
@@ -94,10 +89,9 @@ impl ShrincsSigner {
         let stateless_sk_seed = derive32(b"shrincs-stateless-sk-seed", seed_material, &[]);
         let stateless_prf_seed = derive32(b"shrincs-stateless-prf-seed", seed_material, &[]);
         let pk_seed = derive32(b"shrincs-pk-seed", seed_material, &[]);
-        let hypertree_root = hypertree_public_root(&params, &stateless_sk_seed, &pk_seed);
+        let hypertree_root = hypertree_public_root(&stateless_sk_seed, &pk_seed);
 
         let signing_key = ShrincsSigningKey {
-            parameter_set_id,
             stateful_sk_seed,
             stateful_prf_seed,
             stateful_pk_seed,
@@ -110,7 +104,6 @@ impl ShrincsSigner {
             hypertree_root,
         };
         let public_key = public_key_from_components(
-            parameter_set_id,
             encode_stateful_public_key(stateful_pk_seed, stateful_root, max_stateful_signatures),
             pk_seed,
             hypertree_root,
@@ -127,8 +120,7 @@ impl ShrincsSigner {
     ) -> ShrincsSignerResult<StatefulSignature> {
         let expected = word32(&public_key.public_key_commitment)?;
         let verifier = ShrincsVerifier::new();
-        let message =
-            verifier.stateful_action_message_hash(signing_key.parameter_set_id, expected, context);
+        let message = verifier.stateful_action_message_hash(expected, context);
         sign_stateful_raw_inner(signing_key, &message)
     }
 
@@ -159,12 +151,8 @@ impl ShrincsSigner {
         signing_key: &ShrincsSigningKey,
         message: &[u8],
     ) -> ShrincsSignerResult<StatelessSignature> {
-        let params = ShrincsVerifier::default_params_view(signing_key.parameter_set_id);
-        ensure_supported_params(&params)?;
-
-        let signed_fors = sign_fors_c(&params, signing_key, message)?;
+        let signed_fors = sign_fors_c(signing_key, message)?;
         let hypertree = sign_hypertree(
-            &params,
             signing_key,
             signed_fors.root,
             signed_fors.tree_index,
@@ -179,7 +167,9 @@ impl ShrincsSigner {
 
 #[cfg(test)]
 mod tests {
-    use self::verifier::{HASH_LEN, WOTS_CHAINS_STATEFUL};
+    use self::verifier::{
+        HASH_LEN, HYPERTREE_HEIGHT, NUM_HYPERTREE_LAYERS, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN,
+    };
     use super::shrincs_signer_utils::hash_packed;
     use super::*;
 
@@ -198,33 +188,21 @@ mod tests {
     }
 
     #[test]
-    fn signer_supported_profile_matches_lib_style_constants() {
-        // Mirrors the constants checks in `lib.rs`, but for the SHRINCS signer
-        // profile that the signer intentionally limits itself to producing.
-        let params = ShrincsVerifier::default_params_view(ParameterSetId::Sphincs256sKeccakQ20);
-
-        assert_eq!(params.hash_len as usize, HASH_LEN);
-        assert_eq!(params.hypertree_height, 64);
-        assert_eq!(params.num_hypertree_layers, 8);
-        assert_eq!(params.hypertree_height / params.num_hypertree_layers, 8);
-        assert_eq!(params.num_wots_chains as usize, WOTS_CHAINS_STATEFUL);
-        assert_eq!(params.chain_len, 16);
+    fn signer_constants_match_verifier_constants() {
+        assert_eq!(HASH_LEN, 32);
+        assert_eq!(HYPERTREE_HEIGHT, 64);
+        assert_eq!(NUM_HYPERTREE_LAYERS, 8);
+        assert_eq!(HYPERTREE_HEIGHT / NUM_HYPERTREE_LAYERS, 8);
+        assert_eq!(NUM_WOTS_CHAINS, 64);
+        assert_eq!(WOTS_CHAIN_LEN, 16);
     }
 
     #[test]
     fn keygen_is_deterministic_for_same_seed_material() {
-        let (signing_key_a, public_key_a) = ShrincsSigner::keygen(
-            ParameterSetId::Sphincs256sKeccakQ20,
-            b"deterministic keygen seed",
-            4,
-        )
-        .unwrap();
-        let (signing_key_b, public_key_b) = ShrincsSigner::keygen(
-            ParameterSetId::Sphincs256sKeccakQ20,
-            b"deterministic keygen seed",
-            4,
-        )
-        .unwrap();
+        let (signing_key_a, public_key_a) =
+            ShrincsSigner::keygen(b"deterministic keygen seed", 4).unwrap();
+        let (signing_key_b, public_key_b) =
+            ShrincsSigner::keygen(b"deterministic keygen seed", 4).unwrap();
 
         assert_eq!(signing_key_a, signing_key_b);
         assert_eq!(public_key_a, public_key_b);
@@ -232,12 +210,7 @@ mod tests {
 
     #[test]
     fn keygen_public_key_uses_single_stateless_seed_and_root() {
-        let (_, public_key) = ShrincsSigner::keygen(
-            ParameterSetId::Sphincs256sKeccakQ20,
-            b"public key structure seed",
-            8,
-        )
-        .unwrap();
+        let (_, public_key) = ShrincsSigner::keygen(b"public key structure seed", 8).unwrap();
 
         assert_eq!(
             public_key.stateful_public_key.len(),
@@ -250,12 +223,7 @@ mod tests {
 
     #[test]
     fn keygen_starts_stateful_signer_at_leaf_one() {
-        let (signing_key, _) = ShrincsSigner::keygen(
-            ParameterSetId::Sphincs256sKeccakQ20,
-            b"initial stateful leaf seed",
-            8,
-        )
-        .unwrap();
+        let (signing_key, _) = ShrincsSigner::keygen(b"initial stateful leaf seed", 8).unwrap();
 
         assert_eq!(
             signing_key.next_stateful_leaf_index,
@@ -265,12 +233,8 @@ mod tests {
 
     #[test]
     fn generated_stateful_signature_verifies() {
-        let (mut signing_key, public_key) = ShrincsSigner::keygen(
-            ParameterSetId::Sphincs256sKeccakQ20,
-            b"stateful signer seed",
-            4,
-        )
-        .unwrap();
+        let (mut signing_key, public_key) =
+            ShrincsSigner::keygen(b"stateful signer seed", 4).unwrap();
         let expected = expected_key(&public_key);
         let message = hash_packed(&[b"stateful test message"]);
         let signature = ShrincsSigner::sign_stateful_raw(&mut signing_key, &message).unwrap();
@@ -278,7 +242,6 @@ mod tests {
         // Positive example matching `lib.rs`: a signer-generated signature must
         // verify against the public key returned by the same key generation.
         assert!(ShrincsVerifier::new().verify_stateful_unsafe_raw(
-            ParameterSetId::Sphincs256sKeccakQ20,
             expected,
             &public_key,
             &message,
@@ -288,12 +251,8 @@ mod tests {
 
     #[test]
     fn generated_stateful_action_signature_verifies() {
-        let (mut signing_key, public_key) = ShrincsSigner::keygen(
-            ParameterSetId::Sphincs256sKeccakQ20,
-            b"action signer seed",
-            4,
-        )
-        .unwrap();
+        let (mut signing_key, public_key) =
+            ShrincsSigner::keygen(b"action signer seed", 4).unwrap();
         let context = action_context();
         let expected = expected_key(&public_key);
         let signature =
@@ -302,7 +261,6 @@ mod tests {
         // The safe action path signs the verifier's canonical action hash, not
         // caller-supplied raw bytes.
         assert!(ShrincsVerifier::new().verify_stateful(
-            ParameterSetId::Sphincs256sKeccakQ20,
             expected,
             &public_key,
             &context,
@@ -312,12 +270,8 @@ mod tests {
 
     #[test]
     fn explicit_leaf_test_helper_verifies_for_requested_leaf() {
-        let (signing_key, public_key) = ShrincsSigner::keygen(
-            ParameterSetId::Sphincs256sKeccakQ20,
-            b"explicit leaf helper seed",
-            4,
-        )
-        .unwrap();
+        let (signing_key, public_key) =
+            ShrincsSigner::keygen(b"explicit leaf helper seed", 4).unwrap();
         let expected = expected_key(&public_key);
         let message = hash_packed(&[b"explicit leaf test message"]);
         let signature =
@@ -325,7 +279,6 @@ mod tests {
 
         assert_eq!(signature.auth_path.len(), 2);
         assert!(ShrincsVerifier::new().verify_stateful_unsafe_raw(
-            ParameterSetId::Sphincs256sKeccakQ20,
             expected,
             &public_key,
             &message,
@@ -335,12 +288,7 @@ mod tests {
 
     #[test]
     fn generated_stateless_raw_signature_verifies() {
-        let (signing_key, public_key) = ShrincsSigner::keygen(
-            ParameterSetId::Sphincs256sKeccakQ20,
-            b"stateless signer seed",
-            2,
-        )
-        .unwrap();
+        let (signing_key, public_key) = ShrincsSigner::keygen(b"stateless signer seed", 2).unwrap();
         let message = hash_packed(&[b"stateless test"]);
         let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &message).unwrap();
         let expected = expected_key(&public_key);
@@ -348,7 +296,6 @@ mod tests {
         // Stateless signatures should verify through the FORS-C opening and all
         // hypertree layers up to the generated hypertree public root.
         assert!(ShrincsVerifier::new().verify_stateless_unsafe_raw(
-            ParameterSetId::Sphincs256sKeccakQ20,
             expected,
             &public_key,
             &message,
@@ -357,27 +304,15 @@ mod tests {
     }
 
     #[test]
-    fn keygen_rejects_unsupported_profile_and_empty_stateful_budget() {
-        // Negative examples mirroring the invalid-input checks in `lib.rs`: the
-        // signer should not silently produce keys outside its supported profile.
-        assert!(ShrincsSigner::keygen(ParameterSetId::Unsupported, b"seed", 4).is_none());
-        assert!(ShrincsSigner::keygen(ParameterSetId::Sphincs256sKeccakQ20, b"seed", 0).is_none());
-        assert!(ShrincsSigner::keygen(
-            ParameterSetId::Sphincs256sKeccakQ20,
-            b"seed",
-            MAX_STATEFUL_SIGNATURES_LIMIT + 1,
-        )
-        .is_none());
+    fn keygen_rejects_empty_or_excessive_stateful_budget() {
+        assert!(ShrincsSigner::keygen(b"seed", 0).is_none());
+        assert!(ShrincsSigner::keygen(b"seed", MAX_STATEFUL_SIGNATURES_LIMIT + 1).is_none());
     }
 
     #[test]
     fn stateful_signing_advances_leaf_and_rejects_exhaustion() {
-        let (mut signing_key, public_key) = ShrincsSigner::keygen(
-            ParameterSetId::Sphincs256sKeccakQ20,
-            b"stateful exhaustion seed",
-            1,
-        )
-        .unwrap();
+        let (mut signing_key, public_key) =
+            ShrincsSigner::keygen(b"stateful exhaustion seed", 1).unwrap();
         let expected = expected_key(&public_key);
         let message = hash_packed(&[b"first and only stateful signature"]);
 
@@ -387,7 +322,6 @@ mod tests {
             INITIAL_STATEFUL_LEAF_INDEX + 1
         );
         assert!(ShrincsVerifier::new().verify_stateful_unsafe_raw(
-            ParameterSetId::Sphincs256sKeccakQ20,
             expected,
             &public_key,
             &message,
@@ -401,12 +335,8 @@ mod tests {
 
     #[test]
     fn stateful_signature_rejects_wrong_message_and_tampered_chain() {
-        let (mut signing_key, public_key) = ShrincsSigner::keygen(
-            ParameterSetId::Sphincs256sKeccakQ20,
-            b"stateful negative seed",
-            4,
-        )
-        .unwrap();
+        let (mut signing_key, public_key) =
+            ShrincsSigner::keygen(b"stateful negative seed", 4).unwrap();
         let expected = expected_key(&public_key);
         let message = hash_packed(&[b"stateful valid message"]);
         let wrong_message = hash_packed(&[b"stateful wrong message"]);
@@ -416,7 +346,6 @@ mod tests {
         // Equivalent to the invalid-message test in `lib.rs`: the signature is
         // bound to the exact message hash that was signed.
         assert!(!verifier.verify_stateful_unsafe_raw(
-            ParameterSetId::Sphincs256sKeccakQ20,
             expected,
             &public_key,
             &wrong_message,
@@ -427,23 +356,13 @@ mod tests {
         tampered.chains[0][0] ^= 1;
         // Equivalent to the invalid-signature test in `lib.rs`: mutating a WOTS
         // chain value prevents reconstruction of the committed public key hash.
-        assert!(!verifier.verify_stateful_unsafe_raw(
-            ParameterSetId::Sphincs256sKeccakQ20,
-            expected,
-            &public_key,
-            &message,
-            &tampered,
-        ));
+        assert!(!verifier.verify_stateful_unsafe_raw(expected, &public_key, &message, &tampered,));
     }
 
     #[test]
     fn stateful_action_rejects_tampered_context() {
-        let (mut signing_key, public_key) = ShrincsSigner::keygen(
-            ParameterSetId::Sphincs256sKeccakQ20,
-            b"action negative seed",
-            4,
-        )
-        .unwrap();
+        let (mut signing_key, public_key) =
+            ShrincsSigner::keygen(b"action negative seed", 4).unwrap();
         let expected = expected_key(&public_key);
         let context = action_context();
         let signature =
@@ -455,7 +374,6 @@ mod tests {
         // Safe action verification hashes the structured context, so changing a
         // replay-control field invalidates the same signature.
         assert!(!ShrincsVerifier::new().verify_stateful(
-            ParameterSetId::Sphincs256sKeccakQ20,
             expected,
             &public_key,
             &tampered_context,
@@ -465,12 +383,8 @@ mod tests {
 
     #[test]
     fn stateless_signature_rejects_wrong_message_and_tampered_hypertree_path() {
-        let (signing_key, public_key) = ShrincsSigner::keygen(
-            ParameterSetId::Sphincs256sKeccakQ20,
-            b"stateless negative seed",
-            2,
-        )
-        .unwrap();
+        let (signing_key, public_key) =
+            ShrincsSigner::keygen(b"stateless negative seed", 2).unwrap();
         let message = hash_packed(&[b"stateless valid message"]);
         let wrong_message = hash_packed(&[b"stateless wrong message"]);
         let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &message).unwrap();
@@ -480,7 +394,6 @@ mod tests {
         // The FORS-C digest binds the stateless signature to the signed raw
         // message, so a different message must not verify.
         assert!(!verifier.verify_stateless_unsafe_raw(
-            ParameterSetId::Sphincs256sKeccakQ20,
             expected,
             &public_key,
             &wrong_message,
@@ -491,23 +404,13 @@ mod tests {
         tampered.hypertree[0].auth_path[0][0] ^= 1;
         // A changed auth-path sibling should stop the verifier from climbing to
         // the committed hypertree root.
-        assert!(!verifier.verify_stateless_unsafe_raw(
-            ParameterSetId::Sphincs256sKeccakQ20,
-            expected,
-            &public_key,
-            &message,
-            &tampered,
-        ));
+        assert!(!verifier.verify_stateless_unsafe_raw(expected, &public_key, &message, &tampered,));
     }
 
     #[test]
     fn stateless_signature_rejects_malformed_lengths() {
-        let (signing_key, public_key) = ShrincsSigner::keygen(
-            ParameterSetId::Sphincs256sKeccakQ20,
-            b"stateless malformed seed",
-            2,
-        )
-        .unwrap();
+        let (signing_key, public_key) =
+            ShrincsSigner::keygen(b"stateless malformed seed", 2).unwrap();
         let message = hash_packed(&[b"stateless malformed message"]);
         let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &message).unwrap();
         let expected = expected_key(&public_key);
@@ -518,7 +421,6 @@ mod tests {
         // Similar to the invalid-signature-length test in `lib.rs`: the
         // hypertree must carry exactly one proof per configured layer.
         assert!(!verifier.verify_stateless_unsafe_raw(
-            ParameterSetId::Sphincs256sKeccakQ20,
             expected,
             &public_key,
             &message,
@@ -530,7 +432,6 @@ mod tests {
         // Each WOTS-C signature must include one chain value for every configured
         // WOTS chain.
         assert!(!verifier.verify_stateless_unsafe_raw(
-            ParameterSetId::Sphincs256sKeccakQ20,
             expected,
             &public_key,
             &message,
@@ -540,12 +441,8 @@ mod tests {
 
     #[test]
     fn public_key_commitment_rejects_tampered_component() {
-        let (mut signing_key, mut public_key) = ShrincsSigner::keygen(
-            ParameterSetId::Sphincs256sKeccakQ20,
-            b"public key negative seed",
-            4,
-        )
-        .unwrap();
+        let (mut signing_key, mut public_key) =
+            ShrincsSigner::keygen(b"public key negative seed", 4).unwrap();
         let expected = expected_key(&public_key);
         let message = hash_packed(&[b"public key commitment message"]);
         let signature = ShrincsSigner::sign_stateful_raw(&mut signing_key, &message).unwrap();
@@ -556,7 +453,6 @@ mod tests {
         // a commitment to every public-key component, so changing one component
         // while keeping the old expected commitment must be rejected.
         assert!(!ShrincsVerifier::new().verify_stateful_unsafe_raw(
-            ParameterSetId::Sphincs256sKeccakQ20,
             expected,
             &public_key,
             &message,

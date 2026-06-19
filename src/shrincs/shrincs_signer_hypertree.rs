@@ -22,10 +22,12 @@ use super::shrincs_signer_utils::{
     address_word32, base_w_digit, derive32, hash_packed, hypertree_address_word, wots_digest_bytes,
     WOTS_C_MAX_GRIND_COUNTER,
 };
-use super::verifier::{HypertreeLayerSignature, ParamsView, WotsCSignature, HASH_LEN};
+use super::verifier::{
+    HypertreeLayerSignature, WotsCSignature, HASH_LEN, HYPERTREE_HEIGHT, NUM_HYPERTREE_LAYERS,
+    NUM_WOTS_CHAINS, WOTS_CHAIN_LEN, WOTS_TARGET_SUM_STATEFUL,
+};
 
 pub(crate) fn sign_hypertree(
-    params: &ParamsView,
     signing_key: &ShrincsSigningKey,
     fors_root: [u8; HASH_LEN],
     bottom_tree: u64,
@@ -34,13 +36,13 @@ pub(crate) fn sign_hypertree(
     // Layer 0 starts at the FORS-selected coordinate. Every higher layer must
     // follow the verifier's recurrence, so the signature cannot choose arbitrary
     // upper-layer tree/leaf positions.
-    let subtree_height = u32::from(params.hypertree_height / params.num_hypertree_layers);
+    let subtree_height = u32::from(HYPERTREE_HEIGHT / NUM_HYPERTREE_LAYERS);
     let leaf_mask = (1u64 << subtree_height) - 1;
     // `stateless_sk_seed` is the shared SK.seed-style master for FORS-C and
     // hypertree WOTS-C signing secrets.
     // `pk_seed` is the global public seed used for stateless hashing.
-    let layer_seeds = hypertree_layer_seeds(params, &signing_key.stateless_sk_seed);
-    let mut layers = Vec::with_capacity(params.num_hypertree_layers as usize);
+    let layer_seeds = hypertree_layer_seeds(&signing_key.stateless_sk_seed);
+    let mut layers = Vec::with_capacity(NUM_HYPERTREE_LAYERS as usize);
 
     // `current` is the value being authenticated by the current layer. At layer
     // 0 it is the FORS aggregate root. After each layer, it becomes that layer's
@@ -49,7 +51,7 @@ pub(crate) fn sign_hypertree(
     let mut tree = bottom_tree;
     let mut leaf = bottom_leaf;
 
-    for layer in 0..u32::from(params.num_hypertree_layers) {
+    for layer in 0..u32::from(NUM_HYPERTREE_LAYERS) {
         // Each WOTS keypair is derived from its exact coordinate. This makes the
         // stateless hypertree deterministic without storing every WOTS secret.
         let leaf_seed = derive32(
@@ -63,9 +65,8 @@ pub(crate) fn sign_hypertree(
         // included in the layer signature so the verifier can bind the WOTS-C
         // chain reconstruction to the auth path that follows.
         let pk_hash =
-            stateless_wots_c_public_key(params, &signing_key.pk_seed, &sk_seed, layer, tree, leaf);
+            stateless_wots_c_public_key(&signing_key.pk_seed, &sk_seed, layer, tree, leaf);
         let wots_c_signature = sign_stateless_wots_c(
-            params,
             &signing_key.pk_seed,
             &sk_seed,
             &signing_key.stateless_prf_seed,
@@ -79,7 +80,6 @@ pub(crate) fn sign_hypertree(
         // The auth path proves that this WOTS public-key hash belongs to the
         // current layer's XMSS-like subtree at `tree`.
         let auth_path = hypertree_auth_path(
-            params,
             &signing_key.pk_seed,
             &layer_seeds[layer as usize],
             layer,
@@ -90,7 +90,6 @@ pub(crate) fn sign_hypertree(
         // Compute the subtree root that the next hypertree layer must sign. This
         // is also what the verifier obtains after it applies the auth path.
         current = hypertree_virtual_node(
-            params,
             &signing_key.pk_seed,
             &layer_seeds[layer as usize],
             layer,
@@ -119,7 +118,6 @@ pub(crate) fn sign_hypertree(
 }
 
 pub(crate) fn hypertree_public_root(
-    params: &ParamsView,
     stateless_sk_seed: &[u8; HASH_LEN],
     pk_seed: &[u8; HASH_LEN],
 ) -> [u8; HASH_LEN] {
@@ -128,11 +126,10 @@ pub(crate) fn hypertree_public_root(
     // therefore zero for the public root.
     //A full bottom-layer position needs 64 bits: [ L7 ][ L6 ][ L5 ][ L4 ][ L3 ][ L2 ][ L1 ][ L0 ]
     // Lowest layer has 2^64/2^8 = 2^56 subtrees so 7 of 8 bits are used for the tree index
-    let layer_seeds = hypertree_layer_seeds(params, stateless_sk_seed);
-    let top_layer = u32::from(params.num_hypertree_layers - 1);
-    let subtree_height = u32::from(params.hypertree_height / params.num_hypertree_layers);
+    let layer_seeds = hypertree_layer_seeds(stateless_sk_seed);
+    let top_layer = u32::from(NUM_HYPERTREE_LAYERS - 1);
+    let subtree_height = u32::from(HYPERTREE_HEIGHT / NUM_HYPERTREE_LAYERS);
     hypertree_virtual_node(
-        params,
         pk_seed,
         &layer_seeds[top_layer as usize],
         top_layer,
@@ -142,19 +139,15 @@ pub(crate) fn hypertree_public_root(
     )
 }
 
-fn hypertree_layer_seeds(
-    params: &ParamsView,
-    stateless_sk_seed: &[u8; HASH_LEN],
-) -> Vec<[u8; HASH_LEN]> {
+fn hypertree_layer_seeds(stateless_sk_seed: &[u8; HASH_LEN]) -> Vec<[u8; HASH_LEN]> {
     // One seed per hypertree layer keeps the subtrees domain-separated while
     // still deriving the entire stateless tree from one SK.seed-style seed.
-    (0..params.num_hypertree_layers)
+    (0..NUM_HYPERTREE_LAYERS)
         .map(|layer| derive32(b"hypertree-layer-seed", stateless_sk_seed, &[layer]))
         .collect()
 }
 
 fn hypertree_virtual_node(
-    params: &ParamsView,
     pk_seed: &[u8; HASH_LEN],
     layer_seed: &[u8; HASH_LEN],
     layer: u32,
@@ -166,33 +159,16 @@ fn hypertree_virtual_node(
     // simple and reviewable for the current small per-layer height; a production
     // signer can cache nodes if signing throughput later becomes important.
     if height == 0 {
-        return hypertree_leaf(params, pk_seed, layer_seed, layer, tree, index);
+        return hypertree_leaf(pk_seed, layer_seed, layer, tree, index);
     }
-    let left = hypertree_virtual_node(
-        params,
-        pk_seed,
-        layer_seed,
-        layer,
-        tree,
-        height - 1,
-        index << 1,
-    );
+    let left = hypertree_virtual_node(pk_seed, layer_seed, layer, tree, height - 1, index << 1);
     let right_index = (index << 1) | 1;
-    let right = hypertree_virtual_node(
-        params,
-        pk_seed,
-        layer_seed,
-        layer,
-        tree,
-        height - 1,
-        right_index,
-    );
+    let right = hypertree_virtual_node(pk_seed, layer_seed, layer, tree, height - 1, right_index);
     let address_word = hypertree_address_word(layer, tree, height, u64::from(index));
     hash_packed(&[b"hypertree-node", pk_seed, &address_word, &left, &right])
 }
 
 fn hypertree_auth_path(
-    params: &ParamsView,
     pk_seed: &[u8; HASH_LEN],
     layer_seed: &[u8; HASH_LEN],
     layer: u32,
@@ -202,18 +178,16 @@ fn hypertree_auth_path(
     // Collect siblings from the signed leaf up to the subtree root. At level 0
     // the sibling is another WOTS public-key hash; at higher levels it is the
     // root of a virtual subtree of height `level`.
-    let subtree_height = u32::from(params.hypertree_height / params.num_hypertree_layers);
+    let subtree_height = u32::from(HYPERTREE_HEIGHT / NUM_HYPERTREE_LAYERS);
     (0..subtree_height)
         .map(|level| {
             let sibling = (leaf >> level) ^ 1;
-            hypertree_virtual_node(params, pk_seed, layer_seed, layer, tree, level, sibling)
-                .to_vec()
+            hypertree_virtual_node(pk_seed, layer_seed, layer, tree, level, sibling).to_vec()
         })
         .collect()
 }
 
 fn hypertree_leaf(
-    params: &ParamsView,
     pk_seed: &[u8; HASH_LEN],
     layer_seed: &[u8; HASH_LEN],
     layer: u32,
@@ -228,11 +202,10 @@ fn hypertree_leaf(
         &[tree.to_be_bytes().as_slice(), leaf.to_be_bytes().as_slice()].concat(),
     );
     let sk_seed = derive32(b"hypertree-wots-sk-seed", &leaf_seed, &[]);
-    stateless_wots_c_public_key(params, pk_seed, &sk_seed, layer, tree, leaf)
+    stateless_wots_c_public_key(pk_seed, &sk_seed, layer, tree, leaf)
 }
 
 fn stateless_wots_c_public_key(
-    params: &ParamsView,
     pk_seed: &[u8; HASH_LEN],
     sk_seed: &[u8; HASH_LEN],
     layer: u32,
@@ -241,8 +214,8 @@ fn stateless_wots_c_public_key(
 ) -> [u8; HASH_LEN] {
     // Build every WOTS chain all the way to its endpoint, then hash the endpoints
     // together. That aggregate hash is the Merkle leaf used by the hypertree.
-    let mut endpoints = Vec::with_capacity(params.num_wots_chains as usize * HASH_LEN);
-    for chain in 0..params.num_wots_chains {
+    let mut endpoints = Vec::with_capacity(NUM_WOTS_CHAINS as usize * HASH_LEN);
+    for chain in 0..NUM_WOTS_CHAINS {
         let secret = stateless_wots_c_secret(sk_seed, u32::from(chain));
         let endpoint = stateless_wots_c_chain(
             pk_seed,
@@ -252,7 +225,7 @@ fn stateless_wots_c_public_key(
             u32::from(chain),
             secret,
             0,
-            u32::from(params.chain_len - 1),
+            u32::from(WOTS_CHAIN_LEN - 1),
         );
         endpoints.extend_from_slice(&endpoint);
     }
@@ -260,7 +233,6 @@ fn stateless_wots_c_public_key(
 }
 
 fn sign_stateless_wots_c(
-    params: &ParamsView,
     pk_seed: &[u8; HASH_LEN],
     sk_seed: &[u8; HASH_LEN],
     stateless_prf_seed: &[u8; HASH_LEN],
@@ -274,7 +246,7 @@ fn sign_stateless_wots_c(
     // WOTS public-key hash is included in the digest, binding the challenge to
     // the key whose Merkle path is supplied next.
     let randomizer = hash_packed(&[b"wots-c-randomizer", stateless_prf_seed, message]);
-    let digest_bytes = wots_digest_bytes(params);
+    let digest_bytes = wots_digest_bytes();
 
     for counter in 0..WOTS_C_MAX_GRIND_COUNTER {
         // The verifier derives the same digits from this digest. Grinding keeps
@@ -289,10 +261,10 @@ fn sign_stateless_wots_c(
             message,
         ]);
         let digest = &digest[..digest_bytes];
-        let digits = (0..params.num_wots_chains as usize)
-            .map(|index| base_w_digit(params.chain_len, digest, index))
+        let digits = (0..NUM_WOTS_CHAINS as usize)
+            .map(|index| base_w_digit(WOTS_CHAIN_LEN, digest, index))
             .collect::<Vec<_>>();
-        if digits.iter().sum::<u32>() != params.wots_target_sum {
+        if digits.iter().sum::<u32>() != WOTS_TARGET_SUM_STATEFUL {
             continue;
         }
 

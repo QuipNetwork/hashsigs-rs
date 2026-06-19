@@ -19,11 +19,10 @@
 
 use core::fmt;
 
-use super::verifier::{ParameterSetId, HASH_LEN};
+use super::verifier::HASH_LEN;
 
-/// Signer operations return `None` when inputs are outside the supported
-/// production profile, stateful leaves are exhausted, or WOTS-C/FORS-C grinding
-/// fails within the configured counter budget.
+/// Signer operations return `None` when stateful leaves are exhausted or
+/// WOTS-C/FORS-C grinding fails within the configured counter budget.
 pub type ShrincsSignerResult<T> = Option<T>;
 
 /// Secret material for both the stateful fast path and stateless recovery path.
@@ -32,8 +31,6 @@ pub type ShrincsSignerResult<T> = Option<T>;
 /// private key material: anyone with these seeds can sign.
 #[derive(PartialEq, Eq)]
 pub struct ShrincsSigningKey {
-    /// Parameter profile this secret key was generated for.
-    pub parameter_set_id: ParameterSetId,
     /// Secret seed used to derive stateful WOTS-C chain secrets.
     pub stateful_sk_seed: [u8; HASH_LEN],
     /// Secret PRF seed used to derive stateful WOTS-C message randomizers.
@@ -59,7 +56,6 @@ pub struct ShrincsSigningKey {
 impl fmt::Debug for ShrincsSigningKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ShrincsSigningKey")
-            .field("parameter_set_id", &self.parameter_set_id)
             .field("stateful_sk_seed", &"<redacted>")
             .field("stateful_prf_seed", &"<redacted>")
             .field("stateful_pk_seed", &"<redacted>")

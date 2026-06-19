@@ -21,16 +21,15 @@
 // from the signature, then climb the unbalanced stateful Merkle path back to the pinned root.
 
 use super::shrincs_verifier_types::{
-    default_params_view, ParameterSetId, PublicKey, StatefulSignature, ADDRESS_TYPE_WOTS_HASH,
-    HASH_LEN, WOTS_BASE_STATEFUL, WOTS_CHAINS_STATEFUL, WOTS_TARGET_SUM_STATEFUL,
+    PublicKey, StatefulSignature, ADDRESS_TYPE_WOTS_HASH, HASH_LEN, WOTS_BASE_STATEFUL,
+    WOTS_CHAINS_STATEFUL, WOTS_TARGET_SUM_STATEFUL,
 };
 use super::shrincs_verifier_utils::{
     address_word32, base_w16_digit, decode_stateful_public_key, hash_packed,
-    matches_expected_public_key_commitment, valid_parameter_set_binding, valid_public_key,
+    matches_expected_public_key_commitment, valid_public_key,
 };
 
 pub(crate) fn verify_stateful_unsafe_raw(
-    parameter_set_id: ParameterSetId,
     expected_public_key_commitment: [u8; HASH_LEN],
     public_key: &PublicKey,
     message: &[u8],
@@ -38,11 +37,6 @@ pub(crate) fn verify_stateful_unsafe_raw(
 ) -> bool {
     // Low-level verifier path. The caller supplies the signed message directly,
     // so replay protection and domain separation are entirely caller-managed.
-    let params = default_params_view(parameter_set_id);
-
-    if !valid_parameter_set_binding(&params, parameter_set_id, public_key.parameter_set_id) {
-        return false;
-    }
     if !matches_expected_public_key_commitment(public_key, expected_public_key_commitment) {
         return false;
     }
@@ -54,7 +48,7 @@ pub(crate) fn verify_stateful_unsafe_raw(
     };
 
     // The Solidity verifier encodes the leaf index as the authentication-path
-    // length. Leaf zero is intentionally not accepted by this stateful profile.
+    // length. Leaf zero is intentionally not accepted by this stateful layout.
     let leaf_index = signature.auth_path.len() as u32;
     if leaf_index == 0 {
         return false;

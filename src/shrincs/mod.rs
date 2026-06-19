@@ -22,15 +22,9 @@ pub mod verifier;
 
 pub use signer::{ShrincsSigner, ShrincsSignerResult, ShrincsSigningKey};
 pub use verifier::{
-    ActionContext, ForsEntry, ForsSignature, HypertreeLayerSignature, ParameterSetId, ParamsView,
-    PublicKey, RotationContext, RotationTarget, ShrincsVerifier, StatefulPublicKey,
-    StatefulRotationTarget, StatefulSignature, StatelessSignature, WotsCSignature,
-    ADDRESS_TYPE_FORS_TREE, ADDRESS_TYPE_TREE, ADDRESS_TYPE_WOTS_HASH, HASH_LEN,
-    HASH_SUITE_KECCAK_256, STATEFUL_PUBLIC_KEY_BYTES, WOTS_BASE_STATEFUL, WOTS_CHAINS_STATEFUL,
-    WOTS_TARGET_SUM_STATEFUL,
+    ActionContext, ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey, RotationContext,
+    RotationTarget, ShrincsVerifier, StatefulPublicKey, StatefulRotationTarget, StatefulSignature,
+    StatelessSignature, WotsCSignature, ADDRESS_TYPE_FORS_TREE, ADDRESS_TYPE_TREE,
+    ADDRESS_TYPE_WOTS_HASH, HASH_LEN, HASH_SUITE_KECCAK_256, STATEFUL_PUBLIC_KEY_BYTES,
+    STATELESS_SIGNATURE_LIMIT, WOTS_BASE_STATEFUL, WOTS_CHAINS_STATEFUL, WOTS_TARGET_SUM_STATEFUL,
 };
-
-/// Resolve the fixed SHRINCS parameter table for a supported profile.
-pub fn default_params_view(parameter_set_id: ParameterSetId) -> ParamsView {
-    ShrincsVerifier::default_params_view(parameter_set_id)
-}
