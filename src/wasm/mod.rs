@@ -15,11 +15,14 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+#![cfg_attr(not(feature = "wasm-bindings"), allow(dead_code, unused_imports))]
+
 //! WASM-oriented surface for `hashsigs-rs`.
 //!
-//! The first exported bindings are verifier-only and TS-friendly:
-//! callers pass hex strings plus plain JS objects that mirror the SHRINCS
-//! public-key / signature shapes.
+//! This module exports TS-friendly SHRINCS verifier, signer, and account
+//! bindings plus canonical account-message helpers.
+//! Callers pass hex strings plus plain JS objects that mirror the SHRINCS
+//! public-key, signature, and account-context shapes.
 
 pub use crate::shrincs;
 pub use crate::wotsplus;

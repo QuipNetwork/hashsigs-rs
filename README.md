@@ -32,8 +32,9 @@ cargo build-sbf
 
 ## WASM Packaging
 
-The repo now includes an initial verifier-oriented WASM surface in
-`src/wasm/`. Build it with `wasm-pack` and the `wasm-bindings` feature.
+The repo now includes a WASM surface in `src/wasm/` for SHRINCS verifier,
+signer, and account-wrapper bindings. Build it with `wasm-pack` and the
+`wasm-bindings` feature.
 
 Install `wasm-pack` once:
 
@@ -90,13 +91,14 @@ Target guidance:
 Current WASM scope:
 
 - supported now:
-  - verifier-oriented SHRINCS bindings
+  - SHRINCS verifier bindings
   - SHRINCS key generation and raw signing bindings
   - account-layer wrapper bindings
   - hex/JSON-friendly JS entry points
 - not implemented yet:
   - published npm package flow
-  - browser/node integration tests on a real wasm target
+  - documented browser/node packaging examples beyond the raw `wasm-pack` targets
+  - CI automation for real wasm-target binding test execution
   - WOTS-specific bindings
 
 ## WASM Testing
