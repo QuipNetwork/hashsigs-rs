@@ -77,6 +77,23 @@ impl WasmShrincsKeypair {
         js_value_from_serde(&stateful_signature_dto_from_signer(&signature))
     }
 
+    /// Deterministically sign a raw message at a caller-chosen stateful leaf.
+    ///
+    /// Unlike `signStatefulRaw`, this does not advance the keypair's internal
+    /// leaf counter: the caller supplies `leaf` (typically the lowest unused
+    /// leaf read from the on-chain used-leaf bitmap). The on-chain verifier
+    /// requires `authPath.length == leaf`, so the SDK stays authoritative over
+    /// which leaf is burned.
+    #[wasm_bindgen(js_name = signStatefulRawAt)]
+    pub fn sign_stateful_raw_at(&self, message_hex: &str, leaf: u32) -> Result<JsValue, JsValue> {
+        let message = parse_hex_bytes(message_hex).map_err(js_error)?;
+        let signature = ShrincsSigner::sign_stateful_raw_at_leaf(&self.signing_key, leaf, &message)
+            .ok_or_else(|| {
+                js_error("stateful signing failed for the supplied key/leaf/message".to_string())
+            })?;
+        js_value_from_serde(&stateful_signature_dto_from_signer(&signature))
+    }
+
     #[wasm_bindgen(js_name = signStatelessRaw)]
     pub fn sign_stateless_raw(&self, message_hex: &str) -> Result<JsValue, JsValue> {
         let message = parse_hex_bytes(message_hex).map_err(js_error)?;
