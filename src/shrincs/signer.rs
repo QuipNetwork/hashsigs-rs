@@ -43,7 +43,6 @@ pub use self::shrincs_signer_types::{ShrincsSignerResult, ShrincsSigningKey};
 
 use self::shrincs_signer_fors_c::sign_fors_c;
 use self::shrincs_signer_hypertree::{hypertree_public_root, sign_hypertree};
-#[cfg(test)]
 use self::shrincs_signer_stateful::sign_stateful_raw_at_leaf as sign_stateful_raw_at_leaf_inner;
 use self::shrincs_signer_stateful::{
     sign_stateful_raw as sign_stateful_raw_inner, stateful_subtree_root,
@@ -140,9 +139,13 @@ impl ShrincsSigner {
         sign_stateful_raw_inner(signing_key, message)
     }
 
-    /// Sign raw bytes with a specific stateful leaf for deterministic tests.
-    #[cfg(test)]
-    pub(crate) fn sign_stateful_raw_at_leaf(
+    /// Sign raw bytes at a caller-chosen stateful leaf.
+    ///
+    /// Deterministic for a given `(signing_key, leaf_index, message)`: unlike
+    /// `sign_stateful_raw`, it does not advance the monotonic
+    /// `next_stateful_leaf_index`. Exposed for off-chain test-vector generation
+    /// and for SDK callers that pick the leaf from the on-chain used-leaf bitmap.
+    pub fn sign_stateful_raw_at_leaf(
         signing_key: &ShrincsSigningKey,
         leaf_index: u32,
         message: &[u8],
