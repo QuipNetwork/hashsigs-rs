@@ -1159,7 +1159,13 @@ fn account_error_to_js(error: crate::account::AccountError) -> JsValue {
 
 #[cfg(feature = "wasm-bindings")]
 fn js_value_from_serde<T: serde::Serialize>(value: &T) -> Result<JsValue, JsValue> {
-    serde_wasm_bindgen::to_value(value).map_err(js_error_from_serde)
+    // Emit 64-bit integers (e.g. the hypertree `treeIndex: u64`) as JS BigInt:
+    // SPHINCS+ tree indices routinely exceed 2^53, so a plain JS `number` both
+    // throws on serialization and loses precision. u32 fields (counters, leaf
+    // index) are unaffected and stay numbers.
+    let serializer =
+        serde_wasm_bindgen::Serializer::new().serialize_large_number_types_as_bigints(true);
+    serde::Serialize::serialize(value, &serializer).map_err(js_error_from_serde)
 }
 
 #[cfg(test)]
