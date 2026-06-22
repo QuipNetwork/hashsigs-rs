@@ -24,8 +24,8 @@ use solana_program::keccak::hash as keccak256_hash;
 use crate::shrincs::{
     ActionContext, PublicKey, RotationContext, RotationTarget, ShrincsVerifier,
     StatefulRotationTarget, StatefulSignature, StatelessSignature, HASH_LEN,
-    STATELESS_SIGNATURE_LIMIT,
 };
+use crate::shrincs::verifier::STATELESS_SIGNATURE_LIMIT;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StatefulPolicy {
@@ -48,6 +48,7 @@ pub enum AccountError {
     OnlyOwner,
     RecoveryPolicyRequired,
     StatefulIndexRollback,
+    StatefulPolicyFrozen,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,6 +69,8 @@ pub struct ShrincsAccountVerifierExample {
     statelessSignaturesUsed: u64,
     // Current stateful leaf-tracking / recovery policy enforced by the wrapper.
     statefulPolicy: StatefulPolicy,
+    // Whether stateful leaf consumption has frozen policy changes for the current key epoch.
+    statefulPolicyFrozen: bool,
     // Next expected stateful leaf when monotonic tracking is active.
     nextStatefulLeafIndex: u32,
     // Whether the wrapper is currently in recovery mode for stateless rotation.
@@ -101,6 +104,7 @@ impl ShrincsAccountVerifierExample {
             statelessSignaturesUsed: 0,
             // Default to ordered stateful signing under monotonic leaf tracking.
             statefulPolicy: StatefulPolicy::MonotonicIndex,
+            statefulPolicyFrozen: false,
             // Fresh keys begin consuming stateful leaves from index 1.
             nextStatefulLeafIndex: INITIAL_STATEFUL_LEAF_INDEX,
             recoveryMode: false,
@@ -142,6 +146,10 @@ impl ShrincsAccountVerifierExample {
 
     pub fn nextStatefulLeafIndex(&self) -> u32 {
         self.nextStatefulLeafIndex
+    }
+
+    pub fn statefulPolicyFrozen(&self) -> bool {
+        self.statefulPolicyFrozen
     }
 
     pub fn recoveryMode(&self) -> bool {
@@ -327,8 +335,12 @@ impl ShrincsAccountVerifierExample {
             return false;
         };
 
-        // Install the next key bundle and reset wrapper state for the new epoch.
-        self.installFreshKey(nextCompositePublicKey);
+        // Count the recovery signature against the current stateless budget before preserving it
+        // into the next stateful-only epoch.
+        self.consumeStatelessRotationUse(nextCompositePublicKey, false);
+        // Install the next stateful subkey while preserving stateless usage accounting because
+        // the stateless key material is unchanged.
+        self.installFreshStatefulKey(nextCompositePublicKey);
         true
     }
 
@@ -376,8 +388,11 @@ impl ShrincsAccountVerifierExample {
             return false;
         };
 
-        // Install the next key bundle and reset wrapper state for the new epoch.
-        self.installFreshKey(nextCompositePublicKey);
+        // Count the recovery signature as the final stateless use under the old key before
+        // installing the fully fresh stateless bundle.
+        self.consumeStatelessRotationUse(nextCompositePublicKey, true);
+        // Install the next full key bundle and reset wrapper state for the new stateless epoch.
+        self.installFreshFullKey(nextCompositePublicKey);
         true
     }
 
@@ -399,16 +414,21 @@ impl ShrincsAccountVerifierExample {
 
     // setStatefulPolicyMonotonicIndex: Switch to monotonic stateful leaf tracking.
     // 1. Only the owner may change the wrapper policy.
-    // 2. Prevent rollback to an earlier expected leaf index.
-    // 3. Install monotonic tracking with the supplied next expected leaf.
-    // 4. Exit recovery mode because the wrapper is returning to normal operation.
-    // 5. Emit the policy update for off-chain observers.
+    // 2. Reject policy changes after any successful stateful leaf use in this key epoch.
+    // 3. Prevent rollback to an earlier expected leaf index.
+    // 4. Install monotonic tracking with the supplied next expected leaf.
+    // 5. Exit recovery mode because the wrapper is returning to normal operation.
+    // 6. Emit the policy update for off-chain observers.
     pub fn setStatefulPolicyMonotonicIndex(
         &mut self,
         caller: [u8; HASH_LEN],
         initialLeafIndex: u32,
     ) -> Result<(), AccountError> {
         self.onlyOwner(caller)?;
+        // Freeze the stateful tracking model once any stateful leaf has been consumed in this epoch.
+        if self.statefulPolicyFrozen {
+            return Err(AccountError::StatefulPolicyFrozen);
+        }
         // Never allow policy changes to roll back the expected monotonic leaf cursor.
         if initialLeafIndex < self.nextStatefulLeafIndex {
             return Err(AccountError::StatefulIndexRollback);
@@ -424,14 +444,19 @@ impl ShrincsAccountVerifierExample {
 
     // setStatefulPolicyRecoveryRotation: Switch to recovery-only stateless rotation mode.
     // 1. Only the owner may change the wrapper policy.
-    // 2. Preserve or initialize the stateful leaf cursor for later normal operation.
-    // 3. Require an explicit enterRecoveryMode() call before stateless recovery is accepted.
-    // 4. Emit the policy update for off-chain observers.
+    // 2. Reject policy changes after any successful stateful leaf use in this key epoch.
+    // 3. Preserve or initialize the stateful leaf cursor for later normal operation.
+    // 4. Require an explicit enterRecoveryMode() call before stateless recovery is accepted.
+    // 5. Emit the policy update for off-chain observers.
     pub fn setStatefulPolicyRecoveryRotation(
         &mut self,
         caller: [u8; HASH_LEN],
     ) -> Result<(), AccountError> {
         self.onlyOwner(caller)?;
+        // Freeze the stateful tracking model once any stateful leaf has been consumed in this epoch.
+        if self.statefulPolicyFrozen {
+            return Err(AccountError::StatefulPolicyFrozen);
+        }
         // Switch into the policy where stateless signatures serve as recovery authority.
         self.statefulPolicy = StatefulPolicy::RecoveryRotation;
         // Ensure the stateful cursor stays initialized for later normal operation.
@@ -445,14 +470,19 @@ impl ShrincsAccountVerifierExample {
 
     // setStatefulPolicyLeafBitmap: Switch to bitmap-based stateful leaf tracking.
     // 1. Only the owner may change the wrapper policy.
-    // 2. Preserve or initialize the stateful leaf cursor for future monotonic use.
-    // 3. Exit recovery mode because the wrapper is returning to normal operation.
-    // 4. Emit the policy update for off-chain observers.
+    // 2. Reject policy changes after any successful stateful leaf use in this key epoch.
+    // 3. Preserve or initialize the stateful leaf cursor for future monotonic use.
+    // 4. Exit recovery mode because the wrapper is returning to normal operation.
+    // 5. Emit the policy update for off-chain observers.
     pub fn setStatefulPolicyLeafBitmap(
         &mut self,
         caller: [u8; HASH_LEN],
     ) -> Result<(), AccountError> {
         self.onlyOwner(caller)?;
+        // Freeze the stateful tracking model once any stateful leaf has been consumed in this epoch.
+        if self.statefulPolicyFrozen {
+            return Err(AccountError::StatefulPolicyFrozen);
+        }
         // Switch into out-of-order bitmap tracking for stateful leaf use.
         self.statefulPolicy = StatefulPolicy::LeafBitmap;
         // Ensure the stateful cursor stays initialized for future monotonic use.
@@ -481,13 +511,14 @@ impl ShrincsAccountVerifierExample {
     }
 
     // precheckStatefulLeafUse: Check whether the active policy allows a stateful leaf before verification.
-    // 1. Reject stateful signatures while recovery mode is actively using stateless authority.
+    // 1. Reject all stateful signatures while the wrapper is configured for recovery-only stateless authority.
     // 2. Under monotonic tracking, accept only the next expected leaf.
     // 3. Under bitmap tracking, accept only leaves that have not yet been marked used.
     // 4. Return true for any remaining policy branch.
     pub fn precheckStatefulLeafUse(&self, leafIndex: u32) -> bool {
-        // While recovery mode is active, block all stateful signatures.
-        if self.statefulPolicy == StatefulPolicy::RecoveryRotation && self.recoveryMode {
+        // Recovery-rotation policy disables the stateful path entirely, whether or not recovery
+        // mode has been explicitly armed yet.
+        if self.statefulPolicy == StatefulPolicy::RecoveryRotation {
             return false;
         }
         // Ordered tracking accepts exactly one next leaf.
@@ -504,14 +535,13 @@ impl ShrincsAccountVerifierExample {
     // commitStatefulLeafUse: Record a successfully verified stateful leaf under the active policy.
     // 1. Under monotonic tracking, advance the next expected leaf by one.
     // 2. Under bitmap tracking, mark the corresponding bit for this leaf as used.
-    // 3. Leave recovery-only mode unchanged because stateful signatures are blocked there.
+    // 3. Freeze stateful policy changes for the remainder of the key epoch.
+    // 4. Leave recovery-only mode unchanged because stateful signatures are blocked there.
     pub fn commitStatefulLeafUse(&mut self, leafIndex: u32) {
         if self.statefulPolicy == StatefulPolicy::MonotonicIndex {
             // Move the expected cursor forward after one successful monotonic use.
             self.nextStatefulLeafIndex += 1;
-            return;
-        }
-        if self.statefulPolicy == StatefulPolicy::LeafBitmap {
+        } else if self.statefulPolicy == StatefulPolicy::LeafBitmap {
             // Group leaves into 256-bit words for compact bitmap storage.
             let wordIndex = u64::from(leafIndex) >> 8;
             // Select the bit inside that word corresponding to this leaf.
@@ -522,6 +552,8 @@ impl ShrincsAccountVerifierExample {
                 .or_default()
                 .set_bit(bitIndex);
         }
+        // Any successful stateful verification fixes the tracking model for this key epoch.
+        self.statefulPolicyFrozen = true;
     }
 
     // domainSeparator: Derive the wrapper's canonical signing domain.
@@ -553,14 +585,30 @@ impl ShrincsAccountVerifierExample {
         keccak256_hash(&encoded).to_bytes()
     }
 
-    // installFreshKey: Install a fresh key bundle and reset wrapper state for the new key epoch.
+    // consumeStatelessRotationUse: Record one successful stateless recovery signature used for rotation.
+    // 1. Increment the current stateless usage count under the old key epoch.
+    // 2. Keep the Rust account state aligned with the Solidity wrapper's accounting model.
+    fn consumeStatelessRotationUse(
+        &mut self,
+        _nextCompositePublicKey: [u8; HASH_LEN],
+        _fullRotation: bool,
+    ) {
+        self.statelessSignaturesUsed += 1;
+    }
+
+    // installRotatedKey: Install a rotated key bundle and reset wrapper state for the next epoch.
     // 1. Preserve the previous installed key commitment for the rotation event.
     // 2. Install the next SHRINCS public-key commitment.
     // 3. Advance nonce and key version to close the old authorization epoch.
-    // 4. Reset stateless usage and stateful leaf tracking for the new key.
-    // 5. Return the wrapper to the default monotonic non-recovery policy.
-    // 6. Emit rotation and policy-reset events for off-chain observers.
-    fn installFreshKey(&mut self, nextCompositePublicKey: [u8; HASH_LEN]) {
+    // 4. Reset or preserve stateless usage accounting according to the caller's intent.
+    // 5. Reset stateful leaf tracking and policy-freeze state for the new key.
+    // 6. Return the wrapper to the default monotonic non-recovery policy.
+    // 7. Emit rotation and policy-reset events for off-chain observers.
+    fn installRotatedKey(
+        &mut self,
+        nextCompositePublicKey: [u8; HASH_LEN],
+        resetStatelessUsage: bool,
+    ) {
         // Preserve the previous key commitment for the rotation event payload.
         let _previousShrincsPublicKey = self.currentShrincsPublicKey;
         // Install the next trusted SHRINCS public-key commitment.
@@ -568,14 +616,41 @@ impl ShrincsAccountVerifierExample {
         // Advance nonce and key epoch so old authorizations cannot be replayed.
         increment_u256_be(&mut self.nonce);
         increment_u256_be(&mut self.keyVersion);
-        // Reset per-key stateless usage accounting.
-        self.statelessSignaturesUsed = 0;
+        // Reset per-key stateless usage accounting only when the caller rotates the stateless key too.
+        if resetStatelessUsage {
+            self.statelessSignaturesUsed = 0;
+        }
         // Reset stateful signing to the first leaf of the new key epoch.
         self.nextStatefulLeafIndex = INITIAL_STATEFUL_LEAF_INDEX;
+        // Fresh key epochs allow policy selection again until the first stateful leaf is consumed.
+        self.statefulPolicyFrozen = false;
         // Fresh installs return to the default safe wrapper policy.
         self.statefulPolicy = StatefulPolicy::MonotonicIndex;
         // Recovery mode ends once the new key has been installed.
         self.recoveryMode = false;
+    }
+
+    // installFreshStatefulKey: Install a fresh stateful subkey while preserving the stateless side.
+    // 1. Install the next SHRINCS public-key commitment.
+    // 2. Preserve stateless usage accounting because the stateless key material is unchanged.
+    // 3. Reset stateful tracking and wrapper policy state for the next epoch.
+    fn installFreshStatefulKey(&mut self, nextCompositePublicKey: [u8; HASH_LEN]) {
+        self.installRotatedKey(nextCompositePublicKey, false);
+    }
+
+    // installFreshFullKey: Install a fully fresh SHRINCS bundle for the next key epoch.
+    // 1. Install the next SHRINCS public-key commitment.
+    // 2. Reset stateless usage accounting because the stateless key material changes too.
+    // 3. Reset stateful tracking and wrapper policy state for the next epoch.
+    fn installFreshFullKey(&mut self, nextCompositePublicKey: [u8; HASH_LEN]) {
+        self.installRotatedKey(nextCompositePublicKey, true);
+    }
+
+    // installFreshKey: Backward-compatible alias for the full fresh-key install path.
+    // 1. Preserve existing helper-call behavior in tests and support harnesses.
+    // 2. Route to the semantic full-key install helper.
+    fn installFreshKey(&mut self, nextCompositePublicKey: [u8; HASH_LEN]) {
+        self.installFreshFullKey(nextCompositePublicKey);
     }
 
     fn onlyOwner(&self, caller: [u8; HASH_LEN]) -> Result<(), AccountError> {
@@ -712,6 +787,7 @@ mod tests {
         );
         assert_eq!(account.currentShrincsPublicKey(), id(3));
         assert_eq!(account.statefulPolicy(), StatefulPolicy::MonotonicIndex);
+        assert!(!account.statefulPolicyFrozen());
         assert_eq!(account.nextStatefulLeafIndex(), INITIAL_STATEFUL_LEAF_INDEX);
         assert_eq!(account.nonce(), [0u8; HASH_LEN]);
         assert_eq!(account.keyVersion(), [0u8; HASH_LEN]);
@@ -750,6 +826,7 @@ mod tests {
         assert!(account.precheckStatefulLeafUse(1));
         account.commitStatefulLeafUse(1);
         assert_eq!(account.nextStatefulLeafIndex(), 2);
+        assert!(account.statefulPolicyFrozen());
         assert!(!account.precheckStatefulLeafUse(1));
         assert!(account.precheckStatefulLeafUse(2));
     }
@@ -764,10 +841,12 @@ mod tests {
         assert!(account.precheckStatefulLeafUse(9));
         account.commitStatefulLeafUse(9);
         assert!(account.isLeafUsed(9));
+        assert!(account.statefulPolicyFrozen());
         assert!(!account.precheckStatefulLeafUse(9));
 
         account.installFreshKey(id(4));
         assert!(!account.isLeafUsed(9));
+        assert!(!account.statefulPolicyFrozen());
     }
 
     #[test]
@@ -808,8 +887,40 @@ mod tests {
         assert_eq!(account.keyVersion()[HASH_LEN - 1], 1);
         assert_eq!(account.statelessSignaturesUsed(), 0);
         assert_eq!(account.statefulPolicy(), StatefulPolicy::MonotonicIndex);
+        assert!(!account.statefulPolicyFrozen());
         assert_eq!(account.nextStatefulLeafIndex(), INITIAL_STATEFUL_LEAF_INDEX);
         assert!(!account.recoveryMode());
+    }
+
+    #[test]
+    fn policy_changes_freeze_after_successful_stateful_use() {
+        let mut account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), id(3));
+
+        account.commitStatefulLeafUse(1);
+
+        assert_eq!(
+            account.setStatefulPolicyLeafBitmap(id(1)),
+            Err(AccountError::StatefulPolicyFrozen)
+        );
+        assert_eq!(
+            account.setStatefulPolicyRecoveryRotation(id(1)),
+            Err(AccountError::StatefulPolicyFrozen)
+        );
+    }
+
+    #[test]
+    fn recovery_rotation_blocks_stateful_path_before_and_during_recovery_mode() {
+        let mut account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), id(3));
+        account
+            .setStatefulPolicyRecoveryRotation(id(1))
+            .expect("owner can select recovery policy");
+
+        assert!(!account.precheckStatefulLeafUse(1));
+
+        account
+            .enterRecoveryMode(id(1))
+            .expect("owner can arm recovery mode");
+        assert!(!account.precheckStatefulLeafUse(1));
     }
 
     #[test]
@@ -905,6 +1016,7 @@ mod tests {
         account
             .enterRecoveryMode(id(1))
             .expect("owner can arm recovery mode");
+        account.statelessSignaturesUsed = 7;
         let context = RotationContext {
             domain_separator: account.domainSeparator(),
             nonce: account.nonce(),
@@ -919,7 +1031,9 @@ mod tests {
         assert_eq!(account.currentShrincsPublicKey(), next_commitment);
         assert_eq!(account.keyVersion()[HASH_LEN - 1], 1);
         assert_eq!(account.nonce()[HASH_LEN - 1], 1);
+        assert_eq!(account.statelessSignaturesUsed(), 8);
         assert_eq!(account.statefulPolicy(), StatefulPolicy::MonotonicIndex);
+        assert!(!account.statefulPolicyFrozen());
         assert!(!account.recoveryMode());
     }
 
@@ -947,6 +1061,7 @@ mod tests {
         account
             .enterRecoveryMode(id(1))
             .expect("owner can arm recovery mode");
+        account.statelessSignaturesUsed = 7;
         let context = RotationContext {
             domain_separator: account.domainSeparator(),
             nonce: account.nonce(),
@@ -961,7 +1076,9 @@ mod tests {
         assert_eq!(account.currentShrincsPublicKey(), next_commitment);
         assert_eq!(account.keyVersion()[HASH_LEN - 1], 1);
         assert_eq!(account.nonce()[HASH_LEN - 1], 1);
+        assert_eq!(account.statelessSignaturesUsed(), 0);
         assert_eq!(account.statefulPolicy(), StatefulPolicy::MonotonicIndex);
+        assert!(!account.statefulPolicyFrozen());
         assert!(!account.recoveryMode());
     }
 }

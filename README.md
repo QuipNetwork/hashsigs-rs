@@ -644,6 +644,14 @@ key-version, stateful-leaf use, and recovery-mode transitions around the core
 SHRINCS primitives. It is intentionally close to the Solidity example account
 wrapper, but it is not a literal runtime-equivalent copy.
 
+The Rust account wrapper now follows the same security policy model as the
+Solidity example wrapper:
+
+- stateful policy changes are frozen after the first successful stateful use in a key epoch
+- `RecoveryRotation` disables the stateful path for the whole recovery-policy epoch
+- `rotateToFreshKey(...)` preserves stateless usage accounting because the stateless key is unchanged
+- `rotateFullKey(...)` resets stateless usage accounting only when the stateless key changes
+
 Current intentional differences:
 
 - Owner / caller model:
@@ -668,7 +676,15 @@ Current intentional differences:
 
 The account module now recomputes its domain separator from stored `chainId`
 and `contractAddress`, and `rotateToFreshKey(...)` is narrowed to a dedicated
-stateful-only recovery-rotation target.
+stateful-only recovery-rotation target. It also mirrors the Solidity account
+wrapper's hardened policy/accounting behavior:
+
+- policy changes must be chosen before the first successful stateful signature in a key epoch
+- selecting `RecoveryRotation` blocks the stateful path immediately; `enterRecoveryMode(...)`
+  only arms stateless recovery rotations
+- stateful-only rotation consumes one stateless recovery use and carries that counter forward
+- full-key rotation consumes one stateless recovery use under the old key and then resets the
+  counter for the newly installed stateless key
 
 ## License
 
