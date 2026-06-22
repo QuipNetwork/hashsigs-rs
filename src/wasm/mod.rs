@@ -1028,6 +1028,9 @@ fn account_error_to_js(error: crate::account::AccountError) -> JsValue {
         crate::account::AccountError::StatefulIndexRollback => {
             "stateful monotonic leaf index rollback is not allowed"
         }
+        crate::account::AccountError::StatefulPolicyFrozen => {
+            "stateful policy changes are frozen after the first successful stateful use in a key epoch"
+        }
     };
     JsValue::from_str(message)
 }
