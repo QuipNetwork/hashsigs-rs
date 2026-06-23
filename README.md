@@ -596,6 +596,26 @@ cp tests/test_vectors/shrincs_sphincs_256s_keccak.json \
   /path/to/hashsigs-solidity/test/test_vectors/shrincs_sphincs_256s_keccak.json
 ```
 
+To cross-check Solidity-exported account vectors against the Rust verifier,
+generate the account-vector JSON in `hashsigs-solidity` first, then copy it
+into this Rust repository manually. The repos are separate, so this handoff is
+intentionally not automated.
+
+```bash
+# in hashsigs-solidity
+bash dev/export-account-vectors.sh
+
+# copy the generated JSON into hashsigs-rs manually
+cp /path/to/hashsigs-solidity/test/test_vectors/shrincs_account_wrapper_vectors.json \
+  tests/test_vectors/shrincs_account_wrapper_vectors.json
+```
+
+Then run the Rust-side cross-check:
+
+```bash
+cargo test --test solidity_account_vectors
+```
+
 Run Solana program tests:
 
 ```bash
