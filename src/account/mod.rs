@@ -21,11 +21,11 @@ use std::collections::HashMap;
 
 use solana_program::keccak::hash as keccak256_hash;
 
+use crate::shrincs::verifier::STATELESS_SIGNATURE_LIMIT;
 use crate::shrincs::{
     ActionContext, PublicKey, RotationContext, RotationTarget, ShrincsVerifier,
     StatefulRotationTarget, StatefulSignature, StatelessSignature, HASH_LEN,
 };
-use crate::shrincs::verifier::STATELESS_SIGNATURE_LIMIT;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StatefulPolicy {
@@ -37,8 +37,8 @@ pub enum StatefulPolicy {
     LeafBitmap,
 }
 
-// Freshly installed keys begin stateful signing at leaf 1.
-pub const INITIAL_STATEFUL_LEAF_INDEX: u32 = 1;
+// Freshly installed JARDIN compact-path keys begin at slot q=0.
+pub const INITIAL_STATEFUL_LEAF_INDEX: u32 = 0;
 
 // Stable domain tag for this wrapper family.
 pub const DOMAIN_TAG_MESSAGE: &[u8] = b"shrincs-account-v1";
@@ -84,7 +84,7 @@ impl ShrincsAccountVerifierExample {
     // 1. Record the deployer as the wrapper owner.
     // 2. Install the initial SHRINCS public-key commitment.
     // 3. Start with monotonic stateful leaf tracking.
-    // 4. Expect the first stateful signature to use leaf 1.
+    // 4. Expect the first stateful signature to use slot q=0.
     pub fn new(
         owner: [u8; HASH_LEN],
         chainId: [u8; HASH_LEN],
@@ -105,7 +105,7 @@ impl ShrincsAccountVerifierExample {
             // Default to ordered stateful signing under monotonic leaf tracking.
             statefulPolicy: StatefulPolicy::MonotonicIndex,
             statefulPolicyFrozen: false,
-            // Fresh keys begin consuming stateful leaves from index 1.
+            // Fresh keys begin consuming compact-path slots from q=0.
             nextStatefulLeafIndex: INITIAL_STATEFUL_LEAF_INDEX,
             recoveryMode: false,
             usedLeafBitmap: HashMap::new(),
@@ -171,7 +171,7 @@ impl ShrincsAccountVerifierExample {
     ) -> bool {
         // This path bypasses canonical wrapper message construction and therefore remains internal-only.
         // Recover the consumed stateful leaf from the signature layout.
-        let leafIndex = signature.auth_path.len() as u32;
+        let leafIndex = u32::from(signature.q);
         // Stop early if the active policy disallows this leaf.
         if !self.precheckStatefulLeafUse(leafIndex) {
             return false;
@@ -208,7 +208,7 @@ impl ShrincsAccountVerifierExample {
         signature: &StatefulSignature,
     ) -> bool {
         // Recover the consumed stateful leaf from the signature layout.
-        let leafIndex = signature.auth_path.len() as u32;
+        let leafIndex = u32::from(signature.q);
         // Stop early if the active policy disallows this leaf.
         if !self.precheckStatefulLeafUse(leafIndex) {
             return false;
@@ -719,9 +719,17 @@ mod tests {
 
     fn to_stateful_signature(input: &SignerStatefulSignature) -> StatefulSignature {
         StatefulSignature {
+            q: input.q,
             randomizer: input.randomizer,
             counter: input.counter,
-            chains: input.chains.clone(),
+            fors_entries: input
+                .fors_entries
+                .iter()
+                .map(|entry| ForsEntry {
+                    secret_leaf: entry.secret_leaf.clone(),
+                    auth_path: entry.auth_path.clone(),
+                })
+                .collect(),
             auth_path: input.auth_path.clone(),
         }
     }
@@ -825,7 +833,7 @@ mod tests {
 
         assert!(account.precheckStatefulLeafUse(1));
         account.commitStatefulLeafUse(1);
-        assert_eq!(account.nextStatefulLeafIndex(), 2);
+        assert_eq!(account.nextStatefulLeafIndex(), 1);
         assert!(account.statefulPolicyFrozen());
         assert!(!account.precheckStatefulLeafUse(1));
         assert!(account.precheckStatefulLeafUse(2));
@@ -936,7 +944,7 @@ mod tests {
 
         assert!(account.verifyStatefulUncheckedMessage(&public_key, message, &signature));
         assert_eq!(account.nonce(), [0u8; HASH_LEN]);
-        assert_eq!(account.nextStatefulLeafIndex(), 2);
+        assert_eq!(account.nextStatefulLeafIndex(), 1);
     }
 
     #[test]
@@ -962,7 +970,7 @@ mod tests {
 
         assert!(account.verifyStatefulAction(&public_key, action_type, payload_hash, &signature));
         assert_eq!(account.nonce()[HASH_LEN - 1], 1);
-        assert_eq!(account.nextStatefulLeafIndex(), 2);
+        assert_eq!(account.nextStatefulLeafIndex(), 1);
     }
 
     #[test]
