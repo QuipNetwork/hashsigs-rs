@@ -457,9 +457,10 @@ struct WasmRotationContext {
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct WasmStatefulSignature {
+    q: u8,
     randomizer: String,
     counter: u32,
-    chains: Vec<String>,
+    fors_entries: Vec<WasmForsEntry>,
     auth_path: Vec<String>,
 }
 
@@ -742,12 +743,22 @@ fn parse_rotation_context(
 #[cfg(any(test, feature = "wasm-bindings"))]
 fn parse_stateful_signature(input: &WasmStatefulSignature) -> Result<StatefulSignature, String> {
     Ok(StatefulSignature {
+        q: input.q,
         randomizer: parse_word32(&input.randomizer)?,
         counter: input.counter,
-        chains: input
-            .chains
+        fors_entries: input
+            .fors_entries
             .iter()
-            .map(|item| parse_word32(item))
+            .map(|entry| {
+                Ok::<ForsEntry, String>(ForsEntry {
+                    secret_leaf: parse_hex_bytes(&entry.secret_leaf)?,
+                    auth_path: entry
+                        .auth_path
+                        .iter()
+                        .map(|item| parse_hex_bytes(item))
+                        .collect::<Result<Vec<_>, _>>()?,
+                })
+            })
             .collect::<Result<Vec<_>, _>>()?,
         auth_path: input
             .auth_path
@@ -899,12 +910,20 @@ fn stateful_signature_dto_from_signer(
     signature: &SigningStatefulSignature,
 ) -> WasmStatefulSignature {
     WasmStatefulSignature {
+        q: signature.q,
         randomizer: hex_string(&signature.randomizer),
         counter: signature.counter,
-        chains: signature
-            .chains
+        fors_entries: signature
+            .fors_entries
             .iter()
-            .map(|item| hex_string(item))
+            .map(|entry| WasmForsEntry {
+                secret_leaf: hex_string(&entry.secret_leaf),
+                auth_path: entry
+                    .auth_path
+                    .iter()
+                    .map(|item| hex_string(item))
+                    .collect(),
+            })
             .collect(),
         auth_path: signature
             .auth_path
@@ -1064,9 +1083,17 @@ mod tests {
 
     fn stateful_signature_dto(signature: &SignerStatefulSignature) -> WasmStatefulSignature {
         WasmStatefulSignature {
+            q: signature.q,
             randomizer: hex(&signature.randomizer),
             counter: signature.counter,
-            chains: signature.chains.iter().map(|item| hex(item)).collect(),
+            fors_entries: signature
+                .fors_entries
+                .iter()
+                .map(|entry| WasmForsEntry {
+                    secret_leaf: hex(&entry.secret_leaf),
+                    auth_path: entry.auth_path.iter().map(|item| hex(item)).collect(),
+                })
+                .collect(),
             auth_path: signature.auth_path.iter().map(|item| hex(item)).collect(),
         }
     }
