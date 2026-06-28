@@ -25,21 +25,27 @@ pub const FORS_TREE_HEIGHT: u8 = 14;
 pub const NUM_FORS_TREES: u8 = 22;
 pub const WOTS_CHAIN_LEN: u16 = 16;
 pub const NUM_WOTS_CHAINS: u16 = 64;
+// Stateless hypertree WOTS-C compatibility constants.
+pub const WOTS_CHAINS_STATEFUL: usize = 64;
+pub const WOTS_BASE_STATEFUL: u32 = 16;
+pub const WOTS_TARGET_SUM_STATEFUL: u32 = 480;
 
 // Encoded stateful public key layout:
-// 32-byte pkSeed || 32-byte root || 4-byte maxSignatures.
+// 32-byte subPkSeed || 32-byte subPkRoot || 4-byte Q_MAX.
 pub const STATEFUL_PUBLIC_KEY_BYTES: usize = 68;
-// Stateful WOTS-C uses 64 chains.
-pub const WOTS_CHAINS_STATEFUL: usize = 64;
-// Stateful WOTS-C uses base-16 digits for message expansion.
-pub const WOTS_BASE_STATEFUL: u32 = 16;
-// The 64 base-16 digits reconstructed from the stateful message digest must
-// sum to 480.
-pub const WOTS_TARGET_SUM_STATEFUL: u32 = 480;
+// JARDIN compact-path FORS+C parameters for the stateful fast path.
+pub const STATEFUL_FORS_TREE_HEIGHT: u8 = 5;
+pub const STATEFUL_FORS_K_TOTAL: u8 = 52;
+pub const STATEFUL_FORS_K_OPEN: u8 = 51;
+pub const STATEFUL_MERKLE_HEIGHT: u8 = 7;
+pub const STATEFUL_Q_MAX: u32 = 128;
 
 pub const ADDRESS_TYPE_WOTS_HASH: u32 = 0;
 pub const ADDRESS_TYPE_TREE: u32 = 2;
 pub const ADDRESS_TYPE_FORS_TREE: u32 = 3;
+pub const ADDRESS_TYPE_FORS_ROOTS: u32 = 4;
+pub const ADDRESS_TYPE_FORS_PRF: u32 = 6;
+pub const ADDRESS_TYPE_JARDIN_MERKLE: u32 = 16;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicKey {
@@ -55,23 +61,25 @@ pub struct PublicKey {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StatefulPublicKey {
-    /// Public seed used by stateful WOTS-C and the unbalanced XMSS-like tree.
+    /// JARDIN compact-path public seed (`subPkSeed`).
     pub pk_seed: [u8; HASH_LEN],
-    /// Root of the stateful unbalanced authentication tree.
+    /// Root of the balanced compact-path Merkle tree (`subPkRoot`).
     pub root: [u8; HASH_LEN],
-    /// Highest accepted stateful leaf index.
+    /// Number of compact-path slots committed by this subkey (`Q_MAX`).
     pub max_signatures: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatefulSignature {
-    /// Per-signature randomizer mixed into WOTS digit derivation.
+    /// Zero-indexed compact-path slot. The JARDIN FORS ADRS `ci` field uses `q + 1`.
+    pub q: u8,
+    /// Per-signature randomizer R mixed into compact digest derivation.
     pub randomizer: [u8; HASH_LEN],
-    /// Counter mixed into WOTS digit derivation.
+    /// Counter ground until the omitted final FORS tree selects leaf zero.
     pub counter: u32,
-    /// One WOTS-C chain value per reconstructed digit.
-    pub chains: Vec<[u8; HASH_LEN]>,
-    /// Unbalanced authentication path. Its length is also the leaf index.
+    /// The first `k_open` FORS+C openings for this compact slot.
+    pub fors_entries: Vec<ForsEntry>,
+    /// Balanced Merkle authentication path from the slot FORS+C public key to `subPkRoot`.
     pub auth_path: Vec<[u8; HASH_LEN]>,
 }
 
