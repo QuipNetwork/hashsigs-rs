@@ -1,0 +1,43 @@
+# CI for hashsigs-rs.
+#
+# - On merge requests and the default branch: build + test the crate (incl. the
+#   wasm target) so regressions are caught before merge.
+# - On a version tag (e.g. v0.1.0): build the wasm, package ts/, and publish
+#   @quip.network/hashsigs-wasm at the tag's version to npm.
+#
+# The wasm-bindgen CLI version MUST equal the crate's wasm-bindgen dependency
+# (0.2.100) or wasm-bindgen emits a schema-mismatch error.
+
+stages: [test, publish]
+
+variables:
+  WASM_BINDGEN_VERSION: "0.2.100"
+
+build-test:
+  stage: test
+  image: rust:latest
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  before_script:
+    - rustup target add wasm32-unknown-unknown
+  script:
+    - cargo test --features wasm-bindings
+    - cargo build --release --target wasm32-unknown-unknown --features wasm-bindings
+
+# publish-npm:
+#   stage: publish
+#   image: rust:latest
+#   rules:
+#     - if: $CI_COMMIT_TAG # runs only on a version tag
+#   before_script:
+#     - apt-get update && apt-get install -y nodejs npm
+#     - rustup target add wasm32-unknown-unknown
+#     - cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION"
+#   script:
+#     - ./bin/build-wasm.sh ts/src
+#     - cd ts && npm ci
+#     - npm version "${CI_COMMIT_TAG#v}" --no-git-tag-version --allow-same-version # tag v0.1.0 -> 0.1.0
+#     - npm run build
+#     - echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > .npmrc
+#     - npm publish

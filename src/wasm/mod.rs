@@ -336,7 +336,7 @@ pub fn shrincs_full_rotation_message_hash(
 }
 
 #[cfg(feature = "wasm-bindings")]
-#[wasm_bindgen]
+#[wasm_bindgen(js_name = shrincsVerifyStatefulRaw)]
 pub fn shrincs_verify_stateful_raw(
     expected_public_key_commitment_hex: &str,
     public_key: JsValue,
@@ -357,7 +357,7 @@ pub fn shrincs_verify_stateful_raw(
 }
 
 #[cfg(feature = "wasm-bindings")]
-#[wasm_bindgen]
+#[wasm_bindgen(js_name = shrincsVerifyStatefulAction)]
 pub fn shrincs_verify_stateful_action(
     expected_public_key_commitment_hex: &str,
     public_key: JsValue,
@@ -380,7 +380,7 @@ pub fn shrincs_verify_stateful_action(
 }
 
 #[cfg(feature = "wasm-bindings")]
-#[wasm_bindgen]
+#[wasm_bindgen(js_name = shrincsVerifyStatelessRaw)]
 pub fn shrincs_verify_stateless_raw(
     expected_public_key_commitment_hex: &str,
     public_key: JsValue,
@@ -401,7 +401,7 @@ pub fn shrincs_verify_stateless_raw(
 }
 
 #[cfg(feature = "wasm-bindings")]
-#[wasm_bindgen]
+#[wasm_bindgen(js_name = shrincsVerifyStatelessAction)]
 pub fn shrincs_verify_stateless_action(
     expected_public_key_commitment_hex: &str,
     public_key: JsValue,
@@ -1037,7 +1037,14 @@ fn account_error_to_js(error: crate::account::AccountError) -> JsValue {
 
 #[cfg(feature = "wasm-bindings")]
 fn js_value_from_serde<T: serde::Serialize>(value: &T) -> Result<JsValue, JsValue> {
-    serde_wasm_bindgen::to_value(value).map_err(js_error_from_serde)
+    // Emit u64/i64 fields (e.g. the hypertree `treeIndex` and
+    // `statelessSignaturesUsed`) as JS `BigInt` instead of `number`. The default
+    // serializer errors when such a value exceeds 2^53 ("can't be represented as
+    // a JavaScript number"), which otherwise breaks stateless signatures whose
+    // tree index is large. `from_value` already accepts BigInt back into u64.
+    let serializer =
+        serde_wasm_bindgen::Serializer::new().serialize_large_number_types_as_bigints(true);
+    value.serialize(&serializer).map_err(js_error_from_serde)
 }
 
 #[cfg(test)]
