@@ -53,12 +53,13 @@ use self::shrincs_signer_utils::{
 };
 use self::verifier::{
     ActionContext, PublicKey, ShrincsVerifier, StatefulSignature, StatelessSignature,
+    STATEFUL_Q_MAX,
 };
 
 pub struct ShrincsSigner;
 
-const INITIAL_STATEFUL_LEAF_INDEX: u32 = 1;
-const MAX_STATEFUL_SIGNATURES_LIMIT: u32 = 4096;
+const INITIAL_STATEFUL_LEAF_INDEX: u32 = 0;
+const MAX_STATEFUL_SIGNATURES_LIMIT: u32 = STATEFUL_Q_MAX;
 
 impl ShrincsSigner {
     /// Deterministically derive signing material and a public key from seed material.
@@ -353,9 +354,9 @@ mod tests {
         ));
 
         let mut tampered = signature.clone();
-        tampered.chains[0][0] ^= 1;
-        // Equivalent to the invalid-signature test in `lib.rs`: mutating a WOTS
-        // chain value prevents reconstruction of the committed public key hash.
+        tampered.fors_entries[0].secret_leaf[0] ^= 1;
+        // Equivalent to the invalid-signature test in `lib.rs`: mutating a FORS
+        // opening prevents reconstruction of the committed compact-path root.
         assert!(!verifier.verify_stateful_unsafe_raw(expected, &public_key, &message, &tampered,));
     }
 
