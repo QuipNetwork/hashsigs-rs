@@ -63,6 +63,15 @@ fn generate_stateful_k_gas_vector() {
     }
     let signature = signature.expect("kth signature");
     assert_eq!(signature.auth_path.len(), TARGET_SIGNATURE_NUMBER as usize);
+    assert!(
+        ShrincsVerifier::new().verify_stateful(
+            expected_public_key_commitment,
+            &public_key,
+            &context,
+            &signature,
+        ),
+        "exported kth stateful signature must verify before it is written",
+    );
 
     let vector = json!({
         "statefulRawK": {

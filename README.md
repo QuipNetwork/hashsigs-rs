@@ -610,10 +610,19 @@ cp /path/to/hashsigs-solidity/test/test_vectors/shrincs_account_wrapper_vectors.
   tests/test_vectors/shrincs_account_wrapper_vectors.json
 ```
 
-Then run the Rust-side cross-check:
+Then run the Rust-side cross-check. The tests are `#[ignore]`d because the
+fixture is copied in manually, so pass `--ignored` explicitly:
 
 ```bash
-cargo test --test solidity_account_vectors
+cargo test --test solidity_account_vectors -- --ignored
+```
+
+Generate the kth stateful gas vector for Solidity gas benchmarks. The
+generator requires Foundry's `cast` on `PATH` and writes
+`tests/test_vectors/shrincs_stateful_k_gas_vector.json` (gitignored):
+
+```bash
+cargo test --test generate_stateful_gas_vector -- --ignored --nocapture
 ```
 
 Run Solana program tests:

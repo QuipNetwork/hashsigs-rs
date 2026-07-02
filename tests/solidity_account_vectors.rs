@@ -20,8 +20,8 @@ use std::path::PathBuf;
 
 use hashsigs_rs::shrincs::{
     ActionContext, ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey, RotationContext,
-    RotationTarget, ShrincsVerifier, StatefulRotationTarget, StatefulSignature,
-    StatelessSignature, WotsCSignature, HASH_LEN,
+    RotationTarget, ShrincsVerifier, StatefulRotationTarget, StatefulSignature, StatelessSignature,
+    WotsCSignature, HASH_LEN,
 };
 use serde_json::Value;
 
@@ -227,11 +227,7 @@ impl<'a> AbiDecoder<'a> {
         }
     }
 
-    fn decode_stateful_rotation_target(
-        &self,
-        base: usize,
-        head: usize,
-    ) -> StatefulRotationTarget {
+    fn decode_stateful_rotation_target(&self, base: usize, head: usize) -> StatefulRotationTarget {
         let start = base + self.read_usize(head);
         StatefulRotationTarget {
             stateful_public_key: self.decode_bytes(start, start),
@@ -358,12 +354,13 @@ fn bytes32_from_vec(bytes: &[u8]) -> [u8; HASH_LEN] {
 }
 
 #[test]
+#[ignore = "requires manually copied Solidity account vectors; see README"]
 fn solidity_exported_stateful_action_vector_verifies_in_rust() {
     let vectors = load_vectors();
     let encoded = vectors["testExportStatefulActionBundle"]["stateful_vector_abi"]
         .as_str()
         .expect("missing stateful action vector blob");
-    let vector = AbiDecoder::new(&hex_to_bytes(encoded)).decode_root_stateful_action_vector();
+    let mut vector = AbiDecoder::new(&hex_to_bytes(encoded)).decode_root_stateful_action_vector();
     let verifier = ShrincsVerifier::new();
 
     assert_eq!(vector.action_type, vector.context.action_type);
@@ -380,15 +377,26 @@ fn solidity_exported_stateful_action_vector_verifies_in_rust() {
         &vector.context,
         &vector.signature,
     ));
+
+    // A tampered Solidity-shaped signature must be rejected through the same
+    // decode-then-verify path.
+    vector.signature.chains[0][0] ^= 0x01;
+    assert!(!verifier.verify_stateful(
+        vector.current_shrincs_public_key,
+        &vector.public_key,
+        &vector.context,
+        &vector.signature,
+    ));
 }
 
 #[test]
+#[ignore = "requires manually copied Solidity account vectors; see README"]
 fn solidity_exported_stateless_action_vector_verifies_in_rust() {
     let vectors = load_vectors();
     let encoded = vectors["testExportStatelessActionBundle"]["stateless_vector_abi"]
         .as_str()
         .expect("missing stateless action vector blob");
-    let vector = AbiDecoder::new(&hex_to_bytes(encoded)).decode_root_stateless_action_vector();
+    let mut vector = AbiDecoder::new(&hex_to_bytes(encoded)).decode_root_stateless_action_vector();
     let verifier = ShrincsVerifier::new();
 
     assert_eq!(vector.action_type, vector.context.action_type);
@@ -405,15 +413,26 @@ fn solidity_exported_stateless_action_vector_verifies_in_rust() {
         &vector.context,
         &vector.signature,
     ));
+
+    // A tampered Solidity-shaped signature must be rejected through the same
+    // decode-then-verify path.
+    vector.signature.fors.randomizer[0] ^= 0x01;
+    assert!(!verifier.verify_stateless(
+        vector.current_shrincs_public_key,
+        &vector.public_key,
+        &vector.context,
+        &vector.signature,
+    ));
 }
 
 #[test]
+#[ignore = "requires manually copied Solidity account vectors; see README"]
 fn solidity_exported_stateful_only_rotation_vector_verifies_in_rust() {
     let vectors = load_vectors();
     let encoded = vectors["testExportStatefulOnlyRotationBundle"]["stateful_rotation_vector_abi"]
         .as_str()
         .expect("missing stateful-only rotation vector blob");
-    let vector =
+    let mut vector =
         AbiDecoder::new(&hex_to_bytes(encoded)).decode_root_stateful_only_rotation_vector();
     let verifier = ShrincsVerifier::new();
 
@@ -441,15 +460,29 @@ fn solidity_exported_stateful_only_rotation_vector_verifies_in_rust() {
         next_commitment,
         bytes32_from_vec(&vector.next_key.public_key_commitment),
     );
+
+    // A tampered recovery signature must fail the cryptographic verification,
+    // not just the structural commitment checks.
+    vector.recovery_signature.fors.randomizer[0] ^= 0x01;
+    assert!(verifier
+        .rotate_stateful_via_stateless(
+            vector.current_shrincs_public_key,
+            &vector.current_public_key,
+            &vector.context,
+            &vector.recovery_signature,
+            &vector.next_key,
+        )
+        .is_none());
 }
 
 #[test]
+#[ignore = "requires manually copied Solidity account vectors; see README"]
 fn solidity_exported_full_rotation_vector_verifies_in_rust() {
     let vectors = load_vectors();
     let encoded = vectors["testExportFullRotationBundle"]["full_rotation_vector_abi"]
         .as_str()
         .expect("missing full rotation vector blob");
-    let vector = AbiDecoder::new(&hex_to_bytes(encoded)).decode_root_full_rotation_vector();
+    let mut vector = AbiDecoder::new(&hex_to_bytes(encoded)).decode_root_full_rotation_vector();
     let verifier = ShrincsVerifier::new();
 
     assert_eq!(
@@ -476,4 +509,17 @@ fn solidity_exported_full_rotation_vector_verifies_in_rust() {
         next_commitment,
         bytes32_from_vec(&vector.next_key.public_key_commitment),
     );
+
+    // A tampered recovery signature must fail the cryptographic verification,
+    // not just the structural commitment checks.
+    vector.recovery_signature.fors.randomizer[0] ^= 0x01;
+    assert!(verifier
+        .stateless_rotate(
+            vector.current_shrincs_public_key,
+            &vector.current_public_key,
+            &vector.context,
+            &vector.recovery_signature,
+            &vector.next_key,
+        )
+        .is_none());
 }
