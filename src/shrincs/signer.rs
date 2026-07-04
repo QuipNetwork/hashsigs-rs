@@ -21,11 +21,6 @@
 //! - `shrincs_signer_fors_c` opens the fixed FORS forest for a message digest.
 //! - `shrincs_signer_hypertree` carries the FORS root to the hypertree root.
 
-#[cfg(test)]
-#[path = "verifier.rs"]
-pub(crate) mod verifier;
-
-#[cfg(not(test))]
 pub(crate) use super::verifier;
 
 #[path = "shrincs_signer_fors_c.rs"]
