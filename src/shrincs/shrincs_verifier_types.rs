@@ -17,7 +17,6 @@
 
 pub const HASH_LEN: usize = 32;
 pub const HASH_SUITE_KECCAK_256: u32 = 1;
-#[allow(dead_code)]
 pub const STATELESS_SIGNATURE_LIMIT: u64 = 1_048_576;
 pub const HYPERTREE_HEIGHT: u8 = 64;
 pub const NUM_HYPERTREE_LAYERS: u8 = 8;
