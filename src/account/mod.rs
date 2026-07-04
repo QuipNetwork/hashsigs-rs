@@ -24,8 +24,8 @@ use solana_program::keccak::hash as keccak256_hash;
 use crate::shrincs::{
     ActionContext, PublicKey, RotationContext, RotationTarget, ShrincsVerifier,
     StatefulRotationTarget, StatefulSignature, StatelessSignature, HASH_LEN,
+    STATELESS_SIGNATURE_LIMIT,
 };
-use crate::shrincs::verifier::STATELESS_SIGNATURE_LIMIT;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StatefulPolicy {
@@ -337,10 +337,10 @@ impl ShrincsAccountVerifierExample {
 
         // Count the recovery signature against the current stateless budget before preserving it
         // into the next stateful-only epoch.
-        self.consumeStatelessRotationUse(nextCompositePublicKey, false);
+        self.statelessSignaturesUsed += 1;
         // Install the next stateful subkey while preserving stateless usage accounting because
         // the stateless key material is unchanged.
-        self.installFreshStatefulKey(nextCompositePublicKey);
+        self.installRotatedKey(nextCompositePublicKey, false);
         true
     }
 
@@ -388,11 +388,15 @@ impl ShrincsAccountVerifierExample {
             return false;
         };
 
-        // Count the recovery signature as the final stateless use under the old key before
-        // installing the fully fresh stateless bundle.
-        self.consumeStatelessRotationUse(nextCompositePublicKey, true);
+        // Count the recovery signature as the final stateless use under the old key.
+        self.statelessSignaturesUsed += 1;
+        // Reset the stateless budget only if the target actually replaces the stateless key
+        // material. A rotation target that reuses the current pk_seed and hypertree_root keeps
+        // the same few-time stateless key, so its usage accounting must carry forward.
+        let statelessKeyChanged = nextKey.pk_seed != currentPublicKey.pk_seed
+            || nextKey.hypertree_root != currentPublicKey.hypertree_root;
         // Install the next full key bundle and reset wrapper state for the new stateless epoch.
-        self.installFreshFullKey(nextCompositePublicKey);
+        self.installRotatedKey(nextCompositePublicKey, statelessKeyChanged);
         true
     }
 
@@ -444,7 +448,7 @@ impl ShrincsAccountVerifierExample {
 
     // setStatefulPolicyRecoveryRotation: Switch to recovery-only stateless rotation mode.
     // 1. Only the owner may change the wrapper policy.
-    // 2. Reject policy changes after any successful stateful leaf use in this key epoch.
+    // 2. Remain available even after the policy freeze so key rotation stays reachable.
     // 3. Preserve or initialize the stateful leaf cursor for later normal operation.
     // 4. Require an explicit enterRecoveryMode() call before stateless recovery is accepted.
     // 5. Emit the policy update for off-chain observers.
@@ -453,10 +457,14 @@ impl ShrincsAccountVerifierExample {
         caller: [u8; HASH_LEN],
     ) -> Result<(), AccountError> {
         self.onlyOwner(caller)?;
-        // Freeze the stateful tracking model once any stateful leaf has been consumed in this epoch.
-        if self.statefulPolicyFrozen {
-            return Err(AccountError::StatefulPolicyFrozen);
-        }
+        // The policy freeze intentionally does NOT apply here. The freeze exists to stop
+        // switches between leaf-tracking models (monotonic <-> bitmap) that would erase
+        // leaf-use memory and enable stateful leaf reuse. RecoveryRotation disables the
+        // stateful path entirely, so entering it cannot cause reuse — and it is the only
+        // route to key rotation, which is what clears the freeze. Blocking it here would
+        // permanently lock any account out of rotation after its first stateful signature.
+        // The freeze flag stays set, so switching back to a leaf-tracking policy without
+        // rotating first remains rejected.
         // Switch into the policy where stateless signatures serve as recovery authority.
         self.statefulPolicy = StatefulPolicy::RecoveryRotation;
         // Ensure the stateful cursor stays initialized for later normal operation.
@@ -585,17 +593,6 @@ impl ShrincsAccountVerifierExample {
         keccak256_hash(&encoded).to_bytes()
     }
 
-    // consumeStatelessRotationUse: Record one successful stateless recovery signature used for rotation.
-    // 1. Increment the current stateless usage count under the old key epoch.
-    // 2. Keep the Rust account state aligned with the Solidity wrapper's accounting model.
-    fn consumeStatelessRotationUse(
-        &mut self,
-        _nextCompositePublicKey: [u8; HASH_LEN],
-        _fullRotation: bool,
-    ) {
-        self.statelessSignaturesUsed += 1;
-    }
-
     // installRotatedKey: Install a rotated key bundle and reset wrapper state for the next epoch.
     // 1. Preserve the previous installed key commitment for the rotation event.
     // 2. Install the next SHRINCS public-key commitment.
@@ -628,29 +625,6 @@ impl ShrincsAccountVerifierExample {
         self.statefulPolicy = StatefulPolicy::MonotonicIndex;
         // Recovery mode ends once the new key has been installed.
         self.recoveryMode = false;
-    }
-
-    // installFreshStatefulKey: Install a fresh stateful subkey while preserving the stateless side.
-    // 1. Install the next SHRINCS public-key commitment.
-    // 2. Preserve stateless usage accounting because the stateless key material is unchanged.
-    // 3. Reset stateful tracking and wrapper policy state for the next epoch.
-    fn installFreshStatefulKey(&mut self, nextCompositePublicKey: [u8; HASH_LEN]) {
-        self.installRotatedKey(nextCompositePublicKey, false);
-    }
-
-    // installFreshFullKey: Install a fully fresh SHRINCS bundle for the next key epoch.
-    // 1. Install the next SHRINCS public-key commitment.
-    // 2. Reset stateless usage accounting because the stateless key material changes too.
-    // 3. Reset stateful tracking and wrapper policy state for the next epoch.
-    fn installFreshFullKey(&mut self, nextCompositePublicKey: [u8; HASH_LEN]) {
-        self.installRotatedKey(nextCompositePublicKey, true);
-    }
-
-    // installFreshKey: Backward-compatible alias for the full fresh-key install path.
-    // 1. Preserve existing helper-call behavior in tests and support harnesses.
-    // 2. Route to the semantic full-key install helper.
-    fn installFreshKey(&mut self, nextCompositePublicKey: [u8; HASH_LEN]) {
-        self.installFreshFullKey(nextCompositePublicKey);
     }
 
     fn onlyOwner(&self, caller: [u8; HASH_LEN]) -> Result<(), AccountError> {
@@ -844,7 +818,7 @@ mod tests {
         assert!(account.statefulPolicyFrozen());
         assert!(!account.precheckStatefulLeafUse(9));
 
-        account.installFreshKey(id(4));
+        account.installRotatedKey(id(4), true);
         assert!(!account.isLeafUsed(9));
         assert!(!account.statefulPolicyFrozen());
     }
@@ -880,7 +854,7 @@ mod tests {
             .expect("owner can arm recovery mode");
         account.statelessSignaturesUsed = 7;
 
-        account.installFreshKey(id(4));
+        account.installRotatedKey(id(4), true);
 
         assert_eq!(account.currentShrincsPublicKey(), id(4));
         assert_eq!(account.nonce()[HASH_LEN - 1], 1);
@@ -903,7 +877,15 @@ mod tests {
             Err(AccountError::StatefulPolicyFrozen)
         );
         assert_eq!(
-            account.setStatefulPolicyRecoveryRotation(id(1)),
+            account.setStatefulPolicyMonotonicIndex(id(1), 5),
+            Err(AccountError::StatefulPolicyFrozen)
+        );
+        // RecoveryRotation stays selectable so the account can always rotate out of a
+        // used key; the freeze flag itself stays set until rotation.
+        assert_eq!(account.setStatefulPolicyRecoveryRotation(id(1)), Ok(()));
+        assert!(account.statefulPolicyFrozen());
+        assert_eq!(
+            account.setStatefulPolicyLeafBitmap(id(1)),
             Err(AccountError::StatefulPolicyFrozen)
         );
     }
@@ -1080,5 +1062,278 @@ mod tests {
         assert_eq!(account.statefulPolicy(), StatefulPolicy::MonotonicIndex);
         assert!(!account.statefulPolicyFrozen());
         assert!(!account.recoveryMode());
+    }
+
+    // A structurally valid but never-verifiable signature for exercising gates that
+    // reject before any cryptographic work happens.
+    fn empty_stateless_signature() -> StatelessSignature {
+        StatelessSignature {
+            fors: crate::shrincs::ForsSignature {
+                randomizer: Vec::new(),
+                counter: 0,
+                entries: Vec::new(),
+            },
+            hypertree: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn failed_stateful_verification_does_not_freeze_policy() {
+        let verifier = ShrincsVerifier::new();
+        let (mut signing_key, public_key) =
+            ShrincsSigner::keygen(b"account failed stateful freeze seed", 4).unwrap();
+        let public_key = to_public_key(&public_key);
+        let expected = expected_key(&public_key);
+        let mut account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), expected);
+        let action_type = [3u8; HASH_LEN];
+        let payload_hash = [4u8; HASH_LEN];
+        let context = ActionContext {
+            domain_separator: account.domainSeparator(),
+            nonce: account.nonce(),
+            key_version: account.keyVersion(),
+            action_type,
+            payload_hash,
+        };
+        let message = verifier.stateful_action_message_hash(expected, &context);
+        let signature = ShrincsSigner::sign_stateful_raw(&mut signing_key, &message).unwrap();
+        let mut signature = to_stateful_signature(&signature);
+        // Corrupt the signature so verification fails after the policy precheck passes.
+        signature.chains[0][0] ^= 0x01;
+
+        assert!(!account.verifyStatefulAction(&public_key, action_type, payload_hash, &signature));
+        // A failed verification must leave all policy and freshness state untouched.
+        assert!(!account.statefulPolicyFrozen());
+        assert_eq!(account.nextStatefulLeafIndex(), INITIAL_STATEFUL_LEAF_INDEX);
+        assert_eq!(account.nonce(), [0u8; HASH_LEN]);
+        assert_eq!(
+            account.setStatefulPolicyLeafBitmap(id(1)),
+            Ok(()),
+            "policy changes must remain available after a failed verification",
+        );
+    }
+
+    #[test]
+    fn recovery_rotation_remains_reachable_after_stateful_use() {
+        let verifier = ShrincsVerifier::new();
+        let (mut signing_key, public_key) =
+            ShrincsSigner::keygen(b"account recovery after use seed", 4).unwrap();
+        let (_, next_public_key) =
+            ShrincsSigner::keygen(b"account recovery after use next seed", 8).unwrap();
+        let public_key = to_public_key(&public_key);
+        let expected = expected_key(&public_key);
+        let mut account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), expected);
+
+        // Consume one stateful leaf through real verification, freezing leaf-tracking changes.
+        let action_type = [3u8; HASH_LEN];
+        let payload_hash = [4u8; HASH_LEN];
+        let context = ActionContext {
+            domain_separator: account.domainSeparator(),
+            nonce: account.nonce(),
+            key_version: account.keyVersion(),
+            action_type,
+            payload_hash,
+        };
+        let message = verifier.stateful_action_message_hash(expected, &context);
+        let signature = ShrincsSigner::sign_stateful_raw(&mut signing_key, &message).unwrap();
+        let signature = to_stateful_signature(&signature);
+        assert!(account.verifyStatefulAction(&public_key, action_type, payload_hash, &signature));
+        assert!(account.statefulPolicyFrozen());
+
+        // The recovery/rotation path must stay reachable — otherwise a used key could
+        // never rotate again and the account would be permanently stuck.
+        account
+            .setStatefulPolicyRecoveryRotation(id(1))
+            .expect("recovery policy must remain selectable after stateful use");
+        account
+            .enterRecoveryMode(id(1))
+            .expect("owner can arm recovery mode");
+
+        let next_commitment = public_key_commitment(
+            &next_public_key.stateful_public_key,
+            &public_key.pk_seed,
+            &public_key.hypertree_root,
+        );
+        let next_target = StatefulRotationTarget {
+            stateful_public_key: next_public_key.stateful_public_key.clone(),
+            public_key_commitment: next_commitment.to_vec(),
+        };
+        let rotation_context = RotationContext {
+            domain_separator: account.domainSeparator(),
+            nonce: account.nonce(),
+            key_version: account.keyVersion(),
+        };
+        let rotation_message = verifier.stateful_rotation_message_hash(
+            expected,
+            &public_key,
+            &rotation_context,
+            &next_target,
+        );
+        let rotation_signature =
+            ShrincsSigner::sign_stateless_raw(&signing_key, &rotation_message).unwrap();
+        let rotation_signature = to_stateless_signature(&rotation_signature);
+
+        assert!(account.rotateToFreshKey(&public_key, &rotation_signature, &next_target));
+        assert_eq!(account.currentShrincsPublicKey(), next_commitment);
+        assert!(!account.statefulPolicyFrozen());
+    }
+
+    #[test]
+    fn stateless_action_blocked_under_unarmed_recovery_policy() {
+        let mut account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), id(3));
+        account
+            .setStatefulPolicyRecoveryRotation(id(1))
+            .expect("owner can select recovery policy");
+
+        // The policy gate rejects before any cryptographic work, so a dummy signature suffices.
+        assert!(!account.verifyStatelessAction(
+            &PublicKey {
+                stateful_public_key: Vec::new(),
+                public_key_commitment: Vec::new(),
+                pk_seed: Vec::new(),
+                hypertree_root: Vec::new(),
+            },
+            [5u8; HASH_LEN],
+            [6u8; HASH_LEN],
+            &empty_stateless_signature(),
+        ));
+    }
+
+    #[test]
+    fn rotations_and_stateless_actions_blocked_at_stateless_budget_limit() {
+        let mut account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), id(3));
+        account
+            .setStatefulPolicyRecoveryRotation(id(1))
+            .expect("owner can select recovery policy");
+        account
+            .enterRecoveryMode(id(1))
+            .expect("owner can arm recovery mode");
+        account.statelessSignaturesUsed = STATELESS_SIGNATURE_LIMIT;
+
+        let dummy_public_key = PublicKey {
+            stateful_public_key: Vec::new(),
+            public_key_commitment: Vec::new(),
+            pk_seed: Vec::new(),
+            hypertree_root: Vec::new(),
+        };
+        // All budget gates reject before verification, so dummy inputs suffice.
+        assert!(!account.rotateToFreshKey(
+            &dummy_public_key,
+            &empty_stateless_signature(),
+            &StatefulRotationTarget {
+                stateful_public_key: Vec::new(),
+                public_key_commitment: Vec::new(),
+            },
+        ));
+        assert!(!account.rotateFullKey(
+            &dummy_public_key,
+            &empty_stateless_signature(),
+            &RotationTarget {
+                stateful_public_key: Vec::new(),
+                public_key_commitment: Vec::new(),
+                pk_seed: Vec::new(),
+                hypertree_root: Vec::new(),
+            },
+        ));
+        assert!(!account.verifyStatelessAction(
+            &dummy_public_key,
+            [5u8; HASH_LEN],
+            [6u8; HASH_LEN],
+            &empty_stateless_signature(),
+        ));
+    }
+
+    #[test]
+    fn stateful_only_rotation_at_budget_boundary_lands_exhausted() {
+        let verifier = ShrincsVerifier::new();
+        let (signing_key, public_key) =
+            ShrincsSigner::keygen(b"account boundary rotate seed", 4).unwrap();
+        let (_, next_public_key) =
+            ShrincsSigner::keygen(b"account boundary rotate next seed", 8).unwrap();
+        let public_key = to_public_key(&public_key);
+        let expected = expected_key(&public_key);
+        let next_commitment = public_key_commitment(
+            &next_public_key.stateful_public_key,
+            &public_key.pk_seed,
+            &public_key.hypertree_root,
+        );
+        let next_target = StatefulRotationTarget {
+            stateful_public_key: next_public_key.stateful_public_key.clone(),
+            public_key_commitment: next_commitment.to_vec(),
+        };
+        let mut account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), expected);
+        account
+            .setStatefulPolicyRecoveryRotation(id(1))
+            .expect("owner can select recovery policy");
+        account
+            .enterRecoveryMode(id(1))
+            .expect("owner can arm recovery mode");
+        account.statelessSignaturesUsed = STATELESS_SIGNATURE_LIMIT - 1;
+        let context = RotationContext {
+            domain_separator: account.domainSeparator(),
+            nonce: account.nonce(),
+            key_version: account.keyVersion(),
+        };
+        let message =
+            verifier.stateful_rotation_message_hash(expected, &public_key, &context, &next_target);
+        let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &message).unwrap();
+        let signature = to_stateless_signature(&signature);
+
+        // The final budgeted stateless use may fund a stateful-only rotation...
+        assert!(account.rotateToFreshKey(&public_key, &signature, &next_target));
+        // ...but the preserved counter lands the new epoch exhausted: the unchanged
+        // stateless key has no remaining budget, so no stateless path remains.
+        assert_eq!(account.statelessSignaturesUsed(), STATELESS_SIGNATURE_LIMIT);
+        assert!(!account.verifyStatelessAction(
+            &public_key,
+            [5u8; HASH_LEN],
+            [6u8; HASH_LEN],
+            &empty_stateless_signature(),
+        ));
+    }
+
+    #[test]
+    fn full_rotation_with_unchanged_stateless_key_preserves_usage() {
+        let verifier = ShrincsVerifier::new();
+        let (signing_key, public_key) =
+            ShrincsSigner::keygen(b"account same stateless rotate seed", 4).unwrap();
+        let (_, next_public_key) =
+            ShrincsSigner::keygen(b"account same stateless rotate next seed", 8).unwrap();
+        let public_key = to_public_key(&public_key);
+        let expected = expected_key(&public_key);
+        // Rotation target that installs a fresh stateful subkey but reuses the current
+        // stateless key material.
+        let next_commitment = public_key_commitment(
+            &next_public_key.stateful_public_key,
+            &public_key.pk_seed,
+            &public_key.hypertree_root,
+        );
+        let next_target = RotationTarget {
+            stateful_public_key: next_public_key.stateful_public_key.clone(),
+            public_key_commitment: next_commitment.to_vec(),
+            pk_seed: public_key.pk_seed.clone(),
+            hypertree_root: public_key.hypertree_root.clone(),
+        };
+        let mut account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), expected);
+        account
+            .setStatefulPolicyRecoveryRotation(id(1))
+            .expect("owner can select recovery policy");
+        account
+            .enterRecoveryMode(id(1))
+            .expect("owner can arm recovery mode");
+        account.statelessSignaturesUsed = 7;
+        let context = RotationContext {
+            domain_separator: account.domainSeparator(),
+            nonce: account.nonce(),
+            key_version: account.keyVersion(),
+        };
+        let message =
+            verifier.full_rotation_message_hash(expected, &public_key, &context, &next_target);
+        let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &message).unwrap();
+        let signature = to_stateless_signature(&signature);
+
+        assert!(account.rotateFullKey(&public_key, &signature, &next_target));
+        assert_eq!(account.currentShrincsPublicKey(), next_commitment);
+        // The stateless key did not change, so its usage budget must NOT be refreshed.
+        assert_eq!(account.statelessSignaturesUsed(), 8);
     }
 }
