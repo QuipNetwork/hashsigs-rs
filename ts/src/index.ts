@@ -9,3 +9,21 @@ export { loadShrincsWasm } from "./loader.node.js";
 // audited Rust. Re-export it as a named type for consumers who want to annotate
 // their own variables. The generated `.d.ts` is the single source of truth.
 export type ShrincsWasmModule = typeof import("./nodejs/hashsigs_rs.js");
+
+// The serde DTO interfaces generated from the Rust structs (via Tsify), so
+// consumers can name the object shapes the wasm functions accept and return.
+export type {
+  ShrincsPublicKey,
+  StatefulSignature,
+  StatelessSignature,
+  ForsSignature,
+  ForsEntry,
+  WotsCSignature,
+  HypertreeLayerSignature,
+  ActionContext,
+  RotationContext,
+  StatefulRotationTarget,
+  RotationTarget,
+  ShrincsExportedSigningKey,
+  ShrincsAccountSnapshot,
+} from "./nodejs/hashsigs_rs.js";
