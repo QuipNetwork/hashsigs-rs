@@ -12,7 +12,9 @@
     ".": {
       "types": "./dist/index.d.ts",
       "browser": "./dist/loader.browser.js",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+
     }
   },
   "files": [
