@@ -863,6 +863,9 @@ fn parse_word32(input: &str) -> Result<[u8; HASH_LEN], String> {
 #[cfg(any(test, feature = "wasm-bindings"))]
 fn parse_hex_bytes(input: &str) -> Result<Vec<u8>, String> {
     let trimmed = input.strip_prefix("0x").unwrap_or(input);
+    if !trimmed.is_ascii() {
+        return Err(format!("hex string must be ASCII: {input}"));
+    }
     if trimmed.len() % 2 != 0 {
         return Err(format!("hex string must have even length: {input}"));
     }
@@ -1030,12 +1033,12 @@ fn hex_string(bytes: &[u8]) -> String {
 
 #[cfg(feature = "wasm-bindings")]
 fn js_error(message: String) -> JsValue {
-    JsValue::from_str(&message)
+    JsError::new(&message).into()
 }
 
 #[cfg(feature = "wasm-bindings")]
 fn js_error_from_serde(error: serde_wasm_bindgen::Error) -> JsValue {
-    JsValue::from_str(&error.to_string())
+    JsError::new(&error.to_string()).into()
 }
 
 #[cfg(feature = "wasm-bindings")]
@@ -1052,7 +1055,7 @@ fn account_error_to_js(error: crate::account::AccountError) -> JsValue {
             "stateful policy changes are frozen after the first successful stateful use in a key epoch"
         }
     };
-    JsValue::from_str(message)
+    JsError::new(message).into()
 }
 
 #[cfg(feature = "wasm-bindings")]
@@ -1190,6 +1193,10 @@ mod tests {
         assert_eq!(parse_hex_bytes("0x0102").unwrap(), vec![1u8, 2u8]);
         assert_eq!(parse_hex_bytes("0102").unwrap(), vec![1u8, 2u8]);
         assert!(parse_hex_bytes("0x123").is_err());
+        // non-ASCII must return Err gracefully, not panic (wasm trap)
+        assert!(parse_hex_bytes("a€").is_err());
+        assert!(parse_hex_bytes("€a").is_err());
+        assert!(parse_hex_bytes("1€").is_err());
     }
 
     #[test]
