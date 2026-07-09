@@ -22,11 +22,29 @@ cd "$REPO_ROOT"
 
 WASM="target/wasm32-unknown-unknown/release/hashsigs_rs.wasm"
 
+# Must equal the crate's pinned wasm-bindgen version (Cargo.toml); a mismatched
+# CLI produces a cryptic schema error at build or runtime.
+REQUIRED_WB="0.2.100"
+
 if ! command -v wasm-bindgen >/dev/null 2>&1; then
   echo "error: wasm-bindgen CLI not found. Install with:" >&2
-  echo "  cargo install wasm-bindgen-cli --version 0.2.100" >&2
+  echo "  cargo install wasm-bindgen-cli --version $REQUIRED_WB" >&2
   exit 1
 fi
+
+HAVE_WB="$(wasm-bindgen --version | awk '{print $2}')"
+if [ "$HAVE_WB" != "$REQUIRED_WB" ]; then
+  echo "error: wasm-bindgen CLI is $HAVE_WB but $REQUIRED_WB is required" >&2
+  echo "       (a version mismatch produces a wasm-bindgen schema error)." >&2
+  echo "  cargo install wasm-bindgen-cli --version $REQUIRED_WB --force" >&2
+  exit 1
+fi
+
+# Force a recompile of this crate (deps stay cached). The cdylib output path
+# is shared and un-hashed across crate versions, so an incremental build can
+# declare a previously built version "fresh" and ship stale bytes — e.g. a
+# wasm whose baked-in version() doesn't match Cargo.toml.
+cargo clean -p hashsigs-rs --release --target wasm32-unknown-unknown
 
 cargo build --release --target wasm32-unknown-unknown --features wasm-bindings
 

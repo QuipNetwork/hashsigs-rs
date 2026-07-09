@@ -43,7 +43,7 @@ pub use self::shrincs_signer_types::{ShrincsSignerResult, ShrincsSigningKey};
 
 use self::shrincs_signer_fors_c::sign_fors_c;
 use self::shrincs_signer_hypertree::{hypertree_public_root, sign_hypertree};
-#[cfg(test)]
+#[cfg(any(test, feature = "wasm-bindings"))]
 use self::shrincs_signer_stateful::sign_stateful_raw_at_leaf as sign_stateful_raw_at_leaf_inner;
 use self::shrincs_signer_stateful::{
     sign_stateful_raw as sign_stateful_raw_inner, stateful_subtree_root,
@@ -112,6 +112,48 @@ impl ShrincsSigner {
         Some((signing_key, public_key))
     }
 
+    /// Reconstruct a signing key from previously exported fields (the inverse
+    /// of the wasm `exportSigningKey`). Enforces the same bounds as `keygen`,
+    /// accepts the exhausted state (`next == max + 1`, which
+    /// `sign_stateful_raw` legitimately produces), and recomputes both roots
+    /// from the seeds — returns `None` if the candidate's stored roots don't
+    /// match (corrupted or field-spliced input). The rebuilt `PublicKey`
+    /// (including the commitment) is derived, never taken from the caller.
+    pub fn import_signing_key(
+        candidate: ShrincsSigningKey,
+    ) -> ShrincsSignerResult<(ShrincsSigningKey, PublicKey)> {
+        let max = candidate.max_stateful_signatures;
+        if max == 0 || max > MAX_STATEFUL_SIGNATURES_LIMIT {
+            return None;
+        }
+        let next = candidate.next_stateful_leaf_index;
+        if next < INITIAL_STATEFUL_LEAF_INDEX || next > max.saturating_add(1) {
+            return None;
+        }
+        // Recompute, never trust: the roots are consensus-critical inputs to
+        // every signature this key will produce. The stateful root always
+        // covers the full tree from leaf 1 — independent of `next`.
+        let stateful_root = stateful_subtree_root(
+            &candidate.stateful_sk_seed,
+            &candidate.stateful_pk_seed,
+            INITIAL_STATEFUL_LEAF_INDEX,
+            max,
+        );
+        let hypertree_root =
+            hypertree_public_root(&candidate.stateless_sk_seed, &candidate.pk_seed);
+        if stateful_root != candidate.stateful_root
+            || hypertree_root != candidate.hypertree_root
+        {
+            return None;
+        }
+        let public_key = public_key_from_components(
+            encode_stateful_public_key(candidate.stateful_pk_seed, stateful_root, max),
+            candidate.pk_seed,
+            hypertree_root,
+        );
+        Some((candidate, public_key))
+    }
+
     /// Sign the verifier's canonical stateful action hash and advance the leaf counter.
     pub fn sign_stateful_action(
         signing_key: &mut ShrincsSigningKey,
@@ -132,8 +174,9 @@ impl ShrincsSigner {
         sign_stateful_raw_inner(signing_key, message)
     }
 
-    /// Sign raw bytes with a specific stateful leaf for deterministic tests.
-    #[cfg(test)]
+    /// Sign raw bytes with a caller-supplied stateful leaf; does NOT advance the
+    /// counter. Exposed to the WASM `signStatefulRawAt` binding and to tests.
+    #[cfg(any(test, feature = "wasm-bindings"))]
     pub(crate) fn sign_stateful_raw_at_leaf(
         signing_key: &ShrincsSigningKey,
         leaf_index: u32,
@@ -457,6 +500,85 @@ mod tests {
             &public_key,
             &message,
             &signature,
+        ));
+    }
+
+    #[test]
+    fn import_round_trips_a_keygen_key() {
+        let (key, pk) = ShrincsSigner::keygen(b"import round trip seed", 4).unwrap();
+        let (imported_key, imported_pk) = ShrincsSigner::import_signing_key(key).unwrap();
+        let (key_again, _) = ShrincsSigner::keygen(b"import round trip seed", 4).unwrap();
+        assert_eq!(imported_key, key_again);
+        assert_eq!(imported_pk, pk);
+    }
+
+    #[test]
+    fn import_accepts_advanced_and_exhausted_counters() {
+        let (mut key, _) = ShrincsSigner::keygen(b"import counter seed", 4).unwrap();
+        key.next_stateful_leaf_index = 3;
+        let (imported, _) = ShrincsSigner::import_signing_key(key).unwrap();
+        assert_eq!(imported.next_stateful_leaf_index, 3);
+
+        let (mut key, _) = ShrincsSigner::keygen(b"import counter seed", 4).unwrap();
+        key.next_stateful_leaf_index = 5; // max + 1: exhausted, still valid
+        let (imported, _) = ShrincsSigner::import_signing_key(key).unwrap();
+        assert!(ShrincsSigner::sign_stateful_raw(
+            &mut { imported },
+            b"no leaves left"
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn import_rejects_out_of_range_counters_and_budgets() {
+        let (mut key, _) = ShrincsSigner::keygen(b"import bounds seed", 4).unwrap();
+        key.next_stateful_leaf_index = 0;
+        assert!(ShrincsSigner::import_signing_key(key).is_none());
+
+        let (mut key, _) = ShrincsSigner::keygen(b"import bounds seed", 4).unwrap();
+        key.next_stateful_leaf_index = 6; // max + 2
+        assert!(ShrincsSigner::import_signing_key(key).is_none());
+
+        let (mut key, _) = ShrincsSigner::keygen(b"import bounds seed", 4).unwrap();
+        key.max_stateful_signatures = 0;
+        assert!(ShrincsSigner::import_signing_key(key).is_none());
+
+        let (mut key, _) = ShrincsSigner::keygen(b"import bounds seed", 4).unwrap();
+        key.max_stateful_signatures = 4097; // > MAX_STATEFUL_SIGNATURES_LIMIT
+        assert!(ShrincsSigner::import_signing_key(key).is_none());
+    }
+
+    #[test]
+    fn import_rejects_tampered_roots() {
+        let (mut key, _) = ShrincsSigner::keygen(b"import tamper seed", 4).unwrap();
+        key.stateful_root[0] ^= 0x01;
+        assert!(ShrincsSigner::import_signing_key(key).is_none());
+
+        let (mut key, _) = ShrincsSigner::keygen(b"import tamper seed", 4).unwrap();
+        key.hypertree_root[0] ^= 0x01;
+        assert!(ShrincsSigner::import_signing_key(key).is_none());
+
+        // Field splice: seeds from one key, roots from another.
+        let (key_a, _) = ShrincsSigner::keygen(b"import splice seed A", 4).unwrap();
+        let (mut key_b, _) = ShrincsSigner::keygen(b"import splice seed B", 4).unwrap();
+        key_b.stateful_root = key_a.stateful_root;
+        assert!(ShrincsSigner::import_signing_key(key_b).is_none());
+    }
+
+    #[test]
+    fn imported_key_signs_and_verifies() {
+        let (mut key, _) = ShrincsSigner::keygen(b"import sign seed", 4).unwrap();
+        key.next_stateful_leaf_index = 2;
+        let (mut imported, pk) = ShrincsSigner::import_signing_key(key).unwrap();
+        let message = b"signed after import".to_vec();
+        let signature = ShrincsSigner::sign_stateful_raw(&mut imported, &message).unwrap();
+        assert_eq!(signature.auth_path.len(), 2);
+        let expected = word32(&pk.public_key_commitment).unwrap();
+        assert!(ShrincsVerifier::new().verify_stateful_unsafe_raw(
+            expected,
+            &pk,
+            &message,
+            &signature
         ));
     }
 }

@@ -25,6 +25,24 @@ build-test:
     - cargo test --features wasm-bindings
     - cargo build --release --target wasm32-unknown-unknown --features wasm-bindings
 
+# Conformance test against the BUILT package (dist/): loaders, exports map,
+# ESM/CJS scoping, base64-inline path — the layer cargo tests never touch.
+ts-conformance:
+  stage: test
+  image: rust:latest
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  before_script:
+    - apt-get update && apt-get install -y nodejs npm
+    - rustup target add wasm32-unknown-unknown
+    - cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION"
+  script:
+    - ./bin/build-wasm.sh ts/src
+    - cd ts && npm ci
+    - npm run build
+    - npm test
+
 publish-npm:
   stage: publish
   image: rust:latest
@@ -39,5 +57,6 @@ publish-npm:
     - cd ts && npm ci
     - npm version "${CI_COMMIT_TAG#v}" --no-git-tag-version --allow-same-version # tag v0.1.0 -> 0.1.0
     - npm run build
+    - npm test # conformance gate: exercises the built dist/ before it ships
     - echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > .npmrc
     - npm publish --access public
