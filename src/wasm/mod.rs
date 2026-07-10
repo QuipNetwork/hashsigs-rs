@@ -1524,10 +1524,7 @@ mod tests {
     };
     use crate::shrincs::{ShrincsSigner, ShrincsSigningKey};
     #[cfg(all(feature = "wasm-bindings", target_arch = "wasm32"))]
-    use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
-
-    #[cfg(all(feature = "wasm-bindings", target_arch = "wasm32"))]
-    wasm_bindgen_test_configure!(run_in_browser);
+    use wasm_bindgen_test::wasm_bindgen_test;
 
     fn hex(bytes: &[u8]) -> String {
         let mut out = String::from("0x");

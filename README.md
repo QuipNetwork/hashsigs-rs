@@ -76,6 +76,18 @@ pkg/web/
 pkg/nodejs/
 ```
 
+Pass a second argument to change the output base directory:
+
+```bash
+bash bin/build-wasm.sh bundler /tmp/hashsigs-wasm
+```
+
+That writes to:
+
+```text
+/tmp/hashsigs-wasm/bundler/
+```
+
 The generated package contains the `.wasm` binary, JS wrapper, and `.d.ts`
 files emitted by `wasm-pack`.
 
@@ -118,10 +130,19 @@ To run the real binding-runtime tests, install the wasm target first:
 rustup target add wasm32-unknown-unknown
 ```
 
-Then run:
+The binding tests do not require browser APIs, so run them in Node:
 
 ```bash
-cargo test --features wasm-bindings --target wasm32-unknown-unknown
+wasm-pack test --node --features wasm-bindings
+```
+
+If you prefer invoking `cargo test` directly, install a matching
+`wasm-bindgen-test-runner` with `wasm-bindgen-cli`, or point Cargo at the runner
+binary that `wasm-pack` installed in its cache:
+
+```bash
+CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=/path/to/wasm-bindgen-test-runner \
+  cargo test --features wasm-bindings --target wasm32-unknown-unknown
 ```
 
 Why both layers exist:
@@ -198,16 +219,18 @@ Minimal TS example:
 ```ts
 import { shrincsKeygen } from "./pkg/bundler/hashsigs_rs";
 
-const keypair = shrincsKeygen(
-  "0x00112233445566778899aabbccddeeff",
-  16,
-);
+const keypair = shrincsKeygen("0x00112233445566778899aabbccddeeff", 16);
 
 const publicKey = keypair.publicKey();
 const statefulSignature = keypair.signStatefulRaw("0xdeadbeef");
 const statelessSignature = keypair.signStatelessRaw("0xdeadbeef");
 const signingKeySnapshot = keypair.exportSigningKey();
 ```
+
+`shrincsKeygen(seedHex, maxStatefulSignatures)` rejects
+`maxStatefulSignatures === 0` and values over `4096`. Stateful signing consumes
+one stateful leaf per signature, so `signStatefulRaw(...)` can fail once the
+key has used its configured stateful signature budget.
 
 `exportSigningKey()` returns secret material. Treat it as private key data.
 
@@ -236,19 +259,13 @@ Canonical message helpers:
 Minimal TS example:
 
 ```ts
-import {
-  WasmShrincsAccount,
-  shrincsKeygen,
-} from "./pkg/bundler/hashsigs_rs";
+import { WasmShrincsAccount, shrincsKeygen } from "./pkg/bundler/hashsigs_rs";
 
 const owner = "0x" + "11".repeat(32);
 const chainId = "0x" + "22".repeat(32);
 const contractAddress = "0x" + "33".repeat(20);
 
-const keypair = shrincsKeygen(
-  "0x1234",
-  8,
-);
+const keypair = shrincsKeygen("0x1234", 8);
 const publicKey = keypair.publicKey();
 
 const account = new WasmShrincsAccount(
@@ -279,10 +296,7 @@ const contractAddress = "0x" + "33".repeat(20);
 const actionType = "0x" + "44".repeat(32);
 const payloadHash = "0x" + "55".repeat(32);
 
-const keypair = shrincsKeygen(
-  "0x0011223344",
-  8,
-);
+const keypair = shrincsKeygen("0x0011223344", 8);
 const publicKey = keypair.publicKey();
 const account = new WasmShrincsAccount(
   owner,
@@ -328,10 +342,7 @@ const contractAddress = "0x" + "33".repeat(20);
 const actionType = "0x" + "66".repeat(32);
 const payloadHash = "0x" + "77".repeat(32);
 
-const keypair = shrincsKeygen(
-  "0xabcdef",
-  8,
-);
+const keypair = shrincsKeygen("0xabcdef", 8);
 const publicKey = keypair.publicKey();
 const account = new WasmShrincsAccount(
   owner,
@@ -370,19 +381,28 @@ import {
   shrincsStatefulRotationMessageHash,
   shrincsKeygen,
 } from "./pkg/bundler/hashsigs_rs";
+import { concat, getBytes, keccak256, toUtf8Bytes } from "ethers";
+
+function statefulOnlyTargetCommitment(
+  nextStatefulPublicKey: string,
+  currentPublicKey: { pkSeed: string; hypertreeRoot: string },
+) {
+  return keccak256(
+    concat([
+      toUtf8Bytes("shrincs-public-key"),
+      getBytes(nextStatefulPublicKey),
+      getBytes(currentPublicKey.pkSeed),
+      getBytes(currentPublicKey.hypertreeRoot),
+    ]),
+  );
+}
 
 const owner = "0x" + "11".repeat(32);
 const chainId = "0x" + "22".repeat(32);
 const contractAddress = "0x" + "33".repeat(20);
 
-const currentKeypair = shrincsKeygen(
-  "0x1111",
-  8,
-);
-const nextKeypair = shrincsKeygen(
-  "0x2222",
-  16,
-);
+const currentKeypair = shrincsKeygen("0x1111", 8);
+const nextKeypair = shrincsKeygen("0x2222", 16);
 
 const currentPublicKey = currentKeypair.publicKey();
 const nextPublicKey = nextKeypair.publicKey();
@@ -399,7 +419,10 @@ account.enterRecoveryMode(owner);
 const snapshot = account.snapshot();
 const nextStatefulTarget = {
   statefulPublicKey: nextPublicKey.statefulPublicKey,
-  publicKeyCommitment: nextPublicKey.publicKeyCommitment,
+  publicKeyCommitment: statefulOnlyTargetCommitment(
+    nextPublicKey.statefulPublicKey,
+    currentPublicKey,
+  ),
 };
 
 const recoveryMessage = shrincsStatefulRotationMessageHash(
@@ -435,14 +458,8 @@ const owner = "0x" + "11".repeat(32);
 const chainId = "0x" + "22".repeat(32);
 const contractAddress = "0x" + "33".repeat(20);
 
-const currentKeypair = shrincsKeygen(
-  "0xaaaa",
-  8,
-);
-const nextKeypair = shrincsKeygen(
-  "0xbbbb",
-  16,
-);
+const currentKeypair = shrincsKeygen("0xaaaa", 8);
+const nextKeypair = shrincsKeygen("0xbbbb", 16);
 
 const currentPublicKey = currentKeypair.publicKey();
 const nextPublicKey = nextKeypair.publicKey();
@@ -536,6 +553,16 @@ type WasmAccountSnapshot = {
 };
 ```
 
+Rotation context:
+
+```ts
+type WasmRotationContext = {
+  domainSeparator: string;
+  nonce: string;
+  keyVersion: string;
+};
+```
+
 Stateful rotation target:
 
 ```ts
@@ -551,6 +578,68 @@ Full rotation target:
 type WasmRotationTarget = {
   statefulPublicKey: string;
   publicKeyCommitment: string;
+  pkSeed: string;
+  hypertreeRoot: string;
+};
+```
+
+Stateful signature:
+
+```ts
+type WasmStatefulSignature = {
+  randomizer: string;
+  counter: number;
+  chains: string[];
+  authPath: string[];
+};
+```
+
+Stateless signature:
+
+```ts
+type WasmForsEntry = {
+  secretLeaf: string;
+  authPath: string[];
+};
+
+type WasmForsSignature = {
+  randomizer: string;
+  counter: number;
+  entries: WasmForsEntry[];
+};
+
+type WasmWotsCSignature = {
+  randomizer: string;
+  counter: number;
+  chains: string[];
+};
+
+type WasmHypertreeLayerSignature = {
+  treeIndex: string;
+  leafIndex: number;
+  wotsCPkHash: string;
+  wotsCSignature: WasmWotsCSignature;
+  authPath: string[];
+};
+
+type WasmStatelessSignature = {
+  fors: WasmForsSignature;
+  hypertree: WasmHypertreeLayerSignature[];
+};
+```
+
+Signing key snapshot returned by `exportSigningKey()`:
+
+```ts
+type WasmSigningKey = {
+  statefulSkSeed: string;
+  statefulPrfSeed: string;
+  statefulPkSeed: string;
+  statefulRoot: string;
+  maxStatefulSignatures: number;
+  nextStatefulLeafIndex: number;
+  statelessSkSeed: string;
+  statelessPrfSeed: string;
   pkSeed: string;
   hypertreeRoot: string;
 };
@@ -646,8 +735,9 @@ RUST_BACKTRACE=1 cargo test-sbf -- --nocapture 2>&1 | grep "compute units:"
 
 ## Development Requirements
 
-- Rust 1.70 or later
-- Solana CLI tools (for Solana program development): https://solana.com/docs/intro/installation
+- Rust 1.79 or later; the current local test pass was with Rust 1.95.0
+- Solana/Agave SBF cargo subcommands, including `cargo build-sbf` and
+  `cargo test-sbf`, for Solana program development: https://solana.com/docs/intro/installation
 
 NOTE: if on Mac, do not use brew to install rust and instead use https://www.rust-lang.org/tools/install
 
@@ -710,7 +800,7 @@ wrapper's hardened policy/accounting behavior:
 
 - policy changes must be chosen before the first successful stateful signature in a key epoch
 - selecting `RecoveryRotation` blocks the stateful path immediately; `enterRecoveryMode(...)`
-  only arms stateless recovery rotations
+  then permits stateless action verification and stateless recovery rotations
 - stateful-only rotation consumes one stateless recovery use and carries that counter forward
 - full-key rotation consumes one stateless recovery use under the old key and then resets the
   counter for the newly installed stateless key
