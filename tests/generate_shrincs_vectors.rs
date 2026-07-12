@@ -183,10 +183,14 @@ fn stateful_calldata(
         fixed_array(signature.chains.iter().map(hex)),
         fixed_array(signature.auth_path.iter().map(hex))
     );
-    cast_calldata(
-        "f((bytes32,bytes32,uint32),bytes,(bytes32,uint32,bytes32[64],bytes32[]))",
-        &[key, hex(message), sig],
-    )
+    // The stateful WOTS-C chain array is a fixed-size `bytes32[NUM_WOTS_CHAINS]`
+    // in the per-profile Solidity struct (64 for 256s, 32 for the 128s
+    // profiles), so the ABI type must track the active profile's chain count.
+    let stateful_type = format!(
+        "f((bytes32,bytes32,uint32),bytes,(bytes32,uint32,bytes32[{}],bytes32[]))",
+        signature.chains.len()
+    );
+    cast_calldata(&stateful_type, &[key, hex(message), sig])
 }
 
 fn stateless_calldata(
