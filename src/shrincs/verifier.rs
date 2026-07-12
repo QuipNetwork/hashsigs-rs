@@ -395,17 +395,18 @@ impl ShrincsVerifier {
             return false;
         }
 
-        let first_layer = &signature.hypertree[0];
-        let Some(fors_root) = verify_fors_c_and_return_root(
-            public_key,
-            message,
-            &signature.fors,
-            first_layer.tree_index,
-            first_layer.leaf_index,
-        ) else {
+        let Some((fors_root, seed_tree_index, seed_leaf_index)) =
+            verify_fors_c_and_return_root(public_key, message, &signature.fors)
+        else {
             return false;
         };
-        verify_hypertree(public_key, fors_root, &signature.hypertree)
+        verify_hypertree(
+            public_key,
+            fors_root,
+            seed_tree_index,
+            seed_leaf_index,
+            &signature.hypertree,
+        )
     }
 }
 
@@ -446,8 +447,6 @@ mod tests {
                 .hypertree
                 .iter()
                 .map(|layer| HypertreeLayerSignature {
-                    tree_index: layer.tree_index,
-                    leaf_index: layer.leaf_index,
                     wots_c_pk_hash: layer.wots_c_pk_hash.clone(),
                     wots_c_signature: WotsCSignature {
                         randomizer: layer.wots_c_signature.randomizer.clone(),
@@ -466,12 +465,14 @@ mod tests {
         hypertree_root: &[u8],
     ) -> [u8; HASH_LEN] {
         let mut packed = Vec::with_capacity(
-            b"shrincs-public-key".len()
+            b"shrincs-public-key/".len()
+                + PROFILE_NAME.len()
                 + stateful_public_key.len()
                 + pk_seed.len()
                 + hypertree_root.len(),
         );
-        packed.extend_from_slice(b"shrincs-public-key");
+        packed.extend_from_slice(b"shrincs-public-key/");
+        packed.extend_from_slice(PROFILE_NAME.as_bytes());
         packed.extend_from_slice(stateful_public_key);
         packed.extend_from_slice(pk_seed);
         packed.extend_from_slice(hypertree_root);

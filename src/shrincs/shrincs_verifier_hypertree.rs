@@ -34,6 +34,8 @@ use super::shrincs_verifier_utils::{
 pub(crate) fn verify_hypertree(
     public_key: &PublicKey,
     fors_root: [u8; HASH_LEN],
+    seed_tree_index: u64,
+    seed_leaf_index: u32,
     layers: &[HypertreeLayerSignature],
 ) -> bool {
     if layers.len() != NUM_HYPERTREE_LAYERS as usize {
@@ -51,17 +53,15 @@ pub(crate) fn verify_hypertree(
     let leaf_count = 1u32 << subtree_height;
     let leaf_mask = (1u64 << subtree_height) - 1;
     let mut current_root = fors_root;
-    let mut expected_tree_index = layers[0].tree_index;
-    let mut expected_leaf_index = layers[0].leaf_index;
+    // Layer-0 coordinates are seeded from the FORS digest (passed in by the
+    // caller); every higher layer's coordinates are derived by the canonical
+    // recurrence below. The signature no longer carries them, so there is no
+    // carried-vs-derived equality check.
+    let mut expected_tree_index = seed_tree_index;
+    let mut expected_leaf_index = seed_leaf_index;
 
     for (layer_index, layer_signature) in layers.iter().enumerate() {
-        // Layer 0 is pinned by the FORS digest before this function is called.
-        // Every higher layer must then follow the canonical hypertree recurrence:
-        // the next layer's leaf is the low `subtree_height` bits of the current
-        // tree index, and the next tree index is the remaining high bits.
-        if layer_signature.tree_index != expected_tree_index
-            || layer_signature.leaf_index != expected_leaf_index
-            || layer_signature.leaf_index >= leaf_count
+        if expected_leaf_index >= leaf_count
             || layer_signature.wots_c_pk_hash.len() != HASH_LEN
             || layer_signature.auth_path.len() != subtree_height as usize
         {
@@ -73,8 +73,8 @@ pub(crate) fn verify_hypertree(
         if !verify_wots_c32(
             &public_key.pk_seed,
             layer_index as u32,
-            layer_signature.tree_index,
-            layer_signature.leaf_index,
+            expected_tree_index,
+            expected_leaf_index,
             &layer_signature.wots_c_pk_hash,
             current_root,
             &layer_signature.wots_c_signature,
@@ -90,8 +90,8 @@ pub(crate) fn verify_hypertree(
             subtree_height,
             &public_key.pk_seed,
             layer_index as u32,
-            layer_signature.tree_index,
-            layer_signature.leaf_index,
+            expected_tree_index,
+            expected_leaf_index,
             layer_leaf,
             &layer_signature.auth_path,
         ) else {

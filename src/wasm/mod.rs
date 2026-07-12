@@ -493,8 +493,6 @@ struct WasmWotsCSignature {
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct WasmHypertreeLayerSignature {
-    tree_index: String,
-    leaf_index: u32,
     wots_c_pk_hash: String,
     wots_c_signature: WasmWotsCSignature,
     auth_path: Vec<String>,
@@ -783,13 +781,7 @@ fn parse_stateless_signature(input: &WasmStatelessSignature) -> Result<Stateless
             .hypertree
             .iter()
             .map(|layer| {
-                let tree_index = layer
-                    .tree_index
-                    .parse::<u64>()
-                    .map_err(|_| format!("invalid treeIndex: {}", layer.tree_index))?;
                 Ok(HypertreeLayerSignature {
-                    tree_index,
-                    leaf_index: layer.leaf_index,
                     wots_c_pk_hash: parse_hex_bytes(&layer.wots_c_pk_hash)?,
                     wots_c_signature: WotsCSignature {
                         randomizer: parse_hex_bytes(&layer.wots_c_signature.randomizer)?,
@@ -944,8 +936,6 @@ fn stateless_signature_dto_from_signer(
             .hypertree
             .iter()
             .map(|layer| WasmHypertreeLayerSignature {
-                tree_index: layer.tree_index.to_string(),
-                leaf_index: layer.leaf_index,
                 wots_c_pk_hash: hex_string(&layer.wots_c_pk_hash),
                 wots_c_signature: WasmWotsCSignature {
                     randomizer: hex_string(&layer.wots_c_signature.randomizer),
@@ -1093,8 +1083,6 @@ mod tests {
                 .hypertree
                 .iter()
                 .map(|layer| WasmHypertreeLayerSignature {
-                    tree_index: layer.tree_index.to_string(),
-                    leaf_index: layer.leaf_index,
                     wots_c_pk_hash: hex(&layer.wots_c_pk_hash),
                     wots_c_signature: WasmWotsCSignature {
                         randomizer: hex(&layer.wots_c_signature.randomizer),

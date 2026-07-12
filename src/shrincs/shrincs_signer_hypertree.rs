@@ -97,9 +97,10 @@ pub(crate) fn sign_hypertree(
             subtree_height,
             0,
         );
+        // The tree/leaf coordinates are fully derived by the verifier (layer 0
+        // from the FORS digest, upper layers by the recurrence below), so they
+        // are not serialized into the signature.
         layers.push(HypertreeLayerSignature {
-            tree_index: tree,
-            leaf_index: leaf,
             wots_c_pk_hash: pk_hash.to_vec(),
             wots_c_signature,
             auth_path,

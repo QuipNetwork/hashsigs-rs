@@ -40,9 +40,7 @@ pub(crate) fn verify_fors_c_and_return_root(
     public_key: &PublicKey,
     message: &[u8],
     signature: &ForsSignature,
-    tree_index: u64,
-    leaf_index: u32,
-) -> Option<[u8; HASH_LEN]> {
+) -> Option<([u8; HASH_LEN], u64, u32)> {
     // FORS-C omits the final FORS tree by forcing its digest-selected leaf index to zero.
     // Verification therefore expects only k - 1 revealed entries and rejects any digest
     // whose omitted final tree would require a nonzero leaf.
@@ -58,7 +56,8 @@ pub(crate) fn verify_fors_c_and_return_root(
     // - one leaf in each FORS tree,
     // - the layer-0 hypertree tree index,
     // - the layer-0 hypertree leaf index.
-    // The first hypertree layer must echo those two coordinates.
+    // These two coordinates are returned to seed the hypertree walk; the
+    // signature no longer carries them, so there is nothing to echo-check.
     let digest = fors_digest(
         public_key,
         message,
@@ -74,12 +73,8 @@ pub(crate) fn verify_fors_c_and_return_root(
     {
         return None;
     }
-    if digest.tree_index != tree_index {
-        return None;
-    }
-    if digest.leaf_index != leaf_index {
-        return None;
-    }
+    let tree_index = digest.tree_index;
+    let leaf_index = digest.leaf_index;
 
     let mut roots = Vec::with_capacity(signed_trees * HASH_LEN);
     for fors_tree_index in 0..signed_trees {
@@ -112,8 +107,13 @@ pub(crate) fn verify_fors_c_and_return_root(
     // The FORS output is the hash of all verified FORS roots under the domain
     // tag `fors-pk`. In the SPHINCS-style composition, this is a per-signature
     // value consumed by the hypertree rather than a field of the long-lived
-    // public key.
-    Some(hash_node(&[b"fors-pk", &public_key.pk_seed, &roots]))
+    // public key. The digest-selected layer-0 coordinates are returned so the
+    // hypertree walk can seed itself without carried wire fields.
+    Some((
+        hash_node(&[b"fors-pk", &public_key.pk_seed, &roots]),
+        tree_index,
+        leaf_index,
+    ))
 }
 
 fn fors_entry_root32(

@@ -719,8 +719,6 @@ mod tests {
                 .hypertree
                 .iter()
                 .map(|layer| HypertreeLayerSignature {
-                    tree_index: layer.tree_index,
-                    leaf_index: layer.leaf_index,
                     wots_c_pk_hash: layer.wots_c_pk_hash.clone(),
                     wots_c_signature: WotsCSignature {
                         randomizer: layer.wots_c_signature.randomizer.clone(),
@@ -739,7 +737,8 @@ mod tests {
         hypertree_root: &[u8],
     ) -> [u8; HASH_LEN] {
         let mut packed = Vec::new();
-        packed.extend_from_slice(b"shrincs-public-key");
+        packed.extend_from_slice(b"shrincs-public-key/");
+        packed.extend_from_slice(crate::shrincs::verifier::PROFILE_NAME.as_bytes());
         packed.extend_from_slice(stateful_public_key);
         packed.extend_from_slice(pk_seed);
         packed.extend_from_slice(hypertree_root);
