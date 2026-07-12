@@ -24,7 +24,8 @@
 //! signer to make those byte-level choices visible.
 
 use super::verifier::{
-    PublicKey, HASH_LEN, HASH_TRUNC_LEN, NUM_WOTS_CHAINS, STATEFUL_PUBLIC_KEY_BYTES, WOTS_CHAIN_LEN,
+    PublicKey, HASH_LEN, HASH_TRUNC_LEN, NUM_WOTS_CHAINS, PROFILE_NAME, STATEFUL_PUBLIC_KEY_BYTES,
+    WOTS_CHAIN_LEN,
 };
 use solana_program::keccak::hash as keccak256_hash;
 
@@ -51,8 +52,13 @@ pub(crate) fn public_key_commitment(
     pk_seed: &[u8; HASH_LEN],
     hypertree_root: &[u8; HASH_LEN],
 ) -> [u8; HASH_LEN] {
+    // The commitment tag binds the compile-time profile id (F-08 / Q2), so a
+    // public key from one profile can never collide with another's: the
+    // preimage is `shrincs-public-key/<PROFILE_NAME>`, sourced from the profile
+    // machinery rather than a scattered literal.
     hash_packed(&[
-        b"shrincs-public-key",
+        b"shrincs-public-key/",
+        PROFILE_NAME.as_bytes(),
         stateful_public_key,
         pk_seed,
         hypertree_root,
