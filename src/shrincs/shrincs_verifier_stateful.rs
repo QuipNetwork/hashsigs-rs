@@ -25,7 +25,7 @@ use super::shrincs_verifier_types::{
     WOTS_CHAINS_STATEFUL, WOTS_TARGET_SUM_STATEFUL,
 };
 use super::shrincs_verifier_utils::{
-    address_word32, base_w16_digit, decode_stateful_public_key, hash_packed,
+    address_word32, base_w16_digit, decode_stateful_public_key, hash_node, hash_packed,
     matches_expected_public_key_commitment, valid_public_key,
 };
 
@@ -124,7 +124,7 @@ fn compact_stateful_wots_public_key_from_signature(
     if digit_sum != WOTS_TARGET_SUM_STATEFUL {
         return None;
     }
-    Some(hash_packed(&[
+    Some(hash_node(&[
         b"uxmss-wots-pk",
         &pk_seed,
         &leaf_index.to_be_bytes(),
@@ -168,7 +168,7 @@ fn stateful_parent_hash(
     // Parent nodes are domain-separated from WOTS chain hashes and bind the
     // left leaf index, preventing the same pair of children from moving around
     // the unbalanced tree.
-    hash_packed(&[
+    hash_node(&[
         b"uxmss-node",
         &pk_seed,
         &left_leaf_index.to_be_bytes(),
@@ -207,5 +207,5 @@ fn hash_stateful_wots_c_chain_no_mask32(
     address_word: [u8; HASH_LEN],
     segment: [u8; HASH_LEN],
 ) -> [u8; HASH_LEN] {
-    hash_packed(&[b"wots-c-chain", &pk_seed, &address_word, &segment])
+    hash_node(&[b"wots-c-chain", &pk_seed, &address_word, &segment])
 }

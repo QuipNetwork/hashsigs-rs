@@ -19,7 +19,7 @@
 
 use super::shrincs_signer_types::{ShrincsSignerResult, ShrincsSigningKey};
 use super::shrincs_signer_utils::{
-    address_word32, base_w16_digit, hash_packed, WOTS_C_MAX_GRIND_COUNTER,
+    address_word32, base_w16_digit, hash_node, hash_packed, WOTS_C_MAX_GRIND_COUNTER,
 };
 use super::verifier::{
     StatefulSignature, HASH_LEN, WOTS_BASE_STATEFUL, WOTS_CHAINS_STATEFUL, WOTS_TARGET_SUM_STATEFUL,
@@ -198,7 +198,7 @@ fn stateful_wots_pk_hash(
         );
         endpoints.extend_from_slice(&endpoint);
     }
-    hash_packed(&[
+    hash_node(&[
         b"uxmss-wots-pk",
         pk_seed,
         &leaf_index.to_be_bytes(),
@@ -219,7 +219,7 @@ fn stateful_chain_no_mask(
     let mut out = value;
     for step_offset in 0..steps {
         let address_word = address_word32(0, 0, 0, leaf_index, chain_index, start + step_offset);
-        out = hash_packed(&[b"wots-c-chain", pk_seed, &address_word, &out]);
+        out = hash_node(&[b"wots-c-chain", pk_seed, &address_word, &out]);
     }
     out
 }
@@ -258,7 +258,7 @@ fn stateful_parent_hash(
 ) -> [u8; HASH_LEN] {
     // The left leaf index is part of the parent hash because this tree is
     // unbalanced; it tells the verifier which live leaf starts this subtree.
-    hash_packed(&[
+    hash_node(&[
         b"uxmss-node",
         pk_seed,
         &left_leaf_index.to_be_bytes(),

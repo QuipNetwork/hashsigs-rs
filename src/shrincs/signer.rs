@@ -167,9 +167,7 @@ impl ShrincsSigner {
 
 #[cfg(test)]
 mod tests {
-    use self::verifier::{
-        HASH_LEN, HYPERTREE_HEIGHT, NUM_HYPERTREE_LAYERS, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN,
-    };
+    use self::verifier::HASH_LEN;
     use super::shrincs_signer_utils::hash_packed;
     use super::*;
 
@@ -187,14 +185,84 @@ mod tests {
         word32(&public_key.public_key_commitment).unwrap()
     }
 
+    // The 256s profile pins these exact counts; the 128s profiles use a
+    // different tuple (h=18, d=1, len=32), so this constant-identity check is
+    // scoped to the default build. 256s behaviour is unchanged.
+    #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
     #[test]
     fn signer_constants_match_verifier_constants() {
+        use self::verifier::{
+            HYPERTREE_HEIGHT, NUM_HYPERTREE_LAYERS, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN,
+        };
         assert_eq!(HASH_LEN, 32);
         assert_eq!(HYPERTREE_HEIGHT, 64);
         assert_eq!(NUM_HYPERTREE_LAYERS, 8);
         assert_eq!(HYPERTREE_HEIGHT / NUM_HYPERTREE_LAYERS, 8);
         assert_eq!(NUM_WOTS_CHAINS, 64);
         assert_eq!(WOTS_CHAIN_LEN, 16);
+    }
+
+    // 128s stateless keygen/signing (a 2^18-leaf hypertree and 2^24-leaf FORS
+    // trees) is computationally infeasible in-process, so the 128s truncation
+    // path is proven through the feasible stateful subsystem. The stateful
+    // verifier never rebuilds the hypertree, so a signing key with a placeholder
+    // hypertree root exercises the real stateful WOTS-C and unbalanced-tree
+    // hashing at n=16. This also confirms `mask_hash` actually truncates: every
+    // masked node value must have a zero low half.
+    #[cfg(any(feature = "profile-128s-q18", feature = "profile-128s-q20"))]
+    #[test]
+    fn stateful_round_trip_verifies_under_128s_truncation() {
+        let seed = b"128s stateful truncation seed";
+        let max = 4u32;
+        let stateful_sk_seed = derive32(b"shrincs-stateful-sk-seed", seed, &[]);
+        let stateful_prf_seed = derive32(b"shrincs-stateful-prf-seed", seed, &[]);
+        let stateful_pk_seed = derive32(b"shrincs-stateful-pk-seed", seed, &[]);
+        let stateful_root = stateful_subtree_root(
+            &stateful_sk_seed,
+            &stateful_pk_seed,
+            INITIAL_STATEFUL_LEAF_INDEX,
+            max,
+        );
+        let pk_seed = derive32(b"shrincs-pk-seed", seed, &[]);
+        // Placeholder: a real hypertree root is infeasible here and irrelevant to
+        // the stateful path, but it is still committed by the public key.
+        let hypertree_root = derive32(b"placeholder-hypertree-root", seed, &[]);
+
+        let signing_key = ShrincsSigningKey {
+            stateful_sk_seed,
+            stateful_prf_seed,
+            stateful_pk_seed,
+            stateful_root,
+            max_stateful_signatures: max,
+            next_stateful_leaf_index: INITIAL_STATEFUL_LEAF_INDEX,
+            stateless_sk_seed: derive32(b"shrincs-stateless-sk-seed", seed, &[]),
+            stateless_prf_seed: derive32(b"shrincs-stateless-prf-seed", seed, &[]),
+            pk_seed,
+            hypertree_root,
+        };
+        let public_key = public_key_from_components(
+            encode_stateful_public_key(stateful_pk_seed, stateful_root, max),
+            pk_seed,
+            hypertree_root,
+        );
+        let expected = word32(&public_key.public_key_commitment).unwrap();
+        let message = hash_packed(&[b"128s stateful message"]);
+
+        let signature =
+            ShrincsSigner::sign_stateful_raw_at_leaf(&signing_key, 2, &message).unwrap();
+        assert_eq!(signature.auth_path.len(), 2);
+        assert!(ShrincsVerifier::new().verify_stateful_unsafe_raw(
+            expected,
+            &public_key,
+            &message,
+            &signature,
+        ));
+
+        // Truncation actually happened: the second auth-path node is a masked
+        // `uxmss-wots-pk` leaf, so its low (HASH_LEN - HASH_TRUNC_LEN) bytes are
+        // zero while its high half is not. At 256s this assertion would fail.
+        assert_eq!(&signature.auth_path[1][16..], &[0u8; 16]);
+        assert_ne!(&signature.auth_path[1][..16], &[0u8; 16]);
     }
 
     #[test]

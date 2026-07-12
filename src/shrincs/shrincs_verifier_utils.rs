@@ -21,7 +21,8 @@ use solana_program::keccak::hash as keccak256_hash;
 
 use super::shrincs_verifier_types::{
     ActionContext, PublicKey, RotationContext, StatefulPublicKey, ADDRESS_TYPE_FORS_TREE,
-    ADDRESS_TYPE_TREE, HASH_LEN, NUM_WOTS_CHAINS, STATEFUL_PUBLIC_KEY_BYTES, WOTS_CHAIN_LEN,
+    ADDRESS_TYPE_TREE, HASH_LEN, HASH_TRUNC_LEN, NUM_WOTS_CHAINS, STATEFUL_PUBLIC_KEY_BYTES,
+    WOTS_CHAIN_LEN,
 };
 
 pub(crate) fn keccak256(data: &[u8]) -> [u8; HASH_LEN] {
@@ -44,6 +45,26 @@ pub(crate) fn pack(parts: &[&[u8]]) -> Vec<u8> {
         out.extend_from_slice(part);
     }
     out
+}
+
+pub(crate) fn mask_hash(mut hash: [u8; HASH_LEN]) -> [u8; HASH_LEN] {
+    // High-aligned truncation to the profile's HASH_TRUNC_LEN: keep the top
+    // HASH_TRUNC_LEN bytes and zero the low (HASH_LEN - HASH_TRUNC_LEN),
+    // mirroring Solidity `SHRINCSHash.maskHash` (`h & HASH_MASK`). For the 256s
+    // profile HASH_TRUNC_LEN == HASH_LEN, so this iterates zero times and the
+    // output is byte-identical to the raw keccak. [DESIGN §2(b)/§3.3]
+    for byte in hash.iter_mut().skip(HASH_TRUNC_LEN) {
+        *byte = 0;
+    }
+    hash
+}
+
+pub(crate) fn hash_node(parts: &[&[u8]]) -> [u8; HASH_LEN] {
+    // Node/root/chain/pk-hash sites truncate their keccak output to the active
+    // profile's HASH_LEN. Solidity applies `maskHash` at exactly these nine
+    // hash-producing sites; digit digests, chain secrets, seeds, the FORS
+    // digest expansion, and public-key/action commitments stay full 32 bytes.
+    mask_hash(hash_packed(parts))
 }
 
 pub(crate) fn valid_action_context(context: &ActionContext) -> bool {

@@ -24,7 +24,8 @@
 
 use super::shrincs_signer_types::{ShrincsSignerResult, ShrincsSigningKey};
 use super::shrincs_signer_utils::{
-    fors_address_word, hash_packed, pack, read_bits32, read_bits64, FORS_C_MAX_GRIND_COUNTER,
+    fors_address_word, hash_node, hash_packed, pack, read_bits32, read_bits64,
+    FORS_C_MAX_GRIND_COUNTER,
 };
 use super::verifier::{
     ForsEntry, ForsSignature, FORS_TREE_HEIGHT, HASH_LEN, HYPERTREE_HEIGHT, NUM_FORS_TREES,
@@ -107,7 +108,7 @@ pub(crate) fn sign_fors_c(
         // The public seed is included so roots from a different FORS key cannot
         // be transplanted into this key.
         return Some(SignedForsC {
-            root: hash_packed(&[b"fors-pk", &signing_key.pk_seed, &roots]),
+            root: hash_node(&[b"fors-pk", &signing_key.pk_seed, &roots]),
             signature: ForsSignature {
                 randomizer: randomizer.to_vec(),
                 counter,
@@ -253,7 +254,7 @@ fn fors_tree_root_and_auth_path(
             let parent_low_index = shifted_tree + parent_index as u64;
             let address_word =
                 fors_address_word(tree_index, leaf_index, node_height, parent_low_index);
-            parents.push(hash_packed(&[
+            parents.push(hash_node(&[
                 b"fors-node",
                 pk_seed,
                 &address_word,
@@ -297,5 +298,5 @@ fn fors_leaf_hash(
     let secret = fors_leaf_secret(pk_seed, sk_seed, tree_index, leaf_index, fors_tree, leaf);
     let tree_leaf = (u64::from(fors_tree) << FORS_TREE_HEIGHT) + u64::from(leaf);
     let address_word = fors_address_word(tree_index, leaf_index, 0, tree_leaf);
-    hash_packed(&[b"fors-leaf", pk_seed, &address_word, &secret])
+    hash_node(&[b"fors-leaf", pk_seed, &address_word, &secret])
 }
