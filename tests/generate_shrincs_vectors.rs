@@ -25,7 +25,7 @@ const OUT_PATH: &str = "tests/test_vectors/shrincs_sphincs_128s_q20_keccak.json"
 
 #[test]
 #[ignore = "run explicitly to refresh Solidity SHRINCS vectors"]
-fn generate_shrincs_sphincs_256s_keccak_vectors() {
+fn generate_shrincs_sphincs_vectors() {
     let (mut stateful_key, stateful_public_key) =
         ShrincsSigner::keygen(b"shrincs solidity vector stateful seed", 4)
             .expect("stateful keygen");

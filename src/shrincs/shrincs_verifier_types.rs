@@ -44,6 +44,8 @@ mod profile {
     pub const PROFILE_NAME: &str = "shrincs-256s-keccak";
     /// SPHINCS `n` (HASH_LEN = 32): no truncation, `mask_hash` is a no-op.
     pub const HASH_TRUNC_LEN: usize = 32;
+    // Read by the account stateless-usage cap; allow guards builds that omit
+    // that consumer. T6 also reads it for the per-profile budget.
     #[allow(dead_code)]
     pub const STATELESS_SIGNATURE_LIMIT: u64 = 1_048_576;
     pub const HYPERTREE_HEIGHT: u8 = 64;
@@ -67,6 +69,8 @@ mod profile {
     pub const PROFILE_NAME: &str = "shrincs-128s-q18-keccak";
     /// SPHINCS `n` = 16: hash outputs are truncated to the high 16 bytes.
     pub const HASH_TRUNC_LEN: usize = 16;
+    // Read by the account stateless-usage cap; allow guards builds that omit
+    // that consumer. T6 also reads it for the per-profile budget.
     #[allow(dead_code)]
     pub const STATELESS_SIGNATURE_LIMIT: u64 = 262_144;
     pub const HYPERTREE_HEIGHT: u8 = 18;
@@ -89,6 +93,8 @@ mod profile {
     #[allow(dead_code)]
     pub const PROFILE_NAME: &str = "shrincs-128s-q20-keccak";
     pub const HASH_TRUNC_LEN: usize = 16;
+    // Read by the account stateless-usage cap; allow guards builds that omit
+    // that consumer. T6 also reads it for the per-profile budget.
     #[allow(dead_code)]
     pub const STATELESS_SIGNATURE_LIMIT: u64 = 1_048_576;
     pub const HYPERTREE_HEIGHT: u8 = 18;

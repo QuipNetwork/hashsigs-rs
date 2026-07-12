@@ -513,6 +513,10 @@ mod tests {
         assert!(!valid_action_context(&context));
     }
 
+    #[cfg_attr(
+        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
+    )]
     #[test]
     fn verify_stateless_accepts_valid_action_signature() {
         let verifier = ShrincsVerifier::new();
@@ -528,6 +532,10 @@ mod tests {
         assert!(verifier.verify_stateless(expected, &public_key, &context, &signature,));
     }
 
+    #[cfg_attr(
+        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
+    )]
     #[test]
     fn rotate_stateful_via_stateless_accepts_valid_recovery_signature() {
         let verifier = ShrincsVerifier::new();
@@ -566,6 +574,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
+    )]
     #[test]
     fn stateless_rotate_accepts_valid_recovery_signature() {
         let verifier = ShrincsVerifier::new();

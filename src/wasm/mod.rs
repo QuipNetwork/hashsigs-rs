@@ -1166,6 +1166,10 @@ mod tests {
         assert!(parse_hex_bytes("0x123").is_err());
     }
 
+    #[cfg_attr(
+        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
+    )]
     #[test]
     fn stateful_raw_helper_verifies_signer_output() {
         let (mut signing_key, public_key) = signing_key_and_public_key();
@@ -1183,6 +1187,10 @@ mod tests {
         assert!(ok);
     }
 
+    #[cfg_attr(
+        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
+    )]
     #[test]
     fn stateful_action_helper_verifies_signer_output() {
         let verifier = ShrincsVerifier::new();
@@ -1211,6 +1219,10 @@ mod tests {
         assert!(ok);
     }
 
+    #[cfg_attr(
+        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
+    )]
     #[test]
     fn stateless_raw_and_action_helpers_verify_signer_output() {
         let verifier = ShrincsVerifier::new();
