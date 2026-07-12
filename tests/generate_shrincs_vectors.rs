@@ -99,6 +99,49 @@ fn generate_shrincs_sphincs_vectors() {
     println!("wrote {OUT_PATH}");
 }
 
+// Emit the SHRINCSSignerKeygen.t.sol `EXPECTED_*` anchors for the active
+// compile-time profile. The Solidity test drives keygen("solidity public key
+// seed", 4); this reproduces the same call so the printed constants can be
+// pasted directly into the per-profile golden block. Run once per profile
+// feature (`--features profile-128s-q18` / `-q20`); under a 128s profile this
+// performs the heavy 2^18-leaf hypertree keygen.
+#[test]
+#[ignore = "run explicitly to refresh SHRINCSSignerKeygen anchors"]
+fn emit_keygen_goldens() {
+    let profile = hashsigs_rs::shrincs::verifier::PROFILE_NAME;
+    let (signing_key, public_key) =
+        ShrincsSigner::keygen(b"solidity public key seed", 4).expect("keygen");
+
+    let sol_bytes32 = |label: &str, bytes: &[u8]| {
+        println!(
+            "    bytes32 internal constant {label} =\n        {};",
+            hex(bytes)
+        );
+    };
+
+    println!("// ==== SHRINCSSignerKeygen goldens for profile {profile} ====");
+    sol_bytes32("EXPECTED_STATEFUL_SK_SEED", &signing_key.stateful_sk_seed);
+    sol_bytes32("EXPECTED_STATEFUL_PRF_SEED", &signing_key.stateful_prf_seed);
+    sol_bytes32("EXPECTED_STATEFUL_PK_SEED", &signing_key.stateful_pk_seed);
+    sol_bytes32("EXPECTED_STATEFUL_ROOT", &signing_key.stateful_root);
+    sol_bytes32("EXPECTED_STATELESS_SK_SEED", &signing_key.stateless_sk_seed);
+    sol_bytes32(
+        "EXPECTED_STATELESS_PRF_SEED",
+        &signing_key.stateless_prf_seed,
+    );
+    sol_bytes32("EXPECTED_PK_SEED", &signing_key.pk_seed);
+    sol_bytes32("EXPECTED_HYPERTREE_ROOT", &signing_key.hypertree_root);
+    sol_bytes32(
+        "EXPECTED_PUBLIC_KEY_COMMITMENT",
+        &public_key.public_key_commitment,
+    );
+    println!(
+        "    bytes internal constant EXPECTED_STATEFUL_PUBLIC_KEY =\n        hex\"{}\";",
+        hex(&public_key.stateful_public_key).trim_start_matches("0x")
+    );
+    println!("// ==== end goldens for profile {profile} ====");
+}
+
 fn hash_word(label: &[u8]) -> [u8; HASH_LEN] {
     solana_program::keccak::hash(label).to_bytes()
 }
@@ -159,7 +202,7 @@ fn stateless_calldata(
     );
     let sig = stateless_signature_cast(signature);
     cast_calldata(
-        "f((bytes,bytes,bytes),bytes,((bytes,uint32,(bytes,bytes[])[]),(uint64,uint32,bytes,(bytes,uint32,bytes[]),bytes[])[]))",
+        "f((bytes,bytes,bytes),bytes,((bytes,uint32,(bytes,bytes[])[]),(bytes,(bytes,uint32,bytes[]),bytes[])[]))",
         &[public_key, hex(message), sig],
     )
 }
@@ -186,9 +229,7 @@ fn stateless_signature_cast(signature: &StatelessSignature) -> String {
             fixed_array(layer.wots_c_signature.chains.iter().map(hex))
         );
         format!(
-            "({},{},{},{},{})",
-            layer.tree_index,
-            layer.leaf_index,
+            "({},{},{})",
             hex(&layer.wots_c_pk_hash),
             wots,
             fixed_array(layer.auth_path.iter().map(hex))
@@ -257,8 +298,6 @@ fn stateless_signature_json(signature: &StatelessSignature) -> Value {
             })).collect::<Vec<_>>()
         },
         "hypertree": signature.hypertree.iter().map(|layer| json!({
-            "treeIndex": layer.tree_index,
-            "leafIndex": layer.leaf_index,
             "wotsCPkHash": hex(&layer.wots_c_pk_hash),
             "wotsCSignature": {
                 "randomizer": hex(&layer.wots_c_signature.randomizer),
