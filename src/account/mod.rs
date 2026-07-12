@@ -1132,6 +1132,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
+    )]
     #[test]
     fn recovery_rotation_remains_reachable_after_stateful_use() {
         let verifier = ShrincsVerifier::new();
@@ -1262,6 +1266,10 @@ mod tests {
         ));
     }
 
+    #[cfg_attr(
+        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
+    )]
     #[test]
     fn stateful_only_rotation_at_budget_boundary_lands_exhausted() {
         let verifier = ShrincsVerifier::new();
@@ -1311,6 +1319,10 @@ mod tests {
         ));
     }
 
+    #[cfg_attr(
+        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
+    )]
     #[test]
     fn full_rotation_with_unchanged_stateless_key_preserves_usage() {
         let verifier = ShrincsVerifier::new();
