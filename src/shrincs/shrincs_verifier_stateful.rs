@@ -207,5 +207,7 @@ fn hash_stateful_wots_c_chain_no_mask32(
     address_word: [u8; HASH_LEN],
     segment: [u8; HASH_LEN],
 ) -> [u8; HASH_LEN] {
-    hash_node(&[b"wots-c-chain", &pk_seed, &address_word, &segment])
+    // Stateful (UXMSS) chains use the `uxmss-wots-chain` tag (16 bytes),
+    // domain-separated from the stateless hypertree `wots-c-chain` step.
+    hash_node(&[b"uxmss-wots-chain", &pk_seed, &address_word, &segment])
 }

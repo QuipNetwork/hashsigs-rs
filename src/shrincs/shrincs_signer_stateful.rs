@@ -219,7 +219,10 @@ fn stateful_chain_no_mask(
     let mut out = value;
     for step_offset in 0..steps {
         let address_word = address_word32(0, 0, 0, leaf_index, chain_index, start + step_offset);
-        out = hash_node(&[b"wots-c-chain", pk_seed, &address_word, &out]);
+        // Stateful (UXMSS) WOTS-C chains are domain-separated from the stateless
+        // hypertree chains: the stateful tag is `uxmss-wots-chain` (16 bytes,
+        // 112-byte preimage) while the hypertree walk keeps `wots-c-chain`.
+        out = hash_node(&[b"uxmss-wots-chain", pk_seed, &address_word, &out]);
     }
     out
 }
