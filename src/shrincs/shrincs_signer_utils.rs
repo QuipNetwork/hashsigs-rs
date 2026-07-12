@@ -24,7 +24,7 @@
 //! signer to make those byte-level choices visible.
 
 use super::verifier::{
-    PublicKey, HASH_LEN, NUM_WOTS_CHAINS, STATEFUL_PUBLIC_KEY_BYTES, WOTS_CHAIN_LEN,
+    PublicKey, HASH_LEN, HASH_TRUNC_LEN, NUM_WOTS_CHAINS, STATEFUL_PUBLIC_KEY_BYTES, WOTS_CHAIN_LEN,
 };
 use solana_program::keccak::hash as keccak256_hash;
 
@@ -101,6 +101,24 @@ pub(crate) fn pack(parts: &[&[u8]]) -> Vec<u8> {
         out.extend_from_slice(part);
     }
     out
+}
+
+pub(crate) fn mask_hash(mut hash: [u8; HASH_LEN]) -> [u8; HASH_LEN] {
+    // High-aligned truncation to the profile's HASH_TRUNC_LEN, mirroring the
+    // verifier's `mask_hash` and Solidity `SHRINCSHash.maskHash`. Keeps the top
+    // HASH_TRUNC_LEN bytes and zeroes the low (HASH_LEN - HASH_TRUNC_LEN). For
+    // the 256s profile this is a no-op, so signer output stays byte-identical.
+    for byte in hash.iter_mut().skip(HASH_TRUNC_LEN) {
+        *byte = 0;
+    }
+    hash
+}
+
+pub(crate) fn hash_node(parts: &[&[u8]]) -> [u8; HASH_LEN] {
+    // Truncated node/root/chain/pk-hash hash, applied at exactly the sites the
+    // verifier and Solidity signer mask. Secrets, seeds, digit digests, the
+    // FORS digest expansion, and commitments keep full 32-byte width.
+    mask_hash(hash_packed(parts))
 }
 
 pub(crate) fn word32(input: &[u8]) -> Option<[u8; HASH_LEN]> {

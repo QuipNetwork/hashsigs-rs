@@ -19,8 +19,8 @@
 
 use super::shrincs_signer_types::{ShrincsSignerResult, ShrincsSigningKey};
 use super::shrincs_signer_utils::{
-    address_word32, base_w_digit, derive32, hash_packed, hypertree_address_word, wots_digest_bytes,
-    WOTS_C_MAX_GRIND_COUNTER,
+    address_word32, base_w_digit, derive32, hash_node, hash_packed, hypertree_address_word,
+    wots_digest_bytes, WOTS_C_MAX_GRIND_COUNTER,
 };
 use super::verifier::{
     HypertreeLayerSignature, WotsCSignature, HASH_LEN, HYPERTREE_HEIGHT, NUM_HYPERTREE_LAYERS,
@@ -165,7 +165,7 @@ fn hypertree_virtual_node(
     let right_index = (index << 1) | 1;
     let right = hypertree_virtual_node(pk_seed, layer_seed, layer, tree, height - 1, right_index);
     let address_word = hypertree_address_word(layer, tree, height, u64::from(index));
-    hash_packed(&[b"hypertree-node", pk_seed, &address_word, &left, &right])
+    hash_node(&[b"hypertree-node", pk_seed, &address_word, &left, &right])
 }
 
 fn hypertree_auth_path(
@@ -229,7 +229,7 @@ fn stateless_wots_c_public_key(
         );
         endpoints.extend_from_slice(&endpoint);
     }
-    hash_packed(&[b"wots-c-pk", pk_seed, &endpoints])
+    hash_node(&[b"wots-c-pk", pk_seed, &endpoints])
 }
 
 fn sign_stateless_wots_c(
@@ -320,7 +320,7 @@ fn stateless_wots_c_chain(
     let mut out = value;
     for step in start..start + steps {
         let address_word = address_word32(layer, tree, 0, keypair, chain, step);
-        out = hash_packed(&[b"wots-c-chain", pk_seed, &address_word, &out]);
+        out = hash_node(&[b"wots-c-chain", pk_seed, &address_word, &out]);
     }
     out
 }

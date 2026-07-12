@@ -10,11 +10,22 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+// Output path per compiled profile, mirroring the profile the crate was built
+// with. The default (256s) build keeps the original filename. Emitting the two
+// 128s sets requires building this test crate with the matching profile feature
+// (e.g. `--features profile-128s-q18`); note that 128s stateless generation is
+// the heavy, cache-backed regeneration event (2^24-leaf FORS trees, 2^18-leaf
+// hypertree) rather than an in-line run.
+#[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
 const OUT_PATH: &str = "tests/test_vectors/shrincs_sphincs_256s_keccak.json";
+#[cfg(feature = "profile-128s-q18")]
+const OUT_PATH: &str = "tests/test_vectors/shrincs_sphincs_128s_q18_keccak.json";
+#[cfg(all(feature = "profile-128s-q20", not(feature = "profile-128s-q18")))]
+const OUT_PATH: &str = "tests/test_vectors/shrincs_sphincs_128s_q20_keccak.json";
 
 #[test]
 #[ignore = "run explicitly to refresh Solidity SHRINCS vectors"]
-fn generate_shrincs_sphincs_256s_keccak_vectors() {
+fn generate_shrincs_sphincs_vectors() {
     let (mut stateful_key, stateful_public_key) =
         ShrincsSigner::keygen(b"shrincs solidity vector stateful seed", 4)
             .expect("stateful keygen");

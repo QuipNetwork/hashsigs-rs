@@ -162,9 +162,7 @@ impl ShrincsSigner {
 
 #[cfg(test)]
 mod tests {
-    use self::verifier::{
-        HASH_LEN, HYPERTREE_HEIGHT, NUM_HYPERTREE_LAYERS, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN,
-    };
+    use self::verifier::HASH_LEN;
     use super::shrincs_signer_utils::hash_packed;
     use super::*;
 
@@ -182,8 +180,15 @@ mod tests {
         word32(&public_key.public_key_commitment).unwrap()
     }
 
+    // The 256s profile pins these exact counts; the 128s profiles use a
+    // different tuple (h=18, d=1, len=32), so this constant-identity check is
+    // scoped to the default build. 256s behaviour is unchanged.
+    #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
     #[test]
     fn signer_constants_match_verifier_constants() {
+        use self::verifier::{
+            HYPERTREE_HEIGHT, NUM_HYPERTREE_LAYERS, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN,
+        };
         assert_eq!(HASH_LEN, 32);
         assert_eq!(HYPERTREE_HEIGHT, 64);
         assert_eq!(NUM_HYPERTREE_LAYERS, 8);
@@ -192,6 +197,80 @@ mod tests {
         assert_eq!(WOTS_CHAIN_LEN, 16);
     }
 
+    // 128s stateless keygen/signing (a 2^18-leaf hypertree and 2^24-leaf FORS
+    // trees) is computationally infeasible in-process, so the 128s truncation
+    // path is proven through the feasible stateful subsystem. The stateful
+    // verifier never rebuilds the hypertree, so a signing key with a placeholder
+    // hypertree root exercises the real stateful WOTS-C and unbalanced-tree
+    // hashing at n=16. This also confirms `mask_hash` actually truncates: every
+    // masked node value must have a zero low half.
+    #[cfg(any(feature = "profile-128s-q18", feature = "profile-128s-q20"))]
+    #[test]
+    fn stateful_round_trip_verifies_under_128s_truncation() {
+        use self::verifier::HASH_TRUNC_LEN;
+        let seed = b"128s stateful truncation seed";
+        let max = 4u32;
+        let stateful_sk_seed = derive32(b"shrincs-stateful-sk-seed", seed, &[]);
+        let stateful_prf_seed = derive32(b"shrincs-stateful-prf-seed", seed, &[]);
+        let stateful_pk_seed = derive32(b"shrincs-stateful-pk-seed", seed, &[]);
+        let stateful_root = stateful_subtree_root(
+            &stateful_sk_seed,
+            &stateful_pk_seed,
+            INITIAL_STATEFUL_LEAF_INDEX,
+            max,
+        );
+        let pk_seed = derive32(b"shrincs-pk-seed", seed, &[]);
+        // Placeholder: a real hypertree root is infeasible here and irrelevant to
+        // the stateful path, but it is still committed by the public key.
+        let hypertree_root = derive32(b"placeholder-hypertree-root", seed, &[]);
+
+        let signing_key = ShrincsSigningKey {
+            stateful_sk_seed,
+            stateful_prf_seed,
+            stateful_pk_seed,
+            stateful_root,
+            max_stateful_signatures: max,
+            next_stateful_leaf_index: INITIAL_STATEFUL_LEAF_INDEX,
+            stateless_sk_seed: derive32(b"shrincs-stateless-sk-seed", seed, &[]),
+            stateless_prf_seed: derive32(b"shrincs-stateless-prf-seed", seed, &[]),
+            pk_seed,
+            hypertree_root,
+        };
+        let public_key = public_key_from_components(
+            encode_stateful_public_key(stateful_pk_seed, stateful_root, max),
+            pk_seed,
+            hypertree_root,
+        );
+        let expected = word32(&public_key.public_key_commitment).unwrap();
+        let message = hash_packed(&[b"128s stateful message"]);
+
+        let signature =
+            ShrincsSigner::sign_stateful_raw_at_leaf(&signing_key, 2, &message).unwrap();
+        assert_eq!(signature.auth_path.len(), 2);
+        assert!(ShrincsVerifier::new().verify_stateful_unsafe_raw(
+            expected,
+            &public_key,
+            &message,
+            &signature,
+        ));
+
+        // Truncation actually happened: the second auth-path node is a masked
+        // `uxmss-wots-pk` leaf, so its low (HASH_LEN - HASH_TRUNC_LEN) bytes are
+        // zero while its high half is not. At 256s this assertion would fail.
+        assert_eq!(
+            &signature.auth_path[1][HASH_TRUNC_LEN..],
+            &[0u8; HASH_LEN - HASH_TRUNC_LEN]
+        );
+        assert_ne!(
+            &signature.auth_path[1][..HASH_TRUNC_LEN],
+            &[0u8; HASH_TRUNC_LEN]
+        );
+    }
+
+    #[cfg_attr(
+        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
+    )]
     #[test]
     fn keygen_is_deterministic_for_same_seed_material() {
         let (signing_key_a, public_key_a) =
@@ -203,6 +282,10 @@ mod tests {
         assert_eq!(public_key_a, public_key_b);
     }
 
+    #[cfg_attr(
+        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
+    )]
     #[test]
     fn keygen_public_key_uses_single_stateless_seed_and_root() {
         let (_, public_key) = ShrincsSigner::keygen(b"public key structure seed", 8).unwrap();
@@ -216,6 +299,10 @@ mod tests {
         assert_eq!(public_key.hypertree_root.len(), HASH_LEN);
     }
 
+    #[cfg_attr(
+        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
+    )]
     #[test]
     fn keygen_starts_stateful_signer_at_leaf_one() {
         let (signing_key, _) = ShrincsSigner::keygen(b"initial stateful leaf seed", 8).unwrap();
@@ -226,6 +313,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
+    )]
     #[test]
     fn generated_stateful_signature_verifies() {
         let (mut signing_key, public_key) =
@@ -244,6 +335,10 @@ mod tests {
         ));
     }
 
+    #[cfg_attr(
+        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
+    )]
     #[test]
     fn generated_stateful_action_signature_verifies() {
         let (mut signing_key, public_key) =
@@ -263,6 +358,10 @@ mod tests {
         ));
     }
 
+    #[cfg_attr(
+        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
+    )]
     #[test]
     fn explicit_leaf_test_helper_verifies_for_requested_leaf() {
         let (signing_key, public_key) =
@@ -281,6 +380,10 @@ mod tests {
         ));
     }
 
+    #[cfg_attr(
+        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
+    )]
     #[test]
     fn generated_stateless_raw_signature_verifies() {
         let (signing_key, public_key) = ShrincsSigner::keygen(b"stateless signer seed", 2).unwrap();
@@ -304,6 +407,10 @@ mod tests {
         assert!(ShrincsSigner::keygen(b"seed", MAX_STATEFUL_SIGNATURES_LIMIT + 1).is_none());
     }
 
+    #[cfg_attr(
+        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
+    )]
     #[test]
     fn stateful_signing_advances_leaf_and_rejects_exhaustion() {
         let (mut signing_key, public_key) =
@@ -328,6 +435,10 @@ mod tests {
         assert!(ShrincsSigner::sign_stateful_raw(&mut signing_key, &message).is_none());
     }
 
+    #[cfg_attr(
+        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
+    )]
     #[test]
     fn stateful_signature_rejects_wrong_message_and_tampered_chain() {
         let (mut signing_key, public_key) =
@@ -354,6 +465,10 @@ mod tests {
         assert!(!verifier.verify_stateful_unsafe_raw(expected, &public_key, &message, &tampered,));
     }
 
+    #[cfg_attr(
+        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
+    )]
     #[test]
     fn stateful_action_rejects_tampered_context() {
         let (mut signing_key, public_key) =
@@ -376,6 +491,10 @@ mod tests {
         ));
     }
 
+    #[cfg_attr(
+        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
+    )]
     #[test]
     fn stateless_signature_rejects_wrong_message_and_tampered_hypertree_path() {
         let (signing_key, public_key) =
@@ -402,6 +521,10 @@ mod tests {
         assert!(!verifier.verify_stateless_unsafe_raw(expected, &public_key, &message, &tampered,));
     }
 
+    #[cfg_attr(
+        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
+    )]
     #[test]
     fn stateless_signature_rejects_malformed_lengths() {
         let (signing_key, public_key) =
@@ -434,6 +557,10 @@ mod tests {
         ));
     }
 
+    #[cfg_attr(
+        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
+    )]
     #[test]
     fn public_key_commitment_rejects_tampered_component() {
         let (mut signing_key, mut public_key) =

@@ -26,7 +26,7 @@ use super::shrincs_verifier_types::{
     NUM_FORS_TREES, NUM_HYPERTREE_LAYERS,
 };
 use super::shrincs_verifier_utils::{
-    fors_address_word, hash_packed, pack, read_bits32, read_bits64, word32,
+    fors_address_word, hash_node, hash_packed, pack, read_bits32, read_bits64, word32,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -113,7 +113,7 @@ pub(crate) fn verify_fors_c_and_return_root(
     // tag `fors-pk`. In the SPHINCS-style composition, this is a per-signature
     // value consumed by the hypertree rather than a field of the long-lived
     // public key.
-    Some(hash_packed(&[b"fors-pk", &public_key.pk_seed, &roots]))
+    Some(hash_node(&[b"fors-pk", &public_key.pk_seed, &roots]))
 }
 
 fn fors_entry_root32(
@@ -169,7 +169,7 @@ fn hash_fors_leaf32(
     if sk.len() != HASH_LEN {
         return None;
     }
-    Some(hash_packed(&[b"fors-leaf", pk_seed, &address_word, sk]))
+    Some(hash_node(&[b"fors-leaf", pk_seed, &address_word, sk]))
 }
 
 fn hash_fors_node32(
@@ -181,7 +181,7 @@ fn hash_fors_node32(
     if pk_seed.len() != HASH_LEN {
         return None;
     }
-    Some(hash_packed(&[
+    Some(hash_node(&[
         b"fors-node",
         pk_seed,
         &address_word,
