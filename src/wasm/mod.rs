@@ -1472,10 +1472,10 @@ fn js_error(err: WasmErr) -> JsValue {
 }
 
 #[cfg(feature = "wasm-bindings")]
-fn js_error_from_serde(error: serde_wasm_bindgen::Error) -> JsValue {
+fn js_error_from_serde(_error: serde_wasm_bindgen::Error) -> JsValue {
     js_error(WasmErr {
         code: ERR_INVALID_INPUT,
-        message: error.to_string(),
+        message: "invalid argument shape or field encoding",
     })
 }
 
