@@ -210,6 +210,7 @@ Available signer exports:
 
 - `shrincsKeygen(...)`
 - `WasmShrincsKeypair.publicKey()`
+- `WasmShrincsKeypair.destroy()`
 - `WasmShrincsKeypair.signStatefulRaw(...)`
 - `WasmShrincsKeypair.signStatelessRaw(...)`
 - `WasmShrincsKeypair.exportSigningKey()`
@@ -226,6 +227,30 @@ const statefulSignature = keypair.signStatefulRaw("0xdeadbeef");
 const statelessSignature = keypair.signStatelessRaw("0xdeadbeef");
 const signingKeySnapshot = keypair.exportSigningKey();
 ```
+
+### WASM Secret Handling
+
+The WASM signer surface is suitable only for environments where the surrounding
+JS context is trusted.
+
+Important implications:
+
+- `WasmShrincsKeypair` holds live signing-key material in wasm memory for as
+  long as the handle exists
+- `exportSigningKey()` materializes the full private signing state into JS
+- any XSS, malicious same-origin script, compromised dependency, or hostile
+  browser extension with access to the page context can exfiltrate that key
+  material
+
+Operational guidance:
+
+- do not use the browser signer in pages that execute untrusted third-party JS
+- avoid calling `exportSigningKey()` except for explicit backup / migration
+  flows
+- call `destroy()` as soon as the keypair is no longer needed; this performs a
+  best-effort early wipe and permanently invalidates the handle
+- still assume browser memory is a soft boundary, not a hardware-backed secret
+  store
 
 `shrincsKeygen(seedHex, maxStatefulSignatures)` rejects
 `maxStatefulSignatures === 0` and values over `4096`. Stateful signing consumes

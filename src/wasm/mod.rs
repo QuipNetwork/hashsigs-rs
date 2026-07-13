@@ -48,6 +48,8 @@ use crate::shrincs::verifier::{
     FORS_TREE_HEIGHT, HYPERTREE_HEIGHT, NUM_FORS_TREES, NUM_HYPERTREE_LAYERS,
     NUM_WOTS_CHAINS,
 };
+#[cfg(any(test, feature = "wasm-bindings"))]
+use zeroize::Zeroize;
 #[cfg(all(not(test), feature = "wasm-bindings"))]
 use crate::shrincs::{
     PublicKey as SigningPublicKey, StatefulSignature as SigningStatefulSignature,
@@ -81,6 +83,8 @@ const ERR_SIGNING_FAILED: &str = "ERR_SIGNING_FAILED";
 const ERR_KEYGEN_FAILED: &str = "ERR_KEYGEN_FAILED";
 #[cfg(feature = "wasm-bindings")]
 const ERR_INVALID_INPUT: &str = "ERR_INVALID_INPUT";
+#[cfg(feature = "wasm-bindings")]
+const ERR_HANDLE_DESTROYED: &str = "ERR_HANDLE_DESTROYED";
 #[cfg(any(test, feature = "wasm-bindings"))]
 const ERR_FORMAT_VERSION_UNSUPPORTED: &str = "ERR_FORMAT_VERSION_UNSUPPORTED";
 #[cfg(any(test, feature = "wasm-bindings"))]
@@ -122,6 +126,7 @@ export type ShrincsErrorCode =
   | "ERR_RECOVERY_POLICY_REQUIRED" | "ERR_STATEFUL_INDEX_ROLLBACK"
   | "ERR_STATEFUL_POLICY_FROZEN" | "ERR_STATEFUL_LEAVES_EXHAUSTED"
   | "ERR_SIGNING_FAILED" | "ERR_KEYGEN_FAILED" | "ERR_INVALID_INPUT"
+  | "ERR_HANDLE_DESTROYED"
   | "ERR_SEED_TOO_SHORT"
   | "ERR_FORMAT_VERSION_UNSUPPORTED" | "ERR_IMPORT_INVALID"
   | "ERR_LEAF_OUT_OF_RANGE";
@@ -134,8 +139,8 @@ export type ShrincsErrorCode =
 /// handle after `free()` throws.
 #[wasm_bindgen]
 pub struct WasmShrincsKeypair {
-    signing_key: ShrincsSigningKey,
-    public_key: PublicKey,
+    signing_key: Option<ShrincsSigningKey>,
+    public_key: Option<PublicKey>,
 }
 
 #[cfg(feature = "wasm-bindings")]
@@ -144,31 +149,32 @@ impl WasmShrincsKeypair {
     /// The public key bundle (all fields public; safe to persist and share).
     #[wasm_bindgen(js_name = publicKey, unchecked_return_type = "ShrincsPublicKey")]
     pub fn public_key(&self) -> Result<JsValue, JsValue> {
-        js_value_from_serde(&public_key_dto(&self.public_key))
+        js_value_from_serde(&public_key_dto(self.public_key_ref()?))
     }
 
     /// Next monotonic stateful leaf index (non-secret). This is the value to
     /// persist after each `signStatefulRaw` — reading it here does NOT
     /// require materializing secret material via `exportSigningKey`.
     #[wasm_bindgen(getter, js_name = nextStatefulLeafIndex)]
-    pub fn next_stateful_leaf_index(&self) -> u32 {
-        self.signing_key.next_stateful_leaf_index
+    pub fn next_stateful_leaf_index(&self) -> Result<u32, JsValue> {
+        Ok(self.signing_key_ref()?.next_stateful_leaf_index)
     }
 
     /// Stateful signature budget fixed at keygen (non-secret).
     #[wasm_bindgen(getter, js_name = maxStatefulSignatures)]
-    pub fn max_stateful_signatures(&self) -> u32 {
-        self.signing_key.max_stateful_signatures
+    pub fn max_stateful_signatures(&self) -> Result<u32, JsValue> {
+        Ok(self.signing_key_ref()?.max_stateful_signatures)
     }
 
     /// Stateful signatures still available via `signStatefulRaw`:
     /// `max - (next - 1)`, clamped to 0 for an exhausted key.
     #[wasm_bindgen(getter, js_name = remainingStatefulSignatures)]
-    pub fn remaining_stateful_signatures(&self) -> u32 {
-        remaining_stateful(
-            self.signing_key.max_stateful_signatures,
-            self.signing_key.next_stateful_leaf_index,
-        )
+    pub fn remaining_stateful_signatures(&self) -> Result<u32, JsValue> {
+        let signing_key = self.signing_key_ref()?;
+        Ok(remaining_stateful(
+            signing_key.max_stateful_signatures,
+            signing_key.next_stateful_leaf_index,
+        ))
     }
 
     /// Auto-advancing stateful signature: consumes the next unused leaf and
@@ -183,18 +189,17 @@ impl WasmShrincsKeypair {
     #[wasm_bindgen(js_name = signStatefulRaw, unchecked_return_type = "StatefulSignResult")]
     pub fn sign_stateful_raw(&mut self, message_hex: &str) -> Result<JsValue, JsValue> {
         let message = parse_hex_bytes_with_max(message_hex, MAX_RAW_INPUT_BYTES).map_err(js_error)?;
+        let signing_key = self.signing_key_mut()?;
         // Pre-check exhaustion explicitly. Core signals BOTH exhaustion and
         // (astronomically rare) WOTS-C grinding failure as `None`; without
         // this check the two are conflated under one misleading error code.
-        if self.signing_key.next_stateful_leaf_index
-            > self.signing_key.max_stateful_signatures
-        {
+        if signing_key.next_stateful_leaf_index > signing_key.max_stateful_signatures {
             return Err(js_error(WasmErr {
                 code: ERR_STATEFUL_LEAVES_EXHAUSTED,
                 message: "no unused stateful leaf available for this key".into(),
             }));
         }
-        let signature = ShrincsSigner::sign_stateful_raw(&mut self.signing_key, &message)
+        let signature = ShrincsSigner::sign_stateful_raw(signing_key, &message)
             .ok_or_else(|| {
                 js_error(WasmErr {
                     code: ERR_SIGNING_FAILED,
@@ -203,7 +208,7 @@ impl WasmShrincsKeypair {
             })?;
         js_value_from_serde(&StatefulSignResult {
             signature: stateful_signature_dto_from_signer(&signature),
-            next_stateful_leaf_index: self.signing_key.next_stateful_leaf_index,
+            next_stateful_leaf_index: self.signing_key_ref()?.next_stateful_leaf_index,
         })
     }
 
@@ -217,18 +222,19 @@ impl WasmShrincsKeypair {
     #[wasm_bindgen(js_name = signStatefulRawAt, unchecked_return_type = "StatefulSignature")]
     pub fn sign_stateful_raw_at(&self, message_hex: &str, leaf: u32) -> Result<JsValue, JsValue> {
         let message = parse_hex_bytes_with_max(message_hex, MAX_RAW_INPUT_BYTES).map_err(js_error)?;
+        let signing_key = self.signing_key_ref()?;
         // Range-check up front so an out-of-range leaf is reported as what it
         // is, not as "exhausted" (the previous, misleading mapping).
-        if leaf < 1 || leaf > self.signing_key.max_stateful_signatures {
+        if leaf < 1 || leaf > signing_key.max_stateful_signatures {
             return Err(js_error(WasmErr {
                 code: ERR_LEAF_OUT_OF_RANGE,
                 message: format!(
                     "leaf must be in 1..={}, got {leaf}",
-                    self.signing_key.max_stateful_signatures
+                    signing_key.max_stateful_signatures
                 ),
             }));
         }
-        let signature = ShrincsSigner::sign_stateful_raw_at_leaf(&self.signing_key, leaf, &message)
+        let signature = ShrincsSigner::sign_stateful_raw_at_leaf(signing_key, leaf, &message)
             .ok_or_else(|| {
                 js_error(WasmErr {
                     code: ERR_SIGNING_FAILED,
@@ -246,7 +252,7 @@ impl WasmShrincsKeypair {
     pub fn sign_stateless_raw(&self, message_hex: &str) -> Result<JsValue, JsValue> {
         let message = parse_hex_bytes_with_max(message_hex, MAX_RAW_INPUT_BYTES).map_err(js_error)?;
         let signature =
-            ShrincsSigner::sign_stateless_raw(&self.signing_key, &message).ok_or_else(|| {
+            ShrincsSigner::sign_stateless_raw(self.signing_key_ref()?, &message).ok_or_else(|| {
                 js_error(WasmErr {
                     code: ERR_SIGNING_FAILED,
                     message: "stateless signing failed for the supplied key/message".into(),
@@ -266,7 +272,31 @@ impl WasmShrincsKeypair {
     /// which resets the leaf counter and causes one-time-leaf reuse.
     #[wasm_bindgen(js_name = exportSigningKey, unchecked_return_type = "ShrincsExportedSigningKey")]
     pub fn export_signing_key(&self) -> Result<JsValue, JsValue> {
-        js_value_from_serde(&signing_key_dto(&self.signing_key))
+        js_value_from_serde(&signing_key_dto(self.signing_key_ref()?))
+    }
+
+    /// Best-effort explicit wipe. Clears the in-memory signing state early and
+    /// permanently invalidates this handle; subsequent method calls throw
+    /// `ERR_HANDLE_DESTROYED`.
+    #[wasm_bindgen(js_name = destroy)]
+    pub fn destroy(&mut self) {
+        self.public_key = None;
+        self.signing_key = None;
+    }
+}
+
+#[cfg(feature = "wasm-bindings")]
+impl WasmShrincsKeypair {
+    fn signing_key_ref(&self) -> Result<&ShrincsSigningKey, JsValue> {
+        self.signing_key.as_ref().ok_or_else(destroyed_handle_error)
+    }
+
+    fn signing_key_mut(&mut self) -> Result<&mut ShrincsSigningKey, JsValue> {
+        self.signing_key.as_mut().ok_or_else(destroyed_handle_error)
+    }
+
+    fn public_key_ref(&self) -> Result<&PublicKey, JsValue> {
+        self.public_key.as_ref().ok_or_else(destroyed_handle_error)
     }
 }
 
@@ -506,18 +536,19 @@ pub fn shrincs_keygen(
     seed_hex: &str,
     max_stateful_signatures: u32,
 ) -> Result<WasmShrincsKeypair, JsValue> {
-    let seed_material = parse_hex_bytes_with_max(seed_hex, MAX_RAW_INPUT_BYTES).map_err(js_error)?;
+    let mut seed_material = parse_hex_bytes_with_max(seed_hex, MAX_RAW_INPUT_BYTES).map_err(js_error)?;
     validate_seed_length(&seed_material).map_err(js_error)?;
-    let (signing_key, public_key) = ShrincsSigner::keygen(&seed_material, max_stateful_signatures)
-        .ok_or_else(|| {
-            js_error(WasmErr {
-                code: ERR_KEYGEN_FAILED,
-                message: "key generation failed for the supplied inputs".into(),
-            })
-        })?;
+    let result = ShrincsSigner::keygen(&seed_material, max_stateful_signatures);
+    seed_material.zeroize();
+    let (signing_key, public_key) = result.ok_or_else(|| {
+        js_error(WasmErr {
+            code: ERR_KEYGEN_FAILED,
+            message: "key generation failed for the supplied inputs".into(),
+        })
+    })?;
     Ok(WasmShrincsKeypair {
-        signing_key,
-        public_key: parse_public_key(&public_key_dto_from_signer(&public_key)).map_err(js_error)?,
+        signing_key: Some(signing_key),
+        public_key: Some(parse_public_key(&public_key_dto_from_signer(&public_key)).map_err(js_error)?),
     })
 }
 
@@ -537,18 +568,27 @@ pub fn shrincs_keygen(
 pub fn shrincs_import_signing_key(
     #[wasm_bindgen(unchecked_param_type = "ShrincsExportedSigningKey")] exported: JsValue,
 ) -> Result<WasmShrincsKeypair, JsValue> {
-    let exported: ShrincsExportedSigningKey =
+    let mut exported: ShrincsExportedSigningKey =
         serde_wasm_bindgen::from_value(exported).map_err(js_error_from_serde)?;
     if exported.format_version != SIGNING_KEY_FORMAT_VERSION {
+        let actual = exported.format_version;
+        zeroize_exported_signing_key(&mut exported);
         return Err(js_error(WasmErr {
             code: ERR_FORMAT_VERSION_UNSUPPORTED,
             message: format!(
                 "unsupported signing-key format version {} (expected {})",
-                exported.format_version, SIGNING_KEY_FORMAT_VERSION
+                actual, SIGNING_KEY_FORMAT_VERSION
             ),
         }));
     }
-    let candidate = parse_exported_signing_key(&exported).map_err(js_error)?;
+    let candidate = match parse_exported_signing_key(&exported) {
+        Ok(candidate) => candidate,
+        Err(err) => {
+            zeroize_exported_signing_key(&mut exported);
+            return Err(js_error(err));
+        }
+    };
+    zeroize_exported_signing_key(&mut exported);
     let (signing_key, public_key) =
         ShrincsSigner::import_signing_key(candidate).ok_or_else(|| {
             js_error(WasmErr {
@@ -559,9 +599,9 @@ pub fn shrincs_import_signing_key(
             })
         })?;
     Ok(WasmShrincsKeypair {
-        signing_key,
-        public_key: parse_public_key(&public_key_dto_from_signer(&public_key))
-            .map_err(js_error)?,
+        signing_key: Some(signing_key),
+        public_key: Some(parse_public_key(&public_key_dto_from_signer(&public_key))
+            .map_err(js_error)?),
     })
 }
 
@@ -1510,6 +1550,18 @@ fn signing_key_dto(signing_key: &ShrincsSigningKey) -> ShrincsExportedSigningKey
 }
 
 #[cfg(any(test, feature = "wasm-bindings"))]
+fn zeroize_exported_signing_key(exported: &mut ShrincsExportedSigningKey) {
+    exported.stateful_sk_seed.zeroize();
+    exported.stateful_prf_seed.zeroize();
+    exported.stateful_pk_seed.zeroize();
+    exported.stateful_root.zeroize();
+    exported.stateless_sk_seed.zeroize();
+    exported.stateless_prf_seed.zeroize();
+    exported.pk_seed.zeroize();
+    exported.hypertree_root.zeroize();
+}
+
+#[cfg(any(test, feature = "wasm-bindings"))]
 fn account_snapshot_dto(
     account: &crate::account::ShrincsAccountVerifierExample,
 ) -> ShrincsAccountSnapshot {
@@ -1549,7 +1601,15 @@ fn js_error(err: WasmErr) -> JsValue {
 fn js_error_from_serde(_error: serde_wasm_bindgen::Error) -> JsValue {
     js_error(WasmErr {
         code: ERR_INVALID_INPUT,
-        message: "invalid argument shape or field encoding",
+        message: "invalid argument shape or field encoding".to_string(),
+    })
+}
+
+#[cfg(feature = "wasm-bindings")]
+fn destroyed_handle_error() -> JsValue {
+    js_error(WasmErr {
+        code: ERR_HANDLE_DESTROYED,
+        message: "this keypair handle has been destroyed".to_string(),
     })
 }
 

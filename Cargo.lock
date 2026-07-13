@@ -1720,6 +1720,7 @@ dependencies = [
  "tsify",
  "wasm-bindgen",
  "wasm-bindgen-test",
+ "zeroize",
 ]
 
 [[package]]
