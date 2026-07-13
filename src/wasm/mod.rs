@@ -270,9 +270,22 @@ impl WasmShrincsKeypair {
     /// after every stateful signature, persist atomically, and restore with
     /// `shrincsImportSigningKey` — never with bare `shrincsKeygen(seed)`,
     /// which resets the leaf counter and causes one-time-leaf reuse.
+    ///
+    /// This is intentionally marked `Unsafe` at the JS boundary because it
+    /// crosses the wasm/JS trust boundary with the full private signing state.
+    /// Prefer keeping the live keypair handle in wasm memory and call this only
+    /// for explicit backup or migration flows.
+    #[wasm_bindgen(js_name = exportSigningKeyUnsafe, unchecked_return_type = "ShrincsExportedSigningKey")]
+    pub fn export_signing_key_unsafe(&self) -> Result<JsValue, JsValue> {
+        js_value_from_serde(&signing_key_dto(self.signing_key_ref()?))
+    }
+
+    /// Legacy alias for `exportSigningKeyUnsafe()`. Kept for compatibility, but
+    /// new code should call the explicit `Unsafe` form to acknowledge that this
+    /// materializes the full private signing state into JS-visible values.
     #[wasm_bindgen(js_name = exportSigningKey, unchecked_return_type = "ShrincsExportedSigningKey")]
     pub fn export_signing_key(&self) -> Result<JsValue, JsValue> {
-        js_value_from_serde(&signing_key_dto(self.signing_key_ref()?))
+        self.export_signing_key_unsafe()
     }
 
     /// Best-effort explicit wipe. Clears the in-memory signing state early and

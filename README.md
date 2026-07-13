@@ -213,7 +213,10 @@ Available signer exports:
 - `WasmShrincsKeypair.destroy()`
 - `WasmShrincsKeypair.signStatefulRaw(...)`
 - `WasmShrincsKeypair.signStatelessRaw(...)`
+- `WasmShrincsKeypair.exportSigningKeyUnsafe()`
 - `WasmShrincsKeypair.exportSigningKey()`
+  - legacy compatibility alias; new code should prefer the explicit `Unsafe`
+    form
 
 Minimal TS example:
 
@@ -225,7 +228,7 @@ const keypair = shrincsKeygen("0x00112233445566778899aabbccddeeff", 16);
 const publicKey = keypair.publicKey();
 const statefulSignature = keypair.signStatefulRaw("0xdeadbeef");
 const statelessSignature = keypair.signStatelessRaw("0xdeadbeef");
-const signingKeySnapshot = keypair.exportSigningKey();
+const signingKeySnapshot = keypair.exportSigningKeyUnsafe();
 ```
 
 ### WASM Secret Handling
@@ -237,7 +240,7 @@ Important implications:
 
 - `WasmShrincsKeypair` holds live signing-key material in wasm memory for as
   long as the handle exists
-- `exportSigningKey()` materializes the full private signing state into JS
+- `exportSigningKeyUnsafe()` materializes the full private signing state into JS
 - any XSS, malicious same-origin script, compromised dependency, or hostile
   browser extension with access to the page context can exfiltrate that key
   material
@@ -245,19 +248,30 @@ Important implications:
 Operational guidance:
 
 - do not use the browser signer in pages that execute untrusted third-party JS
-- avoid calling `exportSigningKey()` except for explicit backup / migration
+- avoid calling `exportSigningKeyUnsafe()` except for explicit backup /
+  migration
   flows
 - call `destroy()` as soon as the keypair is no longer needed; this performs a
   best-effort early wipe and permanently invalidates the handle
 - still assume browser memory is a soft boundary, not a hardware-backed secret
   store
 
+Safe-default guidance:
+
+- keep the keypair live in wasm and use `signStatefulRaw(...)` /
+  `signStatelessRaw(...)` for routine operation
+- export secret state only at explicit persistence boundaries such as backup,
+  migration, or a durable post-signature checkpoint
+- treat `exportSigningKey()` exactly like `exportSigningKeyUnsafe()`; it exists
+  only as a legacy alias for compatibility
+
 `shrincsKeygen(seedHex, maxStatefulSignatures)` rejects
 `maxStatefulSignatures === 0` and values over `4096`. Stateful signing consumes
 one stateful leaf per signature, so `signStatefulRaw(...)` can fail once the
 key has used its configured stateful signature budget.
 
-`exportSigningKey()` returns secret material. Treat it as private key data.
+`exportSigningKeyUnsafe()` returns secret material. Treat it as private key
+data. `exportSigningKey()` is a legacy alias with the same risk.
 
 ### Account exports
 
@@ -653,7 +667,7 @@ type WasmStatelessSignature = {
 };
 ```
 
-Signing key snapshot returned by `exportSigningKey()`:
+Signing key snapshot returned by `exportSigningKeyUnsafe()`:
 
 ```ts
 type WasmSigningKey = {
