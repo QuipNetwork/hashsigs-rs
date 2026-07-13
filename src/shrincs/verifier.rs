@@ -39,7 +39,7 @@ use self::shrincs_verifier_fors_c::verify_fors_c_and_return_root;
 use self::shrincs_verifier_hypertree::verify_hypertree;
 use self::shrincs_verifier_stateful::verify_stateful_unsafe_raw as verify_stateful_raw_component;
 use self::shrincs_verifier_utils::{
-    decode_stateful_public_key, hash_packed, matches_expected_public_key_commitment,
+    decode_stateful_public_key, keccak_packed, matches_expected_public_key_commitment,
     rotation_target_commitment, stateful_rotation_target_commitment, valid_action_context,
     valid_public_key, valid_rotation_context, word32,
 };
@@ -290,10 +290,10 @@ impl ShrincsVerifier {
         expected_public_key_commitment: [u8; HASH_LEN],
         context: &ActionContext,
     ) -> [u8; HASH_LEN] {
-        let op = hash_packed(&[b"shrincs-verify-stateful"]);
-        hash_packed(&[
+        let op = keccak_packed(&[b"shrincs-verify-stateful"]);
+        keccak_packed(&[
             &op,
-            &HASH_SUITE_KECCAK_256.to_be_bytes(),
+            &HASH_SUITE_ID.to_be_bytes(),
             &expected_public_key_commitment,
             &context.domain_separator,
             &context.nonce,
@@ -313,10 +313,10 @@ impl ShrincsVerifier {
         expected_public_key_commitment: [u8; HASH_LEN],
         context: &ActionContext,
     ) -> [u8; HASH_LEN] {
-        let op = hash_packed(&[b"shrincs-verify-stateless"]);
-        hash_packed(&[
+        let op = keccak_packed(&[b"shrincs-verify-stateless"]);
+        keccak_packed(&[
             &op,
-            &HASH_SUITE_KECCAK_256.to_be_bytes(),
+            &HASH_SUITE_ID.to_be_bytes(),
             &expected_public_key_commitment,
             &context.domain_separator,
             &context.nonce,
@@ -338,10 +338,10 @@ impl ShrincsVerifier {
         context: &RotationContext,
         next_stateful_key: &StatefulRotationTarget,
     ) -> [u8; HASH_LEN] {
-        let op = hash_packed(&[b"shrincs-rotate-stateful"]);
-        hash_packed(&[
+        let op = keccak_packed(&[b"shrincs-rotate-stateful"]);
+        keccak_packed(&[
             &op,
-            &HASH_SUITE_KECCAK_256.to_be_bytes(),
+            &HASH_SUITE_ID.to_be_bytes(),
             &expected_public_key_commitment,
             &context.domain_separator,
             &context.nonce,
@@ -362,10 +362,10 @@ impl ShrincsVerifier {
         context: &RotationContext,
         next_key: &RotationTarget,
     ) -> [u8; HASH_LEN] {
-        let op = hash_packed(&[b"shrincs-rotate-full"]);
-        hash_packed(&[
+        let op = keccak_packed(&[b"shrincs-rotate-full"]);
+        keccak_packed(&[
             &op,
-            &HASH_SUITE_KECCAK_256.to_be_bytes(),
+            &HASH_SUITE_ID.to_be_bytes(),
             &expected_public_key_commitment,
             &context.domain_separator,
             &context.nonce,

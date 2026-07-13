@@ -20,7 +20,31 @@
 // the parameter set. A truncated profile emits high-aligned, zero-padded node
 // values inside this slot (see HASH_TRUNC_LEN and `mask_hash`).
 pub const HASH_LEN: usize = 32;
+
+// Hash-suite identifiers, mirroring the Solidity HashSuite.HASH_SUITE_ID
+// exports. They are bound into the canonical account action/rotation message
+// hashes so an authorization under one suite cannot be replayed under another.
 pub const HASH_SUITE_KECCAK_256: u32 = 1;
+pub const HASH_SUITE_SHA_256: u32 = 2;
+
+// The suite id bound by the action/rotation hashes, selected by the compile-time
+// hash-suite feature: keccak by default, SHA-256 under `suite-sha2`. Those
+// hashes themselves stay keccak (EVM-domain framing); only the bound id changes.
+#[cfg(not(feature = "suite-sha2"))]
+pub const HASH_SUITE_ID: u32 = HASH_SUITE_KECCAK_256;
+#[cfg(feature = "suite-sha2")]
+pub const HASH_SUITE_ID: u32 = HASH_SUITE_SHA_256;
+
+// The sha2 suite is defined only for the default 256s profile (bead 83d.4).
+// Pairing it with a 128s profile is out of scope; fail closed at compile time.
+#[cfg(all(
+    feature = "suite-sha2",
+    any(feature = "profile-128s-q18", feature = "profile-128s-q20")
+))]
+compile_error!(
+    "the sha2 hash suite (suite-sha2) is only defined for the default 256s \
+     profile; 128s-sha2 is out of scope (bead 83d.4)"
+);
 
 // Per-profile SHRINCS/SPHINCS parameter tuple, selected at compile time by
 // cargo feature. This mirrors the Solidity
@@ -38,10 +62,12 @@ compile_error!(
 #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
 mod profile {
     /// Suite-qualified profile identifier, matching the Solidity PROFILE_ID
-    /// preimage. Reserved for tooling/vector labelling; T6 binds it into the
-    /// public-key commitment tag.
-    #[allow(dead_code)]
+    /// preimage and bound into the public-key commitment tag. The suffix tracks
+    /// the compile-time hash suite: keccak by default, sha2 under `suite-sha2`.
+    #[cfg(not(feature = "suite-sha2"))]
     pub const PROFILE_NAME: &str = "shrincs-256s-keccak";
+    #[cfg(feature = "suite-sha2")]
+    pub const PROFILE_NAME: &str = "shrincs-256s-sha2";
     /// SPHINCS `n` (HASH_LEN = 32): no truncation, `mask_hash` is a no-op.
     pub const HASH_TRUNC_LEN: usize = 32;
     // Read by the account stateless-usage cap; allow guards builds that omit

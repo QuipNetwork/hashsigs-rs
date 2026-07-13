@@ -17,6 +17,8 @@
 
 //! Shared helpers for the SHRINCS verifier.
 
+#[cfg(feature = "suite-sha2")]
+use solana_program::hash::hash as sha256_hash;
 use solana_program::keccak::hash as keccak256_hash;
 
 use super::shrincs_verifier_types::{
@@ -26,15 +28,38 @@ use super::shrincs_verifier_types::{
 };
 
 pub(crate) fn keccak256(data: &[u8]) -> [u8; HASH_LEN] {
-    // Use the same Keccak implementation pattern already used by the existing
-    // WOTS+ Solana processor and tests. This is Ethereum/Solidity Keccak-256,
+    // Ethereum/Solidity Keccak-256, always keccak regardless of the compiled
+    // hash suite: the public-key commitment and account action/rotation framing
+    // are EVM-domain and stay keccak so the on-chain identity is suite-agnostic.
+    // [83d hash-seam design §1.2]
     keccak256_hash(data).to_bytes()
 }
 
+// Suite-selected scheme hash. Every SHRINCS scheme hash the verifier recomputes
+// -- tree nodes, leaves, digests, chains -- routes through hash_packed/hash_node
+// and therefore this one function, so the suite swap is a single edit. keccak by
+// default; SHA-256 under `suite-sha2`. Tag strings and preimage layouts are
+// identical across suites; only the hash primitive changes. [design §3.4/§5.2]
+#[cfg(not(feature = "suite-sha2"))]
+fn scheme_hash(data: &[u8]) -> [u8; HASH_LEN] {
+    keccak256_hash(data).to_bytes()
+}
+#[cfg(feature = "suite-sha2")]
+fn scheme_hash(data: &[u8]) -> [u8; HASH_LEN] {
+    sha256_hash(data).to_bytes()
+}
+
 pub(crate) fn hash_packed(parts: &[&[u8]]) -> [u8; HASH_LEN] {
-    // Solidity's verifier uses `keccak256(abi.encodePacked(...))` throughout.
+    // Solidity's verifier uses `<suite>(abi.encodePacked(...))` throughout.
     // Rust has no ABI packer here, so all callers pass already-big-endian byte
     // chunks and this helper concatenates them with no lengths or padding.
+    scheme_hash(&pack(parts))
+}
+
+pub(crate) fn keccak_packed(parts: &[&[u8]]) -> [u8; HASH_LEN] {
+    // EVM-domain packed keccak for the commitment/action framing (stays keccak
+    // under every suite). Under the default keccak suite this is byte-identical
+    // to hash_packed, so the keccak vectors are unchanged by the seam.
     keccak256(&pack(parts))
 }
 
@@ -82,8 +107,10 @@ pub(crate) fn valid_rotation_context(context: &RotationContext) -> bool {
 pub(crate) fn public_key_commitment(public_key: &PublicKey) -> Option<[u8; HASH_LEN]> {
     let pk_seed = word32(&public_key.pk_seed)?;
     let hypertree_root = word32(&public_key.hypertree_root)?;
-    // Profile-bound commitment tag: `shrincs-public-key/<PROFILE_NAME>`.
-    Some(hash_packed(&[
+    // Profile-bound commitment tag: `shrincs-public-key/<PROFILE_NAME>`. The
+    // commitment is EVM-domain framing and stays keccak under every suite; the
+    // suite is separated by PROFILE_NAME's `-sha2`/`-keccak` suffix instead.
+    Some(keccak_packed(&[
         b"shrincs-public-key/",
         PROFILE_NAME.as_bytes(),
         &public_key.stateful_public_key,
@@ -97,8 +124,9 @@ pub(crate) fn stateful_rotation_target_commitment(
     pk_seed: &[u8; HASH_LEN],
     hypertree_root: &[u8; HASH_LEN],
 ) -> [u8; HASH_LEN] {
-    // Rotation targets commit to the same profile-bound tag as live keys.
-    hash_packed(&[
+    // Rotation targets commit to the same profile-bound tag as live keys;
+    // like the live-key commitment it is EVM-domain and stays keccak.
+    keccak_packed(&[
         b"shrincs-public-key/",
         PROFILE_NAME.as_bytes(),
         stateful_public_key,

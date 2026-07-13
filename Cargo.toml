@@ -32,6 +32,13 @@ default = []
 # struct). Select at most one. See docs/parameterization-design.md.
 profile-128s-q18 = []
 profile-128s-q20 = []
+# Compile-time hash-suite selection, a second axis alongside the profile
+# features. The default suite is keccak-256. `suite-sha2` swaps every SHRINCS
+# scheme hash to SHA-256 (same tag strings and preimage layouts; only the hash
+# primitive changes) and is defined only for the default 256s profile -- pairing
+# it with a 128s profile is a compile error. Mirrors the Solidity
+# contracts/hash/<suite>/HashSuite.sol libraries. See docs/parameterization-design.md.
+suite-sha2 = []
 wasm-bindings = [
     "dep:serde-wasm-bindgen",
     "dep:wasm-bindgen",

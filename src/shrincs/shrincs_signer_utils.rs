@@ -27,6 +27,8 @@ use super::verifier::{
     PublicKey, HASH_LEN, HASH_TRUNC_LEN, NUM_WOTS_CHAINS, PROFILE_NAME, STATEFUL_PUBLIC_KEY_BYTES,
     WOTS_CHAIN_LEN,
 };
+#[cfg(feature = "suite-sha2")]
+use solana_program::hash::hash as sha256_hash;
 use solana_program::keccak::hash as keccak256_hash;
 
 // WOTS-C grinds the counter until the message digits hit the target sum. That
@@ -76,8 +78,10 @@ pub(crate) fn public_key_commitment(
     // The commitment tag binds the compile-time profile id (F-08 / Q2), so a
     // public key from one profile can never collide with another's: the
     // preimage is `shrincs-public-key/<PROFILE_NAME>`, sourced from the profile
-    // machinery rather than a scattered literal.
-    hash_packed(&[
+    // machinery rather than a scattered literal. The commitment is EVM-domain
+    // framing and stays keccak under every suite (the `-sha2`/`-keccak` suffix
+    // in PROFILE_NAME separates the suites), so it uses `keccak_packed`.
+    keccak_packed(&[
         b"shrincs-public-key/",
         PROFILE_NAME.as_bytes(),
         stateful_public_key,
@@ -107,15 +111,38 @@ pub(crate) fn derive32(domain: &[u8], seed: &[u8], data: &[u8]) -> [u8; HASH_LEN
 }
 
 pub(crate) fn keccak256(data: &[u8]) -> [u8; HASH_LEN] {
-    // Use Solana's built-in Keccak entry point directly. This keeps the signer
-    // aligned with on-chain code and avoids pulling in a second hash crate.
+    // Ethereum/Solidity Keccak-256, always keccak regardless of the compiled
+    // hash suite. Used for the EVM-domain public-key commitment framing, which
+    // stays keccak so the on-chain identity is suite-agnostic. [design §1.2]
     keccak256_hash(data).to_bytes()
 }
 
+// Suite-selected scheme hash. Every SHRINCS scheme hash the signer emits --
+// keygen KDF (derive32), tree nodes, leaves, digests, chains, secrets, and
+// randomizers -- routes through hash_packed/hash_node and therefore this one
+// function, so the suite swap is a single edit. keccak by default; SHA-256 under
+// `suite-sha2`. Tag strings and preimage layouts are identical across suites;
+// only the hash primitive changes. [83d hash-seam design §3.4/§5.2]
+#[cfg(not(feature = "suite-sha2"))]
+fn scheme_hash(data: &[u8]) -> [u8; HASH_LEN] {
+    keccak256_hash(data).to_bytes()
+}
+#[cfg(feature = "suite-sha2")]
+fn scheme_hash(data: &[u8]) -> [u8; HASH_LEN] {
+    sha256_hash(data).to_bytes()
+}
+
 pub(crate) fn hash_packed(parts: &[&[u8]]) -> [u8; HASH_LEN] {
-    // Solidity's `abi.encodePacked(...)` hashes a concatenation of byte slices.
-    // Rust has no implicit packed ABI encoding, so callers pass the exact slices
-    // in the same order and this helper performs the concatenation before Keccak.
+    // Solidity's `<suite>(abi.encodePacked(...))` hashes a concatenation of byte
+    // slices. Rust has no implicit packed ABI encoding, so callers pass the exact
+    // slices in the same order and this helper concatenates before the scheme hash.
+    scheme_hash(&pack(parts))
+}
+
+pub(crate) fn keccak_packed(parts: &[&[u8]]) -> [u8; HASH_LEN] {
+    // EVM-domain packed keccak for the commitment framing (stays keccak under
+    // every suite). Under the default keccak suite this is byte-identical to
+    // hash_packed, so the keccak vectors are unchanged by the seam.
     keccak256(&pack(parts))
 }
 
@@ -276,8 +303,41 @@ pub(crate) fn hypertree_address_word(
 
 #[cfg(test)]
 mod tests {
-    use super::FORS_C_MAX_GRIND_COUNTER;
+    use super::{hash_packed, keccak_packed, FORS_C_MAX_GRIND_COUNTER};
     use crate::shrincs::verifier::FORS_TREE_HEIGHT;
+
+    // Keccak-256 of the empty input (EVM-domain framing, all suites).
+    const KECCAK_EMPTY: [u8; 32] = [
+        0xc5, 0xd2, 0x46, 0x01, 0x86, 0xf7, 0x23, 0x3c, 0x92, 0x7e, 0x7d, 0xb2, 0xdc, 0xc7, 0x03,
+        0xc0, 0xe5, 0x00, 0xb6, 0x53, 0xca, 0x82, 0x27, 0x3b, 0x7b, 0xfa, 0xd8, 0x04, 0x5d, 0x85,
+        0xa4, 0x70,
+    ];
+    // SHA-256 of the empty input.
+    #[cfg(feature = "suite-sha2")]
+    const SHA256_EMPTY: [u8; 32] = [
+        0xe3, 0xb0, 0xc4, 0x42, 0x98, 0xfc, 0x1c, 0x14, 0x9a, 0xfb, 0xf4, 0xc8, 0x99, 0x6f, 0xb9,
+        0x24, 0x27, 0xae, 0x41, 0xe4, 0x64, 0x9b, 0x93, 0x4c, 0xa4, 0x95, 0x99, 0x1b, 0x78, 0x52,
+        0xb8, 0x55,
+    ];
+
+    // Under the default keccak suite the scheme hash and the EVM-domain
+    // commitment hash are the same primitive, so the seam is byte-neutral: every
+    // pre-existing keccak vector is unchanged.
+    #[cfg(not(feature = "suite-sha2"))]
+    #[test]
+    fn default_suite_scheme_and_commitment_are_both_keccak() {
+        assert_eq!(hash_packed(&[]), KECCAK_EMPTY);
+        assert_eq!(keccak_packed(&[]), KECCAK_EMPTY);
+    }
+
+    // Under `suite-sha2` the scheme hash swaps to SHA-256 while the EVM-domain
+    // commitment hash stays keccak. They must differ, or the pinning is broken.
+    #[cfg(feature = "suite-sha2")]
+    #[test]
+    fn sha2_suite_swaps_scheme_hash_but_pins_commitment_to_keccak() {
+        assert_eq!(hash_packed(&[]), SHA256_EMPTY);
+        assert_eq!(keccak_packed(&[]), KECCAK_EMPTY);
+    }
 
     #[test]
     fn fors_grind_bound_scales_with_tree_height() {
