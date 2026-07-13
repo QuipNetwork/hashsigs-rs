@@ -3,7 +3,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 use hashsigs_rs::shrincs::{
-    CompactSignature, PublicKey, ShrincsSigner, StatefulSignature, StatelessSignature, HASH_LEN,
+    ActionContext, CompactSignature, CompactSigningKey, PublicKey, ShrincsSigner,
+    StatefulSignature, StatelessSignature, HASH_LEN,
 };
 use serde_json::{json, Value};
 use std::fs;
@@ -37,6 +38,20 @@ fn generate_shrincs_sphincs_256s_keccak_vectors() {
     let compact_message = hash_word(b"shrincs solidity compact message").to_vec();
     let compact_signature =
         ShrincsSigner::sign_compact_raw(&compact_key, &compact_message).expect("compact signature");
+    let compact_first_context = compact_action_context(
+        b"shrincs solidity compact domain",
+        1,
+        1,
+        b"execute",
+        b"shrincs solidity compact payload one",
+    );
+    let compact_second_context = compact_action_context(
+        b"shrincs solidity compact domain",
+        2,
+        1,
+        b"execute",
+        b"shrincs solidity compact payload two",
+    );
 
     let mut wrong_stateful_message = stateful_message.clone();
     wrong_stateful_message[0] ^= 1;
@@ -104,6 +119,20 @@ fn generate_shrincs_sphincs_256s_keccak_vectors() {
             )),
             "cases": {
                 "valid": compact_case(&compact_message, &compact_signature)
+            },
+            "actionCases": {
+                "first": compact_action_case(
+                    &compact_key,
+                    compact_first_context,
+                    1,
+                    1
+                ),
+                "sameQSecond": compact_action_case(
+                    &compact_key,
+                    compact_second_context,
+                    2,
+                    1
+                )
             }
         }
     });
@@ -144,6 +173,58 @@ fn compact_case(message: &[u8], signature: &CompactSignature) -> Value {
         "signature": hex(&signature.raw_signature),
         "calldata": compact_calldata(message, signature)
     })
+}
+
+fn compact_action_case(
+    key: &CompactSigningKey,
+    context: ActionContext,
+    nonce: u64,
+    key_version: u64,
+) -> Value {
+    let signature =
+        ShrincsSigner::sign_compact_action(key, &context).expect("compact action signature");
+    let message = ShrincsSigner::compact_action_message_hash(&context);
+    json!({
+        "subPkSeed": hex(signature.sub_pk_seed),
+        "subPkRoot": hex(signature.sub_pk_root),
+        "q": signature.q().expect("compact signature encodes q"),
+        "context": compact_action_context_json(&context, nonce, key_version),
+        "message": hex(message),
+        "signature": hex(&signature.raw_signature),
+        "calldata": compact_action_calldata(&context, nonce, key_version, &signature)
+    })
+}
+
+fn compact_action_context(
+    domain_label: &[u8],
+    nonce: u64,
+    key_version: u64,
+    action_label: &[u8],
+    payload_label: &[u8],
+) -> ActionContext {
+    ActionContext {
+        domain_separator: hash_word(domain_label),
+        nonce: uint_word(nonce),
+        key_version: uint_word(key_version),
+        action_type: hash_word(action_label),
+        payload_hash: hash_word(payload_label),
+    }
+}
+
+fn compact_action_context_json(context: &ActionContext, nonce: u64, key_version: u64) -> Value {
+    json!({
+        "domainSeparator": hex(context.domain_separator),
+        "nonce": nonce,
+        "keyVersion": key_version,
+        "actionType": hex(context.action_type),
+        "payloadHash": hex(context.payload_hash)
+    })
+}
+
+fn uint_word(value: u64) -> [u8; HASH_LEN] {
+    let mut out = [0u8; HASH_LEN];
+    out[24..32].copy_from_slice(&value.to_be_bytes());
+    out
 }
 
 fn stateful_calldata(
@@ -196,6 +277,31 @@ fn compact_calldata(message: &[u8], signature: &CompactSignature) -> String {
             hex(signature.sub_pk_seed),
             hex(signature.sub_pk_root),
             hex(message),
+            hex(&signature.raw_signature),
+        ],
+    )
+}
+
+fn compact_action_calldata(
+    context: &ActionContext,
+    nonce: u64,
+    key_version: u64,
+    signature: &CompactSignature,
+) -> String {
+    let context_arg = format!(
+        "({},{},{},{},{})",
+        hex(context.domain_separator),
+        nonce,
+        key_version,
+        hex(context.action_type),
+        hex(context.payload_hash)
+    );
+    cast_calldata(
+        "f(bytes32,bytes32,(bytes32,uint256,uint256,bytes32,bytes32),bytes)",
+        &[
+            hex(signature.sub_pk_seed),
+            hex(signature.sub_pk_root),
+            context_arg,
             hex(&signature.raw_signature),
         ],
     )
