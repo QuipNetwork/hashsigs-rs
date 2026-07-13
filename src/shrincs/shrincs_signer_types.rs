@@ -25,6 +25,46 @@ use super::verifier::HASH_LEN;
 /// WOTS-C/FORS-C grinding fails within the configured counter budget.
 pub type ShrincsSignerResult<T> = Option<T>;
 
+/// Byte offset of q inside the full compact signature.
+pub const COMPACT_SIGNATURE_Q_OFFSET: usize = 9828;
+
+/// Signer-owned material for one JARDIN-style compact Type 2 lane.
+///
+/// The account registers `sub_pk_seed` and `sub_pk_root`. The signer/device
+/// keeps `compact_sk_seed` private and owns rollback-safe use of `q`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompactSigningKey {
+    /// Secret seed used to derive compact FORS+C leaves.
+    pub compact_sk_seed: [u8; HASH_LEN],
+    /// Compact public seed registered in the account slot.
+    pub sub_pk_seed: [u8; HASH_LEN],
+    /// Root of the 128-lane compact Merkle tree.
+    pub sub_pk_root: [u8; HASH_LEN],
+    /// JARDIN compact leaf index encoded into every raw signature.
+    pub q: u8,
+}
+
+/// Raw compact signature material ready for the Solidity Type 2 verifier.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompactSignature {
+    /// Compact public seed for slot lookup and verification.
+    /// This is Solidity `subPkSeed`.
+    pub sub_pk_seed: [u8; HASH_LEN],
+    /// Compact public root for slot lookup and verification.
+    /// This is Solidity `subPkRoot`.
+    pub sub_pk_root: [u8; HASH_LEN],
+    /// Fixed 10,053-byte compact signature:
+    /// `R32 || counter4 || openedFORS[51] || q1 || merkleAuth[7]`.
+    pub raw_signature: Vec<u8>,
+}
+
+impl CompactSignature {
+    /// q: Decode the compact leaf index from the full raw signature.
+    pub fn q(&self) -> Option<u8> {
+        self.raw_signature.get(COMPACT_SIGNATURE_Q_OFFSET).copied()
+    }
+}
+
 /// Secret material for both the stateful fast path and stateless recovery path.
 ///
 /// These fields are deterministic derivations from seed material. Treat this as
