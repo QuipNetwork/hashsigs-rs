@@ -20,7 +20,9 @@
 pub mod signer;
 pub mod verifier;
 
-pub use signer::{ShrincsSigner, ShrincsSignerResult, ShrincsSigningKey};
+pub use signer::{
+    CompactSignature, CompactSigningKey, ShrincsSigner, ShrincsSignerResult, ShrincsSigningKey,
+};
 pub use verifier::{
     ActionContext, ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey, RotationContext,
     RotationTarget, ShrincsVerifier, StatefulPublicKey, StatefulRotationTarget, StatefulSignature,

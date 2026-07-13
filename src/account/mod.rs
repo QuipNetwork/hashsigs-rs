@@ -21,11 +21,11 @@ use std::collections::HashMap;
 
 use solana_program::keccak::hash as keccak256_hash;
 
+use crate::shrincs::verifier::STATELESS_SIGNATURE_LIMIT;
 use crate::shrincs::{
     ActionContext, PublicKey, RotationContext, RotationTarget, ShrincsVerifier,
     StatefulRotationTarget, StatefulSignature, StatelessSignature, HASH_LEN,
 };
-use crate::shrincs::verifier::STATELESS_SIGNATURE_LIMIT;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StatefulPolicy {

@@ -1712,9 +1712,11 @@ checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
 name = "hashsigs-rs"
 version = "0.0.3"
 dependencies = [
+ "hmac 0.12.1",
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
+ "sha2 0.10.9",
  "solana-program",
  "wasm-bindgen",
  "wasm-bindgen-test",

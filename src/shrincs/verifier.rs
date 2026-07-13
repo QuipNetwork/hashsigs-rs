@@ -326,6 +326,72 @@ impl ShrincsVerifier {
         ])
     }
 
+    /// Build the canonical message hash for a compact Type 2 action.
+    ///
+    /// Compact slots are authorized separately, so this hash binds only the
+    /// compact operation tag, hash suite, and account action context.
+    ///
+    /// Packed preimage:
+    ///   OP_VERIFY_COMPACT32 || HASH_SUITE_KECCAK_2564 ||
+    ///   domain_separator32 || nonce32 || key_version32 ||
+    ///   action_type32 || payload_hash32.
+    pub fn compact_action_message_hash(&self, context: &ActionContext) -> [u8; HASH_LEN] {
+        let op = hash_packed(&[b"shrincs-verify-compact"]);
+        hash_packed(&[
+            &op,
+            &HASH_SUITE_KECCAK_256.to_be_bytes(),
+            &context.domain_separator,
+            &context.nonce,
+            &context.key_version,
+            &context.action_type,
+            &context.payload_hash,
+        ])
+    }
+
+    /// Build the compact slot id used by account wrapper storage.
+    ///
+    /// Packed preimage:
+    ///   sub_pk_seed32 || sub_pk_root32.
+    pub fn compact_slot_id(
+        &self,
+        sub_pk_seed: &[u8; HASH_LEN],
+        sub_pk_root: &[u8; HASH_LEN],
+    ) -> [u8; HASH_LEN] {
+        hash_packed(&[sub_pk_seed, sub_pk_root])
+    }
+
+    /// Build the stateless authorization hash for compact slot registration.
+    ///
+    /// Packed preimage:
+    ///   OP_REGISTER_COMPACT_SLOT32 || HASH_SUITE_KECCAK_2564 ||
+    ///   domain_separator32 || nonce32 || key_version32 ||
+    ///   slot_id32 || sub_pk_seed32 || sub_pk_root32.
+    pub fn compact_slot_registration_message_hash(
+        &self,
+        context: &RotationContext,
+        sub_pk_seed: &[u8; HASH_LEN],
+        sub_pk_root: &[u8; HASH_LEN],
+    ) -> [u8; HASH_LEN] {
+        let op = hash_packed(&[b"shrincs-register-compact-slot"]);
+        self.compact_slot_update_message_hash(&op, context, sub_pk_seed, sub_pk_root)
+    }
+
+    /// Build the stateless authorization hash for compact slot revocation.
+    ///
+    /// Packed preimage:
+    ///   OP_REVOKE_COMPACT_SLOT32 || HASH_SUITE_KECCAK_2564 ||
+    ///   domain_separator32 || nonce32 || key_version32 ||
+    ///   slot_id32 || sub_pk_seed32 || sub_pk_root32.
+    pub fn compact_slot_revocation_message_hash(
+        &self,
+        context: &RotationContext,
+        sub_pk_seed: &[u8; HASH_LEN],
+        sub_pk_root: &[u8; HASH_LEN],
+    ) -> [u8; HASH_LEN] {
+        let op = hash_packed(&[b"shrincs-revoke-compact-slot"]);
+        self.compact_slot_update_message_hash(&op, context, sub_pk_seed, sub_pk_root)
+    }
+
     /// Build the canonical message hash for stateful-only rotation.
     ///
     /// This binds the current installed-key commitment and the replacement
@@ -372,6 +438,26 @@ impl ShrincsVerifier {
             &context.key_version,
             &current_public_key.public_key_commitment,
             &next_key.public_key_commitment,
+        ])
+    }
+
+    fn compact_slot_update_message_hash(
+        &self,
+        op: &[u8; HASH_LEN],
+        context: &RotationContext,
+        sub_pk_seed: &[u8; HASH_LEN],
+        sub_pk_root: &[u8; HASH_LEN],
+    ) -> [u8; HASH_LEN] {
+        let slot_id = self.compact_slot_id(sub_pk_seed, sub_pk_root);
+        hash_packed(&[
+            op,
+            &HASH_SUITE_KECCAK_256.to_be_bytes(),
+            &context.domain_separator,
+            &context.nonce,
+            &context.key_version,
+            &slot_id,
+            sub_pk_seed,
+            sub_pk_root,
         ])
     }
 

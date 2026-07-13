@@ -28,6 +28,8 @@ pub(crate) mod verifier;
 #[cfg(not(test))]
 pub(crate) use super::verifier;
 
+#[path = "shrincs_signer_compact.rs"]
+mod shrincs_signer_compact;
 #[path = "shrincs_signer_fors_c.rs"]
 mod shrincs_signer_fors_c;
 #[path = "shrincs_signer_hypertree.rs"]
@@ -39,8 +41,13 @@ mod shrincs_signer_types;
 #[path = "shrincs_signer_utils.rs"]
 mod shrincs_signer_utils;
 
-pub use self::shrincs_signer_types::{ShrincsSignerResult, ShrincsSigningKey};
+pub use self::shrincs_signer_types::{
+    CompactSignature, CompactSigningKey, ShrincsSignerResult, ShrincsSigningKey,
+};
 
+use self::shrincs_signer_compact::{
+    compact_keygen as compact_keygen_inner, sign_compact_raw as sign_compact_raw_inner,
+};
 use self::shrincs_signer_fors_c::sign_fors_c;
 use self::shrincs_signer_hypertree::{hypertree_public_root, sign_hypertree};
 #[cfg(test)]
@@ -52,7 +59,7 @@ use self::shrincs_signer_utils::{
     derive32, encode_stateful_public_key, public_key_from_components, word32,
 };
 use self::verifier::{
-    ActionContext, PublicKey, ShrincsVerifier, StatefulSignature, StatelessSignature,
+    ActionContext, PublicKey, ShrincsVerifier, StatefulSignature, StatelessSignature, HASH_LEN,
 };
 
 pub struct ShrincsSigner;
@@ -162,6 +169,71 @@ impl ShrincsSigner {
             fors: signed_fors.signature,
             hypertree,
         })
+    }
+
+    /// Derive one JARDIN-style compact slot from master secret and device r.
+    pub fn compact_keygen(
+        master_sk_seed: &[u8; HASH_LEN],
+        slot_randomness: &[u8; HASH_LEN],
+        q: u8,
+    ) -> ShrincsSignerResult<CompactSigningKey> {
+        compact_keygen_inner(master_sk_seed, slot_randomness, q)
+    }
+
+    /// Sign an already-built 32-byte compact Type 2 message hash.
+    pub fn sign_compact_raw(
+        signing_key: &CompactSigningKey,
+        message: &[u8],
+    ) -> ShrincsSignerResult<CompactSignature> {
+        sign_compact_raw_inner(signing_key, message)
+    }
+
+    /// Sign a canonical compact account action.
+    pub fn sign_compact_action(
+        signing_key: &CompactSigningKey,
+        context: &ActionContext,
+    ) -> ShrincsSignerResult<CompactSignature> {
+        let message = Self::compact_action_message_hash(context);
+        sign_compact_raw_inner(signing_key, &message)
+    }
+
+    /// Build the canonical compact Type 2 account-action message hash.
+    pub fn compact_action_message_hash(context: &ActionContext) -> [u8; HASH_LEN] {
+        ShrincsVerifier::new().compact_action_message_hash(context)
+    }
+
+    /// Build the compact slot id registered by the account wrapper.
+    pub fn compact_slot_id(
+        sub_pk_seed: &[u8; HASH_LEN],
+        sub_pk_root: &[u8; HASH_LEN],
+    ) -> [u8; HASH_LEN] {
+        ShrincsVerifier::new().compact_slot_id(sub_pk_seed, sub_pk_root)
+    }
+
+    /// Build the stateless authorization hash for compact slot registration.
+    pub fn compact_slot_registration_message_hash(
+        context: &verifier::RotationContext,
+        sub_pk_seed: &[u8; HASH_LEN],
+        sub_pk_root: &[u8; HASH_LEN],
+    ) -> [u8; HASH_LEN] {
+        ShrincsVerifier::new().compact_slot_registration_message_hash(
+            context,
+            sub_pk_seed,
+            sub_pk_root,
+        )
+    }
+
+    /// Build the stateless authorization hash for compact slot revocation.
+    pub fn compact_slot_revocation_message_hash(
+        context: &verifier::RotationContext,
+        sub_pk_seed: &[u8; HASH_LEN],
+        sub_pk_root: &[u8; HASH_LEN],
+    ) -> [u8; HASH_LEN] {
+        ShrincsVerifier::new().compact_slot_revocation_message_hash(
+            context,
+            sub_pk_seed,
+            sub_pk_root,
+        )
     }
 }
 

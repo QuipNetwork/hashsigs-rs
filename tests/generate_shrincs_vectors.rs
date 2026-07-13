@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 use hashsigs_rs::shrincs::{
-    PublicKey, ShrincsSigner, StatefulSignature, StatelessSignature, HASH_LEN,
+    CompactSignature, PublicKey, ShrincsSigner, StatefulSignature, StatelessSignature, HASH_LEN,
 };
 use serde_json::{json, Value};
 use std::fs;
@@ -28,6 +28,15 @@ fn generate_shrincs_sphincs_256s_keccak_vectors() {
     let stateless_message = hash_word(b"shrincs solidity stateless message").to_vec();
     let stateless_signature = ShrincsSigner::sign_stateless_raw(&stateless_key, &stateless_message)
         .expect("stateless signature");
+
+    let compact_master_sk_seed = hash_word(b"shrincs solidity vector compact master seed");
+    let compact_slot_randomness = hash_word(b"shrincs solidity vector compact slot r");
+    let compact_key =
+        ShrincsSigner::compact_keygen(&compact_master_sk_seed, &compact_slot_randomness, 11)
+            .expect("compact keygen");
+    let compact_message = hash_word(b"shrincs solidity compact message").to_vec();
+    let compact_signature =
+        ShrincsSigner::sign_compact_raw(&compact_key, &compact_message).expect("compact signature");
 
     let mut wrong_stateful_message = stateful_message.clone();
     wrong_stateful_message[0] ^= 1;
@@ -80,6 +89,22 @@ fn generate_shrincs_sphincs_256s_keccak_vectors() {
                 "wrongPublicRoot": stateless_case(&wrong_public_root, &stateless_message, &stateless_signature),
                 "tamperedComponentPublicKey": stateless_case(&tampered_component_public_key, &stateless_message, &stateless_signature)
             }
+        },
+        "compact": {
+            "masterSkSeed": hex(compact_master_sk_seed),
+            "slotRandomness": hex(compact_slot_randomness),
+            "subPkSeed": hex(compact_signature.sub_pk_seed),
+            "subPkRoot": hex(compact_signature.sub_pk_root),
+            "q": compact_signature.q().expect("compact signature encodes q"),
+            "message": hex(&compact_message),
+            "signature": hex(&compact_signature.raw_signature),
+            "slotId": hex(ShrincsSigner::compact_slot_id(
+                &compact_signature.sub_pk_seed,
+                &compact_signature.sub_pk_root
+            )),
+            "cases": {
+                "valid": compact_case(&compact_message, &compact_signature)
+            }
         }
     });
 
@@ -107,6 +132,17 @@ fn stateless_case(public_key: &PublicKey, message: &[u8], signature: &StatelessS
         "message": hex(message),
         "signature": stateless_signature_json(signature),
         "calldata": stateless_calldata(public_key, message, signature)
+    })
+}
+
+fn compact_case(message: &[u8], signature: &CompactSignature) -> Value {
+    json!({
+        "subPkSeed": hex(signature.sub_pk_seed),
+        "subPkRoot": hex(signature.sub_pk_root),
+        "q": signature.q().expect("compact signature encodes q"),
+        "message": hex(message),
+        "signature": hex(&signature.raw_signature),
+        "calldata": compact_calldata(message, signature)
     })
 }
 
@@ -150,6 +186,18 @@ fn stateless_calldata(
     cast_calldata(
         "f((bytes,bytes,bytes),bytes,((bytes,uint32,(bytes,bytes[])[]),(uint64,uint32,bytes,(bytes,uint32,bytes[]),bytes[])[]))",
         &[public_key, hex(message), sig],
+    )
+}
+
+fn compact_calldata(message: &[u8], signature: &CompactSignature) -> String {
+    cast_calldata(
+        "f(bytes32,bytes32,bytes32,bytes)",
+        &[
+            hex(signature.sub_pk_seed),
+            hex(signature.sub_pk_root),
+            hex(message),
+            hex(&signature.raw_signature),
+        ],
     )
 }
 

@@ -14,21 +14,21 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
+use borsh::{BorshDeserialize, BorshSerialize};
+use hashsigs_rs::{constants, PublicKey, WOTSPlus};
+use solana_program::account_info::next_account_info;
+use solana_program::keccak::hash as keccak256_hash;
+use solana_program::program::set_return_data;
+use solana_program::system_instruction::create_account;
 use solana_program::{
     account_info::AccountInfo,
     entrypoint::ProgramResult,
     msg,
+    program::invoke_signed,
     program_error::ProgramError,
     pubkey::Pubkey,
-    program::invoke_signed,
     sysvar::{rent::Rent, Sysvar},
 };
-use hashsigs_rs::{WOTSPlus, PublicKey, constants};
-use borsh::{BorshSerialize, BorshDeserialize};
-use solana_program::keccak::hash as keccak256_hash;
-use solana_program::program::set_return_data;
-use solana_program::system_instruction::create_account;
-use solana_program::account_info::next_account_info;
 
 // NOTE: The following is supposed to increase the stack size but it does not work in practice.
 /*
@@ -77,10 +77,12 @@ impl borsh::de::BorshDeserialize for PublicKeyWrapper {
             public_key_hash,
         }))
     }
-    
+
     fn deserialize_reader<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
-        let public_seed: [u8; constants::HASH_LEN] = borsh::BorshDeserialize::deserialize_reader(reader)?;
-        let public_key_hash: [u8; constants::HASH_LEN] = borsh::BorshDeserialize::deserialize_reader(reader)?;
+        let public_seed: [u8; constants::HASH_LEN] =
+            borsh::BorshDeserialize::deserialize_reader(reader)?;
+        let public_key_hash: [u8; constants::HASH_LEN] =
+            borsh::BorshDeserialize::deserialize_reader(reader)?;
         Ok(PublicKeyWrapper(PublicKey {
             public_seed,
             public_key_hash,
@@ -117,19 +119,18 @@ pub enum WOTSPlusInstruction {
 }
 
 // Split the instruction processing into smaller functions to reduce stack usage
-fn process_generate_keypair(
-    wots: &WOTSPlus,
-    private_seed: [u8; 32],
-) -> ProgramResult {
+fn process_generate_keypair(wots: &WOTSPlus, private_seed: [u8; 32]) -> ProgramResult {
     let (public_key, private_key) = wots.generate_key_pair(&private_seed);
-    
+
     let mut result_data = Vec::new();
     let wrapper = PublicKeyWrapper::from(public_key);
-    wrapper.serialize(&mut result_data)
+    wrapper
+        .serialize(&mut result_data)
         .map_err(|_| ProgramError::InvalidInstructionData)?;
-    private_key.serialize(&mut result_data)
+    private_key
+        .serialize(&mut result_data)
         .map_err(|_| ProgramError::InvalidInstructionData)?;
-        
+
     solana_program::program::set_return_data(&result_data);
     Ok(())
 }
@@ -152,12 +153,8 @@ fn process_sign(
 
     // Create PDA for signature storage
     let (pda, bump_seed) = Pubkey::find_program_address(
-        &[
-            b"signature",
-            signer.key.as_ref(),
-            message.as_ref(),
-        ],
-        program_id
+        &[b"signature", signer.key.as_ref(), message.as_ref()],
+        program_id,
     );
 
     // Verify the PDA matches our signature account
@@ -211,7 +208,7 @@ fn process_sign(
     };
 
     signature_account_data.serialize(&mut &mut signature_account.try_borrow_mut_data()?[..])?;
-    
+
     Ok(())
 }
 
@@ -245,14 +242,14 @@ fn process_verify_with_randomization(
     if message.len() != constants::MESSAGE_LEN {
         return Err(ProgramError::InvalidInstructionData);
     }
-    
+
     let is_valid = wots.verify_with_randomization_elements(
         &public_key_hash,
         message,
         &signature,
         &randomization_elements,
     );
-    
+
     if !is_valid {
         set_return_data(&[0]);
     } else {
@@ -282,9 +279,7 @@ pub fn process_instruction(
 
     // Try to deserialize and log any errors
     let instruction = match WOTSPlusInstruction::try_from_slice(instruction_data) {
-        Ok(inst) => {
-            inst
-        },
+        Ok(inst) => inst,
         Err(e) => {
             msg!("Failed to deserialize instruction: {:?}", e);
             return Err(ProgramError::InvalidInstructionData);
@@ -295,26 +290,27 @@ pub fn process_instruction(
     match instruction {
         WOTSPlusInstruction::GenerateKeyPair { private_seed } => {
             process_generate_keypair(&wots, private_seed)
-        },
-        WOTSPlusInstruction::Sign { private_key, message } => {
-            process_sign(program_id, accounts, private_key, &message)
-        },
-        WOTSPlusInstruction::Verify { public_key, message, signature } => {
-            process_verify(&wots, public_key, &message, signature)
-        },
-        WOTSPlusInstruction::VerifyWithRandomization { 
-            public_key_hash, 
-            message, 
-            signature, 
-            randomization_elements 
-        } => {
-            process_verify_with_randomization(
-                &wots,
-                public_key_hash,
-                &message,
-                signature,
-                randomization_elements
-            )
         }
+        WOTSPlusInstruction::Sign {
+            private_key,
+            message,
+        } => process_sign(program_id, accounts, private_key, &message),
+        WOTSPlusInstruction::Verify {
+            public_key,
+            message,
+            signature,
+        } => process_verify(&wots, public_key, &message, signature),
+        WOTSPlusInstruction::VerifyWithRandomization {
+            public_key_hash,
+            message,
+            signature,
+            randomization_elements,
+        } => process_verify_with_randomization(
+            &wots,
+            public_key_hash,
+            &message,
+            signature,
+            randomization_elements,
+        ),
     }
 }

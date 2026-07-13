@@ -30,6 +30,8 @@ wasm-bindings = [
 ]
 
 [dependencies]
+hmac = "0.12.1"
+sha2 = "0.10.9"
 solana-program = "2.3"
 serde = { version = "1.0.219", features = ["derive"] }
 serde-wasm-bindgen = { version = "0.6.5", optional = true }

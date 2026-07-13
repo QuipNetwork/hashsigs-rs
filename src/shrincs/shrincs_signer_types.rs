@@ -28,20 +28,38 @@ pub type ShrincsSignerResult<T> = Option<T>;
 /// Byte offset of q inside the full compact signature.
 pub const COMPACT_SIGNATURE_Q_OFFSET: usize = 9828;
 
-/// Signer-owned material for one JARDIN-style compact Type 2 lane.
+/// Signer-owned material for one JARDIN-style compact Type 2 slot.
 ///
-/// The account registers `sub_pk_seed` and `sub_pk_root`. The signer/device
-/// keeps `compact_sk_seed` private and owns rollback-safe use of `q`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// The account registers only `sub_pk_seed` and `sub_pk_root`. The device keeps
+/// the random slot value `r`, the HMAC-derived seeds, and rollback-safe `q`
+/// state off-chain.
+#[derive(Clone, PartialEq, Eq)]
 pub struct CompactSigningKey {
+    /// Device-local random slot value `r = hardware_rng(32)`.
+    pub slot_randomness: [u8; HASH_LEN],
     /// Secret seed used to derive compact FORS+C leaves.
-    pub compact_sk_seed: [u8; HASH_LEN],
+    pub slot_sk_seed: [u8; HASH_LEN],
+    /// Secret PRF seed used to derive JARDIN Type 2 randomizer `R`.
+    pub slot_sk_prf: [u8; HASH_LEN],
     /// Compact public seed registered in the account slot.
     pub sub_pk_seed: [u8; HASH_LEN],
     /// Root of the 128-lane compact Merkle tree.
     pub sub_pk_root: [u8; HASH_LEN],
     /// JARDIN compact leaf index encoded into every raw signature.
     pub q: u8,
+}
+
+impl fmt::Debug for CompactSigningKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CompactSigningKey")
+            .field("slot_randomness", &"<redacted>")
+            .field("slot_sk_seed", &"<redacted>")
+            .field("slot_sk_prf", &"<redacted>")
+            .field("sub_pk_seed", &"<redacted>")
+            .field("sub_pk_root", &"<redacted>")
+            .field("q", &self.q)
+            .finish()
+    }
 }
 
 /// Raw compact signature material ready for the Solidity Type 2 verifier.

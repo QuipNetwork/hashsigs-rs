@@ -22,7 +22,13 @@ pub mod wotsplus_solana_test {
     use borsh::{BorshDeserialize, BorshSerialize};
     use hashsigs_rs::{constants, PublicKey, WOTSPlus};
     use hashsigs_rs_solana::processor::{self, PublicKeyWrapper};
-    use solana_sdk::{instruction::{AccountMeta, Instruction}, msg, pubkey::Pubkey, signer::Signer, transaction::Transaction};
+    use solana_sdk::{
+        instruction::{AccountMeta, Instruction},
+        msg,
+        pubkey::Pubkey,
+        signer::Signer,
+        transaction::Transaction,
+    };
 
     use super::*;
 
@@ -33,11 +39,10 @@ pub mod wotsplus_solana_test {
             program_id.pubkey(),
             processor!(process_instruction),
         );
-        
+
         // Increase compute units significantly
-        let compute_max_units = 1_400_000;  // Increased from 200,000
+        let compute_max_units = 1_400_000; // Increased from 200,000
         program_test.set_compute_max_units(compute_max_units);
-        
 
         (program_test, program_id)
     }
@@ -67,25 +72,25 @@ pub mod wotsplus_solana_test {
     async fn test_generate_key_pair() {
         let (program_test, program_id) = setup_test().await;
         let mut context = program_test.start_with_context().await;
-        
+
         let private_seed = [1u8; 32];
-        
-        let instruction = processor::WOTSPlusInstruction::GenerateKeyPair {
-            private_seed,
-        };
+
+        let instruction = processor::WOTSPlusInstruction::GenerateKeyPair { private_seed };
 
         let mut instruction_data: Vec<u8> = Vec::new();
         instruction.serialize(&mut instruction_data).unwrap();
-        
+
         // Execute the instruction on-chain
-        let transaction = execute_transaction(
-            &mut context,
-            &program_id.pubkey(),
-            instruction_data,
-        ).await.unwrap();
+        let transaction = execute_transaction(&mut context, &program_id.pubkey(), instruction_data)
+            .await
+            .unwrap();
 
         // Process the transaction and get the return data
-        let transaction_result = context.banks_client.process_transaction_with_metadata(transaction).await.unwrap();
+        let transaction_result = context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap();
         let metadata = transaction_result.metadata.unwrap();
         let compute_units = metadata.compute_units_consumed;
         let return_data = metadata.return_data;
@@ -95,23 +100,26 @@ pub mod wotsplus_solana_test {
         // Create a mutable slice for deserialization
         let binding = return_data.unwrap();
         let mut return_data_slice = binding.data.as_slice();
-        
+
         // Deserialize the return data into (PublicKey, [u8; 32])
-        let (on_chain_public_key, on_chain_private_key): (PublicKeyWrapper, [u8; 32]) = 
+        let (on_chain_public_key, on_chain_private_key): (PublicKeyWrapper, [u8; 32]) =
             borsh::BorshDeserialize::deserialize(&mut return_data_slice).unwrap();
-        
+
         // Convert wrapper to PublicKey
         let on_chain_public_key = PublicKey::from(on_chain_public_key);
-        
+
         // Verify the results match local execution
         let wots = WOTSPlus::new(processor::keccak256);
         let (local_public_key, local_private_key) = wots.generate_key_pair(&private_seed);
-        
+
         assert_eq!(on_chain_public_key.to_bytes(), local_public_key.to_bytes());
         assert_eq!(on_chain_private_key, local_private_key);
-        
+
         // Additional validation
-        assert_eq!(on_chain_public_key.to_bytes().len(), constants::PUBLIC_KEY_SIZE);
+        assert_eq!(
+            on_chain_public_key.to_bytes().len(),
+            constants::PUBLIC_KEY_SIZE
+        );
         assert!(on_chain_private_key.iter().any(|&x| x != 0));
     }
 
@@ -119,13 +127,15 @@ pub mod wotsplus_solana_test {
     async fn test_sign() {
         let (program_test, program_id) = setup_test().await;
         let context = program_test.start_with_context().await;
-        
+
         let wots = WOTSPlus::new(processor::keccak256);
         let private_seed = [1u8; 32];
         let (_public_key, private_key) = wots.generate_key_pair(&private_seed);
 
-        let message = (0..constants::MESSAGE_LEN).map(|i| i as u8).collect::<Vec<u8>>();
-        
+        let message = (0..constants::MESSAGE_LEN)
+            .map(|i| i as u8)
+            .collect::<Vec<u8>>();
+
         // Create PDA for signature storage
         let (signature_pda, _bump_seed) = Pubkey::find_program_address(
             &[
@@ -133,7 +143,7 @@ pub mod wotsplus_solana_test {
                 context.payer.pubkey().as_ref(),
                 message.as_ref(),
             ],
-            &program_id.pubkey()
+            &program_id.pubkey(),
         );
 
         msg!("Program ID: {:?}", program_id.pubkey());
@@ -156,7 +166,7 @@ pub mod wotsplus_solana_test {
                 .serialize(&mut instruction_data)
                 .unwrap();
                 instruction_data
-            }
+            },
         };
 
         let transaction = Transaction::new_signed_with_payer(
@@ -166,7 +176,10 @@ pub mod wotsplus_solana_test {
             context.last_blockhash,
         );
 
-        let result = context.banks_client.process_transaction_with_metadata(transaction).await;
+        let result = context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await;
         match result {
             Ok(result) => {
                 let metadata = result.metadata.unwrap();
@@ -190,8 +203,9 @@ pub mod wotsplus_solana_test {
         // Verify locally
         let local_signature = wots.sign(&private_key, &message);
 
-        let stored_data = processor::SignatureAccount::deserialize(&mut &signature_account.data[..])
-            .expect("Failed to deserialize signature data");
+        let stored_data =
+            processor::SignatureAccount::deserialize(&mut &signature_account.data[..])
+                .expect("Failed to deserialize signature data");
 
         assert_eq!(stored_data.signature, local_signature);
     }
@@ -200,13 +214,15 @@ pub mod wotsplus_solana_test {
     async fn test_sign_and_verify_empty_signature() {
         let (program_test, program_id) = setup_test().await;
         let mut context = program_test.start_with_context().await;
-        
-        let message = (0..constants::MESSAGE_LEN).map(|i| i as u8).collect::<Vec<u8>>();
-        
+
+        let message = (0..constants::MESSAGE_LEN)
+            .map(|i| i as u8)
+            .collect::<Vec<u8>>();
+
         let wots = WOTSPlus::new(processor::keccak256);
         let private_seed = [1u8; 32];
         let (public_key, _) = wots.generate_key_pair(&private_seed);
-        
+
         let empty_signature = vec![0u8; constants::HASH_LEN * constants::NUM_SIGNATURE_CHUNKS];
         let empty_signature_chunks: Vec<[u8; constants::HASH_LEN]> = empty_signature
             .chunks(constants::HASH_LEN)
@@ -220,26 +236,30 @@ pub mod wotsplus_solana_test {
         let instruction = processor::WOTSPlusInstruction::Verify {
             public_key: PublicKeyWrapper::from(public_key),
             message: message.clone(),
-            signature: empty_signature_chunks
+            signature: empty_signature_chunks,
         };
-    
+
         let mut instruction_data: Vec<u8> = Vec::new();
         instruction.serialize(&mut instruction_data).unwrap();
 
-        let transaction = execute_transaction(
-            &mut context,
-            &program_id.pubkey(),
-            instruction_data,
-        ).await.unwrap();
+        let transaction = execute_transaction(&mut context, &program_id.pubkey(), instruction_data)
+            .await
+            .unwrap();
 
-        let result = context.banks_client.process_transaction_with_metadata(transaction).await;
+        let result = context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await;
 
         match result {
             Ok(result) => {
                 let metadata = result.metadata.unwrap();
                 let compute_units = metadata.compute_units_consumed;
                 msg!("Verify Empty Signature compute units: {}", compute_units);
-                msg!("Verify Empty Signature return data: {:?}", metadata.return_data);
+                msg!(
+                    "Verify Empty Signature return data: {:?}",
+                    metadata.return_data
+                );
                 let binding = metadata.return_data.unwrap();
                 assert_eq!(binding.data, vec![0]);
             }
@@ -254,30 +274,34 @@ pub mod wotsplus_solana_test {
     async fn test_verify_valid_signature() {
         let (program_test, program_id) = setup_test().await;
         let mut context = program_test.start_with_context().await;
-        
+
         // Generate key pair and signature locally first
         let wots = WOTSPlus::new(processor::keccak256);
         let private_seed = [1u8; 32];
         let (public_key, private_key) = wots.generate_key_pair(&private_seed);
-        let message = (0..constants::MESSAGE_LEN).map(|i| i as u8).collect::<Vec<u8>>();
+        let message = (0..constants::MESSAGE_LEN)
+            .map(|i| i as u8)
+            .collect::<Vec<u8>>();
         let signature = wots.sign(&private_key, &message);
-        
+
         let instruction = processor::WOTSPlusInstruction::Verify {
             public_key: PublicKeyWrapper::from(public_key),
             message: message.clone(),
             signature: signature.to_vec(),
         };
-        
+
         let mut instruction_data = Vec::new();
         instruction.serialize(&mut instruction_data).unwrap();
-              
-        let transaction = execute_transaction(
-            &mut context,
-            &program_id.pubkey(),
-            instruction_data,
-        ).await.unwrap();
-       
-        let transaction_result = context.banks_client.process_transaction_with_metadata(transaction).await.unwrap();
+
+        let transaction = execute_transaction(&mut context, &program_id.pubkey(), instruction_data)
+            .await
+            .unwrap();
+
+        let transaction_result = context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap();
         let metadata = transaction_result.metadata.unwrap();
         let compute_units = metadata.compute_units_consumed;
         let return_data = metadata.return_data;
@@ -294,36 +318,40 @@ pub mod wotsplus_solana_test {
     async fn test_verify_with_randomization_elements() {
         let (program_test, program_id) = setup_test().await;
         let mut context = program_test.start_with_context().await;
-        
+
         // Generate key pair and signature locally first
         let wots = WOTSPlus::new(processor::keccak256);
         let private_seed = [1u8; 32];
         let (public_key, private_key) = wots.generate_key_pair(&private_seed);
-        let message = (0..constants::MESSAGE_LEN).map(|i| i as u8).collect::<Vec<u8>>();
+        let message = (0..constants::MESSAGE_LEN)
+            .map(|i| i as u8)
+            .collect::<Vec<u8>>();
         let randomization_elements = wots.generate_randomization_elements(&public_key.public_seed);
         let signature = wots.sign(&private_key, &message);
-        
+
         let instruction = processor::WOTSPlusInstruction::VerifyWithRandomization {
             public_key_hash: public_key.public_key_hash,
             message: message.clone(),
             signature: signature.to_vec(),
             randomization_elements: randomization_elements.to_vec(),
         };
-        
+
         let mut instruction_data = Vec::new();
         instruction.serialize(&mut instruction_data).unwrap();
-        
-        let transaction = execute_transaction(
-            &mut context,
-            &program_id.pubkey(),
-            instruction_data,
-        ).await.unwrap();
-     
-        let transaction_result = context.banks_client.process_transaction_with_metadata(transaction).await.unwrap();
+
+        let transaction = execute_transaction(&mut context, &program_id.pubkey(), instruction_data)
+            .await
+            .unwrap();
+
+        let transaction_result = context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap();
         let metadata = transaction_result.metadata.unwrap();
         let compute_units = metadata.compute_units_consumed;
         let return_data = metadata.return_data;
-        
+
         msg!("Verify with randomization compute units: {}", compute_units);
         msg!("Verify with randomization return data: {:?}", return_data);
 
@@ -337,12 +365,12 @@ pub mod wotsplus_solana_test {
         let (program_test, program_id) = setup_test().await;
         let mut context = program_test.start_with_context().await;
         let wots = WOTSPlus::new(processor::keccak256);
-        let mut compute_units_total: u64 = 0;   
+        let mut compute_units_total: u64 = 0;
         let num_runs = 10;
         for i in 1..num_runs {
             let mut private_seed = [0u8; 32];
             private_seed[0] = i as u8;
-            
+
             let (public_key, private_key) = wots.generate_key_pair(&private_seed);
             let message = processor::keccak256(format!("Hello World{}", i).as_bytes()).to_vec();
             let signature = wots.sign(&private_key, &message);
@@ -352,29 +380,34 @@ pub mod wotsplus_solana_test {
                 message: message.clone(),
                 signature: signature.to_vec(),
             };
-            
+
             let mut instruction_data = Vec::new();
             instruction.serialize(&mut instruction_data).unwrap();
-                  
-            let transaction = execute_transaction(
-                &mut context,
-                &program_id.pubkey(),
-                instruction_data,
-            ).await.unwrap();
-           
-            let transaction_result = context.banks_client.process_transaction_with_metadata(transaction).await.unwrap();
+
+            let transaction =
+                execute_transaction(&mut context, &program_id.pubkey(), instruction_data)
+                    .await
+                    .unwrap();
+
+            let transaction_result = context
+                .banks_client
+                .process_transaction_with_metadata(transaction)
+                .await
+                .unwrap();
             let metadata = transaction_result.metadata.unwrap();
             let compute_units = metadata.compute_units_consumed;
             compute_units_total += compute_units;
             let return_data = metadata.return_data;
-       
+
             // Check return data indicates success
             let binding = return_data.unwrap();
             assert_eq!(binding.data, vec![1]);
-            
         }
 
-        msg!("Verify many average compute units: {}", compute_units_total as f64 / num_runs as f64);
+        msg!(
+            "Verify many average compute units: {}",
+            compute_units_total as f64 / num_runs as f64
+        );
     }
 
     #[tokio::test]
@@ -387,40 +420,46 @@ pub mod wotsplus_solana_test {
         for i in 1..num_runs {
             let mut private_seed = [0u8; 32];
             private_seed[0] = i as u8;
-            
+
             let (public_key, private_key) = wots.generate_key_pair(&private_seed);
             let message = processor::keccak256(format!("Hello World{}", i).as_bytes()).to_vec();
             let signature = wots.sign(&private_key, &message);
-            let randomization_elements = wots.generate_randomization_elements(&public_key.public_seed);
-            
+            let randomization_elements =
+                wots.generate_randomization_elements(&public_key.public_seed);
+
             let instruction = processor::WOTSPlusInstruction::VerifyWithRandomization {
                 public_key_hash: public_key.public_key_hash,
                 message: message.clone(),
                 signature: signature.to_vec(),
                 randomization_elements: randomization_elements.to_vec(),
             };
-            
+
             let mut instruction_data = Vec::new();
             instruction.serialize(&mut instruction_data).unwrap();
-            
-            let transaction = execute_transaction(
-                &mut context,
-                &program_id.pubkey(),
-                instruction_data,
-            ).await.unwrap();
-           
-            let transaction_result = context.banks_client.process_transaction_with_metadata(transaction).await.unwrap();
+
+            let transaction =
+                execute_transaction(&mut context, &program_id.pubkey(), instruction_data)
+                    .await
+                    .unwrap();
+
+            let transaction_result = context
+                .banks_client
+                .process_transaction_with_metadata(transaction)
+                .await
+                .unwrap();
             let metadata = transaction_result.metadata.unwrap();
             let compute_units = metadata.compute_units_consumed;
             compute_units_total += compute_units;
             let return_data = metadata.return_data;
-       
+
             // Check return data indicates success
             let binding = return_data.unwrap();
             assert_eq!(binding.data, vec![1]);
         }
 
-        msg!("Verify many with randomization average compute units: {}", compute_units_total as f64 / num_runs as f64);
+        msg!(
+            "Verify many with randomization average compute units: {}",
+            compute_units_total as f64 / num_runs as f64
+        );
     }
-
 }
