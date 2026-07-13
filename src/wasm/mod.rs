@@ -40,8 +40,13 @@ use crate::shrincs::{
     RotationTarget as CoreRotationTarget, ShrincsSigner, ShrincsSigningKey,
     ShrincsVerifier, StatefulRotationTarget as CoreStatefulRotationTarget,
     StatefulSignature as CoreStatefulSignature,
-    StatelessSignature as CoreStatelessSignature,
-    WotsCSignature as CoreWotsCSignature, HASH_LEN,
+    StatelessSignature as CoreStatelessSignature, STATEFUL_PUBLIC_KEY_BYTES,
+    WotsCSignature as CoreWotsCSignature, WOTS_CHAINS_STATEFUL, HASH_LEN,
+};
+#[cfg(any(test, feature = "wasm-bindings"))]
+use crate::shrincs::verifier::{
+    FORS_TREE_HEIGHT, HYPERTREE_HEIGHT, NUM_FORS_TREES, NUM_HYPERTREE_LAYERS,
+    NUM_WOTS_CHAINS,
 };
 #[cfg(all(not(test), feature = "wasm-bindings"))]
 use crate::shrincs::{
@@ -94,6 +99,10 @@ const SIGNING_KEY_FORMAT_VERSION: u32 = 1;
 /// ones who pass "0x" or a password. Core keygen is unchanged.
 #[cfg(any(test, feature = "wasm-bindings"))]
 const MIN_SEED_BYTES: usize = 32;
+#[cfg(any(test, feature = "wasm-bindings"))]
+const MAX_RAW_INPUT_BYTES: usize = 1 << 20;
+#[cfg(any(test, feature = "wasm-bindings"))]
+const MAX_STATEFUL_SIGNATURES_LIMIT: usize = 4096;
 
 /// Error carrier for the wasm boundary: a stable machine-readable `code` plus
 /// a human-readable `message`. Messages must never echo raw caller input
@@ -173,7 +182,7 @@ impl WasmShrincsKeypair {
     /// * `message_hex` - arbitrary-length hex.
     #[wasm_bindgen(js_name = signStatefulRaw, unchecked_return_type = "StatefulSignResult")]
     pub fn sign_stateful_raw(&mut self, message_hex: &str) -> Result<JsValue, JsValue> {
-        let message = parse_hex_bytes(message_hex).map_err(js_error)?;
+        let message = parse_hex_bytes_with_max(message_hex, MAX_RAW_INPUT_BYTES).map_err(js_error)?;
         // Pre-check exhaustion explicitly. Core signals BOTH exhaustion and
         // (astronomically rare) WOTS-C grinding failure as `None`; without
         // this check the two are conflated under one misleading error code.
@@ -207,7 +216,7 @@ impl WasmShrincsKeypair {
     /// * `message_hex` - arbitrary-length hex.
     #[wasm_bindgen(js_name = signStatefulRawAt, unchecked_return_type = "StatefulSignature")]
     pub fn sign_stateful_raw_at(&self, message_hex: &str, leaf: u32) -> Result<JsValue, JsValue> {
-        let message = parse_hex_bytes(message_hex).map_err(js_error)?;
+        let message = parse_hex_bytes_with_max(message_hex, MAX_RAW_INPUT_BYTES).map_err(js_error)?;
         // Range-check up front so an out-of-range leaf is reported as what it
         // is, not as "exhausted" (the previous, misleading mapping).
         if leaf < 1 || leaf > self.signing_key.max_stateful_signatures {
@@ -235,7 +244,7 @@ impl WasmShrincsKeypair {
     /// * `message_hex` - arbitrary-length hex.
     #[wasm_bindgen(js_name = signStatelessRaw, unchecked_return_type = "StatelessSignature")]
     pub fn sign_stateless_raw(&self, message_hex: &str) -> Result<JsValue, JsValue> {
-        let message = parse_hex_bytes(message_hex).map_err(js_error)?;
+        let message = parse_hex_bytes_with_max(message_hex, MAX_RAW_INPUT_BYTES).map_err(js_error)?;
         let signature =
             ShrincsSigner::sign_stateless_raw(&self.signing_key, &message).ok_or_else(|| {
                 js_error(WasmErr {
@@ -497,7 +506,7 @@ pub fn shrincs_keygen(
     seed_hex: &str,
     max_stateful_signatures: u32,
 ) -> Result<WasmShrincsKeypair, JsValue> {
-    let seed_material = parse_hex_bytes(seed_hex).map_err(js_error)?;
+    let seed_material = parse_hex_bytes_with_max(seed_hex, MAX_RAW_INPUT_BYTES).map_err(js_error)?;
     validate_seed_length(&seed_material).map_err(js_error)?;
     let (signing_key, public_key) = ShrincsSigner::keygen(&seed_material, max_stateful_signatures)
         .ok_or_else(|| {
@@ -979,7 +988,7 @@ fn verify_stateful_raw_inner(
 ) -> Result<bool, WasmErr> {
     let expected_public_key_commitment = parse_word32(expected_public_key_commitment_hex)?;
     let public_key = parse_public_key(public_key)?;
-    let message = parse_hex_bytes(message_hex)?;
+    let message = parse_hex_bytes_with_max(message_hex, MAX_RAW_INPUT_BYTES)?;
     let signature = parse_stateful_signature(signature)?;
 
     Ok(ShrincsVerifier::new().verify_stateful_unsafe_raw(
@@ -1087,7 +1096,7 @@ fn verify_stateless_raw_inner(
 ) -> Result<bool, WasmErr> {
     let expected_public_key_commitment = parse_word32(expected_public_key_commitment_hex)?;
     let public_key = parse_public_key(public_key)?;
-    let message = parse_hex_bytes(message_hex)?;
+    let message = parse_hex_bytes_with_max(message_hex, MAX_RAW_INPUT_BYTES)?;
     let signature = parse_stateless_signature(signature)?;
 
     Ok(ShrincsVerifier::new().verify_stateless_unsafe_raw(
@@ -1121,10 +1130,10 @@ fn verify_stateless_action_inner(
 #[cfg(any(test, feature = "wasm-bindings"))]
 fn parse_public_key(input: &ShrincsPublicKey) -> Result<PublicKey, WasmErr> {
     Ok(PublicKey {
-        stateful_public_key: parse_hex_bytes(&input.stateful_public_key)?,
-        public_key_commitment: parse_hex_bytes(&input.public_key_commitment)?,
-        pk_seed: parse_hex_bytes(&input.pk_seed)?,
-        hypertree_root: parse_hex_bytes(&input.hypertree_root)?,
+        stateful_public_key: parse_fixed_hex::<STATEFUL_PUBLIC_KEY_BYTES>(&input.stateful_public_key)?.to_vec(),
+        public_key_commitment: parse_word32(&input.public_key_commitment)?.to_vec(),
+        pk_seed: parse_word32(&input.pk_seed)?.to_vec(),
+        hypertree_root: parse_word32(&input.hypertree_root)?.to_vec(),
     })
 }
 
@@ -1152,6 +1161,12 @@ fn parse_rotation_context(
 
 #[cfg(any(test, feature = "wasm-bindings"))]
 fn parse_stateful_signature(input: &StatefulSignature) -> Result<CoreStatefulSignature, WasmErr> {
+    expect_vec_len("stateful signature chains", input.chains.len(), WOTS_CHAINS_STATEFUL)?;
+    expect_vec_len_at_most(
+        "stateful signature auth path",
+        input.auth_path.len(),
+        MAX_STATEFUL_SIGNATURES_LIMIT,
+    )?;
     Ok(CoreStatefulSignature {
         randomizer: parse_word32(&input.randomizer)?,
         counter: input.counter,
@@ -1172,21 +1187,26 @@ fn parse_stateful_signature(input: &StatefulSignature) -> Result<CoreStatefulSig
 fn parse_stateless_signature(
     input: &StatelessSignature,
 ) -> Result<CoreStatelessSignature, WasmErr> {
+    let signed_fors_trees = NUM_FORS_TREES as usize - 1;
+    let subtree_height = (HYPERTREE_HEIGHT / NUM_HYPERTREE_LAYERS) as usize;
+    expect_vec_len("FORS entries", input.fors.entries.len(), signed_fors_trees)?;
+    expect_vec_len("hypertree layers", input.hypertree.len(), NUM_HYPERTREE_LAYERS as usize)?;
     Ok(CoreStatelessSignature {
         fors: CoreForsSignature {
-            randomizer: parse_hex_bytes(&input.fors.randomizer)?,
+            randomizer: parse_word32(&input.fors.randomizer)?.to_vec(),
             counter: input.fors.counter,
             entries: input
                 .fors
                 .entries
                 .iter()
                 .map(|entry| {
+                    expect_vec_len("FORS auth path", entry.auth_path.len(), FORS_TREE_HEIGHT as usize)?;
                     Ok(CoreForsEntry {
-                        secret_leaf: parse_hex_bytes(&entry.secret_leaf)?,
+                        secret_leaf: parse_word32(&entry.secret_leaf)?.to_vec(),
                         auth_path: entry
                             .auth_path
                             .iter()
-                            .map(|node| parse_hex_bytes(node))
+                            .map(|node| parse_word32(node).map(|word| word.to_vec()))
                             .collect::<Result<Vec<_>, _>>()?,
                     })
                 })
@@ -1196,24 +1216,30 @@ fn parse_stateless_signature(
             .hypertree
             .iter()
             .map(|layer| {
+                expect_vec_len(
+                    "WOTS-C chains",
+                    layer.wots_c_signature.chains.len(),
+                    NUM_WOTS_CHAINS as usize,
+                )?;
+                expect_vec_len("hypertree auth path", layer.auth_path.len(), subtree_height)?;
                 Ok(CoreHypertreeLayerSignature {
                     tree_index: layer.tree_index,
                     leaf_index: layer.leaf_index,
-                    wots_c_pk_hash: parse_hex_bytes(&layer.wots_c_pk_hash)?,
+                    wots_c_pk_hash: parse_word32(&layer.wots_c_pk_hash)?.to_vec(),
                     wots_c_signature: CoreWotsCSignature {
-                        randomizer: parse_hex_bytes(&layer.wots_c_signature.randomizer)?,
+                        randomizer: parse_word32(&layer.wots_c_signature.randomizer)?.to_vec(),
                         counter: layer.wots_c_signature.counter,
                         chains: layer
                             .wots_c_signature
                             .chains
                             .iter()
-                            .map(|chain| parse_hex_bytes(chain))
+                            .map(|chain| parse_word32(chain).map(|word| word.to_vec()))
                             .collect::<Result<Vec<_>, _>>()?,
                     },
                     auth_path: layer
                         .auth_path
                         .iter()
-                        .map(|node| parse_hex_bytes(node))
+                        .map(|node| parse_word32(node).map(|word| word.to_vec()))
                         .collect::<Result<Vec<_>, _>>()?,
                 })
             })
@@ -1226,32 +1252,24 @@ fn parse_stateful_rotation_target(
     input: &StatefulRotationTarget,
 ) -> Result<CoreStatefulRotationTarget, WasmErr> {
     Ok(CoreStatefulRotationTarget {
-        stateful_public_key: parse_hex_bytes(&input.stateful_public_key)?,
-        public_key_commitment: parse_hex_bytes(&input.public_key_commitment)?,
+        stateful_public_key: parse_fixed_hex::<STATEFUL_PUBLIC_KEY_BYTES>(&input.stateful_public_key)?.to_vec(),
+        public_key_commitment: parse_word32(&input.public_key_commitment)?.to_vec(),
     })
 }
 
 #[cfg(any(test, feature = "wasm-bindings"))]
 fn parse_rotation_target(input: &RotationTarget) -> Result<CoreRotationTarget, WasmErr> {
     Ok(CoreRotationTarget {
-        stateful_public_key: parse_hex_bytes(&input.stateful_public_key)?,
-        public_key_commitment: parse_hex_bytes(&input.public_key_commitment)?,
-        pk_seed: parse_hex_bytes(&input.pk_seed)?,
-        hypertree_root: parse_hex_bytes(&input.hypertree_root)?,
+        stateful_public_key: parse_fixed_hex::<STATEFUL_PUBLIC_KEY_BYTES>(&input.stateful_public_key)?.to_vec(),
+        public_key_commitment: parse_word32(&input.public_key_commitment)?.to_vec(),
+        pk_seed: parse_word32(&input.pk_seed)?.to_vec(),
+        hypertree_root: parse_word32(&input.hypertree_root)?.to_vec(),
     })
 }
 
 #[cfg(any(test, feature = "wasm-bindings"))]
 fn parse_word32(input: &str) -> Result<[u8; HASH_LEN], WasmErr> {
-    let bytes = parse_hex_bytes(input)?;
-    let len = bytes.len();
-    bytes.try_into().map_err(|_| WasmErr {
-        code: ERR_BAD_LENGTH,
-        message: format!(
-            "expected {} bytes for fixed-width field, got {}",
-            HASH_LEN, len
-        ),
-    })
+    parse_fixed_hex::<HASH_LEN>(input)
 }
 
 /// Stateful signatures still available: `max - (next - 1)`, clamped to 0
@@ -1278,7 +1296,7 @@ fn validate_seed_length(seed: &[u8]) -> Result<(), WasmErr> {
 }
 
 #[cfg(any(test, feature = "wasm-bindings"))]
-fn parse_hex_bytes(input: &str) -> Result<Vec<u8>, WasmErr> {
+fn normalized_hex_body(input: &str) -> Result<&str, WasmErr> {
     // Error messages must not echo `input`: hex inputs include secret seeds,
     // and echoed values leak into logs/telemetry via exception messages.
     // Accept either `0x` or `0X` prefix.
@@ -1298,8 +1316,21 @@ fn parse_hex_bytes(input: &str) -> Result<Vec<u8>, WasmErr> {
             message: format!("hex string must have even length (got {} chars)", trimmed.len()),
         });
     }
+    Ok(trimmed)
+}
 
-    let mut out = Vec::with_capacity(trimmed.len() / 2);
+#[cfg(any(test, feature = "wasm-bindings"))]
+fn parse_hex_bytes_with_max(input: &str, max_bytes: usize) -> Result<Vec<u8>, WasmErr> {
+    let trimmed = normalized_hex_body(input)?;
+    let byte_len = trimmed.len() / 2;
+    if byte_len > max_bytes {
+        return Err(WasmErr {
+            code: ERR_BAD_LENGTH,
+            message: format!("hex input exceeds maximum of {max_bytes} bytes"),
+        });
+    }
+
+    let mut out = Vec::with_capacity(byte_len);
     for index in (0..trimmed.len()).step_by(2) {
         let byte = u8::from_str_radix(&trimmed[index..index + 2], 16).map_err(|_| WasmErr {
             code: ERR_HEX_INVALID,
@@ -1311,13 +1342,56 @@ fn parse_hex_bytes(input: &str) -> Result<Vec<u8>, WasmErr> {
 }
 
 #[cfg(any(test, feature = "wasm-bindings"))]
+fn parse_hex_bytes(input: &str) -> Result<Vec<u8>, WasmErr> {
+    parse_hex_bytes_with_max(input, MAX_RAW_INPUT_BYTES)
+}
+
+#[cfg(any(test, feature = "wasm-bindings"))]
+fn parse_fixed_hex<const N: usize>(input: &str) -> Result<[u8; N], WasmErr> {
+    let trimmed = normalized_hex_body(input)?;
+    let len = trimmed.len() / 2;
+    if len != N {
+        return Err(WasmErr {
+            code: ERR_BAD_LENGTH,
+            message: format!("expected {N} bytes for fixed-width field, got {len}"),
+        });
+    }
+
+    let mut out = [0u8; N];
+    for (i, index) in (0..trimmed.len()).step_by(2).enumerate() {
+        out[i] = u8::from_str_radix(&trimmed[index..index + 2], 16).map_err(|_| WasmErr {
+            code: ERR_HEX_INVALID,
+            message: format!("invalid hex at byte offset {}", index / 2),
+        })?;
+    }
+    Ok(out)
+}
+
+#[cfg(any(test, feature = "wasm-bindings"))]
 fn parse_address20(input: &str) -> Result<[u8; 20], WasmErr> {
-    let bytes = parse_hex_bytes(input)?;
-    let len = bytes.len();
-    bytes.try_into().map_err(|_| WasmErr {
-        code: ERR_BAD_LENGTH,
-        message: format!("expected 20 bytes for address field, got {len}"),
-    })
+    parse_fixed_hex::<20>(input)
+}
+
+#[cfg(any(test, feature = "wasm-bindings"))]
+fn expect_vec_len(name: &str, actual: usize, expected: usize) -> Result<(), WasmErr> {
+    if actual != expected {
+        return Err(WasmErr {
+            code: ERR_BAD_LENGTH,
+            message: format!("{name} must contain exactly {expected} items, got {actual}"),
+        });
+    }
+    Ok(())
+}
+
+#[cfg(any(test, feature = "wasm-bindings"))]
+fn expect_vec_len_at_most(name: &str, actual: usize, max: usize) -> Result<(), WasmErr> {
+    if actual > max {
+        return Err(WasmErr {
+            code: ERR_BAD_LENGTH,
+            message: format!("{name} exceeds maximum of {max} items (got {actual})"),
+        });
+    }
+    Ok(())
 }
 
 #[cfg(any(test, feature = "wasm-bindings"))]
