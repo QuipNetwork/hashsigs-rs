@@ -29,8 +29,29 @@ use super::verifier::{
 };
 use solana_program::keccak::hash as keccak256_hash;
 
+// WOTS-C grinds the counter until the message digits hit the target sum. That
+// hit is percent-scale (~1.1% at 256s, ~1.5% at 128s: the digit sum lands on the
+// mean of its distribution), so the expected search is ~100 counters and a 2^24
+// bound overshoots it by ~10^5. Exhaustion probability is (1 - p)^(2^24) with
+// p ~ 0.01, i.e. e^-1.8e5, cryptographically zero. Fixed 2^24 is ample; unlike
+// the FORS bound below it does not need to scale with any profile constant.
 pub(crate) const WOTS_C_MAX_GRIND_COUNTER: u32 = 1 << 24;
-pub(crate) const FORS_C_MAX_GRIND_COUNTER: u32 = 1 << 24;
+
+// FORS-C grinds the counter until the omitted final FORS tree selects leaf 0,
+// which happens with probability 2^-FORS_TREE_HEIGHT per counter (every one of
+// the final tree index's `a = FORS_TREE_HEIGHT` bits must be zero). The bound
+// must therefore scale with `a`. A fixed 2^24 was safe only at 256s (a = 14,
+// expected 2^14 trials); at 128s (a = 24) the expected search is itself 2^24, so
+// a 2^24 bound exhausts without success for (1 - 2^-24)^(2^24) ~ e^-1 = 36.8% of
+// messages -- and because the FORS randomizer is deterministic in
+// (stateless_prf_seed, message), such a message can NEVER be signed by that key.
+//
+// The Solidity verifier enforces no counter bound (the counter is a free
+// uint32), so we search the whole u32 counter domain: 2^32 - 1 counters. The
+// exhaustion probability is then (1 - 2^-a)^(2^32) = e^-2^(32-a): e^-2^18 at
+// 256s and e^-256 at 128s, both negligible. Raising the signer bound is
+// wire-compatible and leaves every existing vector unchanged.
+pub(crate) const FORS_C_MAX_GRIND_COUNTER: u32 = u32::MAX;
 
 pub(crate) fn public_key_from_components(
     stateful_public_key: Vec<u8>,
@@ -251,4 +272,26 @@ pub(crate) fn hypertree_address_word(
     let low = (u64::from(node_height) << 32) | parent_index;
     out[24..32].copy_from_slice(&low.to_be_bytes());
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FORS_C_MAX_GRIND_COUNTER;
+    use crate::shrincs::verifier::FORS_TREE_HEIGHT;
+
+    #[test]
+    fn fors_grind_bound_scales_with_tree_height() {
+        // FORS-C succeeds per counter with probability 2^-FORS_TREE_HEIGHT, so the
+        // bound must exceed the expected 2^FORS_TREE_HEIGHT trials by a wide margin
+        // or a fraction of messages become permanently unsignable. Require at least
+        // a 2^7 safety factor over the expected trials (exhaustion probability
+        // <= e^-128). The pre-fix 2^24 bound fails this at 128s
+        // (FORS_TREE_HEIGHT = 24: 2^24 < 2^31).
+        let expected_trials = 1u64 << FORS_TREE_HEIGHT;
+        assert!(
+            u64::from(FORS_C_MAX_GRIND_COUNTER) >= expected_trials << 7,
+            "FORS grind bound {FORS_C_MAX_GRIND_COUNTER} too small for \
+             FORS_TREE_HEIGHT {FORS_TREE_HEIGHT}"
+        );
+    }
 }
