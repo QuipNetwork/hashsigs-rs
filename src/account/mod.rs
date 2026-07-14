@@ -22,8 +22,9 @@ use std::collections::HashMap;
 use solana_program::keccak::hash as keccak256_hash;
 
 use crate::shrincs::{
-    ActionContext, ParameterSetId, PublicKey, RotationContext, RotationTarget, ShrincsVerifier,
+    ActionContext, PublicKey, RotationContext, RotationTarget, ShrincsVerifier,
     StatefulRotationTarget, StatefulSignature, StatelessSignature, HASH_LEN,
+    STATELESS_SIGNATURE_LIMIT,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,8 +60,6 @@ pub struct ShrincsAccountVerifierExample {
     chainId: [u8; HASH_LEN],
     // Contract/account identity used when deriving the canonical signing domain.
     contractAddress: [u8; 20],
-    // Active SHRINCS parameter profile for the installed key bundle.
-    parameterSetId: ParameterSetId,
     // Canonical action/rotation nonce consumed on successful wrapper operations.
     nonce: [u8; HASH_LEN],
     // Installed-key epoch incremented whenever a fresh key bundle is installed.
@@ -81,9 +80,8 @@ impl ShrincsAccountVerifierExample {
     // constructor: Install the initial key commitment and start in the default safe wrapper mode.
     // 1. Record the deployer as the wrapper owner.
     // 2. Install the initial SHRINCS public-key commitment.
-    // 3. Select the default parameter profile for the example wrapper.
-    // 4. Start with monotonic stateful leaf tracking.
-    // 5. Expect the first stateful signature to use leaf 1.
+    // 3. Start with monotonic stateful leaf tracking.
+    // 4. Expect the first stateful signature to use leaf 1.
     pub fn new(
         owner: [u8; HASH_LEN],
         chainId: [u8; HASH_LEN],
@@ -98,8 +96,6 @@ impl ShrincsAccountVerifierExample {
             // Preserve the deployment identity that defines the canonical signing domain.
             chainId,
             contractAddress,
-            // Start the example wrapper on its default SHRINCS parameter profile.
-            parameterSetId: ParameterSetId::Sphincs256sKeccakQ20,
             nonce: [0u8; HASH_LEN],
             keyVersion: [0u8; HASH_LEN],
             statelessSignaturesUsed: 0,
@@ -126,10 +122,6 @@ impl ShrincsAccountVerifierExample {
 
     pub fn contractAddress(&self) -> [u8; 20] {
         self.contractAddress
-    }
-
-    pub fn parameterSetId(&self) -> ParameterSetId {
-        self.parameterSetId
     }
 
     pub fn nonce(&self) -> [u8; HASH_LEN] {
@@ -179,7 +171,6 @@ impl ShrincsAccountVerifierExample {
 
         // Verify the caller-supplied message directly against the current installed key.
         let ok = ShrincsVerifier::new().verify_stateful_unsafe_raw(
-            self.parameterSetId,
             self.currentShrincsPublicKey,
             publicKey,
             message,
@@ -226,7 +217,6 @@ impl ShrincsAccountVerifierExample {
 
         // Verify the canonical typed action under the installed key commitment.
         let ok = ShrincsVerifier::new().verify_stateful(
-            self.parameterSetId,
             self.currentShrincsPublicKey,
             publicKey,
             &context,
@@ -246,7 +236,7 @@ impl ShrincsAccountVerifierExample {
 
     // verifyStatelessAction: Canonical stateless account-action verification path.
     // 1. Reject stateless actions when recovery mode gating forbids them.
-    // 2. Enforce the profile's stateless usage budget for the current key epoch.
+    // 2. Enforce the fixed stateless usage budget for the current key epoch.
     // 3. Build the canonical typed action context from wrapper-owned freshness state.
     // 4. Verify the stateless signature against that canonical action message.
     // 5. Advance nonce and stateless-usage counters only after success.
@@ -261,10 +251,8 @@ impl ShrincsAccountVerifierExample {
         if self.statefulPolicy == StatefulPolicy::RecoveryRotation && !self.recoveryMode {
             return false;
         }
-        // Enforce the per-key stateless usage budget from the active parameter profile.
-        let limit =
-            ShrincsVerifier::default_params_view(self.parameterSetId).stateless_signature_limit;
-        if self.statelessSignaturesUsed >= limit {
+        // Enforce the per-key stateless usage budget.
+        if self.statelessSignaturesUsed >= STATELESS_SIGNATURE_LIMIT {
             return false;
         }
 
@@ -279,7 +267,6 @@ impl ShrincsAccountVerifierExample {
 
         // Verify the canonical typed action under the installed key commitment.
         let ok = ShrincsVerifier::new().verify_stateless(
-            self.parameterSetId,
             self.currentShrincsPublicKey,
             publicKey,
             &context,
@@ -317,10 +304,8 @@ impl ShrincsAccountVerifierExample {
         if !self.recoveryMode {
             return false;
         }
-        // Enforce the per-key stateless usage budget from the active parameter profile.
-        let limit =
-            ShrincsVerifier::default_params_view(self.parameterSetId).stateless_signature_limit;
-        if self.statelessSignaturesUsed >= limit {
+        // Enforce the per-key stateless usage budget.
+        if self.statelessSignaturesUsed >= STATELESS_SIGNATURE_LIMIT {
             return false;
         }
 
@@ -333,7 +318,6 @@ impl ShrincsAccountVerifierExample {
 
         // Verify the stateless recovery signature and derive the next installed commitment.
         let Some(nextCompositePublicKey) = ShrincsVerifier::new().rotate_stateful_via_stateless(
-            self.parameterSetId,
             self.currentShrincsPublicKey,
             currentPublicKey,
             &context,
@@ -344,7 +328,7 @@ impl ShrincsAccountVerifierExample {
         };
 
         // Install the next key bundle and reset wrapper state for the new epoch.
-        self.installFreshKey(nextCompositePublicKey, nextKey.parameter_set_id);
+        self.installFreshKey(nextCompositePublicKey);
         true
     }
 
@@ -369,10 +353,8 @@ impl ShrincsAccountVerifierExample {
         if !self.recoveryMode {
             return false;
         }
-        // Enforce the per-key stateless usage budget from the active parameter profile.
-        let limit =
-            ShrincsVerifier::default_params_view(self.parameterSetId).stateless_signature_limit;
-        if self.statelessSignaturesUsed >= limit {
+        // Enforce the per-key stateless usage budget.
+        if self.statelessSignaturesUsed >= STATELESS_SIGNATURE_LIMIT {
             return false;
         }
 
@@ -385,7 +367,6 @@ impl ShrincsAccountVerifierExample {
 
         // Verify the stateless recovery signature and derive the next installed commitment.
         let Some(nextCompositePublicKey) = ShrincsVerifier::new().stateless_rotate(
-            self.parameterSetId,
             self.currentShrincsPublicKey,
             currentPublicKey,
             &context,
@@ -396,7 +377,7 @@ impl ShrincsAccountVerifierExample {
         };
 
         // Install the next key bundle and reset wrapper state for the new epoch.
-        self.installFreshKey(nextCompositePublicKey, nextKey.parameter_set_id);
+        self.installFreshKey(nextCompositePublicKey);
         true
     }
 
@@ -574,22 +555,16 @@ impl ShrincsAccountVerifierExample {
 
     // installFreshKey: Install a fresh key bundle and reset wrapper state for the new key epoch.
     // 1. Preserve the previous installed key commitment for the rotation event.
-    // 2. Install the next SHRINCS public-key commitment and parameter profile.
+    // 2. Install the next SHRINCS public-key commitment.
     // 3. Advance nonce and key version to close the old authorization epoch.
     // 4. Reset stateless usage and stateful leaf tracking for the new key.
     // 5. Return the wrapper to the default monotonic non-recovery policy.
     // 6. Emit rotation and policy-reset events for off-chain observers.
-    fn installFreshKey(
-        &mut self,
-        nextCompositePublicKey: [u8; HASH_LEN],
-        nextParameterSetId: ParameterSetId,
-    ) {
+    fn installFreshKey(&mut self, nextCompositePublicKey: [u8; HASH_LEN]) {
         // Preserve the previous key commitment for the rotation event payload.
         let _previousShrincsPublicKey = self.currentShrincsPublicKey;
         // Install the next trusted SHRINCS public-key commitment.
         self.currentShrincsPublicKey = nextCompositePublicKey;
-        // Switch to the next key bundle's parameter profile.
-        self.parameterSetId = nextParameterSetId;
         // Advance nonce and key epoch so old authorizations cannot be replayed.
         increment_u256_be(&mut self.nonce);
         increment_u256_be(&mut self.keyVersion);
@@ -643,8 +618,7 @@ fn increment_u256_be(value: &mut [u8; HASH_LEN]) {
 mod tests {
     use super::*;
     use crate::shrincs::signer::verifier::{
-        ParameterSetId as SignerParameterSetId, PublicKey as SignerPublicKey,
-        StatefulSignature as SignerStatefulSignature,
+        PublicKey as SignerPublicKey, StatefulSignature as SignerStatefulSignature,
         StatelessSignature as SignerStatelessSignature,
     };
     use crate::shrincs::ShrincsSigner;
@@ -661,10 +635,6 @@ mod tests {
 
     fn to_public_key(input: &SignerPublicKey) -> PublicKey {
         PublicKey {
-            parameter_set_id: match input.parameter_set_id {
-                SignerParameterSetId::Sphincs256sKeccakQ20 => ParameterSetId::Sphincs256sKeccakQ20,
-                SignerParameterSetId::Unsupported => ParameterSetId::Unsupported,
-            },
             stateful_public_key: input.stateful_public_key.clone(),
             public_key_commitment: input.public_key_commitment.clone(),
             pk_seed: input.pk_seed.clone(),
@@ -715,17 +685,12 @@ mod tests {
     }
 
     fn public_key_commitment(
-        parameter_set_id: ParameterSetId,
         stateful_public_key: &[u8],
         pk_seed: &[u8],
         hypertree_root: &[u8],
     ) -> [u8; HASH_LEN] {
         let mut packed = Vec::new();
         packed.extend_from_slice(b"shrincs-public-key");
-        packed.push(match parameter_set_id {
-            ParameterSetId::Sphincs256sKeccakQ20 => 0,
-            ParameterSetId::Unsupported => 1,
-        });
         packed.extend_from_slice(stateful_public_key);
         packed.extend_from_slice(pk_seed);
         packed.extend_from_slice(hypertree_root);
@@ -746,10 +711,6 @@ mod tests {
             ShrincsAccountVerifierExample::computeDomainSeparator(id(2), address(7))
         );
         assert_eq!(account.currentShrincsPublicKey(), id(3));
-        assert_eq!(
-            account.parameterSetId(),
-            ParameterSetId::Sphincs256sKeccakQ20
-        );
         assert_eq!(account.statefulPolicy(), StatefulPolicy::MonotonicIndex);
         assert_eq!(account.nextStatefulLeafIndex(), INITIAL_STATEFUL_LEAF_INDEX);
         assert_eq!(account.nonce(), [0u8; HASH_LEN]);
@@ -805,7 +766,7 @@ mod tests {
         assert!(account.isLeafUsed(9));
         assert!(!account.precheckStatefulLeafUse(9));
 
-        account.installFreshKey(id(4), ParameterSetId::Sphincs256sKeccakQ20);
+        account.installFreshKey(id(4));
         assert!(!account.isLeafUsed(9));
     }
 
@@ -840,7 +801,7 @@ mod tests {
             .expect("owner can arm recovery mode");
         account.statelessSignaturesUsed = 7;
 
-        account.installFreshKey(id(4), ParameterSetId::Sphincs256sKeccakQ20);
+        account.installFreshKey(id(4));
 
         assert_eq!(account.currentShrincsPublicKey(), id(4));
         assert_eq!(account.nonce()[HASH_LEN - 1], 1);
@@ -853,12 +814,8 @@ mod tests {
 
     #[test]
     fn raw_stateful_helper_verifies_message_without_advancing_nonce() {
-        let (mut signing_key, public_key) = ShrincsSigner::keygen(
-            SignerParameterSetId::Sphincs256sKeccakQ20,
-            b"account raw helper seed",
-            4,
-        )
-        .unwrap();
+        let (mut signing_key, public_key) =
+            ShrincsSigner::keygen(b"account raw helper seed", 4).unwrap();
         let public_key = to_public_key(&public_key);
         let expected = expected_key(&public_key);
         let mut account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), expected);
@@ -874,12 +831,8 @@ mod tests {
     #[test]
     fn verify_stateful_action_advances_nonce_and_leaf() {
         let verifier = ShrincsVerifier::new();
-        let (mut signing_key, public_key) = ShrincsSigner::keygen(
-            SignerParameterSetId::Sphincs256sKeccakQ20,
-            b"account stateful action seed",
-            4,
-        )
-        .unwrap();
+        let (mut signing_key, public_key) =
+            ShrincsSigner::keygen(b"account stateful action seed", 4).unwrap();
         let public_key = to_public_key(&public_key);
         let expected = expected_key(&public_key);
         let mut account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), expected);
@@ -892,11 +845,7 @@ mod tests {
             action_type,
             payload_hash,
         };
-        let message = verifier.stateful_action_message_hash(
-            ParameterSetId::Sphincs256sKeccakQ20,
-            expected,
-            &context,
-        );
+        let message = verifier.stateful_action_message_hash(expected, &context);
         let signature = ShrincsSigner::sign_stateful_raw(&mut signing_key, &message).unwrap();
         let signature = to_stateful_signature(&signature);
 
@@ -908,12 +857,8 @@ mod tests {
     #[test]
     fn verify_stateless_action_advances_nonce_and_usage_counter() {
         let verifier = ShrincsVerifier::new();
-        let (signing_key, public_key) = ShrincsSigner::keygen(
-            SignerParameterSetId::Sphincs256sKeccakQ20,
-            b"account stateless action seed",
-            4,
-        )
-        .unwrap();
+        let (signing_key, public_key) =
+            ShrincsSigner::keygen(b"account stateless action seed", 4).unwrap();
         let public_key = to_public_key(&public_key);
         let expected = expected_key(&public_key);
         let mut account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), expected);
@@ -926,11 +871,7 @@ mod tests {
             action_type,
             payload_hash,
         };
-        let message = verifier.stateless_action_message_hash(
-            ParameterSetId::Sphincs256sKeccakQ20,
-            expected,
-            &context,
-        );
+        let message = verifier.stateless_action_message_hash(expected, &context);
         let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &message).unwrap();
         let signature = to_stateless_signature(&signature);
 
@@ -942,28 +883,18 @@ mod tests {
     #[test]
     fn rotate_to_fresh_key_installs_next_stateful_commitment() {
         let verifier = ShrincsVerifier::new();
-        let (signing_key, public_key) = ShrincsSigner::keygen(
-            SignerParameterSetId::Sphincs256sKeccakQ20,
-            b"account rotate stateful current seed",
-            4,
-        )
-        .unwrap();
-        let (_, next_public_key) = ShrincsSigner::keygen(
-            SignerParameterSetId::Sphincs256sKeccakQ20,
-            b"account rotate stateful next seed",
-            8,
-        )
-        .unwrap();
+        let (signing_key, public_key) =
+            ShrincsSigner::keygen(b"account rotate stateful current seed", 4).unwrap();
+        let (_, next_public_key) =
+            ShrincsSigner::keygen(b"account rotate stateful next seed", 8).unwrap();
         let public_key = to_public_key(&public_key);
         let expected = expected_key(&public_key);
         let next_commitment = public_key_commitment(
-            ParameterSetId::Sphincs256sKeccakQ20,
             &next_public_key.stateful_public_key,
             &public_key.pk_seed,
             &public_key.hypertree_root,
         );
         let next_target = StatefulRotationTarget {
-            parameter_set_id: ParameterSetId::Sphincs256sKeccakQ20,
             stateful_public_key: next_public_key.stateful_public_key.clone(),
             public_key_commitment: next_commitment.to_vec(),
         };
@@ -979,13 +910,8 @@ mod tests {
             nonce: account.nonce(),
             key_version: account.keyVersion(),
         };
-        let message = verifier.stateful_rotation_message_hash(
-            ParameterSetId::Sphincs256sKeccakQ20,
-            expected,
-            &public_key,
-            &context,
-            &next_target,
-        );
+        let message =
+            verifier.stateful_rotation_message_hash(expected, &public_key, &context, &next_target);
         let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &message).unwrap();
         let signature = to_stateless_signature(&signature);
 
@@ -1000,24 +926,15 @@ mod tests {
     #[test]
     fn rotate_full_key_installs_next_full_commitment() {
         let verifier = ShrincsVerifier::new();
-        let (signing_key, public_key) = ShrincsSigner::keygen(
-            SignerParameterSetId::Sphincs256sKeccakQ20,
-            b"account rotate full current seed",
-            4,
-        )
-        .unwrap();
-        let (_, next_public_key) = ShrincsSigner::keygen(
-            SignerParameterSetId::Sphincs256sKeccakQ20,
-            b"account rotate full next seed",
-            8,
-        )
-        .unwrap();
+        let (signing_key, public_key) =
+            ShrincsSigner::keygen(b"account rotate full current seed", 4).unwrap();
+        let (_, next_public_key) =
+            ShrincsSigner::keygen(b"account rotate full next seed", 8).unwrap();
         let public_key = to_public_key(&public_key);
         let next_public_key = to_public_key(&next_public_key);
         let expected = expected_key(&public_key);
         let next_commitment = expected_key(&next_public_key);
         let next_target = RotationTarget {
-            parameter_set_id: ParameterSetId::Sphincs256sKeccakQ20,
             stateful_public_key: next_public_key.stateful_public_key.clone(),
             public_key_commitment: next_public_key.public_key_commitment.clone(),
             pk_seed: next_public_key.pk_seed.clone(),
@@ -1035,13 +952,8 @@ mod tests {
             nonce: account.nonce(),
             key_version: account.keyVersion(),
         };
-        let message = verifier.full_rotation_message_hash(
-            ParameterSetId::Sphincs256sKeccakQ20,
-            expected,
-            &public_key,
-            &context,
-            &next_target,
-        );
+        let message =
+            verifier.full_rotation_message_hash(expected, &public_key, &context, &next_target);
         let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &message).unwrap();
         let signature = to_stateless_signature(&signature);
 

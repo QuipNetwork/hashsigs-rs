@@ -29,28 +29,23 @@ pub use crate::wotsplus;
 
 #[cfg(test)]
 use crate::shrincs::signer::verifier::{
-    ParameterSetId as SigningParameterSetId, PublicKey as SigningPublicKey,
-    StatefulSignature as SigningStatefulSignature, StatelessSignature as SigningStatelessSignature,
+    PublicKey as SigningPublicKey, StatefulSignature as SigningStatefulSignature,
+    StatelessSignature as SigningStatelessSignature,
 };
 #[cfg(any(test, feature = "wasm-bindings"))]
 use crate::shrincs::{
-    ActionContext, ForsEntry, ForsSignature, HypertreeLayerSignature, ParameterSetId, PublicKey,
-    RotationTarget, ShrincsSigner, ShrincsSigningKey, ShrincsVerifier, StatefulRotationTarget,
-    StatefulSignature, StatelessSignature, WotsCSignature, HASH_LEN,
+    ActionContext, ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey, RotationTarget,
+    ShrincsSigner, ShrincsSigningKey, ShrincsVerifier, StatefulRotationTarget, StatefulSignature,
+    StatelessSignature, WotsCSignature, HASH_LEN,
 };
-#[cfg(not(test))]
+#[cfg(all(not(test), feature = "wasm-bindings"))]
 use crate::shrincs::{
-    ParameterSetId as SigningParameterSetId, PublicKey as SigningPublicKey,
-    StatefulSignature as SigningStatefulSignature, StatelessSignature as SigningStatelessSignature,
+    PublicKey as SigningPublicKey, StatefulSignature as SigningStatefulSignature,
+    StatelessSignature as SigningStatelessSignature,
 };
 
 #[cfg(feature = "wasm-bindings")]
 use wasm_bindgen::prelude::*;
-
-#[cfg_attr(feature = "wasm-bindings", wasm_bindgen)]
-pub fn supported_parameter_sets() -> Vec<String> {
-    vec!["sphincs-256s-keccak-q20".to_string()]
-}
 
 #[cfg(feature = "wasm-bindings")]
 #[wasm_bindgen]
@@ -258,15 +253,12 @@ impl WasmShrincsAccount {
 #[cfg(feature = "wasm-bindings")]
 #[wasm_bindgen(js_name = shrincsKeygen)]
 pub fn shrincs_keygen(
-    parameter_set_id: &str,
     seed_hex: &str,
     max_stateful_signatures: u32,
 ) -> Result<WasmShrincsKeypair, JsValue> {
-    let parameter_set_id = parse_signing_parameter_set_id(parameter_set_id).map_err(js_error)?;
     let seed_material = parse_hex_bytes(seed_hex).map_err(js_error)?;
-    let (signing_key, public_key) =
-        ShrincsSigner::keygen(parameter_set_id, &seed_material, max_stateful_signatures)
-            .ok_or_else(|| js_error("key generation failed for the supplied inputs".to_string()))?;
+    let (signing_key, public_key) = ShrincsSigner::keygen(&seed_material, max_stateful_signatures)
+        .ok_or_else(|| js_error("key generation failed for the supplied inputs".to_string()))?;
     Ok(WasmShrincsKeypair {
         signing_key,
         public_key: parse_public_key(&public_key_dto_from_signer(&public_key)).map_err(js_error)?,
@@ -276,41 +268,30 @@ pub fn shrincs_keygen(
 #[cfg(feature = "wasm-bindings")]
 #[wasm_bindgen(js_name = shrincsStatefulActionMessageHash)]
 pub fn shrincs_stateful_action_message_hash(
-    parameter_set_id: &str,
     expected_public_key_commitment_hex: &str,
     context: JsValue,
 ) -> Result<String, JsValue> {
     let context: WasmActionContext =
         serde_wasm_bindgen::from_value(context).map_err(js_error_from_serde)?;
-    stateful_action_message_hash_inner(
-        parameter_set_id,
-        expected_public_key_commitment_hex,
-        &context,
-    )
-    .map_err(js_error)
+    stateful_action_message_hash_inner(expected_public_key_commitment_hex, &context)
+        .map_err(js_error)
 }
 
 #[cfg(feature = "wasm-bindings")]
 #[wasm_bindgen(js_name = shrincsStatelessActionMessageHash)]
 pub fn shrincs_stateless_action_message_hash(
-    parameter_set_id: &str,
     expected_public_key_commitment_hex: &str,
     context: JsValue,
 ) -> Result<String, JsValue> {
     let context: WasmActionContext =
         serde_wasm_bindgen::from_value(context).map_err(js_error_from_serde)?;
-    stateless_action_message_hash_inner(
-        parameter_set_id,
-        expected_public_key_commitment_hex,
-        &context,
-    )
-    .map_err(js_error)
+    stateless_action_message_hash_inner(expected_public_key_commitment_hex, &context)
+        .map_err(js_error)
 }
 
 #[cfg(feature = "wasm-bindings")]
 #[wasm_bindgen(js_name = shrincsStatefulRotationMessageHash)]
 pub fn shrincs_stateful_rotation_message_hash(
-    parameter_set_id: &str,
     expected_public_key_commitment_hex: &str,
     current_public_key: JsValue,
     context: JsValue,
@@ -323,7 +304,6 @@ pub fn shrincs_stateful_rotation_message_hash(
     let next_key: WasmStatefulRotationTarget =
         serde_wasm_bindgen::from_value(next_key).map_err(js_error_from_serde)?;
     stateful_rotation_message_hash_inner(
-        parameter_set_id,
         expected_public_key_commitment_hex,
         &current_public_key,
         &context,
@@ -335,7 +315,6 @@ pub fn shrincs_stateful_rotation_message_hash(
 #[cfg(feature = "wasm-bindings")]
 #[wasm_bindgen(js_name = shrincsFullRotationMessageHash)]
 pub fn shrincs_full_rotation_message_hash(
-    parameter_set_id: &str,
     expected_public_key_commitment_hex: &str,
     current_public_key: JsValue,
     context: JsValue,
@@ -348,7 +327,6 @@ pub fn shrincs_full_rotation_message_hash(
     let next_key: WasmRotationTarget =
         serde_wasm_bindgen::from_value(next_key).map_err(js_error_from_serde)?;
     full_rotation_message_hash_inner(
-        parameter_set_id,
         expected_public_key_commitment_hex,
         &current_public_key,
         &context,
@@ -360,7 +338,6 @@ pub fn shrincs_full_rotation_message_hash(
 #[cfg(feature = "wasm-bindings")]
 #[wasm_bindgen]
 pub fn shrincs_verify_stateful_raw(
-    parameter_set_id: &str,
     expected_public_key_commitment_hex: &str,
     public_key: JsValue,
     message_hex: &str,
@@ -371,7 +348,6 @@ pub fn shrincs_verify_stateful_raw(
     let signature: WasmStatefulSignature =
         serde_wasm_bindgen::from_value(signature).map_err(js_error_from_serde)?;
     verify_stateful_raw_inner(
-        parameter_set_id,
         expected_public_key_commitment_hex,
         &public_key,
         message_hex,
@@ -383,7 +359,6 @@ pub fn shrincs_verify_stateful_raw(
 #[cfg(feature = "wasm-bindings")]
 #[wasm_bindgen]
 pub fn shrincs_verify_stateful_action(
-    parameter_set_id: &str,
     expected_public_key_commitment_hex: &str,
     public_key: JsValue,
     context: JsValue,
@@ -396,7 +371,6 @@ pub fn shrincs_verify_stateful_action(
     let signature: WasmStatefulSignature =
         serde_wasm_bindgen::from_value(signature).map_err(js_error_from_serde)?;
     verify_stateful_action_inner(
-        parameter_set_id,
         expected_public_key_commitment_hex,
         &public_key,
         &context,
@@ -408,7 +382,6 @@ pub fn shrincs_verify_stateful_action(
 #[cfg(feature = "wasm-bindings")]
 #[wasm_bindgen]
 pub fn shrincs_verify_stateless_raw(
-    parameter_set_id: &str,
     expected_public_key_commitment_hex: &str,
     public_key: JsValue,
     message_hex: &str,
@@ -419,7 +392,6 @@ pub fn shrincs_verify_stateless_raw(
     let signature: WasmStatelessSignature =
         serde_wasm_bindgen::from_value(signature).map_err(js_error_from_serde)?;
     verify_stateless_raw_inner(
-        parameter_set_id,
         expected_public_key_commitment_hex,
         &public_key,
         message_hex,
@@ -431,7 +403,6 @@ pub fn shrincs_verify_stateless_raw(
 #[cfg(feature = "wasm-bindings")]
 #[wasm_bindgen]
 pub fn shrincs_verify_stateless_action(
-    parameter_set_id: &str,
     expected_public_key_commitment_hex: &str,
     public_key: JsValue,
     context: JsValue,
@@ -444,7 +415,6 @@ pub fn shrincs_verify_stateless_action(
     let signature: WasmStatelessSignature =
         serde_wasm_bindgen::from_value(signature).map_err(js_error_from_serde)?;
     verify_stateless_action_inner(
-        parameter_set_id,
         expected_public_key_commitment_hex,
         &public_key,
         &context,
@@ -457,7 +427,6 @@ pub fn shrincs_verify_stateless_action(
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct WasmPublicKey {
-    parameter_set_id: String,
     stateful_public_key: String,
     public_key_commitment: String,
     pk_seed: String,
@@ -543,7 +512,6 @@ struct WasmStatelessSignature {
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct WasmSigningKey {
-    parameter_set_id: String,
     stateful_sk_seed: String,
     stateful_prf_seed: String,
     stateful_pk_seed: String,
@@ -565,7 +533,6 @@ struct WasmAccountSnapshot {
     chain_id: String,
     contract_address: String,
     domain_separator: String,
-    parameter_set_id: String,
     nonce: String,
     key_version: String,
     stateless_signatures_used: u64,
@@ -578,7 +545,6 @@ struct WasmAccountSnapshot {
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct WasmStatefulRotationTarget {
-    parameter_set_id: String,
     stateful_public_key: String,
     public_key_commitment: String,
 }
@@ -587,7 +553,6 @@ struct WasmStatefulRotationTarget {
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct WasmRotationTarget {
-    parameter_set_id: String,
     stateful_public_key: String,
     public_key_commitment: String,
     pk_seed: String,
@@ -596,20 +561,17 @@ struct WasmRotationTarget {
 
 #[cfg(any(test, feature = "wasm-bindings"))]
 fn verify_stateful_raw_inner(
-    parameter_set_id: &str,
     expected_public_key_commitment_hex: &str,
     public_key: &WasmPublicKey,
     message_hex: &str,
     signature: &WasmStatefulSignature,
 ) -> Result<bool, String> {
-    let parameter_set_id = parse_parameter_set_id(parameter_set_id)?;
     let expected_public_key_commitment = parse_word32(expected_public_key_commitment_hex)?;
     let public_key = parse_public_key(public_key)?;
     let message = parse_hex_bytes(message_hex)?;
     let signature = parse_stateful_signature(signature)?;
 
     Ok(ShrincsVerifier::new().verify_stateful_unsafe_raw(
-        parameter_set_id,
         expected_public_key_commitment,
         &public_key,
         &message,
@@ -619,56 +581,43 @@ fn verify_stateful_raw_inner(
 
 #[cfg(any(test, feature = "wasm-bindings"))]
 fn stateful_action_message_hash_inner(
-    parameter_set_id: &str,
     expected_public_key_commitment_hex: &str,
     context: &WasmActionContext,
 ) -> Result<String, String> {
-    let parameter_set_id = parse_parameter_set_id(parameter_set_id)?;
     let expected_public_key_commitment = parse_word32(expected_public_key_commitment_hex)?;
     let context = parse_action_context(context)?;
     Ok(hex_string(
-        &ShrincsVerifier::new().stateful_action_message_hash(
-            parameter_set_id,
-            expected_public_key_commitment,
-            &context,
-        ),
+        &ShrincsVerifier::new()
+            .stateful_action_message_hash(expected_public_key_commitment, &context),
     ))
 }
 
 #[cfg(any(test, feature = "wasm-bindings"))]
 fn stateless_action_message_hash_inner(
-    parameter_set_id: &str,
     expected_public_key_commitment_hex: &str,
     context: &WasmActionContext,
 ) -> Result<String, String> {
-    let parameter_set_id = parse_parameter_set_id(parameter_set_id)?;
     let expected_public_key_commitment = parse_word32(expected_public_key_commitment_hex)?;
     let context = parse_action_context(context)?;
     Ok(hex_string(
-        &ShrincsVerifier::new().stateless_action_message_hash(
-            parameter_set_id,
-            expected_public_key_commitment,
-            &context,
-        ),
+        &ShrincsVerifier::new()
+            .stateless_action_message_hash(expected_public_key_commitment, &context),
     ))
 }
 
 #[cfg(any(test, feature = "wasm-bindings"))]
 fn stateful_rotation_message_hash_inner(
-    parameter_set_id: &str,
     expected_public_key_commitment_hex: &str,
     current_public_key: &WasmPublicKey,
     context: &WasmRotationContext,
     next_key: &WasmStatefulRotationTarget,
 ) -> Result<String, String> {
-    let parameter_set_id = parse_parameter_set_id(parameter_set_id)?;
     let expected_public_key_commitment = parse_word32(expected_public_key_commitment_hex)?;
     let current_public_key = parse_public_key(current_public_key)?;
     let context = parse_rotation_context(context)?;
     let next_key = parse_stateful_rotation_target(next_key)?;
     Ok(hex_string(
         &ShrincsVerifier::new().stateful_rotation_message_hash(
-            parameter_set_id,
             expected_public_key_commitment,
             &current_public_key,
             &context,
@@ -679,20 +628,17 @@ fn stateful_rotation_message_hash_inner(
 
 #[cfg(any(test, feature = "wasm-bindings"))]
 fn full_rotation_message_hash_inner(
-    parameter_set_id: &str,
     expected_public_key_commitment_hex: &str,
     current_public_key: &WasmPublicKey,
     context: &WasmRotationContext,
     next_key: &WasmRotationTarget,
 ) -> Result<String, String> {
-    let parameter_set_id = parse_parameter_set_id(parameter_set_id)?;
     let expected_public_key_commitment = parse_word32(expected_public_key_commitment_hex)?;
     let current_public_key = parse_public_key(current_public_key)?;
     let context = parse_rotation_context(context)?;
     let next_key = parse_rotation_target(next_key)?;
     Ok(hex_string(
         &ShrincsVerifier::new().full_rotation_message_hash(
-            parameter_set_id,
             expected_public_key_commitment,
             &current_public_key,
             &context,
@@ -703,20 +649,17 @@ fn full_rotation_message_hash_inner(
 
 #[cfg(any(test, feature = "wasm-bindings"))]
 fn verify_stateful_action_inner(
-    parameter_set_id: &str,
     expected_public_key_commitment_hex: &str,
     public_key: &WasmPublicKey,
     context: &WasmActionContext,
     signature: &WasmStatefulSignature,
 ) -> Result<bool, String> {
-    let parameter_set_id = parse_parameter_set_id(parameter_set_id)?;
     let expected_public_key_commitment = parse_word32(expected_public_key_commitment_hex)?;
     let public_key = parse_public_key(public_key)?;
     let context = parse_action_context(context)?;
     let signature = parse_stateful_signature(signature)?;
 
     Ok(ShrincsVerifier::new().verify_stateful(
-        parameter_set_id,
         expected_public_key_commitment,
         &public_key,
         &context,
@@ -726,20 +669,17 @@ fn verify_stateful_action_inner(
 
 #[cfg(any(test, feature = "wasm-bindings"))]
 fn verify_stateless_raw_inner(
-    parameter_set_id: &str,
     expected_public_key_commitment_hex: &str,
     public_key: &WasmPublicKey,
     message_hex: &str,
     signature: &WasmStatelessSignature,
 ) -> Result<bool, String> {
-    let parameter_set_id = parse_parameter_set_id(parameter_set_id)?;
     let expected_public_key_commitment = parse_word32(expected_public_key_commitment_hex)?;
     let public_key = parse_public_key(public_key)?;
     let message = parse_hex_bytes(message_hex)?;
     let signature = parse_stateless_signature(signature)?;
 
     Ok(ShrincsVerifier::new().verify_stateless_unsafe_raw(
-        parameter_set_id,
         expected_public_key_commitment,
         &public_key,
         &message,
@@ -749,20 +689,17 @@ fn verify_stateless_raw_inner(
 
 #[cfg(any(test, feature = "wasm-bindings"))]
 fn verify_stateless_action_inner(
-    parameter_set_id: &str,
     expected_public_key_commitment_hex: &str,
     public_key: &WasmPublicKey,
     context: &WasmActionContext,
     signature: &WasmStatelessSignature,
 ) -> Result<bool, String> {
-    let parameter_set_id = parse_parameter_set_id(parameter_set_id)?;
     let expected_public_key_commitment = parse_word32(expected_public_key_commitment_hex)?;
     let public_key = parse_public_key(public_key)?;
     let context = parse_action_context(context)?;
     let signature = parse_stateless_signature(signature)?;
 
     Ok(ShrincsVerifier::new().verify_stateless(
-        parameter_set_id,
         expected_public_key_commitment,
         &public_key,
         &context,
@@ -773,7 +710,6 @@ fn verify_stateless_action_inner(
 #[cfg(any(test, feature = "wasm-bindings"))]
 fn parse_public_key(input: &WasmPublicKey) -> Result<PublicKey, String> {
     Ok(PublicKey {
-        parameter_set_id: parse_parameter_set_id(&input.parameter_set_id)?,
         stateful_public_key: parse_hex_bytes(&input.stateful_public_key)?,
         public_key_commitment: parse_hex_bytes(&input.public_key_commitment)?,
         pk_seed: parse_hex_bytes(&input.pk_seed)?,
@@ -877,7 +813,6 @@ fn parse_stateful_rotation_target(
     input: &WasmStatefulRotationTarget,
 ) -> Result<StatefulRotationTarget, String> {
     Ok(StatefulRotationTarget {
-        parameter_set_id: parse_parameter_set_id(&input.parameter_set_id)?,
         stateful_public_key: parse_hex_bytes(&input.stateful_public_key)?,
         public_key_commitment: parse_hex_bytes(&input.public_key_commitment)?,
     })
@@ -886,23 +821,11 @@ fn parse_stateful_rotation_target(
 #[cfg(any(test, feature = "wasm-bindings"))]
 fn parse_rotation_target(input: &WasmRotationTarget) -> Result<RotationTarget, String> {
     Ok(RotationTarget {
-        parameter_set_id: parse_parameter_set_id(&input.parameter_set_id)?,
         stateful_public_key: parse_hex_bytes(&input.stateful_public_key)?,
         public_key_commitment: parse_hex_bytes(&input.public_key_commitment)?,
         pk_seed: parse_hex_bytes(&input.pk_seed)?,
         hypertree_root: parse_hex_bytes(&input.hypertree_root)?,
     })
-}
-
-#[cfg(any(test, feature = "wasm-bindings"))]
-fn parse_parameter_set_id(input: &str) -> Result<ParameterSetId, String> {
-    match input {
-        "sphincs-256s-keccak-q20" | "Sphincs256sKeccakQ20" => {
-            Ok(ParameterSetId::Sphincs256sKeccakQ20)
-        }
-        "unsupported" | "Unsupported" => Ok(ParameterSetId::Unsupported),
-        _ => Err(format!("unsupported parameter set id: {input}")),
-    }
 }
 
 #[cfg(any(test, feature = "wasm-bindings"))]
@@ -943,22 +866,6 @@ fn parse_address20(input: &str) -> Result<[u8; 20], String> {
 }
 
 #[cfg(any(test, feature = "wasm-bindings"))]
-fn parameter_set_id_name(parameter_set_id: ParameterSetId) -> String {
-    match parameter_set_id {
-        ParameterSetId::Sphincs256sKeccakQ20 => "sphincs-256s-keccak-q20".to_string(),
-        ParameterSetId::Unsupported => "unsupported".to_string(),
-    }
-}
-
-#[cfg(any(test, feature = "wasm-bindings"))]
-fn signing_parameter_set_id_name(parameter_set_id: SigningParameterSetId) -> String {
-    match parameter_set_id {
-        SigningParameterSetId::Sphincs256sKeccakQ20 => "sphincs-256s-keccak-q20".to_string(),
-        SigningParameterSetId::Unsupported => "unsupported".to_string(),
-    }
-}
-
-#[cfg(any(test, feature = "wasm-bindings"))]
 fn stateful_policy_name(policy: crate::account::StatefulPolicy) -> String {
     match policy {
         crate::account::StatefulPolicy::MonotonicIndex => "monotonic-index".to_string(),
@@ -970,7 +877,6 @@ fn stateful_policy_name(policy: crate::account::StatefulPolicy) -> String {
 #[cfg(any(test, feature = "wasm-bindings"))]
 fn public_key_dto(public_key: &PublicKey) -> WasmPublicKey {
     WasmPublicKey {
-        parameter_set_id: parameter_set_id_name(public_key.parameter_set_id),
         stateful_public_key: hex_string(&public_key.stateful_public_key),
         public_key_commitment: hex_string(&public_key.public_key_commitment),
         pk_seed: hex_string(&public_key.pk_seed),
@@ -981,7 +887,6 @@ fn public_key_dto(public_key: &PublicKey) -> WasmPublicKey {
 #[cfg(any(test, feature = "wasm-bindings"))]
 fn public_key_dto_from_signer(public_key: &SigningPublicKey) -> WasmPublicKey {
     WasmPublicKey {
-        parameter_set_id: signing_parameter_set_id_name(public_key.parameter_set_id),
         stateful_public_key: hex_string(&public_key.stateful_public_key),
         public_key_commitment: hex_string(&public_key.public_key_commitment),
         pk_seed: hex_string(&public_key.pk_seed),
@@ -1061,7 +966,6 @@ fn stateless_signature_dto_from_signer(
 #[cfg(any(test, feature = "wasm-bindings"))]
 fn signing_key_dto(signing_key: &ShrincsSigningKey) -> WasmSigningKey {
     WasmSigningKey {
-        parameter_set_id: signing_parameter_set_id_name(signing_key.parameter_set_id),
         stateful_sk_seed: hex_string(&signing_key.stateful_sk_seed),
         stateful_prf_seed: hex_string(&signing_key.stateful_prf_seed),
         stateful_pk_seed: hex_string(&signing_key.stateful_pk_seed),
@@ -1076,17 +980,6 @@ fn signing_key_dto(signing_key: &ShrincsSigningKey) -> WasmSigningKey {
 }
 
 #[cfg(any(test, feature = "wasm-bindings"))]
-fn parse_signing_parameter_set_id(input: &str) -> Result<SigningParameterSetId, String> {
-    match input {
-        "sphincs-256s-keccak-q20" | "Sphincs256sKeccakQ20" => {
-            Ok(SigningParameterSetId::Sphincs256sKeccakQ20)
-        }
-        "unsupported" | "Unsupported" => Ok(SigningParameterSetId::Unsupported),
-        _ => Err(format!("unsupported parameter set id: {input}")),
-    }
-}
-
-#[cfg(any(test, feature = "wasm-bindings"))]
 fn account_snapshot_dto(
     account: &crate::account::ShrincsAccountVerifierExample,
 ) -> WasmAccountSnapshot {
@@ -1096,7 +989,6 @@ fn account_snapshot_dto(
         chain_id: hex_string(&account.chainId()),
         contract_address: hex_string(&account.contractAddress()),
         domain_separator: hex_string(&account.domainSeparator()),
-        parameter_set_id: parameter_set_id_name(account.parameterSetId()),
         nonce: hex_string(&account.nonce()),
         key_version: hex_string(&account.keyVersion()),
         stateless_signatures_used: account.statelessSignaturesUsed(),
@@ -1149,8 +1041,7 @@ fn js_value_from_serde<T: serde::Serialize>(value: &T) -> Result<JsValue, JsValu
 mod tests {
     use super::*;
     use crate::shrincs::signer::verifier::{
-        ParameterSetId as SignerParameterSetId, PublicKey as SignerPublicKey,
-        StatefulSignature as SignerStatefulSignature,
+        PublicKey as SignerPublicKey, StatefulSignature as SignerStatefulSignature,
     };
     use crate::shrincs::{ShrincsSigner, ShrincsSigningKey};
     #[cfg(all(feature = "wasm-bindings", target_arch = "wasm32"))]
@@ -1219,7 +1110,6 @@ mod tests {
 
     fn public_key_dto(public_key: &SignerPublicKey) -> WasmPublicKey {
         WasmPublicKey {
-            parameter_set_id: "sphincs-256s-keccak-q20".to_string(),
             stateful_public_key: hex(&public_key.stateful_public_key),
             public_key_commitment: hex(&public_key.public_key_commitment),
             pk_seed: hex(&public_key.pk_seed),
@@ -1262,12 +1152,7 @@ mod tests {
     }
 
     fn signing_key_and_public_key() -> (ShrincsSigningKey, SignerPublicKey) {
-        ShrincsSigner::keygen(
-            SignerParameterSetId::Sphincs256sKeccakQ20,
-            b"wasm verifier test seed",
-            4,
-        )
-        .unwrap()
+        ShrincsSigner::keygen(b"wasm verifier test seed", 4).unwrap()
     }
 
     #[test]
@@ -1284,7 +1169,6 @@ mod tests {
         let signature = ShrincsSigner::sign_stateful_raw(&mut signing_key, &message).unwrap();
 
         let ok = verify_stateful_raw_inner(
-            "sphincs-256s-keccak-q20",
             &expected_key(&public_key),
             &public_key_dto(&public_key),
             &hex(&message),
@@ -1308,15 +1192,11 @@ mod tests {
             action_type: [3u8; HASH_LEN],
             payload_hash: [4u8; HASH_LEN],
         };
-        let message = verifier.stateful_action_message_hash(
-            ParameterSetId::Sphincs256sKeccakQ20,
-            parse_word32(&expected).unwrap(),
-            &context,
-        );
+        let message =
+            verifier.stateful_action_message_hash(parse_word32(&expected).unwrap(), &context);
         let signature = ShrincsSigner::sign_stateful_raw(&mut signing_key, &message).unwrap();
 
         let ok = verify_stateful_action_inner(
-            "sphincs-256s-keccak-q20",
             &expected,
             &public_key_dto,
             &action_context_dto(&context),
@@ -1337,7 +1217,6 @@ mod tests {
         let raw_message = b"wasm-stateless-message".to_vec();
         let raw_signature = ShrincsSigner::sign_stateless_raw(&signing_key, &raw_message).unwrap();
         assert!(verify_stateless_raw_inner(
-            "sphincs-256s-keccak-q20",
             &expected,
             &public_key_dto,
             &hex(&raw_message),
@@ -1352,15 +1231,11 @@ mod tests {
             action_type: [11u8; HASH_LEN],
             payload_hash: [12u8; HASH_LEN],
         };
-        let action_message = verifier.stateless_action_message_hash(
-            ParameterSetId::Sphincs256sKeccakQ20,
-            parse_word32(&expected).unwrap(),
-            &context,
-        );
+        let action_message =
+            verifier.stateless_action_message_hash(parse_word32(&expected).unwrap(), &context);
         let action_signature =
             ShrincsSigner::sign_stateless_raw(&signing_key, &action_message).unwrap();
         assert!(verify_stateless_action_inner(
-            "sphincs-256s-keccak-q20",
             &expected,
             &public_key_dto,
             &action_context_dto(&context),
@@ -1372,12 +1247,7 @@ mod tests {
     #[cfg(all(feature = "wasm-bindings", target_arch = "wasm32"))]
     #[wasm_bindgen_test]
     fn wasm_keypair_binding_signs_and_exports_public_key() {
-        let mut keypair = shrincs_keygen(
-            "sphincs-256s-keccak-q20",
-            "0x7761736d2d6b6579706169722d73656564",
-            4,
-        )
-        .unwrap();
+        let mut keypair = shrincs_keygen("0x7761736d2d6b6579706169722d73656564", 4).unwrap();
         let public_key: WasmPublicKey =
             serde_wasm_bindgen::from_value(keypair.public_key().unwrap()).unwrap();
         let signature: WasmStatefulSignature = serde_wasm_bindgen::from_value(
@@ -1388,7 +1258,6 @@ mod tests {
         .unwrap();
 
         let ok = verify_stateful_raw_inner(
-            "sphincs-256s-keccak-q20",
             &public_key.public_key_commitment,
             &public_key,
             "0x7761736d2d6d657373616765",
@@ -1402,12 +1271,7 @@ mod tests {
     #[cfg(all(feature = "wasm-bindings", target_arch = "wasm32"))]
     #[wasm_bindgen_test]
     fn wasm_account_binding_tracks_policy_changes() {
-        let keypair = shrincs_keygen(
-            "sphincs-256s-keccak-q20",
-            "0x7761736d2d6163636f756e742d73656564",
-            4,
-        )
-        .unwrap();
+        let keypair = shrincs_keygen("0x7761736d2d6163636f756e742d73656564", 4).unwrap();
         let public_key: WasmPublicKey =
             serde_wasm_bindgen::from_value(keypair.public_key().unwrap()).unwrap();
         let mut account = WasmShrincsAccount::new(
@@ -1439,12 +1303,8 @@ mod tests {
     #[cfg(all(feature = "wasm-bindings", target_arch = "wasm32"))]
     #[wasm_bindgen_test]
     fn wasm_account_binding_verifies_canonical_stateful_action_end_to_end() {
-        let mut keypair = shrincs_keygen(
-            "sphincs-256s-keccak-q20",
-            "0x7761736d2d63616e6f6e6963616c2d737461746566756c",
-            8,
-        )
-        .unwrap();
+        let mut keypair =
+            shrincs_keygen("0x7761736d2d63616e6f6e6963616c2d737461746566756c", 8).unwrap();
         let public_key_value = keypair.public_key().unwrap();
         let public_key: WasmPublicKey =
             serde_wasm_bindgen::from_value(public_key_value.clone()).unwrap();
@@ -1466,7 +1326,6 @@ mod tests {
             payload_hash: hex_string(&[5u8; HASH_LEN]),
         };
         let message_hex = shrincs_stateful_action_message_hash(
-            "sphincs-256s-keccak-q20",
             &public_key.public_key_commitment,
             serde_wasm_bindgen::to_value(&context).unwrap(),
         )
@@ -1491,18 +1350,9 @@ mod tests {
     #[cfg(all(feature = "wasm-bindings", target_arch = "wasm32"))]
     #[wasm_bindgen_test]
     fn wasm_account_binding_rotates_full_key_via_canonical_recovery_message() {
-        let current_keypair = shrincs_keygen(
-            "sphincs-256s-keccak-q20",
-            "0x7761736d2d726f746174696f6e2d63757272656e74",
-            8,
-        )
-        .unwrap();
-        let next_keypair = shrincs_keygen(
-            "sphincs-256s-keccak-q20",
-            "0x7761736d2d726f746174696f6e2d6e657874",
-            16,
-        )
-        .unwrap();
+        let current_keypair =
+            shrincs_keygen("0x7761736d2d726f746174696f6e2d63757272656e74", 8).unwrap();
+        let next_keypair = shrincs_keygen("0x7761736d2d726f746174696f6e2d6e657874", 16).unwrap();
         let current_public_key_value = current_keypair.public_key().unwrap();
         let current_public_key: WasmPublicKey =
             serde_wasm_bindgen::from_value(current_public_key_value.clone()).unwrap();
@@ -1531,14 +1381,12 @@ mod tests {
             parse_word32(&snapshot.key_version).unwrap(),
         );
         let next_target = WasmRotationTarget {
-            parameter_set_id: next_public_key.parameter_set_id.clone(),
             stateful_public_key: next_public_key.stateful_public_key.clone(),
             public_key_commitment: next_public_key.public_key_commitment.clone(),
             pk_seed: next_public_key.pk_seed.clone(),
             hypertree_root: next_public_key.hypertree_root.clone(),
         };
         let recovery_message_hex = shrincs_full_rotation_message_hash(
-            "sphincs-256s-keccak-q20",
             &current_public_key.public_key_commitment,
             current_public_key_value.clone(),
             serde_wasm_bindgen::to_value(&rotation_context).unwrap(),
@@ -1571,12 +1419,8 @@ mod tests {
     #[cfg(all(feature = "wasm-bindings", target_arch = "wasm32"))]
     #[wasm_bindgen_test]
     fn wasm_account_binding_verifies_canonical_stateless_action_end_to_end() {
-        let keypair = shrincs_keygen(
-            "sphincs-256s-keccak-q20",
-            "0x7761736d2d63616e6f6e6963616c2d73746174656c657373",
-            8,
-        )
-        .unwrap();
+        let keypair =
+            shrincs_keygen("0x7761736d2d63616e6f6e6963616c2d73746174656c657373", 8).unwrap();
         let public_key_value = keypair.public_key().unwrap();
         let public_key: WasmPublicKey =
             serde_wasm_bindgen::from_value(public_key_value.clone()).unwrap();
@@ -1598,7 +1442,6 @@ mod tests {
             payload_hash: hex_string(&[7u8; HASH_LEN]),
         };
         let message_hex = shrincs_stateless_action_message_hash(
-            "sphincs-256s-keccak-q20",
             &public_key.public_key_commitment,
             serde_wasm_bindgen::to_value(&context).unwrap(),
         )

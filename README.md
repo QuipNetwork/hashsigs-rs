@@ -159,7 +159,6 @@ The current JS-facing data model uses:
 
 Available verifier exports:
 
-- `supported_parameter_sets()`
 - `shrincs_verify_stateful_raw(...)`
 - `shrincs_verify_stateful_action(...)`
 - `shrincs_verify_stateless_raw(...)`
@@ -168,15 +167,9 @@ Available verifier exports:
 Minimal TS example:
 
 ```ts
-import {
-  supported_parameter_sets,
-  shrincs_verify_stateless_action,
-} from "./pkg/bundler/hashsigs_rs";
-
-console.log(supported_parameter_sets());
+import { shrincs_verify_stateless_action } from "./pkg/bundler/hashsigs_rs";
 
 const ok = shrincs_verify_stateless_action(
-  "sphincs-256s-keccak-q20",
   publicKey.publicKeyCommitment,
   publicKey,
   {
@@ -206,7 +199,6 @@ Minimal TS example:
 import { shrincsKeygen } from "./pkg/bundler/hashsigs_rs";
 
 const keypair = shrincsKeygen(
-  "sphincs-256s-keccak-q20",
   "0x00112233445566778899aabbccddeeff",
   16,
 );
@@ -254,7 +246,6 @@ const chainId = "0x" + "22".repeat(32);
 const contractAddress = "0x" + "33".repeat(20);
 
 const keypair = shrincsKeygen(
-  "sphincs-256s-keccak-q20",
   "0x1234",
   8,
 );
@@ -289,7 +280,6 @@ const actionType = "0x" + "44".repeat(32);
 const payloadHash = "0x" + "55".repeat(32);
 
 const keypair = shrincsKeygen(
-  "sphincs-256s-keccak-q20",
   "0x0011223344",
   8,
 );
@@ -303,7 +293,6 @@ const account = new WasmShrincsAccount(
 
 const snapshot = account.snapshot();
 const message = shrincsStatefulActionMessageHash(
-  publicKey.parameterSetId,
   publicKey.publicKeyCommitment,
   {
     domainSeparator: snapshot.domainSeparator,
@@ -340,7 +329,6 @@ const actionType = "0x" + "66".repeat(32);
 const payloadHash = "0x" + "77".repeat(32);
 
 const keypair = shrincsKeygen(
-  "sphincs-256s-keccak-q20",
   "0xabcdef",
   8,
 );
@@ -354,7 +342,6 @@ const account = new WasmShrincsAccount(
 
 const snapshot = account.snapshot();
 const message = shrincsStatelessActionMessageHash(
-  publicKey.parameterSetId,
   publicKey.publicKeyCommitment,
   {
     domainSeparator: snapshot.domainSeparator,
@@ -389,12 +376,10 @@ const chainId = "0x" + "22".repeat(32);
 const contractAddress = "0x" + "33".repeat(20);
 
 const currentKeypair = shrincsKeygen(
-  "sphincs-256s-keccak-q20",
   "0x1111",
   8,
 );
 const nextKeypair = shrincsKeygen(
-  "sphincs-256s-keccak-q20",
   "0x2222",
   16,
 );
@@ -413,13 +398,11 @@ account.enterRecoveryMode(owner);
 
 const snapshot = account.snapshot();
 const nextStatefulTarget = {
-  parameterSetId: nextPublicKey.parameterSetId,
   statefulPublicKey: nextPublicKey.statefulPublicKey,
   publicKeyCommitment: nextPublicKey.publicKeyCommitment,
 };
 
 const recoveryMessage = shrincsStatefulRotationMessageHash(
-  currentPublicKey.parameterSetId,
   currentPublicKey.publicKeyCommitment,
   currentPublicKey,
   {
@@ -453,12 +436,10 @@ const chainId = "0x" + "22".repeat(32);
 const contractAddress = "0x" + "33".repeat(20);
 
 const currentKeypair = shrincsKeygen(
-  "sphincs-256s-keccak-q20",
   "0xaaaa",
   8,
 );
 const nextKeypair = shrincsKeygen(
-  "sphincs-256s-keccak-q20",
   "0xbbbb",
   16,
 );
@@ -477,7 +458,6 @@ account.enterRecoveryMode(owner);
 
 const snapshot = account.snapshot();
 const nextFullTarget = {
-  parameterSetId: nextPublicKey.parameterSetId,
   statefulPublicKey: nextPublicKey.statefulPublicKey,
   publicKeyCommitment: nextPublicKey.publicKeyCommitment,
   pkSeed: nextPublicKey.pkSeed,
@@ -485,7 +465,6 @@ const nextFullTarget = {
 };
 
 const recoveryMessage = shrincsFullRotationMessageHash(
-  currentPublicKey.parameterSetId,
   currentPublicKey.publicKeyCommitment,
   currentPublicKey,
   {
@@ -520,7 +499,6 @@ Public key:
 
 ```ts
 type WasmPublicKey = {
-  parameterSetId: string;
   statefulPublicKey: string;
   publicKeyCommitment: string;
   pkSeed: string;
@@ -549,7 +527,6 @@ type WasmAccountSnapshot = {
   chainId: string;
   contractAddress: string;
   domainSeparator: string;
-  parameterSetId: string;
   nonce: string;
   keyVersion: string;
   statelessSignaturesUsed: number;
@@ -563,7 +540,6 @@ Stateful rotation target:
 
 ```ts
 type WasmStatefulRotationTarget = {
-  parameterSetId: string;
   statefulPublicKey: string;
   publicKeyCommitment: string;
 };
@@ -573,7 +549,6 @@ Full rotation target:
 
 ```ts
 type WasmRotationTarget = {
-  parameterSetId: string;
   statefulPublicKey: string;
   publicKeyCommitment: string;
   pkSeed: string;

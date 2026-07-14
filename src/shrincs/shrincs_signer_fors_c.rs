@@ -26,7 +26,10 @@ use super::shrincs_signer_types::{ShrincsSignerResult, ShrincsSigningKey};
 use super::shrincs_signer_utils::{
     fors_address_word, hash_packed, pack, read_bits32, read_bits64, FORS_C_MAX_GRIND_COUNTER,
 };
-use super::verifier::{ForsEntry, ForsSignature, ParamsView, HASH_LEN};
+use super::verifier::{
+    ForsEntry, ForsSignature, FORS_TREE_HEIGHT, HASH_LEN, HYPERTREE_HEIGHT, NUM_FORS_TREES,
+    NUM_HYPERTREE_LAYERS,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SignedForsC {
@@ -42,14 +45,13 @@ pub(crate) struct SignedForsC {
 }
 
 pub(crate) fn sign_fors_c(
-    params: &ParamsView,
     signing_key: &ShrincsSigningKey,
     message: &[u8],
 ) -> ShrincsSignerResult<SignedForsC> {
     // FORS-C signs k - 1 trees. The final tree is omitted only when the digest
     // selects leaf zero for that final tree, so the signer grinds the counter
     // until that condition holds.
-    let signed_trees = params.num_fors_trees as usize - 1;
+    let signed_trees = NUM_FORS_TREES as usize - 1;
 
     // This is the FORS-C local message randomizer. It is deterministic for the
     // same stateless PRF seed and message, matching the SPHINCS-style separation
@@ -60,7 +62,6 @@ pub(crate) fn sign_fors_c(
         // The counter is public and stored in the signature. Its only job is to
         // find a digest whose omitted final FORS tree opens leaf zero.
         let Some(digest) = fors_digest(
-            params,
             &signing_key.pk_seed,
             &signing_key.hypertree_root,
             message,
@@ -80,7 +81,6 @@ pub(crate) fn sign_fors_c(
             // provide the siblings needed to recompute that tree's root.
             let leaf = digest.indices[fors_tree];
             let (root, auth_path) = fors_tree_root_and_auth_path(
-                params,
                 &signing_key.pk_seed,
                 &signing_key.stateless_sk_seed,
                 digest.tree_index,
@@ -91,7 +91,6 @@ pub(crate) fn sign_fors_c(
             roots.extend_from_slice(&root);
             entries.push(ForsEntry {
                 secret_leaf: fors_leaf_secret(
-                    params,
                     &signing_key.pk_seed,
                     &signing_key.stateless_sk_seed,
                     digest.tree_index,
@@ -133,7 +132,6 @@ struct ForsDigest {
 }
 
 fn fors_digest(
-    params: &ParamsView,
     pk_seed: &[u8; HASH_LEN],
     hypertree_root: &[u8; HASH_LEN],
     message: &[u8],
@@ -147,10 +145,10 @@ fn fors_digest(
     //
     // These fields are read from one bit string. Changing the order or bit order
     // here would make signatures verify against a different set of openings.
-    let index_bits = u32::from(params.num_fors_trees) * u32::from(params.fors_tree_height);
-    let subtree_height = u32::from(params.hypertree_height / params.num_hypertree_layers);
-    let tree_bits = u32::from(params.hypertree_height) - subtree_height;
-    let digest_bytes = ((index_bits + u32::from(params.hypertree_height) + 7) / 8) as usize;
+    let index_bits = u32::from(NUM_FORS_TREES) * u32::from(FORS_TREE_HEIGHT);
+    let subtree_height = u32::from(HYPERTREE_HEIGHT / NUM_HYPERTREE_LAYERS);
+    let tree_bits = u32::from(HYPERTREE_HEIGHT) - subtree_height;
+    let digest_bytes = ((index_bits + u32::from(HYPERTREE_HEIGHT) + 7) / 8) as usize;
     let digest = fors_digest_bytes(
         pk_seed,
         hypertree_root,
@@ -159,12 +157,12 @@ fn fors_digest(
         message,
         digest_bytes,
     );
-    let indices = (0..params.num_fors_trees)
+    let indices = (0..NUM_FORS_TREES)
         .map(|tree| {
             read_bits32(
                 &digest,
-                tree as usize * params.fors_tree_height as usize,
-                params.fors_tree_height as u32,
+                tree as usize * FORS_TREE_HEIGHT as usize,
+                FORS_TREE_HEIGHT as u32,
             )
         })
         .collect::<Option<Vec<_>>>()?;
@@ -196,8 +194,8 @@ fn fors_digest_bytes(
         message,
     ]);
     if digest_bytes <= HASH_LEN {
-        // The current profile fits in one word, but the expansion below keeps the
-        // helper honest if a future profile needs more digest bits.
+        // The current digest fits in one word, but the expansion below keeps the
+        // helper honest if the fixed constants are widened later.
         return hash_packed(&[&base])[..digest_bytes].to_vec();
     }
 
@@ -215,7 +213,6 @@ fn fors_digest_bytes(
 }
 
 fn fors_tree_root_and_auth_path(
-    params: &ParamsView,
     pk_seed: &[u8; HASH_LEN],
     sk_seed: &[u8; HASH_LEN],
     tree_index: u64,
@@ -226,12 +223,11 @@ fn fors_tree_root_and_auth_path(
     // Build one FORS tree bottom-up once, collecting the selected leaf's sibling
     // at each level. The root contributes to the aggregate FORS public root, and
     // the auth path is carried in the signature.
-    let height = u32::from(params.fors_tree_height);
+    let height = u32::from(FORS_TREE_HEIGHT);
     let leaf_count = 1usize << height;
     let mut level_nodes = (0..leaf_count)
         .map(|index| {
             fors_leaf_hash(
-                params,
                 pk_seed,
                 sk_seed,
                 tree_index,
@@ -273,7 +269,6 @@ fn fors_tree_root_and_auth_path(
 }
 
 fn fors_leaf_secret(
-    params: &ParamsView,
     pk_seed: &[u8; HASH_LEN],
     sk_seed: &[u8; HASH_LEN],
     tree_index: u64,
@@ -283,13 +278,12 @@ fn fors_leaf_secret(
 ) -> [u8; HASH_LEN] {
     // A FORS secret leaf is derived, not stored. The address includes both the
     // FORS tree number and the selected leaf inside that tree.
-    let tree_leaf = (u64::from(fors_tree) << params.fors_tree_height) + u64::from(leaf);
+    let tree_leaf = (u64::from(fors_tree) << FORS_TREE_HEIGHT) + u64::from(leaf);
     let address_word = fors_address_word(tree_index, leaf_index, 0, tree_leaf);
     hash_packed(&[b"fors-sk", sk_seed, pk_seed, &address_word])
 }
 
 fn fors_leaf_hash(
-    params: &ParamsView,
     pk_seed: &[u8; HASH_LEN],
     sk_seed: &[u8; HASH_LEN],
     tree_index: u64,
@@ -300,10 +294,8 @@ fn fors_leaf_hash(
     // The leaf hash commits to the secret leaf under the public seed and address.
     // The verifier recomputes this from the revealed secret leaf before walking
     // the authentication path to the tree root.
-    let secret = fors_leaf_secret(
-        params, pk_seed, sk_seed, tree_index, leaf_index, fors_tree, leaf,
-    );
-    let tree_leaf = (u64::from(fors_tree) << params.fors_tree_height) + u64::from(leaf);
+    let secret = fors_leaf_secret(pk_seed, sk_seed, tree_index, leaf_index, fors_tree, leaf);
+    let tree_leaf = (u64::from(fors_tree) << FORS_TREE_HEIGHT) + u64::from(leaf);
     let address_word = fors_address_word(tree_index, leaf_index, 0, tree_leaf);
     hash_packed(&[b"fors-leaf", pk_seed, &address_word, &secret])
 }

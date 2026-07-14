@@ -23,48 +23,22 @@
 //! Solidity verifier encoded the same idea explicitly and we want the Rust
 //! signer to make those byte-level choices visible.
 
-use super::shrincs_signer_types::ShrincsSignerResult;
 use super::verifier::{
-    ParameterSetId, ParamsView, PublicKey, HASH_LEN, STATEFUL_PUBLIC_KEY_BYTES, WOTS_BASE_STATEFUL,
-    WOTS_CHAINS_STATEFUL, WOTS_TARGET_SUM_STATEFUL,
+    PublicKey, HASH_LEN, NUM_WOTS_CHAINS, STATEFUL_PUBLIC_KEY_BYTES, WOTS_CHAIN_LEN,
 };
 use solana_program::keccak::hash as keccak256_hash;
 
 pub(crate) const WOTS_C_MAX_GRIND_COUNTER: u32 = 1 << 24;
 pub(crate) const FORS_C_MAX_GRIND_COUNTER: u32 = 1 << 24;
 
-pub(crate) fn ensure_supported_params(params: &ParamsView) -> ShrincsSignerResult<()> {
-    // This signer is intentionally narrow: it only produces signatures for the
-    // production Keccak-256 profile that the verifier currently accepts. That is
-    // safer than silently signing under a parameter set whose address layout,
-    // digit width, or tree split has not been checked end-to-end.
-    if params.parameter_set_id != ParameterSetId::Sphincs256sKeccakQ20
-        || params.hash_len != HASH_LEN as u16
-        || params.chain_len != WOTS_BASE_STATEFUL as u16
-        || params.num_wots_chains != WOTS_CHAINS_STATEFUL as u16
-        || params.wots_target_sum != WOTS_TARGET_SUM_STATEFUL
-        || params.hypertree_height == 0
-        || params.num_hypertree_layers == 0
-    {
-        return None;
-    }
-    Some(())
-}
-
 pub(crate) fn public_key_from_components(
-    parameter_set_id: ParameterSetId,
     stateful_public_key: Vec<u8>,
     pk_seed: [u8; HASH_LEN],
     hypertree_root: [u8; HASH_LEN],
 ) -> PublicKey {
-    let public_key_commitment = public_key_commitment(
-        parameter_set_id,
-        &stateful_public_key,
-        &pk_seed,
-        &hypertree_root,
-    );
+    let public_key_commitment =
+        public_key_commitment(&stateful_public_key, &pk_seed, &hypertree_root);
     PublicKey {
-        parameter_set_id,
         stateful_public_key,
         public_key_commitment: public_key_commitment.to_vec(),
         pk_seed: pk_seed.to_vec(),
@@ -73,14 +47,12 @@ pub(crate) fn public_key_from_components(
 }
 
 pub(crate) fn public_key_commitment(
-    parameter_set_id: ParameterSetId,
     stateful_public_key: &[u8],
     pk_seed: &[u8; HASH_LEN],
     hypertree_root: &[u8; HASH_LEN],
 ) -> [u8; HASH_LEN] {
     hash_packed(&[
         b"shrincs-public-key",
-        &[parameter_set_id.packed_byte()],
         stateful_public_key,
         pk_seed,
         hypertree_root,
@@ -150,7 +122,7 @@ pub(crate) fn base_w16_digit(digest: &[u8; HASH_LEN], index: usize) -> u32 {
 }
 
 pub(crate) fn base_w_digit(w: u16, digest: &[u8], index: usize) -> u32 {
-    // Stateless WOTS-C supports the verifier profile's configured base. Base-256
+    // Stateless WOTS-C supports the compiled chain length. Base-256
     // consumes one byte per digit; base-16 consumes one nibble per digit.
     if w == 256 {
         return u32::from(digest[index]);
@@ -163,11 +135,11 @@ pub(crate) fn base_w_digit(w: u16, digest: &[u8], index: usize) -> u32 {
     }
 }
 
-pub(crate) fn wots_digest_bytes(params: &ParamsView) -> usize {
+pub(crate) fn wots_digest_bytes() -> usize {
     // The signer only needs enough digest bytes to cover the configured WOTS
     // digits. The counter grinding checks the digit sum after this truncation.
-    let bits_per_digit = if params.chain_len == 256 { 8 } else { 4 };
-    (params.num_wots_chains as usize * bits_per_digit + 7) / 8
+    let bits_per_digit = if WOTS_CHAIN_LEN == 256 { 8 } else { 4 };
+    (NUM_WOTS_CHAINS as usize * bits_per_digit + 7) / 8
 }
 
 pub(crate) fn read_bits32(input: &[u8], start_bit: usize, bit_len: u32) -> Option<u32> {
@@ -187,7 +159,7 @@ pub(crate) fn read_bits64(input: &[u8], start_bit: usize, bit_len: u32) -> Optio
 }
 
 fn read_bits(input: &[u8], start_bit: usize, bit_len: u32) -> Option<u64> {
-    // Walk one bit at a time because the field boundaries are parameter-driven.
+    // Walk one bit at a time because the digest fields are bit-packed.
     // This is slower than word slicing but much harder to get subtly wrong.
     let mut out = 0u64;
     for bit in 0..bit_len as usize {

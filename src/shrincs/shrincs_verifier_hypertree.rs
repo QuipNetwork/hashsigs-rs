@@ -23,7 +23,8 @@
 // hypertree root in the public key.
 
 use super::shrincs_verifier_types::{
-    HypertreeLayerSignature, ParamsView, PublicKey, WotsCSignature, HASH_LEN,
+    HypertreeLayerSignature, PublicKey, WotsCSignature, HASH_LEN, HYPERTREE_HEIGHT,
+    NUM_HYPERTREE_LAYERS, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN, WOTS_TARGET_SUM_STATEFUL,
 };
 use super::shrincs_verifier_utils::{
     base_w_digit, hash_packed, hypertree_address_word, word32, wots_address_base,
@@ -31,17 +32,16 @@ use super::shrincs_verifier_utils::{
 };
 
 pub(crate) fn verify_hypertree(
-    params: &ParamsView,
     public_key: &PublicKey,
     fors_root: [u8; HASH_LEN],
     layers: &[HypertreeLayerSignature],
 ) -> bool {
-    if layers.len() != params.num_hypertree_layers as usize {
+    if layers.len() != NUM_HYPERTREE_LAYERS as usize {
         return false;
     }
-    // The hypertree is split evenly into `num_hypertree_layers`. For the current
-    // profile that is 64 / 8 = 8 levels per layer.
-    let subtree_height = u32::from(params.hypertree_height / params.num_hypertree_layers);
+    // The hypertree is split evenly into the fixed layer count: 64 / 8 = 8
+    // levels per layer.
+    let subtree_height = u32::from(HYPERTREE_HEIGHT / NUM_HYPERTREE_LAYERS);
     if subtree_height == 0 {
         return false;
     }
@@ -62,7 +62,7 @@ pub(crate) fn verify_hypertree(
         if layer_signature.tree_index != expected_tree_index
             || layer_signature.leaf_index != expected_leaf_index
             || layer_signature.leaf_index >= leaf_count
-            || layer_signature.wots_c_pk_hash.len() != params.hash_len as usize
+            || layer_signature.wots_c_pk_hash.len() != HASH_LEN
             || layer_signature.auth_path.len() != subtree_height as usize
         {
             return false;
@@ -71,7 +71,6 @@ pub(crate) fn verify_hypertree(
         // Layer 0 starts with the FORS root; later layers use the root produced
         // by the previous layer's Merkle path.
         if !verify_wots_c32(
-            params,
             &public_key.pk_seed,
             layer_index as u32,
             layer_signature.tree_index,
@@ -110,7 +109,6 @@ pub(crate) fn verify_hypertree(
 }
 
 fn verify_wots_c32(
-    params: &ParamsView,
     pk_seed_bytes: &[u8],
     layer: u32,
     tree: u64,
@@ -119,13 +117,13 @@ fn verify_wots_c32(
     message: [u8; HASH_LEN],
     signature: &WotsCSignature,
 ) -> bool {
-    let chain_count = params.num_wots_chains as usize;
+    let chain_count = NUM_WOTS_CHAINS as usize;
     // Each WOTS-C signature must have one randomizer, one counter, one expected
     // 32-byte public-key hash, and exactly `num_wots_chains` chain values.
     if signature.randomizer.len() != HASH_LEN
         || signature.chains.len() != chain_count
         || expected_pk_hash_bytes.len() != HASH_LEN
-        || wots_digest_bytes(params) != HASH_LEN
+        || wots_digest_bytes() != HASH_LEN
     {
         return false;
     }
@@ -159,10 +157,10 @@ fn verify_wots_c32(
         };
         // The digest digit tells us how far along this chain the signature value
         // starts. Verification runs from that digit to the end of the chain.
-        let digit = base_w_digit(params.chain_len, &digest, chain_index);
+        let digit = base_w_digit(WOTS_CHAIN_LEN, &digest, chain_index);
         digit_sum = digit_sum.saturating_add(digit);
         let segment = wots_chain32_no_mask_base(
-            params.chain_len,
+            WOTS_CHAIN_LEN,
             pk_seed,
             address_base,
             chain_index as u32,
@@ -173,7 +171,7 @@ fn verify_wots_c32(
     }
     // WOTS-C does not carry an explicit checksum chain suffix. Instead the message expansion
     // is accepted only when reconstructed base-w digits add up to the fixed target sum.
-    if digit_sum != params.wots_target_sum {
+    if digit_sum != WOTS_TARGET_SUM_STATEFUL {
         return false;
     }
 

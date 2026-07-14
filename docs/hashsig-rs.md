@@ -97,7 +97,6 @@ The `src/wasm/` module provides TS-friendly bindings through `wasm-bindgen`.
 
 Current exported capabilities include:
 
-- supported parameter set discovery
 - SHRINCS key generation
 - raw stateful and stateless signing
 - raw and canonical verification helpers

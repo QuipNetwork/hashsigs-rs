@@ -21,7 +21,10 @@
 //! those roots into the per-signature FORS output carried into hypertree
 //! verification.
 
-use super::shrincs_verifier_types::{ForsEntry, ForsSignature, ParamsView, PublicKey, HASH_LEN};
+use super::shrincs_verifier_types::{
+    ForsEntry, ForsSignature, PublicKey, FORS_TREE_HEIGHT, HASH_LEN, HYPERTREE_HEIGHT,
+    NUM_FORS_TREES, NUM_HYPERTREE_LAYERS,
+};
 use super::shrincs_verifier_utils::{
     fors_address_word, hash_packed, pack, read_bits32, read_bits64, word32,
 };
@@ -34,7 +37,6 @@ struct ForsDigest {
 }
 
 pub(crate) fn verify_fors_c_and_return_root(
-    params: &ParamsView,
     public_key: &PublicKey,
     message: &[u8],
     signature: &ForsSignature,
@@ -44,7 +46,7 @@ pub(crate) fn verify_fors_c_and_return_root(
     // FORS-C omits the final FORS tree by forcing its digest-selected leaf index to zero.
     // Verification therefore expects only k - 1 revealed entries and rejects any digest
     // whose omitted final tree would require a nonzero leaf.
-    let signed_trees = params.num_fors_trees as usize - 1;
+    let signed_trees = NUM_FORS_TREES as usize - 1;
     if signature.randomizer.len() != HASH_LEN {
         return None;
     }
@@ -58,17 +60,16 @@ pub(crate) fn verify_fors_c_and_return_root(
     // - the layer-0 hypertree leaf index.
     // The first hypertree layer must echo those two coordinates.
     let digest = fors_digest(
-        params,
         public_key,
         message,
         &signature.randomizer,
         signature.counter,
     );
-    let fors_tree_height = params.fors_tree_height as usize;
+    let fors_tree_height = FORS_TREE_HEIGHT as usize;
     if read_bits32(
         &digest.digest,
         signed_trees * fors_tree_height,
-        params.fors_tree_height as u32,
+        FORS_TREE_HEIGHT as u32,
     )? != 0
     {
         return None;
@@ -94,7 +95,7 @@ pub(crate) fn verify_fors_c_and_return_root(
         let entry_leaf_index = read_bits32(
             &digest.digest,
             fors_tree_index * fors_tree_height,
-            params.fors_tree_height as u32,
+            FORS_TREE_HEIGHT as u32,
         )?;
         let root = fors_entry_root32(
             fors_tree_height as u32,
@@ -190,7 +191,6 @@ fn hash_fors_node32(
 }
 
 fn fors_digest(
-    params: &ParamsView,
     public_key: &PublicKey,
     message: &[u8],
     randomizer: &[u8],
@@ -199,10 +199,10 @@ fn fors_digest(
     // Digest bit layout:
     // [FORS indices: k * a bits][hypertree tree index][hypertree leaf index].
     // `digest_bytes` rounds that bit count up to a whole byte count.
-    let index_bits = u32::from(params.num_fors_trees) * u32::from(params.fors_tree_height);
-    let subtree_height = u32::from(params.hypertree_height / params.num_hypertree_layers);
-    let tree_bits = u32::from(params.hypertree_height) - subtree_height;
-    let digest_bytes = ((index_bits + u32::from(params.hypertree_height) + 7) / 8) as usize;
+    let index_bits = u32::from(NUM_FORS_TREES) * u32::from(FORS_TREE_HEIGHT);
+    let subtree_height = u32::from(HYPERTREE_HEIGHT / NUM_HYPERTREE_LAYERS);
+    let tree_bits = u32::from(HYPERTREE_HEIGHT) - subtree_height;
+    let digest_bytes = ((index_bits + u32::from(HYPERTREE_HEIGHT) + 7) / 8) as usize;
     let digest = fors_digest_bytes(
         &public_key.pk_seed,
         &public_key.hypertree_root,
@@ -233,7 +233,7 @@ fn fors_digest_bytes(
     // Solidity has two modes here:
     // - one Keccak block if the requested digest fits in 32 bytes,
     // - counter-suffixed blocks when more bytes are needed.
-    // The current supported profile uses the multi-block path.
+    // The current fixed constants use the multi-block path.
     let base = pack(&[
         b"fors-digest",
         pk_seed,
