@@ -12,7 +12,7 @@ const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url),
 if (pkg.version !== crateVersion) {
   throw new Error(
     `version mismatch: ts/package.json is "${pkg.version}" but Cargo.toml is "${crateVersion}". ` +
-    `Bump both to the same version (Cargo.toml is the source of truth).`
+    `Bump both to the same version `
   );
 }
 
