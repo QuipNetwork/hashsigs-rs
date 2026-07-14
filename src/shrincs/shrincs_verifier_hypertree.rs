@@ -27,7 +27,7 @@ use super::shrincs_verifier_types::{
     NUM_HYPERTREE_LAYERS, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN, WOTS_TARGET_SUM_STATEFUL,
 };
 use super::shrincs_verifier_utils::{
-    base_w_digit, hash_packed, hypertree_address_word, word32, wots_address_base,
+    base_w_digit, hash_node, hash_packed, hypertree_address_word, word32, wots_address_base,
     wots_chain_address_word, wots_digest_bytes,
 };
 
@@ -120,10 +120,15 @@ fn verify_wots_c32(
     let chain_count = NUM_WOTS_CHAINS as usize;
     // Each WOTS-C signature must have one randomizer, one counter, one expected
     // 32-byte public-key hash, and exactly `num_wots_chains` chain values.
+    // Wire fields stay 32-byte slots in every profile; the WOTS message digest,
+    // however, is `wots_digest_bytes()` bytes read out of a full 32-byte keccak
+    // (16 for the 128s profiles, 32 for 256s). Guard only against a digest that
+    // would over-read the slot, matching the Solidity `wotsDigestBytes() <= 32`
+    // relaxation ([DESIGN §3.3]); for 256s this is still exactly 32.
     if signature.randomizer.len() != HASH_LEN
         || signature.chains.len() != chain_count
         || expected_pk_hash_bytes.len() != HASH_LEN
-        || wots_digest_bytes() != HASH_LEN
+        || wots_digest_bytes() > HASH_LEN
     {
         return false;
     }
@@ -175,7 +180,7 @@ fn verify_wots_c32(
         return false;
     }
 
-    let computed_pk_hash = hash_packed(&[b"wots-c-pk", &pk_seed, &pk_input_segments]);
+    let computed_pk_hash = hash_node(&[b"wots-c-pk", &pk_seed, &pk_input_segments]);
     computed_pk_hash == expected_pk_hash
 }
 
@@ -222,7 +227,7 @@ fn hash_stateless_wots_c_chain_no_mask32(
     address_word: [u8; HASH_LEN],
     segment: [u8; HASH_LEN],
 ) -> [u8; HASH_LEN] {
-    hash_packed(&[b"wots-c-chain", &pk_seed, &address_word, &segment])
+    hash_node(&[b"wots-c-chain", &pk_seed, &address_word, &segment])
 }
 
 fn hypertree_root_from_path32(
@@ -265,5 +270,5 @@ fn hash_hypertree_node32(
 ) -> [u8; HASH_LEN] {
     // Domain-separated parent hash for hypertree nodes. The address word binds
     // this hash to its exact layer/tree/height/parent-index position.
-    hash_packed(&[b"hypertree-node", &pk_seed, &address_word, &left, &right])
+    hash_node(&[b"hypertree-node", &pk_seed, &address_word, &left, &right])
 }

@@ -927,6 +927,10 @@ mod tests {
         assert!(!account.precheckStatefulLeafUse(1));
     }
 
+    #[cfg_attr(
+        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
+    )]
     #[test]
     fn raw_stateful_helper_verifies_message_without_advancing_nonce() {
         let (mut signing_key, public_key) =
@@ -943,6 +947,10 @@ mod tests {
         assert_eq!(account.nextStatefulLeafIndex(), 2);
     }
 
+    #[cfg_attr(
+        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
+    )]
     #[test]
     fn verify_stateful_action_advances_nonce_and_leaf() {
         let verifier = ShrincsVerifier::new();
@@ -969,6 +977,10 @@ mod tests {
         assert_eq!(account.nextStatefulLeafIndex(), 2);
     }
 
+    #[cfg_attr(
+        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
+    )]
     #[test]
     fn verify_stateless_action_advances_nonce_and_usage_counter() {
         let verifier = ShrincsVerifier::new();
@@ -995,6 +1007,10 @@ mod tests {
         assert_eq!(account.statelessSignaturesUsed(), 1);
     }
 
+    #[cfg_attr(
+        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
+    )]
     #[test]
     fn rotate_to_fresh_key_installs_next_stateful_commitment() {
         let verifier = ShrincsVerifier::new();
@@ -1041,6 +1057,10 @@ mod tests {
         assert!(!account.recoveryMode());
     }
 
+    #[cfg_attr(
+        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
+    )]
     #[test]
     fn rotate_full_key_installs_next_full_commitment() {
         let verifier = ShrincsVerifier::new();
