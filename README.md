@@ -802,12 +802,16 @@ key-version, stateful-leaf use, and recovery-mode transitions around the core
 SHRINCS primitives. It is intentionally close to the Solidity example account
 wrapper, but it is not a literal runtime-equivalent copy.
 
-The Rust account wrapper now follows the same security policy model as the Solidity example wrapper:
+The Rust account wrapper enforces a hardened security policy model:
 
-- stateful policy changes are frozen after the first successful stateful use in a key epoch
+- switches between stateful leaf-tracking policies (monotonic index and leaf
+  bitmap) are frozen after the first successful stateful use in a key epoch;
+  switching to `RecoveryRotation` stays available so key rotation is always
+  reachable
 - `RecoveryRotation` disables the stateful path for the whole recovery-policy epoch
 - `rotateToFreshKey(...)` preserves stateless usage accounting because the stateless key is unchanged
-- `rotateFullKey(...)` resets stateless usage accounting only when the stateless key changes
+- `rotateFullKey(...)` resets stateless usage accounting only when the supplied
+  rotation target actually changes the stateless key material
 
 Current intentional differences:
 
@@ -832,15 +836,19 @@ Current intentional differences:
   simulation/adaptation surface, not a one-to-one deployment API mirror.
 
 The account module now recomputes its domain separator from stored `chainId`
-and `contractAddress`, and `rotateToFreshKey(...)` is narrowed to a dedicated stateful-only recovery-rotation target. It also mirrors the Solidity account
-wrapper's hardened policy/accounting behavior:
+and `contractAddress`, and `rotateToFreshKey(...)` is narrowed to a dedicated
+stateful-only recovery-rotation target. It also enforces hardened
+policy/accounting behavior that goes beyond the current Solidity example
+wrapper:
 
-- policy changes must be chosen before the first successful stateful signature in a key epoch
+- the stateful leaf-tracking model must be chosen before the first successful
+  stateful signature in a key epoch; only `RecoveryRotation` may still be
+  selected afterwards, so a used key can always rotate out
 - selecting `RecoveryRotation` blocks the stateful path immediately; `enterRecoveryMode(...)`
   then permits stateless action verification and stateless recovery rotations
 - stateful-only rotation consumes one stateless recovery use and carries that counter forward
-- full-key rotation consumes one stateless recovery use under the old key and then resets the
-  counter for the newly installed stateless key
+- full-key rotation consumes one stateless recovery use under the old key and resets the
+  counter only when the newly installed stateless key actually differs
 
 ## License
 

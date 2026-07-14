@@ -21,6 +21,13 @@
 // values inside this slot (see HASH_TRUNC_LEN and `mask_hash`).
 pub const HASH_LEN: usize = 32;
 pub const HASH_SUITE_KECCAK_256: u32 = 1;
+pub const STATELESS_SIGNATURE_LIMIT: u64 = 1_048_576;
+pub const HYPERTREE_HEIGHT: u8 = 64;
+pub const NUM_HYPERTREE_LAYERS: u8 = 8;
+pub const FORS_TREE_HEIGHT: u8 = 14;
+pub const NUM_FORS_TREES: u8 = 22;
+pub const WOTS_CHAIN_LEN: u16 = 16;
+pub const NUM_WOTS_CHAINS: u16 = 64;
 
 // Per-profile SHRINCS/SPHINCS parameter tuple, selected at compile time by
 // cargo feature. This mirrors the Solidity
