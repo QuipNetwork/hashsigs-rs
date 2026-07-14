@@ -50,9 +50,7 @@
 //! [JARDIN verifier]: https://github.com/nconsigny/JARDIN (`src`)
 //! [FIPS 205]: https://doi.org/10.6028/NIST.FIPS.205
 
-use super::shrincs_signer_types::{
-    CompactSignature, CompactSigningKey, ShrincsSignerResult,
-};
+use super::shrincs_signer_types::{CompactSignature, CompactSigningKey, ShrincsSignerResult};
 use super::shrincs_signer_utils::{hash_packed, pack, read_bits32, word32};
 use super::verifier::HASH_LEN;
 use hmac::{Hmac, Mac};
@@ -115,20 +113,13 @@ pub(crate) fn compact_keygen(
     }
 
     // Used only by the signer to derive FORS secret leaves.
-    let slot_sk_seed =
-        hmac_sha512_32(master_sk_seed, b"JARDIN/SKSEED", slot_randomness)?;
+    let slot_sk_seed = hmac_sha512_32(master_sk_seed, b"JARDIN/SKSEED", slot_randomness)?;
     // Used only by the signer to derive R for a signature.
-    let slot_sk_prf =
-        hmac_sha512_32(master_sk_seed, b"JARDIN/SKPRF", slot_randomness)?;
+    let slot_sk_prf = hmac_sha512_32(master_sk_seed, b"JARDIN/SKPRF", slot_randomness)?;
     // Public seed for this slot.
     let sub_pk_seed = compact_pk_seed_from_slot_seed(&slot_sk_seed);
     // Merkle root registered on-chain as subPkRoot.
-    let sub_pk_root = compact_merkle_root_and_auth(
-        &slot_sk_seed,
-        &sub_pk_seed,
-        fors_key_index,
-    )
-    .0;
+    let sub_pk_root = compact_merkle_root_and_auth(&slot_sk_seed, &sub_pk_seed, fors_key_index).0;
 
     Some(CompactSigningKey {
         slot_randomness: *slot_randomness,
@@ -199,9 +190,7 @@ pub(crate) fn sign_compact_raw(
             fors_key_index,
         );
         // The 52nd FORS tree is skipped. It must select leaf 0.
-        if compact_base2b(&message_digest, u32::from(COMPACT_OPEN_FORS_TREES))
-            == Some(0)
-        {
+        if compact_base2b(&message_digest, u32::from(COMPACT_OPEN_FORS_TREES)) == Some(0) {
             grind_counter = Some(counter);
             break;
         }
@@ -230,22 +219,19 @@ pub(crate) fn sign_compact_raw(
             leaf_index,
         );
         // Each FORS entry is secret_leaf32 || auth_node[5]32.
-        let offset =
-            COMPACT_FORS_OFFSET + tree as usize * COMPACT_FORS_ENTRY_BYTES;
+        let offset = COMPACT_FORS_OFFSET + tree as usize * COMPACT_FORS_ENTRY_BYTES;
         raw_signature[offset..offset + HASH_LEN].copy_from_slice(&secret);
         for (level, auth) in auth_path.iter().enumerate() {
             // Store the siblings right after the secret leaf.
             let auth_offset = offset + HASH_LEN + level * HASH_LEN;
-            raw_signature[auth_offset..auth_offset + HASH_LEN]
-                .copy_from_slice(auth);
+            raw_signature[auth_offset..auth_offset + HASH_LEN].copy_from_slice(auth);
         }
     }
 
     for level in 0..COMPACT_MERKLE_HEIGHT as u32 {
         // These 7 siblings prove this FORS key is under sub_pk_root.
         let offset = COMPACT_MERKLE_AUTH_OFFSET + level as usize * HASH_LEN;
-        raw_signature[offset..offset + HASH_LEN]
-            .copy_from_slice(&merkle_auth[level as usize]);
+        raw_signature[offset..offset + HASH_LEN].copy_from_slice(&merkle_auth[level as usize]);
     }
 
     Some(CompactSignature {
@@ -296,13 +282,7 @@ fn compact_merkle_root_and_auth(
             let left = nodes[parent << 1];
             let right = nodes[(parent << 1) | 1];
             // Address includes the level and parent index.
-            let address = compact_adrs(
-                ADDRESS_TYPE_JARDIN_MERKLE,
-                0,
-                0,
-                level,
-                parent as u32,
-            );
+            let address = compact_adrs(ADDRESS_TYPE_JARDIN_MERKLE, 0, 0, level, parent as u32);
             // Store the parent in the front half of the same array.
             nodes[parent] = compact_h(pk_seed, &address, &left, &right);
         }
@@ -342,8 +322,7 @@ fn compact_fors_pk(
     ));
     for tree in 0..COMPACT_OPEN_FORS_TREES as u32 {
         // Add one root per signed FORS tree.
-        let root =
-            compact_fors_tree_root(sk_seed, pk_seed, fors_key_index, tree);
+        let root = compact_fors_tree_root(sk_seed, pk_seed, fors_key_index, tree);
         input.extend_from_slice(&root);
     }
     // This is T_k from FORS, implemented with keccak256.
@@ -367,8 +346,7 @@ fn compact_fors_tree_root(
     let mut nodes = [[0u8; HASH_LEN]; 32];
     for leaf in 0..32u32 {
         // Derive the secret for this leaf.
-        let secret =
-            compact_fors_secret(sk_seed, pk_seed, fors_key_index, tree, leaf);
+        let secret = compact_fors_secret(sk_seed, pk_seed, fors_key_index, tree, leaf);
         // tree_index is the leaf number across all FORS trees.
         let tree_index = (tree << COMPACT_FORS_TREE_HEIGHT) + leaf;
         // Hash the secret into a public leaf node.
@@ -382,12 +360,7 @@ fn compact_fors_tree_root(
         // Store this public leaf in the tree buffer.
         nodes[leaf as usize] = compact_f(pk_seed, &address, &secret);
     }
-    compact_fors_tree_root_from_leaves(
-        pk_seed,
-        fors_key_index,
-        tree,
-        &mut nodes,
-    )
+    compact_fors_tree_root_from_leaves(pk_seed, fors_key_index, tree, &mut nodes)
 }
 
 // compact_fors_secret_and_auth: Build one FORS signature entry.
@@ -409,13 +382,7 @@ fn compact_fors_secret_and_auth(
     mut leaf_index: u32,
 ) -> ([u8; HASH_LEN], [[u8; HASH_LEN]; 5]) {
     // This is the secret leaf that the signature reveals.
-    let secret = compact_fors_secret(
-        sk_seed,
-        pk_seed,
-        fors_key_index,
-        tree,
-        leaf_index,
-    );
+    let secret = compact_fors_secret(sk_seed, pk_seed, fors_key_index, tree, leaf_index);
     // The auth path has one sibling for each of the five levels.
     let mut auth_path = [[0u8; HASH_LEN]; 5];
     // The tree is small, so build all 32 leaves.
@@ -423,8 +390,7 @@ fn compact_fors_secret_and_auth(
 
     for leaf in 0..32u32 {
         // Build each public leaf.
-        let leaf_secret =
-            compact_fors_secret(sk_seed, pk_seed, fors_key_index, tree, leaf);
+        let leaf_secret = compact_fors_secret(sk_seed, pk_seed, fors_key_index, tree, leaf);
         let tree_index = (tree << COMPACT_FORS_TREE_HEIGHT) + leaf;
         let address = compact_adrs(
             ADDRESS_TYPE_FORS_TREE,
@@ -441,15 +407,12 @@ fn compact_fors_secret_and_auth(
         // XOR 1 gives the sibling of the selected node.
         auth_path[level as usize] = nodes[(leaf_index ^ 1) as usize];
         // Number of parents at this level: 16, 8, 4, 2, 1.
-        let parent_count =
-            1u32 << (u32::from(COMPACT_FORS_TREE_HEIGHT) - 1 - level);
+        let parent_count = 1u32 << (u32::from(COMPACT_FORS_TREE_HEIGHT) - 1 - level);
         for parent in 0..parent_count {
             // Parent height is one above the child level.
             let height = level + 1;
             // Parent index across all FORS trees.
-            let tree_index = (tree
-                << (u32::from(COMPACT_FORS_TREE_HEIGHT) - height))
-                + parent;
+            let tree_index = (tree << (u32::from(COMPACT_FORS_TREE_HEIGHT) - height)) + parent;
             let address = compact_adrs(
                 ADDRESS_TYPE_FORS_TREE,
                 0,
@@ -485,13 +448,10 @@ fn compact_fors_tree_root_from_leaves(
 ) -> [u8; HASH_LEN] {
     for level in 0..COMPACT_FORS_TREE_HEIGHT as u32 {
         // Number of parents at this level: 16, 8, 4, 2, 1.
-        let parent_count =
-            1u32 << (u32::from(COMPACT_FORS_TREE_HEIGHT) - 1 - level);
+        let parent_count = 1u32 << (u32::from(COMPACT_FORS_TREE_HEIGHT) - 1 - level);
         for parent in 0..parent_count {
             let height = level + 1;
-            let tree_index = (tree
-                << (u32::from(COMPACT_FORS_TREE_HEIGHT) - height))
-                + parent;
+            let tree_index = (tree << (u32::from(COMPACT_FORS_TREE_HEIGHT) - height)) + parent;
             let address = compact_adrs(
                 ADDRESS_TYPE_FORS_TREE,
                 0,
@@ -572,9 +532,7 @@ fn hmac_sha512_32(
 //
 // This matches signer-wasm:
 // pk_seed = keccak256("pk_seed" || master[..32])
-fn compact_pk_seed_from_slot_seed(
-    slot_sk_seed: &[u8; HASH_LEN],
-) -> [u8; HASH_LEN] {
+fn compact_pk_seed_from_slot_seed(slot_sk_seed: &[u8; HASH_LEN]) -> [u8; HASH_LEN] {
     // This matches signer-wasm's labeled Keccak derivation.
     hash_packed(&[b"pk_seed", slot_sk_seed])
 }
@@ -595,8 +553,7 @@ fn compact_prf_msg(
     counter: u32,
 ) -> [u8; HASH_LEN] {
     // M* is the Type 2 message that both PRF_msg and H_msg use.
-    let m_star =
-        compact_type2_message(pk_seed, pk_root, fors_key_index, message);
+    let m_star = compact_type2_message(pk_seed, pk_root, fors_key_index, message);
     let counter_bytes = counter.to_be_bytes();
 
     // JARDIN uses subPkSeed as the deterministic opt_rand value.
@@ -626,8 +583,7 @@ fn compact_h_msg(
     fors_key_index: u8,
 ) -> [u8; COMPACT_DIGEST_BYTES] {
     // M* is the Type 2 message that both PRF_msg and H_msg use.
-    let m_star =
-        compact_type2_message(pk_seed, pk_root, fors_key_index, message);
+    let m_star = compact_type2_message(pk_seed, pk_root, fors_key_index, message);
     let counter_bytes = counter.to_be_bytes();
 
     // This part is the same for both hash blocks.
@@ -671,10 +627,7 @@ fn compact_type2_message(
 //
 // This is the base_2b step from FIPS 205.
 // a = 5, so every returned value is in 0..32.
-fn compact_base2b(
-    message_digest: &[u8; COMPACT_DIGEST_BYTES],
-    digit_index: u32,
-) -> Option<u32> {
+fn compact_base2b(message_digest: &[u8; COMPACT_DIGEST_BYTES], digit_index: u32) -> Option<u32> {
     // a = 5, so each FORS leaf index is 5 bits.
     read_bits32(
         message_digest,
@@ -778,8 +731,7 @@ mod tests {
         // Read R and counter from the signature header.
         let mut randomizer = [0u8; HASH_LEN];
         randomizer.copy_from_slice(&signature[0..HASH_LEN]);
-        let counter =
-            u32::from_be_bytes(signature[32..36].try_into().unwrap());
+        let counter = u32::from_be_bytes(signature[32..36].try_into().unwrap());
         let message_digest = compact_h_msg(
             sub_pk_seed,
             sub_pk_root,
@@ -788,24 +740,13 @@ mod tests {
             counter,
             fors_key_index,
         );
-        if compact_base2b(&message_digest, u32::from(COMPACT_OPEN_FORS_TREES))
-            != Some(0)
-        {
+        if compact_base2b(&message_digest, u32::from(COMPACT_OPEN_FORS_TREES)) != Some(0) {
             return false;
         }
 
-        let fors_pk = compact_fors_pk_from_signature(
-            signature,
-            &message_digest,
-            sub_pk_seed,
-            fors_key_index,
-        );
-        let root = compact_root_from_auth_path(
-            signature,
-            sub_pk_seed,
-            fors_key_index,
-            fors_pk,
-        );
+        let fors_pk =
+            compact_fors_pk_from_signature(signature, &message_digest, sub_pk_seed, fors_key_index);
+        let root = compact_root_from_auth_path(signature, sub_pk_seed, fors_key_index, fors_pk);
         root == *sub_pk_root
     }
 
@@ -869,11 +810,9 @@ mod tests {
         mut leaf_index: u32,
     ) -> [u8; HASH_LEN] {
         // This entry is secret_leaf32 || auth_path[5]32.
-        let offset =
-            COMPACT_FORS_OFFSET + tree as usize * COMPACT_FORS_ENTRY_BYTES;
+        let offset = COMPACT_FORS_OFFSET + tree as usize * COMPACT_FORS_ENTRY_BYTES;
         // Safe because verify_compact_raw checked signature length.
-        let secret: [u8; HASH_LEN] =
-            signature[offset..offset + HASH_LEN].try_into().unwrap();
+        let secret: [u8; HASH_LEN] = signature[offset..offset + HASH_LEN].try_into().unwrap();
         // tree_index is the leaf number across all FORS trees.
         let tree_index = (tree << COMPACT_FORS_TREE_HEIGHT) + leaf_index;
         // Hash the secret into a public leaf node.
@@ -892,8 +831,7 @@ mod tests {
         for level in 0..COMPACT_FORS_TREE_HEIGHT as u32 {
             // Read the sibling for this level.
             let auth_offset = offset + HASH_LEN + level as usize * HASH_LEN;
-            let auth: [u8; HASH_LEN] = signature
-                [auth_offset..auth_offset + HASH_LEN]
+            let auth: [u8; HASH_LEN] = signature[auth_offset..auth_offset + HASH_LEN]
                 .try_into()
                 .unwrap();
             // The low bit says whether our node is left or right.
@@ -906,9 +844,7 @@ mod tests {
             let height = level + 1;
             leaf_index >>= 1;
             // Parent index across all FORS trees.
-            let tree_index = (tree
-                << (u32::from(COMPACT_FORS_TREE_HEIGHT) - height))
-                + leaf_index;
+            let tree_index = (tree << (u32::from(COMPACT_FORS_TREE_HEIGHT) - height)) + leaf_index;
             let address = compact_adrs(
                 ADDRESS_TYPE_FORS_TREE,
                 0,
@@ -936,30 +872,19 @@ mod tests {
     ) -> [u8; HASH_LEN] {
         for level_from_leaf in 0..COMPACT_MERKLE_HEIGHT as u32 {
             // Read one Merkle sibling from the end of the signature.
-            let offset = COMPACT_MERKLE_AUTH_OFFSET
-                + level_from_leaf as usize * HASH_LEN;
-            let auth: [u8; HASH_LEN] =
-                signature[offset..offset + HASH_LEN].try_into().unwrap();
+            let offset = COMPACT_MERKLE_AUTH_OFFSET + level_from_leaf as usize * HASH_LEN;
+            let auth: [u8; HASH_LEN] = signature[offset..offset + HASH_LEN].try_into().unwrap();
             // This q bit says whether our node is left or right.
-            let (left, right) =
-                if u32::from(fors_key_index) & (1 << level_from_leaf) == 0 {
-                    (node, auth)
-                } else {
-                    (auth, node)
-                };
+            let (left, right) = if u32::from(fors_key_index) & (1 << level_from_leaf) == 0 {
+                (node, auth)
+            } else {
+                (auth, node)
+            };
             // JARDIN numbers these levels from root to leaves.
-            let level =
-                u32::from(COMPACT_MERKLE_HEIGHT) - 1 - level_from_leaf;
+            let level = u32::from(COMPACT_MERKLE_HEIGHT) - 1 - level_from_leaf;
             // This is the parent index at that level.
-            let parent_index =
-                u32::from(fors_key_index) >> (level_from_leaf + 1);
-            let address = compact_adrs(
-                ADDRESS_TYPE_JARDIN_MERKLE,
-                0,
-                0,
-                level,
-                parent_index,
-            );
+            let parent_index = u32::from(fors_key_index) >> (level_from_leaf + 1);
+            let address = compact_adrs(ADDRESS_TYPE_JARDIN_MERKLE, 0, 0, level, parent_index);
             // Move one level up.
             node = compact_h(pk_seed, &address, &left, &right);
         }
@@ -1071,11 +996,9 @@ mod tests {
     fn compact_action_signer_uses_context_hash() {
         let master = compact_master_seed(b"action fixture");
         let slot_randomness = compact_slot_randomness(b"action fixture");
-        let key = ShrincsSigner::compact_keygen(&master, &slot_randomness, 9)
-            .unwrap();
+        let key = ShrincsSigner::compact_keygen(&master, &slot_randomness, 9).unwrap();
         let context = action_context();
-        let signature =
-            ShrincsSigner::sign_compact_action(&key, &context).unwrap();
+        let signature = ShrincsSigner::sign_compact_action(&key, &context).unwrap();
         let message = ShrincsSigner::compact_action_message_hash(&context);
 
         assert!(verify_compact_raw(

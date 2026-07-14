@@ -20,8 +20,8 @@
 use solana_program::keccak::hash as keccak256_hash;
 
 use super::shrincs_verifier_types::{
-    ActionContext, PublicKey, RotationContext, StatefulPublicKey, ADDRESS_TYPE_FORS_TREE,
-    ADDRESS_TYPE_TREE, HASH_LEN, NUM_WOTS_CHAINS, STATEFUL_PUBLIC_KEY_BYTES, WOTS_CHAIN_LEN,
+    ActionContext, PublicKey, RotationContext, ADDRESS_TYPE_FORS_TREE, ADDRESS_TYPE_TREE, HASH_LEN,
+    NUM_WOTS_CHAINS, WOTS_CHAIN_LEN,
 };
 
 pub(crate) fn keccak256(data: &[u8]) -> [u8; HASH_LEN] {
@@ -58,76 +58,19 @@ pub(crate) fn valid_rotation_context(context: &RotationContext) -> bool {
     context.domain_separator != [0u8; HASH_LEN]
 }
 
-pub(crate) fn public_key_commitment(public_key: &PublicKey) -> Option<[u8; HASH_LEN]> {
-    let pk_seed = word32(&public_key.pk_seed)?;
-    let hypertree_root = word32(&public_key.hypertree_root)?;
-    Some(hash_packed(&[
-        b"shrincs-public-key",
-        &public_key.stateful_public_key,
-        &pk_seed,
-        &hypertree_root,
-    ]))
-}
-
-pub(crate) fn stateful_rotation_target_commitment(
-    stateful_public_key: &[u8],
-    pk_seed: &[u8; HASH_LEN],
-    hypertree_root: &[u8; HASH_LEN],
-) -> [u8; HASH_LEN] {
-    hash_packed(&[
-        b"shrincs-public-key",
-        stateful_public_key,
-        pk_seed,
-        hypertree_root,
-    ])
-}
-
-pub(crate) fn rotation_target_commitment(
-    target: &super::shrincs_verifier_types::RotationTarget,
-) -> Option<[u8; HASH_LEN]> {
-    let pk_seed = word32(&target.pk_seed)?;
-    let hypertree_root = word32(&target.hypertree_root)?;
-    Some(stateful_rotation_target_commitment(
-        &target.stateful_public_key,
-        &pk_seed,
-        &hypertree_root,
-    ))
-}
-
-pub(crate) fn matches_expected_public_key_commitment(
+pub(crate) fn matches_expected_stateless_key(
     public_key: &PublicKey,
-    expected_public_key_commitment: [u8; HASH_LEN],
+    expected_pk_seed: [u8; HASH_LEN],
+    expected_hypertree_root: [u8; HASH_LEN],
 ) -> bool {
-    // The account or caller stores the installed hybrid-key commitment. The
-    // supplied bundle must match that commitment exactly, not just the stateless
-    // hypertree root inside it.
-    expected_public_key_commitment != [0u8; HASH_LEN]
-        && word32(&public_key.public_key_commitment) == Some(expected_public_key_commitment)
-        && public_key_commitment(public_key) == Some(expected_public_key_commitment)
+    expected_pk_seed != [0u8; HASH_LEN]
+        && expected_hypertree_root != [0u8; HASH_LEN]
+        && word32(&public_key.pk_seed) == Some(expected_pk_seed)
+        && word32(&public_key.hypertree_root) == Some(expected_hypertree_root)
 }
 
 pub(crate) fn valid_public_key(public_key: &PublicKey) -> bool {
-    public_key.stateful_public_key.len() == STATEFUL_PUBLIC_KEY_BYTES
-        && public_key.public_key_commitment.len() == HASH_LEN
-        && public_key.pk_seed.len() == HASH_LEN
-        && public_key.hypertree_root.len() == HASH_LEN
-        && public_key_commitment(public_key) == word32(&public_key.public_key_commitment)
-}
-
-pub(crate) fn decode_stateful_public_key(encoded: &[u8]) -> Option<StatefulPublicKey> {
-    // Keep this byte layout identical to Solidity:
-    // 0..32 pkSeed, 32..64 root, 64..68 maxSignatures as big-endian uint32.
-    if encoded.len() != STATEFUL_PUBLIC_KEY_BYTES {
-        return None;
-    }
-    let pk_seed = word32(&encoded[..32])?;
-    let root = word32(&encoded[32..64])?;
-    let max_signatures = u32::from_be_bytes(encoded[64..68].try_into().ok()?);
-    Some(StatefulPublicKey {
-        pk_seed,
-        root,
-        max_signatures,
-    })
+    public_key.pk_seed.len() == HASH_LEN && public_key.hypertree_root.len() == HASH_LEN
 }
 
 pub(crate) fn word32(input: &[u8]) -> Option<[u8; HASH_LEN]> {

@@ -4,7 +4,7 @@
 
 use hashsigs_rs::shrincs::{
     ActionContext, CompactSignature, CompactSigningKey, PublicKey, ShrincsSigner,
-    StatefulSignature, StatelessSignature, HASH_LEN,
+    StatelessSignature, HASH_LEN,
 };
 use serde_json::{json, Value};
 use std::fs;
@@ -16,13 +16,6 @@ const OUT_PATH: &str = "tests/test_vectors/shrincs_sphincs_256s_keccak.json";
 #[test]
 #[ignore = "run explicitly to refresh Solidity SHRINCS vectors"]
 fn generate_shrincs_sphincs_256s_keccak_vectors() {
-    let (mut stateful_key, stateful_public_key) =
-        ShrincsSigner::keygen(b"shrincs solidity vector stateful seed", 4)
-            .expect("stateful keygen");
-    let stateful_message = hash_word(b"shrincs solidity stateful message").to_vec();
-    let stateful_signature = ShrincsSigner::sign_stateful_raw(&mut stateful_key, &stateful_message)
-        .expect("stateful signature");
-
     let (stateless_key, stateless_public_key) =
         ShrincsSigner::keygen(b"shrincs solidity vector stateless seed", 256)
             .expect("stateless keygen");
@@ -53,16 +46,8 @@ fn generate_shrincs_sphincs_256s_keccak_vectors() {
         b"shrincs solidity compact payload two",
     );
 
-    let mut wrong_stateful_message = stateful_message.clone();
-    wrong_stateful_message[0] ^= 1;
     let mut wrong_stateless_message = stateless_message.clone();
     wrong_stateless_message[0] ^= 1;
-
-    let mut wrong_stateful_public_key = stateful_public_key.clone();
-    wrong_stateful_public_key.stateful_public_key[32] ^= 1;
-
-    let mut corrupted_stateful_signature = stateful_signature.clone();
-    corrupted_stateful_signature.chains[0][0] ^= 1;
 
     let mut tampered_fors = stateless_signature.clone();
     tampered_fors.fors.entries[0].secret_leaf[0] ^= 1;
@@ -77,20 +62,9 @@ fn generate_shrincs_sphincs_256s_keccak_vectors() {
     wrong_public_root.hypertree_root[0] ^= 1;
 
     let mut tampered_component_public_key = stateless_public_key.clone();
-    tampered_component_public_key.stateful_public_key[0] ^= 1;
+    tampered_component_public_key.pk_seed[0] ^= 1;
 
     let vectors = json!({
-        "stateful": {
-            "publicKey": stateful_public_key_json(&stateful_public_key),
-            "message": hex(&stateful_message),
-            "signature": stateful_signature_json(&stateful_signature),
-            "cases": {
-                "valid": stateful_case(&stateful_public_key, &stateful_message, &stateful_signature),
-                "wrongMessage": stateful_case(&stateful_public_key, &wrong_stateful_message, &stateful_signature),
-                "wrongPublicKey": stateful_case(&wrong_stateful_public_key, &stateful_message, &stateful_signature),
-                "corruptedSignature": stateful_case(&stateful_public_key, &stateful_message, &corrupted_stateful_signature)
-            }
-        },
         "stateless": {
             "publicKey": public_key_json(&stateless_public_key),
             "message": hex(&stateless_message),
@@ -144,15 +118,6 @@ fn generate_shrincs_sphincs_256s_keccak_vectors() {
 
 fn hash_word(label: &[u8]) -> [u8; HASH_LEN] {
     solana_program::keccak::hash(label).to_bytes()
-}
-
-fn stateful_case(public_key: &PublicKey, message: &[u8], signature: &StatefulSignature) -> Value {
-    json!({
-        "publicKey": stateful_public_key_json(public_key),
-        "message": hex(message),
-        "signature": stateful_signature_json(signature),
-        "calldata": stateful_calldata(public_key, message, signature)
-    })
 }
 
 fn stateless_case(public_key: &PublicKey, message: &[u8], signature: &StatelessSignature) -> Value {
@@ -227,45 +192,19 @@ fn uint_word(value: u64) -> [u8; HASH_LEN] {
     out
 }
 
-fn stateful_calldata(
-    public_key: &PublicKey,
-    message: &[u8],
-    signature: &StatefulSignature,
-) -> String {
-    let encoded = &public_key.stateful_public_key;
-    let key = format!(
-        "({},{},{})",
-        hex(&encoded[0..32]),
-        hex(&encoded[32..64]),
-        u32::from_be_bytes(encoded[64..68].try_into().expect("max signatures"))
-    );
-    let sig = format!(
-        "({},{},{},{})",
-        hex(signature.randomizer),
-        signature.counter,
-        fixed_array(signature.chains.iter().map(hex)),
-        fixed_array(signature.auth_path.iter().map(hex))
-    );
-    cast_calldata(
-        "f((bytes32,bytes32,uint32),bytes,(bytes32,uint32,bytes32[64],bytes32[]))",
-        &[key, hex(message), sig],
-    )
-}
-
 fn stateless_calldata(
     public_key: &PublicKey,
     message: &[u8],
     signature: &StatelessSignature,
 ) -> String {
     let public_key = format!(
-        "({},{},{})",
-        hex(&public_key.stateful_public_key),
+        "({},{})",
         hex(&public_key.pk_seed),
         hex(&public_key.hypertree_root)
     );
     let sig = stateless_signature_cast(signature);
     cast_calldata(
-        "f((bytes,bytes,bytes),bytes,((bytes,uint32,(bytes,bytes[])[]),(uint64,uint32,bytes,(bytes,uint32,bytes[]),bytes[])[]))",
+        "f((bytes,bytes),bytes,((bytes,uint32,(bytes,bytes[])[]),(uint64,uint32,bytes,(bytes,uint32,bytes[]),bytes[])[]))",
         &[public_key, hex(message), sig],
     )
 }
@@ -360,30 +299,10 @@ fn cast_calldata(signature: &str, args: &[String]) -> String {
     format!("0x00000000{}", encoded.trim().trim_start_matches("0x"))
 }
 
-fn stateful_public_key_json(public_key: &PublicKey) -> Value {
-    let encoded = &public_key.stateful_public_key;
-    json!({
-        "pkSeed": hex(&encoded[0..32]),
-        "root": hex(&encoded[32..64]),
-        "maxSignatures": u32::from_be_bytes(encoded[64..68].try_into().expect("max signatures"))
-    })
-}
-
 fn public_key_json(public_key: &PublicKey) -> Value {
     json!({
-        "statefulPublicKey": hex(&public_key.stateful_public_key),
-        "publicKeyCommitment": hex(&public_key.public_key_commitment),
         "pkSeed": hex(&public_key.pk_seed),
         "hypertreeRoot": hex(&public_key.hypertree_root)
-    })
-}
-
-fn stateful_signature_json(signature: &StatefulSignature) -> Value {
-    json!({
-        "randomizer": hex(signature.randomizer),
-        "counter": signature.counter,
-        "chains": signature.chains.iter().map(hex).collect::<Vec<_>>(),
-        "authPath": signature.auth_path.iter().map(hex).collect::<Vec<_>>()
     })
 }
 

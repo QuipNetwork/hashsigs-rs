@@ -23,54 +23,20 @@
 //! Solidity verifier encoded the same idea explicitly and we want the Rust
 //! signer to make those byte-level choices visible.
 
-use super::verifier::{
-    PublicKey, HASH_LEN, NUM_WOTS_CHAINS, STATEFUL_PUBLIC_KEY_BYTES, WOTS_CHAIN_LEN,
-};
+use super::verifier::{PublicKey, HASH_LEN, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN};
 use solana_program::keccak::hash as keccak256_hash;
 
 pub(crate) const WOTS_C_MAX_GRIND_COUNTER: u32 = 1 << 24;
 pub(crate) const FORS_C_MAX_GRIND_COUNTER: u32 = 1 << 24;
 
 pub(crate) fn public_key_from_components(
-    stateful_public_key: Vec<u8>,
     pk_seed: [u8; HASH_LEN],
     hypertree_root: [u8; HASH_LEN],
 ) -> PublicKey {
-    let public_key_commitment =
-        public_key_commitment(&stateful_public_key, &pk_seed, &hypertree_root);
     PublicKey {
-        stateful_public_key,
-        public_key_commitment: public_key_commitment.to_vec(),
         pk_seed: pk_seed.to_vec(),
         hypertree_root: hypertree_root.to_vec(),
     }
-}
-
-pub(crate) fn public_key_commitment(
-    stateful_public_key: &[u8],
-    pk_seed: &[u8; HASH_LEN],
-    hypertree_root: &[u8; HASH_LEN],
-) -> [u8; HASH_LEN] {
-    hash_packed(&[
-        b"shrincs-public-key",
-        stateful_public_key,
-        pk_seed,
-        hypertree_root,
-    ])
-}
-
-pub(crate) fn encode_stateful_public_key(
-    pk_seed: [u8; HASH_LEN],
-    root: [u8; HASH_LEN],
-    max_signatures: u32,
-) -> Vec<u8> {
-    // Keep this byte layout identical to `decode_stateful_public_key`:
-    // pk_seed || root || max_signatures as big-endian u32.
-    let mut out = Vec::with_capacity(STATEFUL_PUBLIC_KEY_BYTES);
-    out.extend_from_slice(&pk_seed);
-    out.extend_from_slice(&root);
-    out.extend_from_slice(&max_signatures.to_be_bytes());
-    out
 }
 
 pub(crate) fn derive32(domain: &[u8], seed: &[u8], data: &[u8]) -> [u8; HASH_LEN] {

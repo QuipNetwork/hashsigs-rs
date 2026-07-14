@@ -25,6 +25,7 @@
 
 pub mod account;
 pub mod shrincs;
+#[cfg(feature = "wasm-bindings")]
 pub mod wasm;
 pub mod wotsplus;
 

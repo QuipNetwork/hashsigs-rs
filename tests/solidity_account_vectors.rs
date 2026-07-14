@@ -20,8 +20,7 @@ use std::path::PathBuf;
 
 use hashsigs_rs::shrincs::{
     ActionContext, ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey, RotationContext,
-    RotationTarget, ShrincsVerifier, StatefulRotationTarget, StatefulSignature, StatelessSignature,
-    WotsCSignature, HASH_LEN,
+    RotationTarget, ShrincsVerifier, StatelessSignature, WotsCSignature, HASH_LEN,
 };
 use serde_json::Value;
 
@@ -30,19 +29,9 @@ struct AbiDecoder<'a> {
 }
 
 #[derive(Debug)]
-struct StatefulActionVector {
-    current_shrincs_public_key: [u8; HASH_LEN],
-    public_key: PublicKey,
-    context: ActionContext,
-    action_type: [u8; HASH_LEN],
-    payload_hash: [u8; HASH_LEN],
-    signature: StatefulSignature,
-    message: Vec<u8>,
-}
-
-#[derive(Debug)]
 struct StatelessActionVector {
-    current_shrincs_public_key: [u8; HASH_LEN],
+    current_pk_seed: [u8; HASH_LEN],
+    current_hypertree_root: [u8; HASH_LEN],
     public_key: PublicKey,
     context: ActionContext,
     action_type: [u8; HASH_LEN],
@@ -52,18 +41,9 @@ struct StatelessActionVector {
 }
 
 #[derive(Debug)]
-struct StatefulOnlyRotationVector {
-    current_shrincs_public_key: [u8; HASH_LEN],
-    current_public_key: PublicKey,
-    context: RotationContext,
-    next_key: StatefulRotationTarget,
-    recovery_signature: StatelessSignature,
-    message: Vec<u8>,
-}
-
-#[derive(Debug)]
 struct FullRotationVector {
-    current_shrincs_public_key: [u8; HASH_LEN],
+    current_pk_seed: [u8; HASH_LEN],
+    current_hypertree_root: [u8; HASH_LEN],
     current_public_key: PublicKey,
     context: RotationContext,
     next_key: RotationTarget,
@@ -76,19 +56,9 @@ impl<'a> AbiDecoder<'a> {
         Self { data }
     }
 
-    fn decode_root_stateful_action_vector(&self) -> StatefulActionVector {
-        let start = self.read_usize(0);
-        self.decode_stateful_action_vector(start)
-    }
-
     fn decode_root_stateless_action_vector(&self) -> StatelessActionVector {
         let start = self.read_usize(0);
         self.decode_stateless_action_vector(start)
-    }
-
-    fn decode_root_stateful_only_rotation_vector(&self) -> StatefulOnlyRotationVector {
-        let start = self.read_usize(0);
-        self.decode_stateful_only_rotation_vector(start)
     }
 
     fn decode_root_full_rotation_vector(&self) -> FullRotationVector {
@@ -96,59 +66,36 @@ impl<'a> AbiDecoder<'a> {
         self.decode_full_rotation_vector(start)
     }
 
-    fn decode_stateful_action_vector(&self, start: usize) -> StatefulActionVector {
-        StatefulActionVector {
-            current_shrincs_public_key: self.read_bytes32(start),
-            public_key: self.decode_public_key(start, start + 32),
-            context: self.decode_action_context(start + 64),
-            action_type: self.read_bytes32(start + 224),
-            payload_hash: self.read_bytes32(start + 256),
-            signature: self.decode_stateful_signature(start, start + 288),
-            message: self.decode_bytes(start, start + 320),
-        }
-    }
-
     fn decode_stateless_action_vector(&self, start: usize) -> StatelessActionVector {
         StatelessActionVector {
-            current_shrincs_public_key: self.read_bytes32(start),
-            public_key: self.decode_public_key(start, start + 32),
-            context: self.decode_action_context(start + 64),
-            action_type: self.read_bytes32(start + 224),
-            payload_hash: self.read_bytes32(start + 256),
-            signature: self.decode_stateless_signature(start, start + 288),
-            message: self.decode_bytes(start, start + 320),
-        }
-    }
-
-    fn decode_stateful_only_rotation_vector(&self, start: usize) -> StatefulOnlyRotationVector {
-        StatefulOnlyRotationVector {
-            current_shrincs_public_key: self.read_bytes32(start),
-            current_public_key: self.decode_public_key(start, start + 32),
-            context: self.decode_rotation_context(start + 64),
-            next_key: self.decode_stateful_rotation_target(start, start + 160),
-            recovery_signature: self.decode_stateless_signature(start, start + 192),
-            message: self.decode_bytes(start, start + 224),
+            current_pk_seed: self.read_bytes32(start),
+            current_hypertree_root: self.read_bytes32(start + 32),
+            public_key: self.decode_public_key(start, start + 64),
+            context: self.decode_action_context(start + 96),
+            action_type: self.read_bytes32(start + 256),
+            payload_hash: self.read_bytes32(start + 288),
+            signature: self.decode_stateless_signature(start, start + 320),
+            message: self.decode_bytes(start, start + 352),
         }
     }
 
     fn decode_full_rotation_vector(&self, start: usize) -> FullRotationVector {
         FullRotationVector {
-            current_shrincs_public_key: self.read_bytes32(start),
-            current_public_key: self.decode_public_key(start, start + 32),
-            context: self.decode_rotation_context(start + 64),
-            next_key: self.decode_rotation_target(start, start + 160),
-            recovery_signature: self.decode_stateless_signature(start, start + 192),
-            message: self.decode_bytes(start, start + 224),
+            current_pk_seed: self.read_bytes32(start),
+            current_hypertree_root: self.read_bytes32(start + 32),
+            current_public_key: self.decode_public_key(start, start + 64),
+            context: self.decode_rotation_context(start + 96),
+            next_key: self.decode_rotation_target(start, start + 192),
+            recovery_signature: self.decode_stateless_signature(start, start + 224),
+            message: self.decode_bytes(start, start + 256),
         }
     }
 
     fn decode_public_key(&self, base: usize, head: usize) -> PublicKey {
         let start = base + self.read_usize(head);
         PublicKey {
-            stateful_public_key: self.decode_bytes(start, start),
-            public_key_commitment: self.decode_bytes(start, start + 32),
-            pk_seed: self.decode_bytes(start, start + 64),
-            hypertree_root: self.decode_bytes(start, start + 96),
+            pk_seed: self.decode_bytes(start, start),
+            hypertree_root: self.decode_bytes(start, start + 32),
         }
     }
 
@@ -167,16 +114,6 @@ impl<'a> AbiDecoder<'a> {
             domain_separator: self.read_bytes32(start),
             nonce: self.read_bytes32(start + 32),
             key_version: self.read_bytes32(start + 64),
-        }
-    }
-
-    fn decode_stateful_signature(&self, base: usize, head: usize) -> StatefulSignature {
-        let start = base + self.read_usize(head);
-        StatefulSignature {
-            randomizer: self.read_bytes32(start),
-            counter: self.read_u32(start + 32),
-            chains: self.decode_array_bytes32(start, start + 64),
-            auth_path: self.decode_array_bytes32(start, start + 96),
         }
     }
 
@@ -227,21 +164,11 @@ impl<'a> AbiDecoder<'a> {
         }
     }
 
-    fn decode_stateful_rotation_target(&self, base: usize, head: usize) -> StatefulRotationTarget {
-        let start = base + self.read_usize(head);
-        StatefulRotationTarget {
-            stateful_public_key: self.decode_bytes(start, start),
-            public_key_commitment: self.decode_bytes(start, start + 32),
-        }
-    }
-
     fn decode_rotation_target(&self, base: usize, head: usize) -> RotationTarget {
         let start = base + self.read_usize(head);
         RotationTarget {
-            stateful_public_key: self.decode_bytes(start, start),
-            public_key_commitment: self.decode_bytes(start, start + 32),
-            pk_seed: self.decode_bytes(start, start + 64),
-            hypertree_root: self.decode_bytes(start, start + 96),
+            pk_seed: self.decode_bytes(start, start),
+            hypertree_root: self.decode_bytes(start, start + 32),
         }
     }
 
@@ -249,14 +176,6 @@ impl<'a> AbiDecoder<'a> {
         let start = base + self.read_usize(head);
         let len = self.read_usize(start);
         self.slice(start + 32, len).to_vec()
-    }
-
-    fn decode_array_bytes32(&self, base: usize, head: usize) -> Vec<[u8; HASH_LEN]> {
-        let start = base + self.read_usize(head);
-        let len = self.read_usize(start);
-        (0..len)
-            .map(|index| self.read_bytes32(start + 32 + index * 32))
-            .collect()
     }
 
     fn decode_array_bytes(&self, base: usize, head: usize) -> Vec<Vec<u8>> {
@@ -355,42 +274,6 @@ fn bytes32_from_vec(bytes: &[u8]) -> [u8; HASH_LEN] {
 
 #[test]
 #[ignore = "requires manually copied Solidity account vectors; see README"]
-fn solidity_exported_stateful_action_vector_verifies_in_rust() {
-    let vectors = load_vectors();
-    let encoded = vectors["testExportStatefulActionBundle"]["stateful_vector_abi"]
-        .as_str()
-        .expect("missing stateful action vector blob");
-    let mut vector = AbiDecoder::new(&hex_to_bytes(encoded)).decode_root_stateful_action_vector();
-    let verifier = ShrincsVerifier::new();
-
-    assert_eq!(vector.action_type, vector.context.action_type);
-    assert_eq!(vector.payload_hash, vector.context.payload_hash);
-    assert_eq!(
-        vector.message,
-        verifier
-            .stateful_action_message_hash(vector.current_shrincs_public_key, &vector.context)
-            .to_vec(),
-    );
-    assert!(verifier.verify_stateful(
-        vector.current_shrincs_public_key,
-        &vector.public_key,
-        &vector.context,
-        &vector.signature,
-    ));
-
-    // A tampered Solidity-shaped signature must be rejected through the same
-    // decode-then-verify path.
-    vector.signature.chains[0][0] ^= 0x01;
-    assert!(!verifier.verify_stateful(
-        vector.current_shrincs_public_key,
-        &vector.public_key,
-        &vector.context,
-        &vector.signature,
-    ));
-}
-
-#[test]
-#[ignore = "requires manually copied Solidity account vectors; see README"]
 fn solidity_exported_stateless_action_vector_verifies_in_rust() {
     let vectors = load_vectors();
     let encoded = vectors["testExportStatelessActionBundle"]["stateless_vector_abi"]
@@ -404,11 +287,16 @@ fn solidity_exported_stateless_action_vector_verifies_in_rust() {
     assert_eq!(
         vector.message,
         verifier
-            .stateless_action_message_hash(vector.current_shrincs_public_key, &vector.context)
+            .stateless_action_message_hash(
+                vector.current_pk_seed,
+                vector.current_hypertree_root,
+                &vector.context,
+            )
             .to_vec(),
     );
     assert!(verifier.verify_stateless(
-        vector.current_shrincs_public_key,
+        vector.current_pk_seed,
+        vector.current_hypertree_root,
         &vector.public_key,
         &vector.context,
         &vector.signature,
@@ -418,61 +306,12 @@ fn solidity_exported_stateless_action_vector_verifies_in_rust() {
     // decode-then-verify path.
     vector.signature.fors.randomizer[0] ^= 0x01;
     assert!(!verifier.verify_stateless(
-        vector.current_shrincs_public_key,
+        vector.current_pk_seed,
+        vector.current_hypertree_root,
         &vector.public_key,
         &vector.context,
         &vector.signature,
     ));
-}
-
-#[test]
-#[ignore = "requires manually copied Solidity account vectors; see README"]
-fn solidity_exported_stateful_only_rotation_vector_verifies_in_rust() {
-    let vectors = load_vectors();
-    let encoded = vectors["testExportStatefulOnlyRotationBundle"]["stateful_rotation_vector_abi"]
-        .as_str()
-        .expect("missing stateful-only rotation vector blob");
-    let mut vector =
-        AbiDecoder::new(&hex_to_bytes(encoded)).decode_root_stateful_only_rotation_vector();
-    let verifier = ShrincsVerifier::new();
-
-    assert_eq!(
-        vector.message,
-        verifier
-            .stateful_rotation_message_hash(
-                vector.current_shrincs_public_key,
-                &vector.current_public_key,
-                &vector.context,
-                &vector.next_key,
-            )
-            .to_vec(),
-    );
-    let next_commitment = verifier
-        .rotate_stateful_via_stateless(
-            vector.current_shrincs_public_key,
-            &vector.current_public_key,
-            &vector.context,
-            &vector.recovery_signature,
-            &vector.next_key,
-        )
-        .expect("stateful-only rotation vector must verify in Rust");
-    assert_eq!(
-        next_commitment,
-        bytes32_from_vec(&vector.next_key.public_key_commitment),
-    );
-
-    // A tampered recovery signature must fail the cryptographic verification,
-    // not just the structural commitment checks.
-    vector.recovery_signature.fors.randomizer[0] ^= 0x01;
-    assert!(verifier
-        .rotate_stateful_via_stateless(
-            vector.current_shrincs_public_key,
-            &vector.current_public_key,
-            &vector.context,
-            &vector.recovery_signature,
-            &vector.next_key,
-        )
-        .is_none());
 }
 
 #[test]
@@ -489,37 +328,32 @@ fn solidity_exported_full_rotation_vector_verifies_in_rust() {
         vector.message,
         verifier
             .full_rotation_message_hash(
-                vector.current_shrincs_public_key,
+                vector.current_pk_seed,
+                vector.current_hypertree_root,
                 &vector.current_public_key,
                 &vector.context,
                 &vector.next_key,
             )
             .to_vec(),
     );
-    let next_commitment = verifier
-        .stateless_rotate(
-            vector.current_shrincs_public_key,
-            &vector.current_public_key,
-            &vector.context,
-            &vector.recovery_signature,
-            &vector.next_key,
-        )
-        .expect("full rotation vector must verify in Rust");
-    assert_eq!(
-        next_commitment,
-        bytes32_from_vec(&vector.next_key.public_key_commitment),
-    );
+    assert!(verifier.stateless_rotate(
+        vector.current_pk_seed,
+        vector.current_hypertree_root,
+        &vector.current_public_key,
+        &vector.context,
+        &vector.recovery_signature,
+        &vector.next_key,
+    ));
 
     // A tampered recovery signature must fail the cryptographic verification,
     // not just the structural commitment checks.
     vector.recovery_signature.fors.randomizer[0] ^= 0x01;
-    assert!(verifier
-        .stateless_rotate(
-            vector.current_shrincs_public_key,
-            &vector.current_public_key,
-            &vector.context,
-            &vector.recovery_signature,
-            &vector.next_key,
-        )
-        .is_none());
+    assert!(!verifier.stateless_rotate(
+        vector.current_pk_seed,
+        vector.current_hypertree_root,
+        &vector.current_public_key,
+        &vector.context,
+        &vector.recovery_signature,
+        &vector.next_key,
+    ));
 }

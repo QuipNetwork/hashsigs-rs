@@ -26,9 +26,6 @@ pub const NUM_FORS_TREES: u8 = 22;
 pub const WOTS_CHAIN_LEN: u16 = 16;
 pub const NUM_WOTS_CHAINS: u16 = 64;
 
-// Encoded stateful public key layout:
-// 32-byte pkSeed || 32-byte root || 4-byte maxSignatures.
-pub const STATEFUL_PUBLIC_KEY_BYTES: usize = 68;
 // Stateful WOTS-C uses 64 chains.
 pub const WOTS_CHAINS_STATEFUL: usize = 64;
 // Stateful WOTS-C uses base-16 digits for message expansion.
@@ -43,24 +40,10 @@ pub const ADDRESS_TYPE_FORS_TREE: u32 = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicKey {
-    /// Encoded stateful key: `pk_seed || root || max_signatures`.
-    pub stateful_public_key: Vec<u8>,
-    /// Commitment to the installed hybrid public-key bundle.
-    pub public_key_commitment: Vec<u8>,
     /// Global stateless public seed used for FORS-C, hypertree, and WOTS-C hashing.
     pub pk_seed: Vec<u8>,
     /// Expected final hypertree root.
     pub hypertree_root: Vec<u8>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct StatefulPublicKey {
-    /// Public seed used by stateful WOTS-C and the unbalanced XMSS-like tree.
-    pub pk_seed: [u8; HASH_LEN],
-    /// Root of the stateful unbalanced authentication tree.
-    pub root: [u8; HASH_LEN],
-    /// Highest accepted stateful leaf index.
-    pub max_signatures: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -126,19 +109,7 @@ pub struct StatelessSignature {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StatefulRotationTarget {
-    /// Encoded replacement stateful public key.
-    pub stateful_public_key: Vec<u8>,
-    /// Commitment to the replacement installed public-key bundle.
-    pub public_key_commitment: Vec<u8>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RotationTarget {
-    /// Replacement encoded stateful public key.
-    pub stateful_public_key: Vec<u8>,
-    /// Commitment to the replacement installed public-key bundle.
-    pub public_key_commitment: Vec<u8>,
     /// Replacement global stateless public seed.
     pub pk_seed: Vec<u8>,
     /// Replacement hypertree root.
