@@ -20,6 +20,7 @@
 use core::fmt;
 
 use super::verifier::HASH_LEN;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// Signer operations return `None` when stateful leaves are exhausted or
 /// WOTS-C/FORS-C grinding fails within the configured counter budget.
@@ -29,7 +30,7 @@ pub type ShrincsSignerResult<T> = Option<T>;
 ///
 /// These fields are deterministic derivations from seed material. Treat this as
 /// private key material: anyone with these seeds can sign.
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Zeroize, ZeroizeOnDrop)]
 pub struct ShrincsSigningKey {
     /// Secret seed used to derive stateful WOTS-C chain secrets.
     pub stateful_sk_seed: [u8; HASH_LEN],
