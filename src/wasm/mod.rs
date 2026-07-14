@@ -493,7 +493,7 @@ struct WasmWotsCSignature {
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct WasmHypertreeLayerSignature {
-    tree_index: u64,
+    tree_index: String,
     leaf_index: u32,
     wots_c_pk_hash: String,
     wots_c_signature: WasmWotsCSignature,
@@ -783,8 +783,12 @@ fn parse_stateless_signature(input: &WasmStatelessSignature) -> Result<Stateless
             .hypertree
             .iter()
             .map(|layer| {
+                let tree_index = layer
+                    .tree_index
+                    .parse::<u64>()
+                    .map_err(|_| format!("invalid treeIndex: {}", layer.tree_index))?;
                 Ok(HypertreeLayerSignature {
-                    tree_index: layer.tree_index,
+                    tree_index,
                     leaf_index: layer.leaf_index,
                     wots_c_pk_hash: parse_hex_bytes(&layer.wots_c_pk_hash)?,
                     wots_c_signature: WotsCSignature {
@@ -940,7 +944,7 @@ fn stateless_signature_dto_from_signer(
             .hypertree
             .iter()
             .map(|layer| WasmHypertreeLayerSignature {
-                tree_index: layer.tree_index,
+                tree_index: layer.tree_index.to_string(),
                 leaf_index: layer.leaf_index,
                 wots_c_pk_hash: hex_string(&layer.wots_c_pk_hash),
                 wots_c_signature: WasmWotsCSignature {
@@ -1048,10 +1052,7 @@ mod tests {
     };
     use crate::shrincs::{ShrincsSigner, ShrincsSigningKey};
     #[cfg(all(feature = "wasm-bindings", target_arch = "wasm32"))]
-    use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
-
-    #[cfg(all(feature = "wasm-bindings", target_arch = "wasm32"))]
-    wasm_bindgen_test_configure!(run_in_browser);
+    use wasm_bindgen_test::wasm_bindgen_test;
 
     fn hex(bytes: &[u8]) -> String {
         let mut out = String::from("0x");
@@ -1092,7 +1093,7 @@ mod tests {
                 .hypertree
                 .iter()
                 .map(|layer| WasmHypertreeLayerSignature {
-                    tree_index: layer.tree_index,
+                    tree_index: layer.tree_index.to_string(),
                     leaf_index: layer.leaf_index,
                     wots_c_pk_hash: hex(&layer.wots_c_pk_hash),
                     wots_c_signature: WasmWotsCSignature {

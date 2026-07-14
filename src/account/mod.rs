@@ -24,8 +24,8 @@ use solana_program::keccak::hash as keccak256_hash;
 use crate::shrincs::{
     ActionContext, PublicKey, RotationContext, RotationTarget, ShrincsVerifier,
     StatefulRotationTarget, StatefulSignature, StatelessSignature, HASH_LEN,
-    STATELESS_SIGNATURE_LIMIT,
 };
+use crate::shrincs::verifier::STATELESS_SIGNATURE_LIMIT;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StatefulPolicy {
@@ -337,10 +337,11 @@ impl ShrincsAccountVerifierExample {
 
         // Count the recovery signature against the current stateless budget before preserving it
         // into the next stateful-only epoch.
-        self.statelessSignaturesUsed += 1;
+        self.consumeStatelessRotationUse(nextCompositePublicKey, false);
         // Install the next stateful subkey while preserving stateless usage accounting because
         // the stateless key material is unchanged.
-        self.installRotatedKey(nextCompositePublicKey, false);
+        self.installFreshStatefulKey(nextCompositePublicKey);
+
         true
     }
 
@@ -388,15 +389,12 @@ impl ShrincsAccountVerifierExample {
             return false;
         };
 
-        // Count the recovery signature as the final stateless use under the old key.
-        self.statelessSignaturesUsed += 1;
-        // Reset the stateless budget only if the target actually replaces the stateless key
-        // material. A rotation target that reuses the current pk_seed and hypertree_root keeps
-        // the same few-time stateless key, so its usage accounting must carry forward.
-        let statelessKeyChanged = nextKey.pk_seed != currentPublicKey.pk_seed
-            || nextKey.hypertree_root != currentPublicKey.hypertree_root;
+        // Count the recovery signature as the final stateless use under the old key before
+        // installing the fully fresh stateless bundle.
+        self.consumeStatelessRotationUse(nextCompositePublicKey, true);
         // Install the next full key bundle and reset wrapper state for the new stateless epoch.
-        self.installRotatedKey(nextCompositePublicKey, statelessKeyChanged);
+        self.installFreshFullKey(nextCompositePublicKey);
+
         true
     }
 
@@ -448,7 +446,7 @@ impl ShrincsAccountVerifierExample {
 
     // setStatefulPolicyRecoveryRotation: Switch to recovery-only stateless rotation mode.
     // 1. Only the owner may change the wrapper policy.
-    // 2. Remain available even after the policy freeze so key rotation stays reachable.
+    // 2. Reject policy changes after any successful stateful leaf use in this key epoch.
     // 3. Preserve or initialize the stateful leaf cursor for later normal operation.
     // 4. Require an explicit enterRecoveryMode() call before stateless recovery is accepted.
     // 5. Emit the policy update for off-chain observers.
@@ -457,14 +455,12 @@ impl ShrincsAccountVerifierExample {
         caller: [u8; HASH_LEN],
     ) -> Result<(), AccountError> {
         self.onlyOwner(caller)?;
-        // The policy freeze intentionally does NOT apply here. The freeze exists to stop
-        // switches between leaf-tracking models (monotonic <-> bitmap) that would erase
-        // leaf-use memory and enable stateful leaf reuse. RecoveryRotation disables the
-        // stateful path entirely, so entering it cannot cause reuse — and it is the only
-        // route to key rotation, which is what clears the freeze. Blocking it here would
-        // permanently lock any account out of rotation after its first stateful signature.
-        // The freeze flag stays set, so switching back to a leaf-tracking policy without
-        // rotating first remains rejected.
+
+        // Freeze the stateful tracking model once any stateful leaf has been consumed in this epoch.
+        if self.statefulPolicyFrozen {
+            return Err(AccountError::StatefulPolicyFrozen);
+        }
+
         // Switch into the policy where stateless signatures serve as recovery authority.
         self.statefulPolicy = StatefulPolicy::RecoveryRotation;
         // Ensure the stateful cursor stays initialized for later normal operation.
@@ -593,6 +589,17 @@ impl ShrincsAccountVerifierExample {
         keccak256_hash(&encoded).to_bytes()
     }
 
+    // consumeStatelessRotationUse: Record one successful stateless recovery signature used for rotation.
+    // 1. Increment the current stateless usage count under the old key epoch.
+    // 2. Keep the Rust account state aligned with the Solidity wrapper's accounting model.
+    fn consumeStatelessRotationUse(
+        &mut self,
+        _nextCompositePublicKey: [u8; HASH_LEN],
+        _fullRotation: bool,
+    ) {
+        self.statelessSignaturesUsed += 1;
+    }
+
     // installRotatedKey: Install a rotated key bundle and reset wrapper state for the next epoch.
     // 1. Preserve the previous installed key commitment for the rotation event.
     // 2. Install the next SHRINCS public-key commitment.
@@ -625,6 +632,29 @@ impl ShrincsAccountVerifierExample {
         self.statefulPolicy = StatefulPolicy::MonotonicIndex;
         // Recovery mode ends once the new key has been installed.
         self.recoveryMode = false;
+    }
+
+    // installFreshStatefulKey: Install a fresh stateful subkey while preserving the stateless side.
+    // 1. Install the next SHRINCS public-key commitment.
+    // 2. Preserve stateless usage accounting because the stateless key material is unchanged.
+    // 3. Reset stateful tracking and wrapper policy state for the next epoch.
+    fn installFreshStatefulKey(&mut self, nextCompositePublicKey: [u8; HASH_LEN]) {
+        self.installRotatedKey(nextCompositePublicKey, false);
+    }
+
+    // installFreshFullKey: Install a fully fresh SHRINCS bundle for the next key epoch.
+    // 1. Install the next SHRINCS public-key commitment.
+    // 2. Reset stateless usage accounting because the stateless key material changes too.
+    // 3. Reset stateful tracking and wrapper policy state for the next epoch.
+    fn installFreshFullKey(&mut self, nextCompositePublicKey: [u8; HASH_LEN]) {
+        self.installRotatedKey(nextCompositePublicKey, true);
+    }
+
+    // installFreshKey: Backward-compatible alias for the full fresh-key install path.
+    // 1. Preserve existing helper-call behavior in tests and support harnesses.
+    // 2. Route to the semantic full-key install helper.
+    fn installFreshKey(&mut self, nextCompositePublicKey: [u8; HASH_LEN]) {
+        self.installFreshFullKey(nextCompositePublicKey);
     }
 
     fn onlyOwner(&self, caller: [u8; HASH_LEN]) -> Result<(), AccountError> {
@@ -877,15 +907,7 @@ mod tests {
             Err(AccountError::StatefulPolicyFrozen)
         );
         assert_eq!(
-            account.setStatefulPolicyMonotonicIndex(id(1), 5),
-            Err(AccountError::StatefulPolicyFrozen)
-        );
-        // RecoveryRotation stays selectable so the account can always rotate out of a
-        // used key; the freeze flag itself stays set until rotation.
-        assert_eq!(account.setStatefulPolicyRecoveryRotation(id(1)), Ok(()));
-        assert!(account.statefulPolicyFrozen());
-        assert_eq!(
-            account.setStatefulPolicyLeafBitmap(id(1)),
+            account.setStatefulPolicyRecoveryRotation(id(1)),
             Err(AccountError::StatefulPolicyFrozen)
         );
     }

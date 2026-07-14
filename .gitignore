@@ -6,3 +6,5 @@
 test-ledger
 pkg
 node_modules
+tests/test_vectors/shrincs_stateful_k_gas_vector.json
+tests/test_vectors/shrincs_account_wrapper_vectors.json

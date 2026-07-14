@@ -20,7 +20,7 @@ OUT_DIR="$OUT_BASE/$TARGET"
 wasm-pack build \
   --release \
   --target "$TARGET" \
-  --features wasm-bindings \
-  --out-dir "$OUT_DIR"
+  --out-dir "$OUT_DIR" \
+  --features wasm-bindings
 
 echo "built WASM package in $OUT_DIR"
