@@ -1,26 +1,55 @@
 #!/usr/bin/env bash
 
+# Build the SHRINCS wasm from the audited Rust crate and emit wasm-bindgen
+# bindings for both the Node.js and web targets.
+#
+# We use the two-step `cargo build` + `wasm-bindgen` CLI flow rather than
+# `wasm-pack`: recent Cargo (>=1.93) moved `build --out-dir` behind the
+# nightly-only `--artifact-dir`, which breaks `wasm-pack build`. The two-step
+# flow does the exact same work without the broken flag.
+#
+# Prereqs:
+#   rustup target add wasm32-unknown-unknown
+#   cargo install wasm-bindgen-cli --version 0.2.100   # must equal the crate's wasm-bindgen version
+
 set -euo pipefail
 
-TARGET="${1:-bundler}"
-OUT_BASE="${2:-pkg}"
+# Where the generated bindings land. CI and the ts/ package expect ts/src.
+OUT="${1:-ts/src}"
 
-case "$TARGET" in
-  bundler|web|nodejs)
-    ;;
-  *)
-    echo "unsupported wasm-pack target: $TARGET" >&2
-    echo "expected one of: bundler, web, nodejs" >&2
-    exit 1
-    ;;
-esac
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
 
-OUT_DIR="$OUT_BASE/$TARGET"
+WASM="target/wasm32-unknown-unknown/release/hashsigs_rs.wasm"
 
-wasm-pack build \
-  --release \
-  --target "$TARGET" \
-  --out-dir "$OUT_DIR" \
-  --features wasm-bindings
+# Must equal the crate's pinned wasm-bindgen version (Cargo.toml); a mismatched
+# CLI produces a cryptic schema error at build or runtime.
+REQUIRED_WB="0.2.100"
 
-echo "built WASM package in $OUT_DIR"
+if ! command -v wasm-bindgen >/dev/null 2>&1; then
+  echo "error: wasm-bindgen CLI not found. Install with:" >&2
+  echo "  cargo install wasm-bindgen-cli --version $REQUIRED_WB" >&2
+  exit 1
+fi
+
+HAVE_WB="$(wasm-bindgen --version | awk '{print $2}')"
+if [ "$HAVE_WB" != "$REQUIRED_WB" ]; then
+  echo "error: wasm-bindgen CLI is $HAVE_WB but $REQUIRED_WB is required" >&2
+  echo "       (a version mismatch produces a wasm-bindgen schema error)." >&2
+  echo "  cargo install wasm-bindgen-cli --version $REQUIRED_WB --force" >&2
+  exit 1
+fi
+
+# Force a recompile of this crate (deps stay cached). The cdylib output path
+# is shared and un-hashed across crate versions, so an incremental build can
+# declare a previously built version "fresh" and ship stale bytes — e.g. a
+# wasm whose baked-in version() doesn't match Cargo.toml.
+cargo clean -p hashsigs-rs --release --target wasm32-unknown-unknown
+
+cargo build --release --target wasm32-unknown-unknown --features wasm-bindings
+
+for target in nodejs web; do
+  wasm-bindgen "$WASM" --out-dir "$OUT/$target" --target "$target"
+done
+
+echo "built nodejs + web bindings into $OUT"

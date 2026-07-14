@@ -1,0 +1,39 @@
+{
+  "name": "@quip.network/hashsigs-wasm",
+  "version": "0.1.0-rc1",
+  "description": "SHRINCS hash-based signature verifier/signer, compiled from the audited hashsigs-rs crate to WebAssembly. Works in Node.js and the browser.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "browser": {
+    "./dist/loader.node.js": "./dist/loader.browser.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "browser": "./dist/loader.browser.js",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "license": "AGPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/quipnetwork/hashsigs-rs"
+  },
+  "scripts": {
+    "build:wasm": "bash ../bin/build-wasm.sh ts/src",
+    "gen-wasm-inline": "node scripts/gen-wasm-inline.mjs",
+    "build": "node scripts/sync-version.mjs && npm run build:wasm && npm run gen-wasm-inline && tsc -p tsconfig.json && npm run copy-wasm && npm run test",
+    "copy-wasm": "node scripts/copy-wasm.js",
+    "test": "node --test",
+    "prepack": "npm run build"
+  },
+  "devDependencies": {
+    "typescript": "^5.4",
+    "@types/node": "^20"
+  }
+}

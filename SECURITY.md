@@ -213,6 +213,33 @@ Guidance:
 - prefer wrapper-driven flows over ad hoc raw-message signing for production
   authorization use cases
 
+### Browser signer threat model
+
+The wasm signer surface must be treated as running inside the browser's normal
+same-origin trust boundary, not inside a hardened enclave.
+
+Security implication:
+
+- `WasmShrincsKeypair` keeps live signing-key material in wasm memory while the
+  handle exists
+- `exportSigningKeyUnsafe()` copies full secret signing state into JS-visible
+  values
+- any XSS, malicious same-origin script, compromised front-end dependency, or
+  hostile extension able to run in the page context can exfiltrate that key
+
+Guidance:
+
+- do not expose the browser signer in pages that execute untrusted third-party
+  JS
+- do not treat browser local storage, IndexedDB, or ordinary JS heap state as a
+  strong secret boundary
+- use `destroy()` on `WasmShrincsKeypair` once a handle is no longer needed;
+  this performs a best-effort early wipe and invalidates the handle
+- treat `exportSigningKeyUnsafe()` as a backup / migration primitive, not a
+  routine operational call
+- `exportSigningKey()` remains only as a legacy alias; it carries the same
+  risk and should not be preferred in new integrations
+
 ### WOTS+ robustness note
 
 The standalone `wotsplus` module still includes length-sensitive code paths that

@@ -8,3 +8,12 @@ pkg
 node_modules
 tests/test_vectors/shrincs_stateful_k_gas_vector.json
 tests/test_vectors/shrincs_account_wrapper_vectors.json
+
+# generated wasm-bindgen output + build artifacts for the ts/
+# package (built in CI)
+ts/dist
+ts/src/nodejs
+ts/src/web
+
+# local prompt/planning scratch - not committed
+_prompt_planning/
