@@ -25,8 +25,7 @@ pub use signer::{
 };
 pub use verifier::{
     ActionContext, ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey, RotationContext,
-    RotationTarget, ShrincsVerifier, StatefulSignature, StatelessSignature, WotsCSignature,
-    ADDRESS_TYPE_FORS_TREE, ADDRESS_TYPE_TREE, ADDRESS_TYPE_WOTS_HASH, HASH_LEN,
-    HASH_SUITE_KECCAK_256, STATELESS_SIGNATURE_LIMIT, WOTS_BASE_STATEFUL, WOTS_CHAINS_STATEFUL,
-    WOTS_TARGET_SUM_STATEFUL,
+    RotationTarget, ShrincsVerifier, StatelessSignature, WotsCSignature, ADDRESS_TYPE_FORS_TREE,
+    ADDRESS_TYPE_TREE, ADDRESS_TYPE_WOTS_HASH, HASH_LEN, HASH_SUITE_KECCAK_256,
+    STATELESS_SIGNATURE_LIMIT, WOTS_TARGET_SUM,
 };

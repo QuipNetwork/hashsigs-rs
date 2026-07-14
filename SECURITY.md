@@ -112,9 +112,8 @@ The account layer binds signatures to wrapper-owned state such as:
 - domain separator
 - nonce
 - key version
-- stateful leaf-use policy
 - stateless usage accounting
-- recovery mode
+- compact slot registration / revocation state
 
 Guidance:
 
@@ -123,61 +122,60 @@ Guidance:
 - if you bypass the account layer, you must implement equivalent freshness
   protections yourself
 
-### Stateful signing must not reuse leaves
+### Compact slot use must remain policy-bound
 
-The stateful SHRINCS path depends on one-time leaf use.
+Compact signatures are intended to be accepted only through registered account
+slots.
 
 Security implication:
 
-- reusing a stateful signing leaf is a real misuse hazard
-- production callers should use the canonical stateful signing flow that
-  advances leaf state automatically
+- a compact signature must bind to the intended account action context
+- slot registration and revocation must be authorized by the installed
+  stateless key
 
 Guidance:
 
-- do not build production systems around explicit-leaf signing helpers
-- do not clone, roll back, or restore signer state in a way that can cause the
-  same stateful leaf to sign twice
-- if durable state is externalized, treat state advancement as security-critical
+- use canonical compact account-action hashing for account-style integrations
+- reject compact signatures for unregistered or revoked slots
+- keep slot identifiers derived from the registered `(subPkSeed, subPkRoot)` pair
 
-### Stateless recovery rotation is policy-gated
+### Stateless rotation is policy-gated
 
-Stateless signatures are supported for recovery and rotation flows, but they are
- not intended to bypass wrapper policy.
+Stateless signatures are supported for action, slot-management, and rotation
+flows, but they are not intended to bypass wrapper policy.
 
 Current intended model:
 
-- normal stateful actions happen through the stateful path
-- stateless recovery rotation is gated by:
-  - `RecoveryRotation`
-  - explicit `recoveryMode`
+- compact registered-slot actions use compact signatures
+- stateless signatures authorize:
+  - stateless account actions
+  - compact slot registration
+  - compact slot revocation
+  - full stateless key rotation
 
 Guidance:
 
-- use recovery/stateless signatures only through the intended canonical wrapper
-  flows
+- use stateless signatures only through the intended canonical wrapper flows
 - do not treat stateless signatures as unrestricted general-purpose authority in
   account-style integrations
 
-### Public-key commitment binding is security-critical
+### Public-key binding is security-critical
 
-The current SHRINCS design uses a fixed public-key model tied together by
-`public_key_commitment`.
+The current SHRINCS design stores the installed public-key words directly.
 
 Security implication:
 
 - verification depends on correctly binding:
-  - `stateful_public_key`
-  - `pk_seed`
-  - `hypertree_root`
+  - `pkSeed`
+  - `hypertreeRoot`
 - callers must not treat those components as independently swappable fields
 
 Guidance:
 
-- always verify against the installed/original public key bundle
+- always verify against the installed key words
 - do not reintroduce message-specific replacement public keys
-- treat `public_key_commitment` as the installed bundle identifier for account
-  and rotation flows
+- treat `(pkSeed, hypertreeRoot)` as the installed bundle for account and
+  rotation flows
 
 ### Rust account layer is an off-chain adaptation
 

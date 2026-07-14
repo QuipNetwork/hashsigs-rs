@@ -24,7 +24,7 @@
 
 use super::shrincs_verifier_types::{
     HypertreeLayerSignature, PublicKey, WotsCSignature, HASH_LEN, HYPERTREE_HEIGHT,
-    NUM_HYPERTREE_LAYERS, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN, WOTS_TARGET_SUM_STATEFUL,
+    NUM_HYPERTREE_LAYERS, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN, WOTS_TARGET_SUM,
 };
 use super::shrincs_verifier_utils::{
     base_w_digit, hash_packed, hypertree_address_word, word32, wots_address_base,
@@ -171,7 +171,7 @@ fn verify_wots_c32(
     }
     // WOTS-C does not carry an explicit checksum chain suffix. Instead the message expansion
     // is accepted only when reconstructed base-w digits add up to the fixed target sum.
-    if digit_sum != WOTS_TARGET_SUM_STATEFUL {
+    if digit_sum != WOTS_TARGET_SUM {
         return false;
     }
 

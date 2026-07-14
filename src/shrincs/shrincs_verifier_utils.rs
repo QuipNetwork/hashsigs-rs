@@ -145,7 +145,7 @@ pub(crate) fn address_word32(
     chain: u32,
     step: u32,
 ) -> [u8; HASH_LEN] {
-    // 32-byte address word used by WOTS-C/stateful hashing:
+    // 32-byte address word used by WOTS-C hashing:
     // layer(4) || zero(4) || tree(8) || type(4) || keypair(4) || chain(4) || step(4).
     // The zero bytes at 4..8 are intentional because Solidity shifts `tree` by 128 bits.
     let mut out = [0u8; HASH_LEN];

@@ -17,7 +17,6 @@
 
 //! Public SHRINCS key generation and signing facade.
 //!
-//! - `shrincs_signer_stateful` builds stateful WOTS-C signatures.
 //! - `shrincs_signer_fors_c` opens the fixed FORS forest for a message digest.
 //! - `shrincs_signer_hypertree` carries the FORS root to the hypertree root.
 
@@ -29,8 +28,6 @@ mod shrincs_signer_compact;
 mod shrincs_signer_fors_c;
 #[path = "shrincs_signer_hypertree.rs"]
 mod shrincs_signer_hypertree;
-#[path = "shrincs_signer_stateful.rs"]
-mod shrincs_signer_stateful;
 #[path = "shrincs_signer_types.rs"]
 mod shrincs_signer_types;
 #[path = "shrincs_signer_utils.rs"]
@@ -45,59 +42,24 @@ use self::shrincs_signer_compact::{
 };
 use self::shrincs_signer_fors_c::sign_fors_c;
 use self::shrincs_signer_hypertree::{hypertree_public_root, sign_hypertree};
-#[cfg(test)]
-use self::shrincs_signer_stateful::sign_stateful_raw_at_leaf as sign_stateful_raw_at_leaf_inner;
-use self::shrincs_signer_stateful::{
-    sign_stateful_raw as sign_stateful_raw_inner, stateful_subtree_root,
-};
 use self::shrincs_signer_utils::{derive32, public_key_from_components};
-use self::verifier::{
-    ActionContext, PublicKey, ShrincsVerifier, StatefulSignature, StatelessSignature, HASH_LEN,
-};
+use self::verifier::{ActionContext, PublicKey, ShrincsVerifier, StatelessSignature, HASH_LEN};
 
 pub struct ShrincsSigner;
-
-const INITIAL_STATEFUL_LEAF_INDEX: u32 = 1;
-const MAX_STATEFUL_SIGNATURES_LIMIT: u32 = 4096;
 
 impl ShrincsSigner {
     /// Deterministically derive signing material and a public key from seed material.
     ///
-    /// The public key contains one stateful tree plus one stateless `PK.seed`
-    /// and hypertree `PK.root`. The message-specific FORS root is derived
-    /// during signing and authenticated by the hypertree.
-    pub fn keygen(
-        seed_material: &[u8],
-        max_stateful_signatures: u32,
-    ) -> ShrincsSignerResult<(ShrincsSigningKey, PublicKey)> {
-        if max_stateful_signatures == 0 {
-            return None;
-        }
-        if max_stateful_signatures > MAX_STATEFUL_SIGNATURES_LIMIT {
-            return None;
-        }
-
-        let stateful_sk_seed = derive32(b"shrincs-stateful-sk-seed", seed_material, &[]);
-        let stateful_prf_seed = derive32(b"shrincs-stateful-prf-seed", seed_material, &[]);
-        let stateful_pk_seed = derive32(b"shrincs-stateful-pk-seed", seed_material, &[]);
-        let stateful_root = stateful_subtree_root(
-            &stateful_sk_seed,
-            &stateful_pk_seed,
-            INITIAL_STATEFUL_LEAF_INDEX,
-            max_stateful_signatures,
-        );
+    /// The public key contains the stateless `PK.seed` and hypertree `PK.root`.
+    /// The message-specific FORS root is derived during signing and authenticated
+    /// by the hypertree.
+    pub fn keygen(seed_material: &[u8]) -> ShrincsSignerResult<(ShrincsSigningKey, PublicKey)> {
         let stateless_sk_seed = derive32(b"shrincs-stateless-sk-seed", seed_material, &[]);
         let stateless_prf_seed = derive32(b"shrincs-stateless-prf-seed", seed_material, &[]);
         let pk_seed = derive32(b"shrincs-pk-seed", seed_material, &[]);
         let hypertree_root = hypertree_public_root(&stateless_sk_seed, &pk_seed);
 
         let signing_key = ShrincsSigningKey {
-            stateful_sk_seed,
-            stateful_prf_seed,
-            stateful_pk_seed,
-            stateful_root,
-            max_stateful_signatures,
-            next_stateful_leaf_index: INITIAL_STATEFUL_LEAF_INDEX,
             stateless_sk_seed,
             stateless_prf_seed,
             pk_seed,
@@ -106,24 +68,6 @@ impl ShrincsSigner {
         let public_key = public_key_from_components(pk_seed, hypertree_root);
 
         Some((signing_key, public_key))
-    }
-
-    /// Sign raw bytes with the next unused stateful leaf.
-    pub fn sign_stateful_raw(
-        signing_key: &mut ShrincsSigningKey,
-        message: &[u8],
-    ) -> ShrincsSignerResult<StatefulSignature> {
-        sign_stateful_raw_inner(signing_key, message)
-    }
-
-    /// Sign raw bytes with a specific stateful leaf for deterministic tests.
-    #[cfg(test)]
-    pub(crate) fn sign_stateful_raw_at_leaf(
-        signing_key: &ShrincsSigningKey,
-        leaf_index: u32,
-        message: &[u8],
-    ) -> ShrincsSignerResult<StatefulSignature> {
-        sign_stateful_raw_at_leaf_inner(signing_key, leaf_index, message)
     }
 
     /// Sign raw bytes with FORS-C plus the hypertree.

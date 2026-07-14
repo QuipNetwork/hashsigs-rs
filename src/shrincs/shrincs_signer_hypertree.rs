@@ -24,7 +24,7 @@ use super::shrincs_signer_utils::{
 };
 use super::verifier::{
     HypertreeLayerSignature, WotsCSignature, HASH_LEN, HYPERTREE_HEIGHT, NUM_HYPERTREE_LAYERS,
-    NUM_WOTS_CHAINS, WOTS_CHAIN_LEN, WOTS_TARGET_SUM_STATEFUL,
+    NUM_WOTS_CHAINS, WOTS_CHAIN_LEN, WOTS_TARGET_SUM,
 };
 
 pub(crate) fn sign_hypertree(
@@ -264,7 +264,7 @@ fn sign_stateless_wots_c(
         let digits = (0..NUM_WOTS_CHAINS as usize)
             .map(|index| base_w_digit(WOTS_CHAIN_LEN, digest, index))
             .collect::<Vec<_>>();
-        if digits.iter().sum::<u32>() != WOTS_TARGET_SUM_STATEFUL {
+        if digits.iter().sum::<u32>() != WOTS_TARGET_SUM {
             continue;
         }
 

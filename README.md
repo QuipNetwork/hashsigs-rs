@@ -9,7 +9,7 @@ The supported account shape follows the JARDIN-style split:
 - use stateless signatures for stateless actions, compact-slot registration, compact-slot revocation, and full stateless key rotation
 - use compact FORS-C signatures for normal registered-slot actions
 
-There is no global `publicKeyCommitment` in the account model. `PublicKey` is:
+There is no global account-key commitment in the account model. `PublicKey` is:
 
 ```text
 PublicKey = (pkSeed, hypertreeRoot)
@@ -43,7 +43,7 @@ It contains only `stateless` and `compact` top-level vector groups.
 cargo test
 ```
 
-The account tests cover the compact replacement for the old stateful account path:
+The account tests cover the compact/stateless account path:
 
 - stateless storage as direct `pkSeed`/`hypertreeRoot`
 - stateless-authorized compact slot registration
@@ -53,6 +53,6 @@ The account tests cover the compact replacement for the old stateful account pat
 
 ## WASM
 
-The previous WASM binding surface exposed the removed stateful account path and
-the removed global public-key commitment. It is intentionally not exported in
-normal builds while the compact/stateless-only binding surface is rebuilt.
+The previous WASM binding surface exposed removed account APIs and the removed
+global public-key commitment. It is intentionally not exported in normal builds
+while the compact/stateless-only binding surface is rebuilt.

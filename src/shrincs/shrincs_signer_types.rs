@@ -21,8 +21,8 @@ use core::fmt;
 
 use super::verifier::HASH_LEN;
 
-/// Signer operations return `None` when stateful leaves are exhausted or
-/// WOTS-C/FORS-C grinding fails within the configured counter budget.
+/// Signer operations return `None` when WOTS-C/FORS-C grinding fails within
+/// the configured counter budget.
 pub type ShrincsSignerResult<T> = Option<T>;
 
 /// Byte offset of q inside the full compact signature.
@@ -83,24 +83,12 @@ impl CompactSignature {
     }
 }
 
-/// Secret material for both the stateful fast path and stateless recovery path.
+/// Secret material for stateless SHRINCS signing.
 ///
 /// These fields are deterministic derivations from seed material. Treat this as
 /// private key material: anyone with these seeds can sign.
 #[derive(PartialEq, Eq)]
 pub struct ShrincsSigningKey {
-    /// Secret seed used to derive stateful WOTS-C chain secrets.
-    pub stateful_sk_seed: [u8; HASH_LEN],
-    /// Secret PRF seed used to derive stateful WOTS-C message randomizers.
-    pub stateful_prf_seed: [u8; HASH_LEN],
-    /// Public seed used in stateful WOTS-C and stateful tree hashing.
-    pub stateful_pk_seed: [u8; HASH_LEN],
-    /// Root of the stateful unbalanced tree committed in the public key.
-    pub stateful_root: [u8; HASH_LEN],
-    /// Highest stateful leaf index this key may sign with.
-    pub max_stateful_signatures: u32,
-    /// Next monotonic stateful leaf index. Persist this after each stateful signature.
-    pub next_stateful_leaf_index: u32,
     /// Stateless SK.seed-style material used to derive FORS-C and hypertree WOTS-C secrets.
     pub stateless_sk_seed: [u8; HASH_LEN],
     /// Stateless SK.prf-style material used to derive stateless message randomizers.
@@ -114,12 +102,6 @@ pub struct ShrincsSigningKey {
 impl fmt::Debug for ShrincsSigningKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ShrincsSigningKey")
-            .field("stateful_sk_seed", &"<redacted>")
-            .field("stateful_prf_seed", &"<redacted>")
-            .field("stateful_pk_seed", &"<redacted>")
-            .field("stateful_root", &"<redacted>")
-            .field("max_stateful_signatures", &self.max_stateful_signatures)
-            .field("next_stateful_leaf_index", &self.next_stateful_leaf_index)
             .field("stateless_sk_seed", &"<redacted>")
             .field("stateless_prf_seed", &"<redacted>")
             .field("pk_seed", &"<redacted>")

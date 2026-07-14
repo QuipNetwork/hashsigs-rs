@@ -356,7 +356,7 @@ mod tests {
 
     #[test]
     fn compact_slot_registration_enables_compact_action_and_revocation_disables_it() {
-        let (signing_key, public_key) = ShrincsSigner::keygen(b"compact slot account", 4).unwrap();
+        let (signing_key, public_key) = ShrincsSigner::keygen(b"compact slot account").unwrap();
         let mut account = account_for(&public_key);
         let master = id(9);
         let randomness = id(10);
@@ -419,8 +419,8 @@ mod tests {
     #[test]
     fn full_rotation_replaces_direct_stateless_key_words() {
         let (current_signing_key, current_public_key) =
-            ShrincsSigner::keygen(b"current account key", 4).unwrap();
-        let (_, next_public_key) = ShrincsSigner::keygen(b"next account key", 4).unwrap();
+            ShrincsSigner::keygen(b"current account key").unwrap();
+        let (_, next_public_key) = ShrincsSigner::keygen(b"next account key").unwrap();
         let mut account = account_for(&current_public_key);
         let next_key = RotationTarget {
             pk_seed: next_public_key.pk_seed.clone(),

@@ -53,9 +53,8 @@ impl ShrincsVerifier {
 
     /// Verify a stateless signature over an action context.
     ///
-    /// This follows the same safe-context pattern as `verify_stateful`, but it
-    /// verifies the message through FORS-C and the hypertree rather than through
-    /// the stateful WOTS-C tree.
+    /// The message is verified through FORS-C and the hypertree under the
+    /// expected pkSeed/root pair installed by the account.
     pub fn verify_stateless(
         &self,
         expected_pk_seed: [u8; HASH_LEN],
@@ -80,9 +79,8 @@ impl ShrincsVerifier {
 
     /// Rotate the full SHRINCS key bundle using a stateless recovery signature.
     ///
-    /// This is stricter than `rotate_stateful_via_stateless`: every public
-    /// component of the next bundle is supplied and signed into the recovery
-    /// message before the next installed-key commitment is returned.
+    /// Every public component of the next bundle is supplied and signed into
+    /// the recovery message before the next installed key is accepted.
     pub fn stateless_rotate(
         &self,
         expected_pk_seed: [u8; HASH_LEN],
@@ -110,7 +108,7 @@ impl ShrincsVerifier {
         }
 
         // The recovery message signs the replacement bundle fields so callers do
-        // not authorize a different stateful/stateless tuple accidentally.
+        // not authorize a different pkSeed/root tuple accidentally.
         let recovery_message = self.full_rotation_message_hash(
             expected_pk_seed,
             expected_hypertree_root,
@@ -132,8 +130,7 @@ impl ShrincsVerifier {
 
     /// Verify a raw stateless message.
     ///
-    /// Same warning as `verify_stateful_unsafe_raw`: callers own replay
-    /// protection and domain separation when they use this path.
+    /// Callers own replay protection and domain separation when they use this path.
     pub(crate) fn verify_stateless_unsafe_raw(
         &self,
         expected_pk_seed: [u8; HASH_LEN],
@@ -158,9 +155,8 @@ impl ShrincsVerifier {
 
     /// Build the canonical message hash for a stateless action.
     ///
-    /// The only difference from the stateful action hash is the operation tag.
-    /// That prevents a valid stateful authorization from being replayed as a
-    /// stateless authorization or vice versa.
+    /// The operation tag prevents cross-protocol replay with compact actions
+    /// or other future message families.
     pub fn stateless_action_message_hash(
         &self,
         expected_pk_seed: [u8; HASH_LEN],

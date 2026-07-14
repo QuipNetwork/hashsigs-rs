@@ -17,8 +17,7 @@ const OUT_PATH: &str = "tests/test_vectors/shrincs_sphincs_256s_keccak.json";
 #[ignore = "run explicitly to refresh Solidity SHRINCS vectors"]
 fn generate_shrincs_sphincs_256s_keccak_vectors() {
     let (stateless_key, stateless_public_key) =
-        ShrincsSigner::keygen(b"shrincs solidity vector stateless seed", 256)
-            .expect("stateless keygen");
+        ShrincsSigner::keygen(b"shrincs solidity vector stateless seed").expect("stateless keygen");
     let stateless_message = hash_word(b"shrincs solidity stateless message").to_vec();
     let stateless_signature = ShrincsSigner::sign_stateless_raw(&stateless_key, &stateless_message)
         .expect("stateless signature");

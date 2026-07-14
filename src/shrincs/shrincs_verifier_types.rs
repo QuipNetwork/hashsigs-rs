@@ -25,14 +25,8 @@ pub const FORS_TREE_HEIGHT: u8 = 14;
 pub const NUM_FORS_TREES: u8 = 22;
 pub const WOTS_CHAIN_LEN: u16 = 16;
 pub const NUM_WOTS_CHAINS: u16 = 64;
-
-// Stateful WOTS-C uses 64 chains.
-pub const WOTS_CHAINS_STATEFUL: usize = 64;
-// Stateful WOTS-C uses base-16 digits for message expansion.
-pub const WOTS_BASE_STATEFUL: u32 = 16;
-// The 64 base-16 digits reconstructed from the stateful message digest must
-// sum to 480.
-pub const WOTS_TARGET_SUM_STATEFUL: u32 = 480;
+/// The 64 base-16 digits reconstructed from a WOTS-C message digest must sum to 480.
+pub const WOTS_TARGET_SUM: u32 = 480;
 
 pub const ADDRESS_TYPE_WOTS_HASH: u32 = 0;
 pub const ADDRESS_TYPE_TREE: u32 = 2;
@@ -44,18 +38,6 @@ pub struct PublicKey {
     pub pk_seed: Vec<u8>,
     /// Expected final hypertree root.
     pub hypertree_root: Vec<u8>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StatefulSignature {
-    /// Per-signature randomizer mixed into WOTS digit derivation.
-    pub randomizer: [u8; HASH_LEN],
-    /// Counter mixed into WOTS digit derivation.
-    pub counter: u32,
-    /// One WOTS-C chain value per reconstructed digit.
-    pub chains: Vec<[u8; HASH_LEN]>,
-    /// Unbalanced authentication path. Its length is also the leaf index.
-    pub auth_path: Vec<[u8; HASH_LEN]>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
