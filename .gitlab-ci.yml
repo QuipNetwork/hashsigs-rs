@@ -2,15 +2,23 @@
 #
 # - On merge requests and the default branch: build + test the crate (incl. the
 #   wasm target) so regressions are caught before merge.
-# - On a version tag (e.g. v0.2.0): build the wasm, package ts/, and publish
-#   @quip.network/hashsigs-wasm at the tag's version to npm.
+# - On a version tag (e.g. v0.2.0): build the wasm, pack the ts/ package, and
+#   publish @quip.network/hashsigs-wasm at the tag's version to npm.
 #
 # Publishing uses npm OIDC trusted publishing (tokenless): GitLab mints a
 # short-lived NPM_ID_TOKEN via `id_tokens`, npm exchanges it for publish
 # credentials, and provenance attestations are generated automatically. There
 # is no long-lived NPM_TOKEN. A "Trusted Publisher" must be configured on
 # npmjs.com for @quip.network/hashsigs-wasm (namespace/project/CI-file path)
-# with both `npm publish` and `npm stage publish` allowed.
+# with `npm stage publish` allowed.
+#
+# RUNNER SPLIT: npm trusted publishing only works on gitlab.com shared runners,
+# not self-hosted runners. So the heavy Rust/wasm build runs on the self-hosted
+# fleet (tag `x86_64`) and produces a packed tarball artifact; a lightweight
+# publish job runs on a shared runner (tag `saas-linux-small-amd64`) and stages
+# that prebuilt tarball. Publishing a tarball skips the prepack rebuild, so the
+# shared runner needs only Node + npm. Shared runners must be enabled on the
+# project (Settings -> CI/CD -> Runners).
 #
 # npm staging requires the package to already exist, and OIDC trusted publishing
 # can only be configured on an existing package. So the very first publish is
@@ -25,7 +33,7 @@
 # NPM_VERSION because trusted publishing needs >=11.5.1 and staging >=11.15.0,
 # while Node 22.14 ships npm 10.x.
 
-stages: [test, publish]
+stages: [test, package, publish]
 
 variables:
   WASM_BINDGEN_VERSION: "0.2.100"
@@ -113,9 +121,38 @@ ts-conformance:
     - cd ts && npm ci
     - npm run build
 
+# Build + pack on the self-hosted fleet (has the Rust/wasm toolchain and the
+# muscle for it). Produces the publishable tarball as an artifact; the shared
+# runner cannot build wasm and must not try to.
+build-package:
+  stage: package
+  image: rust:1.89.0
+  tags: [x86_64] # self-hosted fleet; SaaS runners don't carry this tag
+  # Anchored semver, optional pre-release suffix (e.g. v0.2.0-rc1); rejects v1.2.3.4 / v1.2.3-foo trailing junk.
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$/ # runs only on a semver version tag
+  before_script:
+    - !reference [.install-node-pinned, before_script]
+    - !reference [.install-wasm-bindgen, before_script]
+  script:
+    # Tag pipelines do not run build-test, so gate the release on the Rust suite here.
+    - cargo test --locked --features wasm-bindings
+    - cd ts && npm ci
+    - npm version "${CI_COMMIT_TAG#v}" --no-git-tag-version --allow-same-version # tag v0.2.0 -> 0.2.0
+    # `npm pack` runs prepack -> npm run build (wasm + tsc + conformance +
+    # sync-version), then writes quip.network-hashsigs-wasm-<version>.tgz.
+    - npm pack
+  artifacts:
+    paths:
+      - ts/quip.network-hashsigs-wasm-*.tgz
+    expire_in: 7 days
+
+# Stage the prebuilt tarball on a shared runner (npm OIDC only works there).
+# Publishing a tarball skips prepack, so no Rust/wasm toolchain is needed.
 publish-npm:
   stage: publish
-  image: rust:1.89.0
+  image: node:${NODE_VERSION}
+  tags: [saas-linux-small-amd64] # gitlab.com shared runner; required for npm OIDC
   # OIDC token for tokenless trusted publishing; npm auto-detects NPM_ID_TOKEN.
   # SIGSTORE_ID_TOKEN enables the sigstore-signed provenance attestation.
   id_tokens:
@@ -123,23 +160,15 @@ publish-npm:
       aud: "npm:registry.npmjs.org"
     SIGSTORE_ID_TOKEN:
       aud: sigstore
-  # Anchored semver, optional pre-release suffix (e.g. v0.2.0-rc1); rejects v1.2.3.4 / v1.2.3-foo trailing junk.
   rules:
     - if: $CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$/ # runs only on a semver version tag
+  dependencies: [build-package] # pull the tarball artifact
   before_script:
-    - !reference [.install-node-pinned, before_script]
-    - !reference [.install-wasm-bindgen, before_script]
     # Trusted publishing (>=11.5.1) and staging (>=11.15.0) need a newer npm than
-    # Node 22.14 bundles.
+    # the node:22.14 image bundles.
     - npm install -g "npm@${NPM_VERSION}"
     - npm --version
   script:
-    # Tag pipelines do not run build-test, so gate the release on the Rust suite here.
-    - cargo test --locked --features wasm-bindings
-    # npm run build rebuilds wasm + runs conformance; do not pre-run either.
-    - cd ts && npm ci
-    - npm version "${CI_COMMIT_TAG#v}" --no-git-tag-version --allow-same-version # tag v0.2.0 -> 0.2.0
-    - npm run build
     # Stage the release for maintainer approval (npm stage approve, 2FA). The
     # package must already exist (first publish is a one-time manual local
     # `npm publish`); fail with a clear message rather than a cryptic npm error
@@ -147,7 +176,8 @@ publish-npm:
     # dist-tag, derived from the prerelease identifier (rc1 -> rc, beta.2 -> beta).
     - |
       set -euo pipefail
-      PKG="$(node -p 'require("./package.json").name')"
+      PKG="$(node -p 'require("./ts/package.json").name')"
+      TARBALL="$(ls ts/quip.network-hashsigs-wasm-*.tgz)"
       if ! npm view "$PKG" version >/dev/null 2>&1; then
         echo "ERROR: $PKG is not on npm yet. Do the one-time bootstrap publish" >&2
         echo "locally (npm publish, with 2FA), add the Trusted Publisher, then" >&2
@@ -162,5 +192,5 @@ publish-npm:
           [ -n "$DIST_TAG" ] || DIST_TAG="next"
           ;;
       esac
-      echo "staging $PKG@$VERSION on dist-tag '$DIST_TAG'"
-      npm stage publish --access public --tag "$DIST_TAG"
+      echo "staging $TARBALL ($PKG@$VERSION) on dist-tag '$DIST_TAG'"
+      npm stage publish "$TARBALL" --access public --tag "$DIST_TAG"
