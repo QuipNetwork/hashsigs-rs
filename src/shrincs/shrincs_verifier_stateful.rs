@@ -20,9 +20,9 @@
 //! Validate the stateful public key binding, reconstruct a compact WOTS-C public key
 // from the signature, then climb the unbalanced stateful Merkle path back to the pinned root.
 
-use super::shrincs_verifier_types::{
-    PublicKey, StatefulSignature, ADDRESS_TYPE_WOTS_HASH, HASH_LEN, WOTS_BASE_STATEFUL,
-    WOTS_CHAINS_STATEFUL, WOTS_TARGET_SUM_STATEFUL,
+use super::super::types::{PublicKey, StatefulSignature, ADDRESS_TYPE_WOTS_HASH, HASH_LEN};
+use super::{
+    WOTS_BASE_STATEFUL, WOTS_CHAINS_STATEFUL, WOTS_TARGET_SUM_STATEFUL,
 };
 use super::shrincs_verifier_utils::{
     address_word32, base_w16_digit, decode_stateful_public_key, hash_node, hash_packed,

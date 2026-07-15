@@ -31,8 +31,9 @@ pub(crate) use super::super::shrincs_common::{
     hypertree_address_word, read_bits32, read_bits64, word32, wots_digest_bytes,
 };
 
-use super::shrincs_verifier_types::{
-    ActionContext, PublicKey, RotationContext, StatefulPublicKey, HASH_LEN, PROFILE_NAME,
+use super::shrincs_verifier_types::PROFILE_NAME;
+use super::super::types::{
+    ActionContext, PublicKey, RotationContext, StatefulPublicKey, HASH_LEN,
     STATEFUL_PUBLIC_KEY_BYTES,
 };
 
@@ -77,7 +78,7 @@ pub(crate) fn stateful_rotation_target_commitment(
 }
 
 pub(crate) fn rotation_target_commitment(
-    target: &super::shrincs_verifier_types::RotationTarget,
+    target: &super::super::types::RotationTarget,
 ) -> Option<[u8; HASH_LEN]> {
     let pk_seed = word32(&target.pk_seed)?;
     let hypertree_root = word32(&target.hypertree_root)?;

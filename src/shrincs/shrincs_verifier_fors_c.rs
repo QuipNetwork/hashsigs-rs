@@ -21,9 +21,9 @@
 //! those roots into the per-signature FORS output carried into hypertree
 //! verification.
 
-use super::shrincs_verifier_types::{
-    ForsEntry, ForsSignature, PublicKey, FORS_TREE_HEIGHT, HASH_LEN, HYPERTREE_HEIGHT,
-    NUM_FORS_TREES, NUM_HYPERTREE_LAYERS,
+use super::super::types::{ForsEntry, ForsSignature, PublicKey, HASH_LEN};
+use super::{
+    FORS_TREE_HEIGHT, HYPERTREE_HEIGHT, NUM_FORS_TREES, NUM_HYPERTREE_LAYERS,
 };
 use super::shrincs_verifier_utils::{
     fors_address_word, hash_node, hash_packed, pack, read_bits32, read_bits64, word32,

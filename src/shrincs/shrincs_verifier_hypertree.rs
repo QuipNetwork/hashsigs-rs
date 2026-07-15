@@ -22,9 +22,10 @@
 // to produce the message for the next layer. The final layer must close at the
 // hypertree root in the public key.
 
-use super::shrincs_verifier_types::{
-    HypertreeLayerSignature, PublicKey, WotsCSignature, HASH_LEN, HYPERTREE_HEIGHT,
-    NUM_HYPERTREE_LAYERS, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN, WOTS_TARGET_SUM_STATEFUL,
+use super::super::types::{HypertreeLayerSignature, PublicKey, WotsCSignature, HASH_LEN};
+use super::{
+    HYPERTREE_HEIGHT, NUM_HYPERTREE_LAYERS, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN,
+    WOTS_TARGET_SUM_STATEFUL,
 };
 use super::shrincs_verifier_utils::{
     base_w_digit, hash_node, hash_packed, hypertree_address_word, word32, wots_address_base,

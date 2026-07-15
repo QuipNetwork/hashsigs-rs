@@ -30,7 +30,8 @@ pub(crate) use super::super::shrincs_common::{
     hypertree_address_word, pack, read_bits32, read_bits64, word32, wots_digest_bytes,
 };
 
-use super::verifier::{PublicKey, HASH_LEN, PROFILE_NAME, STATEFUL_PUBLIC_KEY_BYTES};
+use super::super::types::{PublicKey, HASH_LEN, STATEFUL_PUBLIC_KEY_BYTES};
+use super::verifier::PROFILE_NAME;
 
 pub(crate) const WOTS_C_MAX_GRIND_COUNTER: u32 = 1 << 24;
 pub(crate) const FORS_C_MAX_GRIND_COUNTER: u32 = 1 << 24;

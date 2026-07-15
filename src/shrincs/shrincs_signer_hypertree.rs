@@ -24,9 +24,10 @@ use super::shrincs_signer_utils::{
     address_word32, base_w_digit, derive32, hash_node, hash_packed, hypertree_address_word,
     wots_digest_bytes, WOTS_C_MAX_GRIND_COUNTER,
 };
+use super::super::types::{HypertreeLayerSignature, WotsCSignature, HASH_LEN};
 use super::verifier::{
-    HypertreeLayerSignature, WotsCSignature, HASH_LEN, HYPERTREE_HEIGHT, NUM_HYPERTREE_LAYERS,
-    NUM_WOTS_CHAINS, WOTS_CHAIN_LEN, WOTS_TARGET_SUM_STATEFUL,
+    HYPERTREE_HEIGHT, NUM_HYPERTREE_LAYERS, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN,
+    WOTS_TARGET_SUM_STATEFUL,
 };
 
 /// ADRS coordinates identifying one stateless WOTS-C keypair (its Merkle-leaf

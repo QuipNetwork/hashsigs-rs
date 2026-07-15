@@ -18,6 +18,7 @@
 //! SHRINCS signer / verifier primitives and shared types.
 
 pub(crate) mod shrincs_common;
+mod types;
 pub mod signer;
 pub mod verifier;
 
@@ -25,10 +26,13 @@ pub mod verifier;
 mod vector_conformance;
 
 pub use signer::{ShrincsSigner, ShrincsSignerResult, ShrincsSigningKey};
-pub use verifier::{
+pub use types::{
     ActionContext, ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey, RotationContext,
-    RotationTarget, ShrincsVerifier, StatefulPublicKey, StatefulRotationTarget, StatefulSignature,
+    RotationTarget, StatefulPublicKey, StatefulRotationTarget, StatefulSignature,
     StatelessSignature, WotsCSignature, ADDRESS_TYPE_FORS_TREE, ADDRESS_TYPE_TREE,
     ADDRESS_TYPE_WOTS_HASH, HASH_LEN, HASH_SUITE_KECCAK_256, STATEFUL_PUBLIC_KEY_BYTES,
-    STATELESS_SIGNATURE_LIMIT, WOTS_BASE_STATEFUL, WOTS_CHAINS_STATEFUL, WOTS_TARGET_SUM_STATEFUL,
+};
+pub use verifier::{
+    ShrincsVerifier, STATELESS_SIGNATURE_LIMIT, WOTS_BASE_STATEFUL, WOTS_CHAINS_STATEFUL,
+    WOTS_TARGET_SUM_STATEFUL,
 };

@@ -29,9 +29,9 @@ use super::shrincs_signer_utils::{
     fors_address_word, hash_node, hash_packed, pack, read_bits32, read_bits64,
     FORS_C_MAX_GRIND_COUNTER,
 };
+use super::super::types::{ForsEntry, ForsSignature, HASH_LEN};
 use super::verifier::{
-    ForsEntry, ForsSignature, FORS_TREE_HEIGHT, HASH_LEN, HYPERTREE_HEIGHT, NUM_FORS_TREES,
-    NUM_HYPERTREE_LAYERS,
+    FORS_TREE_HEIGHT, HYPERTREE_HEIGHT, NUM_FORS_TREES, NUM_HYPERTREE_LAYERS,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]

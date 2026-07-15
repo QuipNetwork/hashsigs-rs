@@ -22,6 +22,7 @@
 //! - `shrincs_signer_hypertree` carries the FORS root to the hypertree root.
 
 pub(crate) use super::verifier;
+use super::types::{ActionContext, PublicKey, StatefulSignature, StatelessSignature};
 
 #[path = "shrincs_signer_fors_c.rs"]
 mod shrincs_signer_fors_c;
@@ -46,9 +47,7 @@ use self::shrincs_signer_stateful::{
 use self::shrincs_signer_utils::{
     derive32, encode_stateful_public_key, public_key_from_components, word32,
 };
-use self::verifier::{
-    ActionContext, PublicKey, ShrincsVerifier, StatefulSignature, StatelessSignature,
-};
+use self::verifier::ShrincsVerifier;
 
 pub struct ShrincsSigner;
 

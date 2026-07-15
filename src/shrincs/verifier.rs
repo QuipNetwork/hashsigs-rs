@@ -33,7 +33,12 @@ mod shrincs_verifier_types;
 #[path = "shrincs_verifier_utils.rs"]
 mod shrincs_verifier_utils;
 
-pub use self::shrincs_verifier_types::*;
+pub use super::types::*;
+pub use self::shrincs_verifier_types::{
+    FORS_TREE_HEIGHT, HASH_TRUNC_LEN, HYPERTREE_HEIGHT, NUM_FORS_TREES, NUM_HYPERTREE_LAYERS,
+    NUM_WOTS_CHAINS, PROFILE_NAME, STATELESS_SIGNATURE_LIMIT, WOTS_BASE_STATEFUL,
+    WOTS_CHAIN_LEN, WOTS_CHAINS_STATEFUL, WOTS_TARGET_SUM_STATEFUL,
+};
 
 use self::shrincs_verifier_fors_c::verify_fors_c_and_return_root;
 use self::shrincs_verifier_hypertree::verify_hypertree;
