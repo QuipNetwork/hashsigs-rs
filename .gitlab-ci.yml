@@ -186,7 +186,8 @@ publish-npm:
     - |
       set -euo pipefail
       PKG="$(node -p 'require("./ts/package.json").name')"
-      TARBALL="$(ls ts/quip.network-hashsigs-wasm-*.tgz)"
+      # Leading ./ so npm treats this as a file, not a github owner/repo spec.
+      TARBALL="./$(ls ts/quip.network-hashsigs-wasm-*.tgz)"
       if ! npm view "$PKG" version >/dev/null 2>&1; then
         echo "ERROR: $PKG is not on npm yet. Do the one-time bootstrap publish" >&2
         echo "locally (npm publish, with 2FA), add the Trusted Publisher, then" >&2
