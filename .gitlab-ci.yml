@@ -2,12 +2,28 @@
 #
 # - On merge requests and the default branch: build + test the crate (incl. the
 #   wasm target) so regressions are caught before merge.
-# - On a version tag (e.g. v0.1.0): build the wasm, package ts/, and publish
+# - On a version tag (e.g. v0.2.0): build the wasm, package ts/, and publish
 #   @quip.network/hashsigs-wasm at the tag's version to npm.
+#
+# Publishing uses npm OIDC trusted publishing (tokenless): GitLab mints a
+# short-lived NPM_ID_TOKEN via `id_tokens`, npm exchanges it for publish
+# credentials, and provenance attestations are generated automatically. There
+# is no long-lived NPM_TOKEN. A "Trusted Publisher" must be configured on
+# npmjs.com for @quip.network/hashsigs-wasm (namespace/project/CI-file path)
+# with both `npm publish` and `npm stage publish` allowed.
+#
+# npm staging requires the package to already exist, and OIDC trusted publishing
+# can only be configured on an existing package. So the very first publish is
+# done once by a maintainer locally (`npm publish` with 2FA) to create the
+# package; CI never bootstraps it. Thereafter every tagged release is staged via
+# CI (`npm stage publish`) and a maintainer approves it with 2FA before it goes
+# live.
 #
 # The wasm-bindgen CLI version MUST equal the crate's wasm-bindgen dependency
 # (0.2.100) or wasm-bindgen emits a schema-mismatch error.
-# Node major is pinned to 22 (LTS) for the TS packaging jobs.
+# Node major is pinned to 22 (LTS) for the TS packaging jobs. npm is upgraded to
+# NPM_VERSION because trusted publishing needs >=11.5.1 and staging >=11.15.0,
+# while Node 22.14 ships npm 10.x.
 
 stages: [test, publish]
 
@@ -17,6 +33,8 @@ variables:
   # whatever Debian ships under apt `nodejs`).
   NODE_MAJOR: "22"
   NODE_VERSION: "22.14.0"
+  # npm >= 11.15.0 is required for `npm stage publish`; pin for reproducibility.
+  NPM_VERSION: "12.0.1"
 
 # Shared before_script fragments via GitLab !reference (not YAML list anchors,
 # which nest incorrectly when expanded under another list).
@@ -96,18 +114,51 @@ ts-conformance:
 publish-npm:
   stage: publish
   image: rust:1.89.0
-  # Anchored semver, optional pre-release suffix (e.g. v0.1.0-rc1); rejects v1.2.3.4 / v1.2.3-foo trailing junk.
+  # OIDC token for tokenless trusted publishing; npm auto-detects NPM_ID_TOKEN.
+  # SIGSTORE_ID_TOKEN enables the sigstore-signed provenance attestation.
+  id_tokens:
+    NPM_ID_TOKEN:
+      aud: "npm:registry.npmjs.org"
+    SIGSTORE_ID_TOKEN:
+      aud: sigstore
+  # Anchored semver, optional pre-release suffix (e.g. v0.2.0-rc1); rejects v1.2.3.4 / v1.2.3-foo trailing junk.
   rules:
     - if: $CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$/ # runs only on a semver version tag
   before_script:
     - !reference [.install-node-pinned, before_script]
     - !reference [.install-wasm-bindgen, before_script]
+    # Trusted publishing (>=11.5.1) and staging (>=11.15.0) need a newer npm than
+    # Node 22.14 bundles.
+    - npm install -g "npm@${NPM_VERSION}"
+    - npm --version
   script:
     # Tag pipelines do not run build-test, so gate the release on the Rust suite here.
     - cargo test --locked --features wasm-bindings
     # npm run build rebuilds wasm + runs conformance; do not pre-run either.
     - cd ts && npm ci
-    - npm version "${CI_COMMIT_TAG#v}" --no-git-tag-version --allow-same-version # tag v0.1.0 -> 0.1.0
+    - npm version "${CI_COMMIT_TAG#v}" --no-git-tag-version --allow-same-version # tag v0.2.0 -> 0.2.0
     - npm run build
-    - echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > .npmrc
-    - npm publish --access public
+    # Stage the release for maintainer approval (npm stage approve, 2FA). The
+    # package must already exist (first publish is a one-time manual local
+    # `npm publish`); fail with a clear message rather than a cryptic npm error
+    # if it does not. Prereleases (e.g. 0.2.0-rc1) must go to a non-`latest`
+    # dist-tag, derived from the prerelease identifier (rc1 -> rc, beta.2 -> beta).
+    - |
+      set -euo pipefail
+      PKG="$(node -p 'require("./package.json").name')"
+      if ! npm view "$PKG" version >/dev/null 2>&1; then
+        echo "ERROR: $PKG is not on npm yet. Do the one-time bootstrap publish" >&2
+        echo "locally (npm publish, with 2FA), add the Trusted Publisher, then" >&2
+        echo "re-run this tag. CI only stages releases for existing packages." >&2
+        exit 1
+      fi
+      VERSION="${CI_COMMIT_TAG#v}"
+      DIST_TAG="latest"
+      case "$VERSION" in
+        *-*)
+          DIST_TAG="$(printf '%s' "${VERSION#*-}" | sed -E 's/[^A-Za-z].*$//')"
+          [ -n "$DIST_TAG" ] || DIST_TAG="next"
+          ;;
+      esac
+      echo "staging $PKG@$VERSION on dist-tag '$DIST_TAG'"
+      npm stage publish --access public --tag "$DIST_TAG"
