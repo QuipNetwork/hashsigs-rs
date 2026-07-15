@@ -22,7 +22,7 @@
   "license": "AGPL-3.0-or-later",
   "repository": {
     "type": "git",
-    "url": "https://github.com/quipnetwork/hashsigs-rs"
+    "url": "git+https://gitlab.com/quip.network/hashsigs-rs.git"
   },
   "scripts": {
     "build:wasm": "bash ../bin/build-wasm.sh ts/src",
