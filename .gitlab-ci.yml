@@ -25,6 +25,21 @@ build-test:
     - cargo test --locked --features wasm-bindings
     - cargo build --locked --release --target wasm32-unknown-unknown --features wasm-bindings
 
+# Static clippy gate. Profile features are mutually exclusive, so lint the same
+# feature set CI tests (wasm-bindings), not --all-features. NOTE: `cargo fmt --check`
+# is intentionally not wired in yet — the tree is not fully rustfmt-clean; add it in a
+# dedicated formatting pass so this gate does not fail on pre-existing style drift.
+clippy:
+  stage: test
+  image: rust:1.89.0
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  before_script:
+    - rustup component add clippy
+  script:
+    - cargo clippy --all-targets --features wasm-bindings --locked -- -D warnings
+
 # Conformance test against the BUILT package (dist/): loaders, exports map,
 # ESM/CJS scoping, base64-inline path — the layer cargo tests never touch.
 ts-conformance:
@@ -46,13 +61,16 @@ ts-conformance:
 publish-npm:
   stage: publish
   image: rust:1.89.0
+  # Anchored semver, optional pre-release suffix (e.g. v0.1.0-rc1); rejects v1.2.3.4 / v1.2.3-foo trailing junk.
   rules:
-    - if: $CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+/ # runs only on a semver version tag
+    - if: $CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$/ # runs only on a semver version tag
   before_script:
     - apt-get update && apt-get install -y nodejs npm
     - rustup target add wasm32-unknown-unknown
     - cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION"
   script:
+    # Tag pipelines do not run build-test, so gate the release on the Rust suite here.
+    - cargo test --locked --features wasm-bindings
     - ./bin/build-wasm.sh ts/src
     - cd ts && npm ci
     - npm version "${CI_COMMIT_TAG#v}" --no-git-tag-version --allow-same-version # tag v0.1.0 -> 0.1.0

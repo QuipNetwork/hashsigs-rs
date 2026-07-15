@@ -540,7 +540,8 @@ pub fn version() -> String {
 /// bytes of cryptographically secure entropy and guard it like one. Seeds
 /// under 32 bytes are rejected with `ERR_SEED_TOO_SHORT`.
 /// `maxStatefulSignatures` fixes the stateful leaf budget for the key's
-/// lifetime. Throws `ERR_KEYGEN_FAILED` if generation fails.
+/// lifetime and must be in `1..=4096`; out-of-range values throw
+/// `ERR_INVALID_INPUT`. Throws `ERR_KEYGEN_FAILED` only on internal failure.
 ///
 /// * `seed_hex` - hex, at least 32 bytes.
 #[cfg(feature = "wasm-bindings")]
@@ -549,10 +550,24 @@ pub fn shrincs_keygen(
     seed_hex: &str,
     max_stateful_signatures: u32,
 ) -> Result<WasmShrincsKeypair, JsValue> {
+    // Budget range is caller input, not a crypto failure: reject it as ERR_INVALID_INPUT
+    // rather than letting keygen's None surface as the internal ERR_KEYGEN_FAILED.
+    if max_stateful_signatures == 0
+        || max_stateful_signatures > MAX_STATEFUL_SIGNATURES_LIMIT as u32
+    {
+        return Err(js_error(WasmErr {
+            code: ERR_INVALID_INPUT,
+            message: format!(
+                "maxStatefulSignatures must be in 1..={MAX_STATEFUL_SIGNATURES_LIMIT}"
+            ),
+        }));
+    }
     let mut seed_material = parse_hex_bytes_with_max(seed_hex, MAX_RAW_INPUT_BYTES).map_err(js_error)?;
     validate_seed_length(&seed_material).map_err(js_error)?;
     let result = ShrincsSigner::keygen(&seed_material, max_stateful_signatures);
     seed_material.zeroize();
+    // keygen only returns None for the budget range already rejected above, so this
+    // fallback is defensive and should be unreachable in practice.
     let (signing_key, public_key) = result.ok_or_else(|| {
         js_error(WasmErr {
             code: ERR_KEYGEN_FAILED,

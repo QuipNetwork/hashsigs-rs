@@ -422,6 +422,12 @@ impl WOTSPlus {
 mod tests {
     use super::*;
 
+    // Real one-way hash for tests that depend on preimage resistance (e.g. rejecting
+    // a forged message). mock_hash is essentially identity and cannot bind messages.
+    fn keccak256(data: &[u8]) -> [u8; 32] {
+        solana_program::keccak::hash(data).to_bytes()
+    }
+
     // Mock hash function for testing
     fn mock_hash(data: &[u8]) -> [u8; 32] {
         let mut output = [0u8; 32];
@@ -451,6 +457,32 @@ mod tests {
         let signature = wots.sign(&private_key, &message);
 
         assert!(wots.verify(&public_key, &message, &signature));
+    }
+
+    #[test]
+    fn test_rejects_wrong_message_wrong_key_and_tampered_chain() {
+        // Uses keccak256, not mock_hash: rejecting a forged message relies on the
+        // hash being one-way, which the identity-like mock does not provide.
+        let wots = WOTSPlus::new(keccak256);
+        let (public_key, private_key) = wots.generate_key_pair(&[1u8; 32]);
+
+        let message = [2u8; constants::MESSAGE_LEN];
+        let signature = wots.sign(&private_key, &message);
+        assert!(wots.verify(&public_key, &message, &signature));
+
+        // Correctly-sized signature over a different message must be rejected.
+        let mut other_message = message;
+        other_message[0] ^= 1;
+        assert!(!wots.verify(&public_key, &other_message, &signature));
+
+        // Same signature must not verify against a different key pair's public key.
+        let (other_public_key, _) = wots.generate_key_pair(&[9u8; 32]);
+        assert!(!wots.verify(&other_public_key, &message, &signature));
+
+        // Flipping a single byte of one chain value must break verification.
+        let mut tampered = signature.clone();
+        tampered[0][0] ^= 1;
+        assert!(!wots.verify(&public_key, &message, &tampered));
     }
 
     #[test]

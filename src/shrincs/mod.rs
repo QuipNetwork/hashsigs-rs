@@ -20,6 +20,9 @@
 pub mod signer;
 pub mod verifier;
 
+#[cfg(test)]
+mod vector_conformance;
+
 pub use signer::{ShrincsSigner, ShrincsSignerResult, ShrincsSigningKey};
 pub use verifier::{
     ActionContext, ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey, RotationContext,

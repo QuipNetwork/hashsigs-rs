@@ -29,7 +29,7 @@ default = []
 # contracts/profiles/<profile>/SHRINCSParams.sol libraries selected by the
 # Foundry `shrincs-profile/` remapping: one parameter tuple is chosen at
 # build time, so counts stay compile-time constants (no runtime params
-# struct). Select at most one. See docs/parameterization-design.md.
+# struct). Select at most one.
 profile-128s-q18 = []
 profile-128s-q20 = []
 wasm-bindings = [

@@ -15,6 +15,9 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+// This module is a line-by-line port of the Solidity account wrapper. Identifiers
+// (methods, fields, locals) intentionally mirror the Solidity camelCase names so the
+// two implementations can be cross-read and audited against each other.
 #![allow(non_snake_case)]
 
 use std::collections::HashMap;
@@ -522,22 +525,18 @@ impl ShrincsAccountVerifierExample {
     // 1. Reject all stateful signatures while the wrapper is configured for recovery-only stateless authority.
     // 2. Under monotonic tracking, accept only the next expected leaf.
     // 3. Under bitmap tracking, accept only leaves that have not yet been marked used.
-    // 4. Return true for any remaining policy branch.
+    // Exhaustive match: a future StatefulPolicy variant is a compile error here rather
+    // than a silent accept, so this one-time-signature anti-reuse gate cannot fail open.
     pub fn precheckStatefulLeafUse(&self, leafIndex: u32) -> bool {
-        // Recovery-rotation policy disables the stateful path entirely, whether or not recovery
-        // mode has been explicitly armed yet.
-        if self.statefulPolicy == StatefulPolicy::RecoveryRotation {
-            return false;
+        match self.statefulPolicy {
+            // Recovery-rotation policy disables the stateful path entirely, whether or not
+            // recovery mode has been explicitly armed yet.
+            StatefulPolicy::RecoveryRotation => false,
+            // Ordered tracking accepts exactly one next leaf.
+            StatefulPolicy::MonotonicIndex => leafIndex == self.nextStatefulLeafIndex,
+            // Bitmap tracking accepts any leaf that has not already been marked used.
+            StatefulPolicy::LeafBitmap => !self.isLeafUsed(leafIndex),
         }
-        // Ordered tracking accepts exactly one next leaf.
-        if self.statefulPolicy == StatefulPolicy::MonotonicIndex {
-            return leafIndex == self.nextStatefulLeafIndex;
-        }
-        // Bitmap tracking accepts any leaf that has not already been marked used.
-        if self.statefulPolicy == StatefulPolicy::LeafBitmap {
-            return !self.isLeafUsed(leafIndex);
-        }
-        true
     }
 
     // commitStatefulLeafUse: Record a successfully verified stateful leaf under the active policy.
@@ -546,22 +545,30 @@ impl ShrincsAccountVerifierExample {
     // 3. Freeze stateful policy changes for the remainder of the key epoch.
     // 4. Leave recovery-only mode unchanged because stateful signatures are blocked there.
     pub fn commitStatefulLeafUse(&mut self, leafIndex: u32) {
-        if self.statefulPolicy == StatefulPolicy::MonotonicIndex {
-            // Move the expected cursor forward after one successful monotonic use.
-            // saturating_add avoids an overflow panic (debug) / wrap (release) if
-            // the owner-set cursor is ever near u32::MAX; the verifier already caps
-            // usable leaves at max_signatures, so the saturation point is unreachable.
-            self.nextStatefulLeafIndex = self.nextStatefulLeafIndex.saturating_add(1);
-        } else if self.statefulPolicy == StatefulPolicy::LeafBitmap {
-            // Group leaves into 256-bit words for compact bitmap storage.
-            let wordIndex = u64::from(leafIndex) >> 8;
-            // Select the bit inside that word corresponding to this leaf.
-            let bitIndex = leafIndex & 0xff;
-            // Mark this leaf as consumed for the current key epoch.
-            self.usedLeafBitmap
-                .entry((self.keyVersion, wordIndex))
-                .or_default()
-                .set_bit(bitIndex);
+        // Exhaustive match so a future StatefulPolicy variant must declare how it records
+        // a used leaf; an accepted-but-untracked leaf would reopen one-time-key reuse.
+        match self.statefulPolicy {
+            StatefulPolicy::MonotonicIndex => {
+                // Move the expected cursor forward after one successful monotonic use.
+                // saturating_add avoids an overflow panic (debug) / wrap (release) if
+                // the owner-set cursor is ever near u32::MAX; the verifier already caps
+                // usable leaves at max_signatures, so the saturation point is unreachable.
+                self.nextStatefulLeafIndex = self.nextStatefulLeafIndex.saturating_add(1);
+            }
+            StatefulPolicy::LeafBitmap => {
+                // Group leaves into 256-bit words for compact bitmap storage.
+                let wordIndex = u64::from(leafIndex) >> 8;
+                // Select the bit inside that word corresponding to this leaf.
+                let bitIndex = leafIndex & 0xff;
+                // Mark this leaf as consumed for the current key epoch.
+                self.usedLeafBitmap
+                    .entry((self.keyVersion, wordIndex))
+                    .or_default()
+                    .set_bit(bitIndex);
+            }
+            // Recovery-rotation blocks the stateful path (precheck rejects it), so there is
+            // no leaf to record here.
+            StatefulPolicy::RecoveryRotation => {}
         }
         // Any successful stateful verification fixes the tracking model for this key epoch.
         self.statefulPolicyFrozen = true;
@@ -609,8 +616,6 @@ impl ShrincsAccountVerifierExample {
         nextCompositePublicKey: [u8; HASH_LEN],
         resetStatelessUsage: bool,
     ) {
-        // Preserve the previous key commitment for the rotation event payload.
-        let _previousShrincsPublicKey = self.currentShrincsPublicKey;
         // Install the next trusted SHRINCS public-key commitment.
         self.currentShrincsPublicKey = nextCompositePublicKey;
         // Advance nonce and key epoch so old authorizations cannot be replayed.
