@@ -34,7 +34,9 @@ variables:
   NODE_MAJOR: "22"
   NODE_VERSION: "22.14.0"
   # npm >= 11.15.0 is required for `npm stage publish`; pin for reproducibility.
-  NPM_VERSION: "12.0.1"
+  # Stay on 11.x: npm 12 needs Node >= 22.22, but Node is pinned to the 22.14.0
+  # trusted-publishing floor. npm 11.18 engine is node >=22.9, so it's compatible.
+  NPM_VERSION: "11.18.0"
 
 # Shared before_script fragments via GitLab !reference (not YAML list anchors,
 # which nest incorrectly when expanded under another list).
