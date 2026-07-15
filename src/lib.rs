@@ -23,6 +23,24 @@
 //! - SHRINCS signer / verifier primitives
 //! - shared SHRINCS types used by higher-level wrappers
 
+// Panic-prevention lints (review bead qg4): library code must not panic on
+// untrusted input. Scoped to non-test builds so `#[cfg(test)]` modules may use
+// unwrap/expect freely. The broader `indexing-slicing` and full `pedantic`
+// sets are intentionally deferred — under CI's `-D warnings` they would force
+// a large, churn-heavy rewrite of the crypto slice code with no safety gain
+// (the verifier already bounds every attacker-controlled index).
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::todo,
+        clippy::unimplemented,
+        clippy::panic_in_result_fn
+    )
+)]
+
 pub mod account;
 pub mod shrincs;
 pub mod wasm;
