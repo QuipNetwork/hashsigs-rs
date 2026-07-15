@@ -166,7 +166,12 @@ fn verify_wots_c32(
         // The digest digit tells us how far along this chain the signature value
         // starts. Verification runs from that digit to the end of the chain.
         let digit = base_w_digit(WOTS_CHAIN_LEN, &digest, chain_index);
-        digit_sum = digit_sum.saturating_add(digit);
+        // Unify digit-sum accumulation with the stateful verifier's
+        // `checked_add(...)?`: fail closed on overflow rather than saturating.
+        let Some(next_sum) = digit_sum.checked_add(digit) else {
+            return false;
+        };
+        digit_sum = next_sum;
         let segment = wots_chain32_no_mask_base(
             WOTS_CHAIN_LEN,
             pk_seed,

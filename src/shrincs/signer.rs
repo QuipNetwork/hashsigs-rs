@@ -208,6 +208,43 @@ mod tests {
     use self::verifier::HASH_LEN;
     use super::shrincs_signer_utils::hash_packed;
     use super::*;
+    use proptest::prelude::*;
+
+    // Build a signing key that exercises only the stateful subsystem, with a
+    // placeholder hypertree root. This avoids the compute-infeasible stateless
+    // hypertree keygen, so it runs on every profile and is cheap enough for the
+    // property test. Mirrors `stateful_round_trip_verifies_under_128s_truncation`.
+    fn stateful_only_key(seed: &[u8], max: u32) -> (ShrincsSigningKey, PublicKey) {
+        let stateful_sk_seed = derive32(b"shrincs-stateful-sk-seed", seed, &[]);
+        let stateful_prf_seed = derive32(b"shrincs-stateful-prf-seed", seed, &[]);
+        let stateful_pk_seed = derive32(b"shrincs-stateful-pk-seed", seed, &[]);
+        let stateful_root = stateful_subtree_root(
+            &stateful_sk_seed,
+            &stateful_pk_seed,
+            INITIAL_STATEFUL_LEAF_INDEX,
+            max,
+        );
+        let pk_seed = derive32(b"shrincs-pk-seed", seed, &[]);
+        let hypertree_root = derive32(b"placeholder-hypertree-root", seed, &[]);
+        let signing_key = ShrincsSigningKey {
+            stateful_sk_seed,
+            stateful_prf_seed,
+            stateful_pk_seed,
+            stateful_root,
+            max_stateful_signatures: max,
+            next_stateful_leaf_index: INITIAL_STATEFUL_LEAF_INDEX,
+            stateless_sk_seed: derive32(b"shrincs-stateless-sk-seed", seed, &[]),
+            stateless_prf_seed: derive32(b"shrincs-stateless-prf-seed", seed, &[]),
+            pk_seed,
+            hypertree_root,
+        };
+        let public_key = public_key_from_components(
+            encode_stateful_public_key(stateful_pk_seed, stateful_root, max),
+            pk_seed,
+            hypertree_root,
+        );
+        (signing_key, public_key)
+    }
 
     fn action_context() -> ActionContext {
         ActionContext {
@@ -702,5 +739,103 @@ mod tests {
             &message,
             &signature
         ));
+    }
+
+    // Boundary coverage for the stateful tree: the lowest live leaf (1) and the
+    // budget leaf (leaf == max_signatures) must both round-trip, and an empty
+    // message must round-trip while a signature over `&[]` must not verify a
+    // one-byte message. Uses the placeholder-hypertree key so it runs on every
+    // profile. (Bead 0lh.)
+    #[test]
+    fn stateful_boundary_leaves_and_empty_message_round_trip() {
+        let budget = 4u32;
+        let (signing_key, public_key) = stateful_only_key(b"stateful boundary seed", budget);
+        let expected = expected_key(&public_key);
+        let verifier = ShrincsVerifier::new();
+        let message = hash_packed(&[b"stateful boundary message"]);
+
+        // Leaf 1: the first live leaf.
+        let leaf_one = ShrincsSigner::sign_stateful_raw_at_leaf(&signing_key, 1, &message).unwrap();
+        assert_eq!(leaf_one.auth_path.len(), 1);
+        assert!(verifier.verify_stateful_unsafe_raw(expected, &public_key, &message, &leaf_one));
+
+        // Leaf == budget: the last usable leaf.
+        let leaf_budget =
+            ShrincsSigner::sign_stateful_raw_at_leaf(&signing_key, budget, &message).unwrap();
+        assert_eq!(leaf_budget.auth_path.len(), budget as usize);
+        assert!(verifier.verify_stateful_unsafe_raw(expected, &public_key, &message, &leaf_budget));
+
+        // Empty message round-trips; the same signature must reject a 1-byte message.
+        let empty = ShrincsSigner::sign_stateful_raw_at_leaf(&signing_key, 1, &[]).unwrap();
+        assert!(verifier.verify_stateful_unsafe_raw(expected, &public_key, &[], &empty));
+        assert!(!verifier.verify_stateful_unsafe_raw(expected, &public_key, &[0u8], &empty));
+    }
+
+    // Stateless boundary: an empty message signs and verifies through FORS-C plus
+    // the full hypertree, and the FORS-C opening carries exactly `num_fors_trees
+    // - 1` entries (the omitted final tree is forced to leaf index 0). The
+    // empty-message signature must not verify a one-byte message. (Bead 0lh.)
+    #[cfg_attr(
+        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
+    )]
+    #[test]
+    fn stateless_empty_message_round_trip_and_fors_boundary() {
+        use self::verifier::NUM_FORS_TREES;
+        let (signing_key, public_key) =
+            ShrincsSigner::keygen(b"stateless empty message seed", 2).unwrap();
+        let expected = expected_key(&public_key);
+        let verifier = ShrincsVerifier::new();
+
+        let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &[]).unwrap();
+        // FORS-C forces the omitted final tree's leaf to 0: only k - 1 entries.
+        assert_eq!(signature.fors.entries.len(), NUM_FORS_TREES as usize - 1);
+        assert!(verifier.verify_stateless_unsafe_raw(expected, &public_key, &[], &signature));
+
+        // A signature over `&[]` must not verify a different (1-byte) message.
+        assert!(!verifier.verify_stateless_unsafe_raw(expected, &public_key, &[0u8], &signature));
+    }
+
+    proptest! {
+        // Modest case count: each case builds a placeholder-hypertree stateful
+        // key and grinds one WOTS-C signature. (Bead aur.)
+        #![proptest_config(ProptestConfig::with_cases(24))]
+
+        // Sign->verify round-trip plus the universal single-byte-tamper-rejects
+        // property over the stateful WOTS-C path, across random messages
+        // (including empty), leaves, and tamper positions.
+        #[test]
+        fn stateful_sign_verify_round_trip_and_single_byte_tamper_rejects(
+            message in proptest::collection::vec(any::<u8>(), 0..48usize),
+            leaf in 1u32..=4,
+            tamper_chain in 0usize..self::verifier::WOTS_CHAINS_STATEFUL,
+            tamper_byte in 0usize..HASH_LEN,
+        ) {
+            let (signing_key, public_key) = stateful_only_key(b"proptest stateful seed", 4);
+            let expected = word32(&public_key.public_key_commitment).unwrap();
+            let verifier = ShrincsVerifier::new();
+            let signature =
+                ShrincsSigner::sign_stateful_raw_at_leaf(&signing_key, leaf, &message).unwrap();
+
+            // Round-trip: a freshly produced signature verifies.
+            prop_assert!(verifier.verify_stateful_unsafe_raw(
+                expected,
+                &public_key,
+                &message,
+                &signature
+            ));
+
+            // Flipping any single byte of any revealed WOTS chain value breaks the
+            // reconstruction to the committed public-key hash, so verification
+            // must reject.
+            let mut tampered = signature;
+            tampered.chains[tamper_chain][tamper_byte] ^= 1;
+            prop_assert!(!verifier.verify_stateful_unsafe_raw(
+                expected,
+                &public_key,
+                &message,
+                &tampered
+            ));
+        }
     }
 }

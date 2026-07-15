@@ -17,6 +17,7 @@
 
 //! SHRINCS signer / verifier primitives and shared types.
 
+pub(crate) mod shrincs_common;
 pub mod signer;
 pub mod verifier;
 

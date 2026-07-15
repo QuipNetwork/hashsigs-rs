@@ -17,6 +17,8 @@
 
 //! Stateful WOTS-C signing for the fast SHRINCS path.
 
+use zeroize::Zeroizing;
+
 use super::shrincs_signer_types::{ShrincsSignerResult, ShrincsSigningKey};
 use super::shrincs_signer_utils::{
     address_word32, base_w16_digit, hash_node, hash_packed, WOTS_C_MAX_GRIND_COUNTER,
@@ -141,10 +143,15 @@ fn sign_stateful_wots_c(
             .map(|(chain_index, digit)| {
                 // Reveal the chain value at the selected digit, not the secret
                 // start and not the final endpoint. The verifier hashes forward
-                // from this value to recover the endpoint.
-                let secret =
-                    stateful_chain_secret(sk_seed, pk_seed, leaf_index, chain_index as u32);
-                stateful_chain_no_mask(pk_seed, leaf_index, chain_index as u32, secret, 0, *digit)
+                // from this value to recover the endpoint. The private chain start
+                // is zeroized on drop.
+                let secret = Zeroizing::new(stateful_chain_secret(
+                    sk_seed,
+                    pk_seed,
+                    leaf_index,
+                    chain_index as u32,
+                ));
+                stateful_chain_no_mask(pk_seed, leaf_index, chain_index as u32, *secret, 0, *digit)
             })
             .collect();
 
@@ -186,12 +193,18 @@ fn stateful_wots_pk_hash(
     // by advancing every chain to its endpoint and hashing all endpoints together.
     let mut endpoints = Vec::with_capacity(WOTS_CHAINS_STATEFUL * HASH_LEN);
     for chain_index in 0..WOTS_CHAINS_STATEFUL {
-        let secret = stateful_chain_secret(sk_seed, pk_seed, leaf_index, chain_index as u32);
+        // The private chain start is zeroized on drop.
+        let secret = Zeroizing::new(stateful_chain_secret(
+            sk_seed,
+            pk_seed,
+            leaf_index,
+            chain_index as u32,
+        ));
         let endpoint = stateful_chain_no_mask(
             pk_seed,
             leaf_index,
             chain_index as u32,
-            secret,
+            *secret,
             0,
             WOTS_BASE_STATEFUL - 1,
         );

@@ -78,7 +78,8 @@ pub(crate) fn verify_fors_c_and_return_root(
 
     let mut roots = Vec::with_capacity(signed_trees * HASH_LEN);
     for fors_tree_index in 0..signed_trees {
-        let entry = &signature.entries[fors_tree_index];
+        // Fail closed on signature-derived indexing: `.get()?` instead of `[]`.
+        let entry = signature.entries.get(fors_tree_index)?;
         if entry.secret_leaf.len() != HASH_LEN {
             return None;
         }

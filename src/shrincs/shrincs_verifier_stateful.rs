@@ -107,12 +107,13 @@ fn compact_stateful_wots_public_key_from_signature(
         digit_sum = digit_sum.checked_add(digit)?;
         // A signature chain value is already at position `digit`. Verification
         // runs it forward to the chain end (`base - 1`) to recover the public
-        // chain segment.
+        // chain segment. Fail closed on signature-derived indexing with `.get()?`.
+        let chain_value = *signature.chains.get(chain_index)?;
         let segment = stateful_chain_no_mask(
             pk_seed,
             leaf_index,
             chain_index as u32,
-            signature.chains[chain_index],
+            chain_value,
             digit,
             WOTS_BASE_STATEFUL - 1 - digit,
         );
@@ -146,13 +147,15 @@ fn root_from_unbalanced_path(
     }
     // The first parent combines the WOTS leaf with the first sibling. Each
     // following step combines the next left sibling with the root accumulated so
-    // far. This matches Solidity's unbalanced tree convention.
-    let mut root = stateful_parent_hash(pk_seed, leaf_index, leaf, auth_path[0]);
+    // far. This matches Solidity's unbalanced tree convention. Signature-derived
+    // path nodes are read with `.get()?`/`.first()?` so a malformed path fails
+    // closed instead of panicking.
+    let mut root = stateful_parent_hash(pk_seed, leaf_index, leaf, *auth_path.first()?);
     for offset in 0..auth_path.len() - 1 {
         root = stateful_parent_hash(
             pk_seed,
             leaf_index - offset as u32 - 1,
-            auth_path[offset + 1],
+            *auth_path.get(offset + 1)?,
             root,
         );
     }

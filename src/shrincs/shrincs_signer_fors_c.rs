@@ -22,6 +22,8 @@
 //! Those coordinates are address/domain context for the opened leaves and nodes,
 //! not a selector for a separate FORS public key.
 
+use zeroize::Zeroizing;
+
 use super::shrincs_signer_types::{ShrincsSignerResult, ShrincsSigningKey};
 use super::shrincs_signer_utils::{
     fors_address_word, hash_node, hash_packed, pack, read_bits32, read_bits64,
@@ -294,9 +296,12 @@ fn fors_leaf_hash(
 ) -> [u8; HASH_LEN] {
     // The leaf hash commits to the secret leaf under the public seed and address.
     // The verifier recomputes this from the revealed secret leaf before walking
-    // the authentication path to the tree root.
-    let secret = fors_leaf_secret(pk_seed, sk_seed, tree_index, leaf_index, fors_tree, leaf);
+    // the authentication path to the tree root. This internal secret (for the
+    // non-revealed leaves that build the tree) is zeroized on drop.
+    let secret = Zeroizing::new(fors_leaf_secret(
+        pk_seed, sk_seed, tree_index, leaf_index, fors_tree, leaf,
+    ));
     let tree_leaf = (u64::from(fors_tree) << FORS_TREE_HEIGHT) + u64::from(leaf);
     let address_word = fors_address_word(tree_index, leaf_index, 0, tree_leaf);
-    hash_node(&[b"fors-leaf", pk_seed, &address_word, &secret])
+    hash_node(&[b"fors-leaf", pk_seed, &address_word, &*secret])
 }

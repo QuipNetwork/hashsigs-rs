@@ -17,6 +17,8 @@
 
 //! Hypertree and stateless WOTS-C signing.
 
+use zeroize::Zeroizing;
+
 use super::shrincs_signer_types::{ShrincsSignerResult, ShrincsSigningKey};
 use super::shrincs_signer_utils::{
     address_word32, base_w_digit, derive32, hash_node, hash_packed, hypertree_address_word,
@@ -26,6 +28,48 @@ use super::verifier::{
     HypertreeLayerSignature, WotsCSignature, HASH_LEN, HYPERTREE_HEIGHT, NUM_HYPERTREE_LAYERS,
     NUM_WOTS_CHAINS, WOTS_CHAIN_LEN, WOTS_TARGET_SUM_STATEFUL,
 };
+
+/// ADRS coordinates identifying one stateless WOTS-C keypair (its Merkle-leaf
+/// position). Grouping `layer`/`tree`/`keypair` keeps the signing entry points
+/// under the positional-argument limit without a `too_many_arguments` allow.
+#[derive(Clone, Copy)]
+struct WotsKeypair {
+    layer: u32,
+    tree: u64,
+    keypair: u32,
+}
+
+impl WotsKeypair {
+    /// Extend a keypair position with a chain index for one chain step-walk.
+    fn chain(self, chain: u32) -> WotsChain {
+        WotsChain {
+            layer: self.layer,
+            tree: self.tree,
+            keypair: self.keypair,
+            chain,
+        }
+    }
+}
+
+/// Full ADRS coordinates for one WOTS-C chain step-walk (keypair position plus
+/// the chain index). Bound into every chain hash so a value cannot be replayed
+/// at another layer/tree/leaf/chain.
+#[derive(Clone, Copy)]
+struct WotsChain {
+    layer: u32,
+    tree: u64,
+    keypair: u32,
+    chain: u32,
+}
+
+/// Seed material threaded through a stateless WOTS-C signature: the public seed,
+/// the WOTS secret seed, and the stateless PRF seed. Bundling them keeps
+/// `sign_stateless_wots_c` within the positional-argument limit.
+struct WotsSeeds<'a> {
+    pk_seed: &'a [u8; HASH_LEN],
+    sk_seed: &'a [u8; HASH_LEN],
+    prf_seed: &'a [u8; HASH_LEN],
+}
 
 pub(crate) fn sign_hypertree(
     signing_key: &ShrincsSigningKey,
@@ -59,28 +103,30 @@ pub(crate) fn sign_hypertree(
     for layer in 0..u32::from(NUM_HYPERTREE_LAYERS) {
         // Each WOTS keypair is derived from its exact coordinate. This makes the
         // stateless hypertree deterministic without storing every WOTS secret.
-        let leaf_seed = derive32(
+        // The derived seed and per-keypair WOTS secret seed are private material,
+        // so they are zeroized on drop rather than left in freed stack memory.
+        let leaf_seed = Zeroizing::new(derive32(
             b"hypertree-leaf-seed",
             &layer_seeds[layer as usize],
             &[tree.to_be_bytes().as_slice(), leaf.to_be_bytes().as_slice()].concat(),
-        );
-        let sk_seed = derive32(b"hypertree-wots-sk-seed", &leaf_seed, &[]);
+        ));
+        let sk_seed = Zeroizing::new(derive32(b"hypertree-wots-sk-seed", &*leaf_seed, &[]));
+        let coords = WotsKeypair {
+            layer,
+            tree,
+            keypair: leaf,
+        };
 
         // The WOTS public-key hash is the Merkle leaf for this coordinate. It is
         // included in the layer signature so the verifier can bind the WOTS-C
         // chain reconstruction to the auth path that follows.
-        let pk_hash =
-            stateless_wots_c_public_key(&signing_key.pk_seed, &sk_seed, layer, tree, leaf);
-        let wots_c_signature = sign_stateless_wots_c(
-            &signing_key.pk_seed,
-            &sk_seed,
-            &signing_key.stateless_prf_seed,
-            &pk_hash,
-            layer,
-            tree,
-            leaf,
-            &current,
-        )?;
+        let pk_hash = stateless_wots_c_public_key(&signing_key.pk_seed, &sk_seed, &coords);
+        let seeds = WotsSeeds {
+            pk_seed: &signing_key.pk_seed,
+            sk_seed: &sk_seed,
+            prf_seed: &signing_key.stateless_prf_seed,
+        };
+        let wots_c_signature = sign_stateless_wots_c(&seeds, &coords, &pk_hash, &current)?;
 
         // The auth path proves that this WOTS public-key hash belongs to the
         // current layer's XMSS-like subtree at `tree`.
@@ -202,34 +248,36 @@ fn hypertree_leaf(
 ) -> [u8; HASH_LEN] {
     // A hypertree leaf is the public hash of the stateless WOTS-C keypair at this
     // coordinate. No per-leaf secret is stored; it is derived from `layer_seed`.
-    let leaf_seed = derive32(
+    // The derived seed and WOTS secret seed are zeroized on drop.
+    let leaf_seed = Zeroizing::new(derive32(
         b"hypertree-leaf-seed",
         layer_seed,
         &[tree.to_be_bytes().as_slice(), leaf.to_be_bytes().as_slice()].concat(),
-    );
-    let sk_seed = derive32(b"hypertree-wots-sk-seed", &leaf_seed, &[]);
-    stateless_wots_c_public_key(pk_seed, &sk_seed, layer, tree, leaf)
+    ));
+    let sk_seed = Zeroizing::new(derive32(b"hypertree-wots-sk-seed", &*leaf_seed, &[]));
+    let coords = WotsKeypair {
+        layer,
+        tree,
+        keypair: leaf,
+    };
+    stateless_wots_c_public_key(pk_seed, &sk_seed, &coords)
 }
 
 fn stateless_wots_c_public_key(
     pk_seed: &[u8; HASH_LEN],
     sk_seed: &[u8; HASH_LEN],
-    layer: u32,
-    tree: u64,
-    keypair: u32,
+    coords: &WotsKeypair,
 ) -> [u8; HASH_LEN] {
     // Build every WOTS chain all the way to its endpoint, then hash the endpoints
     // together. That aggregate hash is the Merkle leaf used by the hypertree.
     let mut endpoints = Vec::with_capacity(NUM_WOTS_CHAINS as usize * HASH_LEN);
     for chain in 0..NUM_WOTS_CHAINS {
-        let secret = stateless_wots_c_secret(sk_seed, u32::from(chain));
+        // The chain start is private WOTS material; zeroize the temp on drop.
+        let secret = Zeroizing::new(stateless_wots_c_secret(sk_seed, u32::from(chain)));
         let endpoint = stateless_wots_c_chain(
             pk_seed,
-            layer,
-            tree,
-            keypair,
-            u32::from(chain),
-            secret,
+            &coords.chain(u32::from(chain)),
+            *secret,
             0,
             u32::from(WOTS_CHAIN_LEN - 1),
         );
@@ -238,24 +286,16 @@ fn stateless_wots_c_public_key(
     hash_node(&[b"wots-c-pk", pk_seed, &endpoints])
 }
 
-// ADRS-style WOTS coordinates (layer/tree/leaf/chain/step) are passed
-// positionally to mirror the Solidity signer exactly; grouping them into a
-// struct is deferred to keep this audited signing path byte-for-byte comparable.
-#[allow(clippy::too_many_arguments)]
 fn sign_stateless_wots_c(
-    pk_seed: &[u8; HASH_LEN],
-    sk_seed: &[u8; HASH_LEN],
-    stateless_prf_seed: &[u8; HASH_LEN],
+    seeds: &WotsSeeds,
+    coords: &WotsKeypair,
     pk_hash: &[u8; HASH_LEN],
-    layer: u32,
-    tree: u64,
-    keypair: u32,
     message: &[u8; HASH_LEN],
 ) -> ShrincsSignerResult<WotsCSignature> {
     // The WOTS-C challenge signs the current root for this layer. The expected
     // WOTS public-key hash is included in the digest, binding the challenge to
     // the key whose Merkle path is supplied next.
-    let randomizer = hash_packed(&[b"wots-c-randomizer", stateless_prf_seed, message]);
+    let randomizer = hash_packed(&[b"wots-c-randomizer", seeds.prf_seed, message]);
     let digest_bytes = wots_digest_bytes();
 
     for counter in 0..WOTS_C_MAX_GRIND_COUNTER {
@@ -264,7 +304,7 @@ fn sign_stateless_wots_c(
         // replaces the usual WOTS+ checksum field in this compact variant.
         let digest = hash_packed(&[
             b"wots-c-msg",
-            pk_seed,
+            seeds.pk_seed,
             pk_hash,
             &randomizer,
             &counter.to_be_bytes(),
@@ -285,14 +325,12 @@ fn sign_stateless_wots_c(
                 // A signature chain stops at the selected digit. The verifier
                 // continues the chain from that digit to the endpoint and checks
                 // that the reconstructed public-key hash matches `pk_hash`.
-                let secret = stateless_wots_c_secret(sk_seed, chain as u32);
+                // The chain start is private WOTS material; zeroize it on drop.
+                let secret = Zeroizing::new(stateless_wots_c_secret(seeds.sk_seed, chain as u32));
                 stateless_wots_c_chain(
-                    pk_seed,
-                    layer,
-                    tree,
-                    keypair,
-                    chain as u32,
-                    secret,
+                    seeds.pk_seed,
+                    &coords.chain(chain as u32),
+                    *secret,
                     0,
                     *digit,
                 )
@@ -315,14 +353,9 @@ fn stateless_wots_c_secret(sk_seed: &[u8; HASH_LEN], chain: u32) -> [u8; HASH_LE
     hash_packed(&[b"wots-c-secret", sk_seed, &chain.to_be_bytes()])
 }
 
-// See sign_stateless_wots_c: positional ADRS coordinates mirror Solidity.
-#[allow(clippy::too_many_arguments)]
 fn stateless_wots_c_chain(
     pk_seed: &[u8; HASH_LEN],
-    layer: u32,
-    tree: u64,
-    keypair: u32,
-    chain: u32,
+    coords: &WotsChain,
     value: [u8; HASH_LEN],
     start: u32,
     steps: u32,
@@ -331,7 +364,8 @@ fn stateless_wots_c_chain(
     // current digit position and `steps` is how far to move from there.
     let mut out = value;
     for step in start..start + steps {
-        let address_word = address_word32(layer, tree, 0, keypair, chain, step);
+        let address_word =
+            address_word32(coords.layer, coords.tree, 0, coords.keypair, coords.chain, step);
         out = hash_node(&[b"wots-c-chain", pk_seed, &address_word, &out]);
     }
     out
