@@ -934,7 +934,7 @@ pub struct ForsSignature {
 #[derive(serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "wasm-bindings", derive(tsify::Tsify))]
 #[serde(rename_all = "camelCase")]
-pub struct WotsCSignature {
+struct WasmWotsCSignature {
     randomizer: String,
     counter: u32,
     chains: Vec<String>,
@@ -944,12 +944,9 @@ pub struct WotsCSignature {
 #[derive(serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "wasm-bindings", derive(tsify::Tsify))]
 #[serde(rename_all = "camelCase")]
-pub struct HypertreeLayerSignature {
-    #[cfg_attr(feature = "wasm-bindings", tsify(type = "bigint"))]
-    tree_index: u64,
-    leaf_index: u32,
+struct WasmHypertreeLayerSignature {
     wots_c_pk_hash: String,
-    wots_c_signature: WotsCSignature,
+    wots_c_signature: WasmWotsCSignature,
     auth_path: Vec<String>,
 }
 
@@ -959,7 +956,7 @@ pub struct HypertreeLayerSignature {
 #[serde(rename_all = "camelCase")]
 pub struct StatelessSignature {
     fors: ForsSignature,
-    hypertree: Vec<HypertreeLayerSignature>,
+    hypertree: Vec<WasmHypertreeLayerSignature>,
 }
 
 #[cfg(any(test, feature = "wasm-bindings"))]
@@ -1291,8 +1288,6 @@ fn parse_stateless_signature(
                 )?;
                 expect_vec_len("hypertree auth path", layer.auth_path.len(), subtree_height)?;
                 Ok(CoreHypertreeLayerSignature {
-                    tree_index: layer.tree_index,
-                    leaf_index: layer.leaf_index,
                     wots_c_pk_hash: parse_word32(&layer.wots_c_pk_hash)?.to_vec(),
                     wots_c_signature: CoreWotsCSignature {
                         randomizer: parse_word32(&layer.wots_c_signature.randomizer)?.to_vec(),
@@ -1536,11 +1531,9 @@ fn stateless_signature_dto_from_signer(
         hypertree: signature
             .hypertree
             .iter()
-            .map(|layer| HypertreeLayerSignature {
-                tree_index: layer.tree_index,
-                leaf_index: layer.leaf_index,
+            .map(|layer| WasmHypertreeLayerSignature {
                 wots_c_pk_hash: hex_string(&layer.wots_c_pk_hash),
-                wots_c_signature: WotsCSignature {
+                wots_c_signature: WasmWotsCSignature {
                     randomizer: hex_string(&layer.wots_c_signature.randomizer),
                     counter: layer.wots_c_signature.counter,
                     chains: layer
@@ -1726,11 +1719,9 @@ mod tests {
             hypertree: signature
                 .hypertree
                 .iter()
-                .map(|layer| HypertreeLayerSignature {
-                    tree_index: layer.tree_index,
-                    leaf_index: layer.leaf_index,
+                .map(|layer| WasmHypertreeLayerSignature {
                     wots_c_pk_hash: hex(&layer.wots_c_pk_hash),
-                    wots_c_signature: WotsCSignature {
+                    wots_c_signature: WasmWotsCSignature {
                         randomizer: hex(&layer.wots_c_signature.randomizer),
                         counter: layer.wots_c_signature.counter,
                         chains: layer

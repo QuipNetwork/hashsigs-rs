@@ -109,8 +109,6 @@ fn parse_stateless_signature(value: &Value) -> StatelessSignature {
         .map(|layer| {
             let wots = &layer["wotsCSignature"];
             HypertreeLayerSignature {
-                tree_index: u64_field(layer, "treeIndex"),
-                leaf_index: u64_field(layer, "leafIndex") as u32,
                 wots_c_pk_hash: hex_to_vec(&layer["wotsCPkHash"]),
                 wots_c_signature: WotsCSignature {
                     randomizer: hex_to_vec(&wots["randomizer"]),

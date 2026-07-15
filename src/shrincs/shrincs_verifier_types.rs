@@ -189,10 +189,6 @@ pub struct WotsCSignature {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HypertreeLayerSignature {
-    /// Tree index for this hypertree layer.
-    pub tree_index: u64,
-    /// Leaf index inside this hypertree layer.
-    pub leaf_index: u32,
     /// Expected WOTS-C public-key hash for this layer.
     pub wots_c_pk_hash: Vec<u8>,
     /// WOTS-C signature proving `current_root -> wots_c_pk_hash`.

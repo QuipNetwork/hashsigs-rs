@@ -209,12 +209,13 @@ impl<'a> AbiDecoder<'a> {
     }
 
     fn decode_hypertree_layer_signature(&self, start: usize) -> HypertreeLayerSignature {
+        // The layer tuple dropped its leading (uint64 treeIndex, uint32
+        // leafIndex): the head now begins with the wotsCPkHash offset, so every
+        // remaining head slot shifts down by two 32-byte words.
         HypertreeLayerSignature {
-            tree_index: self.read_u64(start),
-            leaf_index: self.read_u32(start + 32),
-            wots_c_pk_hash: self.decode_bytes(start, start + 64),
-            wots_c_signature: self.decode_wots_c_signature(start, start + 96),
-            auth_path: self.decode_array_bytes(start, start + 128),
+            wots_c_pk_hash: self.decode_bytes(start, start),
+            wots_c_signature: self.decode_wots_c_signature(start, start + 32),
+            auth_path: self.decode_array_bytes(start, start + 64),
         }
     }
 
@@ -295,15 +296,6 @@ impl<'a> AbiDecoder<'a> {
             "u32 word contains non-zero high bytes at offset {pos}",
         );
         u32::from_be_bytes(word[28..32].try_into().unwrap())
-    }
-
-    fn read_u64(&self, pos: usize) -> u64 {
-        let word = self.slice(pos, 32);
-        assert!(
-            word[..24].iter().all(|byte| *byte == 0),
-            "u64 word contains non-zero high bytes at offset {pos}",
-        );
-        u64::from_be_bytes(word[24..32].try_into().unwrap())
     }
 
     fn read_usize(&self, pos: usize) -> usize {

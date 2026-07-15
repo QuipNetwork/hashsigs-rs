@@ -21,8 +21,8 @@ use solana_program::keccak::hash as keccak256_hash;
 
 use super::shrincs_verifier_types::{
     ActionContext, PublicKey, RotationContext, StatefulPublicKey, ADDRESS_TYPE_FORS_TREE,
-    ADDRESS_TYPE_TREE, HASH_LEN, HASH_TRUNC_LEN, NUM_WOTS_CHAINS, STATEFUL_PUBLIC_KEY_BYTES,
-    WOTS_CHAIN_LEN,
+    ADDRESS_TYPE_TREE, HASH_LEN, HASH_TRUNC_LEN, NUM_WOTS_CHAINS, PROFILE_NAME,
+    STATEFUL_PUBLIC_KEY_BYTES, WOTS_CHAIN_LEN,
 };
 
 pub(crate) fn keccak256(data: &[u8]) -> [u8; HASH_LEN] {
@@ -82,8 +82,10 @@ pub(crate) fn valid_rotation_context(context: &RotationContext) -> bool {
 pub(crate) fn public_key_commitment(public_key: &PublicKey) -> Option<[u8; HASH_LEN]> {
     let pk_seed = word32(&public_key.pk_seed)?;
     let hypertree_root = word32(&public_key.hypertree_root)?;
+    // Profile-bound commitment tag: `shrincs-public-key/<PROFILE_NAME>`.
     Some(hash_packed(&[
-        b"shrincs-public-key",
+        b"shrincs-public-key/",
+        PROFILE_NAME.as_bytes(),
         &public_key.stateful_public_key,
         &pk_seed,
         &hypertree_root,
@@ -95,8 +97,10 @@ pub(crate) fn stateful_rotation_target_commitment(
     pk_seed: &[u8; HASH_LEN],
     hypertree_root: &[u8; HASH_LEN],
 ) -> [u8; HASH_LEN] {
+    // Rotation targets commit to the same profile-bound tag as live keys.
     hash_packed(&[
-        b"shrincs-public-key",
+        b"shrincs-public-key/",
+        PROFILE_NAME.as_bytes(),
         stateful_public_key,
         pk_seed,
         hypertree_root,
