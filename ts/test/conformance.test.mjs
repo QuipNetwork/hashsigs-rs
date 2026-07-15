@@ -49,6 +49,49 @@ for (const [name, load] of loaders) {
     );
   });
 
+  test(`${name}: verify with a second keypair commitment returns false`, async () => {
+    const w = await load();
+    const kp = w.shrincsKeygen(SEED, 4);
+    const pk = kp.publicKey();
+    const sig = kp.signStatefulRawAt(MSG, 1);
+    const otherPk = w.shrincsKeygen("0x" + "cd".repeat(32), 4).publicKey();
+    assert.equal(
+      w.shrincsVerifyStatefulRaw(otherPk.publicKeyCommitment, pk, MSG, sig),
+      false,
+    );
+  });
+
+  test(`${name}: verify throws typed errors on malformed hex`, async () => {
+    const w = await load();
+    const kp = w.shrincsKeygen(SEED, 4);
+    const pk = kp.publicKey();
+    const sig = kp.signStatefulRawAt(MSG, 1);
+    // Invalid hex digits → ERR_HEX_INVALID (message does not echo the input).
+    assert.throws(
+      () => w.shrincsVerifyStatefulRaw("0xzz", pk, MSG, sig),
+      (e) => e instanceof Error && e.code === "ERR_HEX_INVALID",
+    );
+    // Odd-length hex body → ERR_BAD_LENGTH.
+    assert.throws(
+      () => w.shrincsVerifyStatefulRaw("0x" + "ab".repeat(31) + "a", pk, MSG, sig),
+      (e) => e instanceof Error && e.code === "ERR_BAD_LENGTH",
+    );
+  });
+
+  test(`${name}: destroy() invalidates the handle with ERR_HANDLE_DESTROYED`, async () => {
+    const w = await load();
+    const kp = w.shrincsKeygen(SEED, 4);
+    kp.destroy();
+    assert.throws(
+      () => kp.publicKey(),
+      (e) => e instanceof Error && e.code === "ERR_HANDLE_DESTROYED",
+    );
+    assert.throws(
+      () => kp.signStatelessRaw(MSG),
+      (e) => e instanceof Error && e.code === "ERR_HANDLE_DESTROYED",
+    );
+  });
+
   test(`${name}: stateless sign → verify`, async () => {
     const w = await load();
     const kp = w.shrincsKeygen(SEED, 4);

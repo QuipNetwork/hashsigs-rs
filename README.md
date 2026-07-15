@@ -32,165 +32,123 @@ cargo build-sbf
 
 ## WASM Packaging
 
-The repo now includes a WASM surface in `src/wasm/` for SHRINCS verifier,
-signer, and account-wrapper bindings. Build it with `wasm-pack` and the
-`wasm-bindings` feature.
+The crate exposes SHRINCS verifier, signer, and account bindings under
+`src/wasm/` behind the `wasm-bindings` feature. The supported build path is
+`bin/build-wasm.sh`, which runs `cargo build` for `wasm32-unknown-unknown` and
+then the `wasm-bindgen` CLI (not `wasm-pack`) for the `nodejs` and `web`
+targets.
 
-Install `wasm-pack` once:
-
-```bash
-cargo install wasm-pack
-```
-
-Use the helper script from the crate root:
-
-```bash
-bin/build-wasm.sh bundler
-```
-
-The script accepts these targets:
-
-- `bundler`
-- `web`
-- `nodejs`
-
-Examples:
-
-```bash
-bin/build-wasm.sh bundler
-bin/build-wasm.sh web
-bin/build-wasm.sh nodejs
-```
-
-Generated package output goes to:
-
-```text
-pkg/<target>/
-```
-
-For example:
-
-```text
-pkg/bundler/
-pkg/web/
-pkg/nodejs/
-```
-
-Pass a second argument to change the output base directory:
-
-```bash
-bash bin/build-wasm.sh bundler /tmp/hashsigs-wasm
-```
-
-That writes to:
-
-```text
-/tmp/hashsigs-wasm/bundler/
-```
-
-The generated package contains the `.wasm` binary, JS wrapper, and `.d.ts`
-files emitted by `wasm-pack`.
-
-Target guidance:
-
-- `bundler`
-  - use this for Vite, webpack, Rollup, and most TS application builds
-- `web`
-  - use this for direct browser loading without a bundler
-- `nodejs`
-  - use this for server-side Node integrations
-
-Current WASM scope:
-
-- supported now:
-  - SHRINCS verifier bindings
-  - SHRINCS key generation and raw signing bindings
-  - account-layer wrapper bindings
-  - hex/JSON-friendly JS entry points
-- not implemented yet:
-  - published npm package flow
-  - documented browser/node packaging examples beyond the raw `wasm-pack` targets
-  - CI automation for real wasm-target binding test execution
-  - WOTS-specific bindings
-
-## WASM Testing
-
-There are two different WASM-related test layers in this repo:
-
-- native host tests
-- real wasm-target binding tests
-
-Native host tests are still useful, but they only validate Rust-side helper
-logic and feature-gated conversion code. They do not execute the exported
-`wasm-bindgen` bindings inside a real wasm runtime.
-
-To run the real binding-runtime tests, install the wasm target first:
+Prerequisites:
 
 ```bash
 rustup target add wasm32-unknown-unknown
+# Must equal the crate's wasm-bindgen dependency (Cargo.toml =0.2.100).
+cargo install wasm-bindgen-cli --version 0.2.100
 ```
 
-The binding tests do not require browser APIs, so run them in Node:
+Build from the crate root (default output directory is `ts/src`):
 
 ```bash
-wasm-pack test --node --features wasm-bindings
+./bin/build-wasm.sh
+# or
+./bin/build-wasm.sh ts/src
 ```
 
-If you prefer invoking `cargo test` directly, install a matching
-`wasm-bindgen-test-runner` with `wasm-bindgen-cli`, or point Cargo at the runner
-binary that `wasm-pack` installed in its cache:
+That writes:
+
+```text
+ts/src/nodejs/   # wasm-bindgen nodejs target (CommonJS)
+ts/src/web/      # wasm-bindgen web target (ESM)
+```
+
+Optional custom output directory:
 
 ```bash
-CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=/path/to/wasm-bindgen-test-runner \
-  cargo test --features wasm-bindings --target wasm32-unknown-unknown
+./bin/build-wasm.sh /tmp/hashsigs-wasm
 ```
 
-Why both layers exist:
+The TypeScript package that wraps those bindings lives in `ts/` and is named
+`@quip.network/hashsigs-wasm`. After the wasm build:
 
-- native host tests
-  - faster
-  - good for DTO parsing and helper logic
-  - do not exercise `JsValue` / `wasm-bindgen` runtime behavior
-- wasm-target tests via `wasm-bindgen-test`
-  - exercise real exported binding behavior on a wasm target
-  - validate JS-facing class/method/runtime conversion paths
+```bash
+cd ts
+npm ci
+npm run build   # also rebuilds wasm, inlines browser wasm as base64, runs tsc
+npm test        # packaging conformance against dist/
+```
 
-If you are changing:
+Published consumers load one async entry point. The package `"browser"` field
+swaps the Node loader for the browser loader at bundle time:
 
-- `WasmShrincsKeypair`
-- `WasmShrincsAccount`
-- verifier exports in `src/wasm/`
+```ts
+import { loadShrincsWasm } from "@quip.network/hashsigs-wasm";
 
-you should treat the wasm-target test run as the authoritative binding check.
+const wasm = await loadShrincsWasm();
+const keypair = wasm.shrincsKeygen("0x" + "ab".repeat(32), 16);
+```
+
+CI builds and tests this package on merge requests and the default branch
+(`ts-conformance` job). Version tags matching `vX.Y.Z` (optional pre-release
+suffix) run the same build and publish to npm.
+
+Current WASM scope:
+
+- supported:
+  - SHRINCS verifier bindings
+  - SHRINCS key generation, raw signing, and signing-key import/export
+  - account-layer wrapper bindings
+  - hex / plain-object JS entry points via `loadShrincsWasm()`
+  - Node and browser packaging under `@quip.network/hashsigs-wasm`
+- not implemented:
+  - WOTS-specific wasm bindings
+  - a separate `wasm-pack` / `pkg/<target>` layout
+
+## WASM Testing
+
+Two layers cover the wasm surface:
+
+1. **Rust host tests** (`cargo test --features wasm-bindings`): DTO parsing,
+   hex helpers, and feature-gated conversion logic on the host. They do not
+   run the exported bindings inside a wasm runtime.
+2. **TS packaging conformance** (`cd ts && npm test`, after `npm run build`):
+   loads the built `dist/` package through both Node and browser loaders and
+   exercises keygen, sign, verify, import/export, and typed errors.
+
+For Rust-only wasm target unit tests (optional), install a matching
+`wasm-bindgen-test-runner` and run:
+
+```bash
+cargo test --features wasm-bindings --target wasm32-unknown-unknown
+```
+
+When changing `WasmShrincsKeypair`, `WasmShrincsAccount`, or verifier exports
+in `src/wasm/`, treat the TS conformance suite as the packaging gate and the
+Rust suite as the crypto / DTO gate.
 
 ## WASM API
 
-The generated package exports three categories of APIs:
-
-- verifier functions
-- signer/keypair APIs
-- account-wrapper APIs
-
-The current JS-facing data model uses:
-
-- hex strings for byte arrays
-- plain JS objects for public keys, signatures, contexts, and rotation targets
+`loadShrincsWasm()` resolves to the generated wasm module. That module exposes
+verifier functions, signer/keypair APIs, and account-wrapper APIs. Byte fields
+are `0x`-prefixed hex strings; structured values are plain camelCase objects.
+`u64` fields cross the boundary as JavaScript `bigint`.
 
 ### Verifier exports
 
-Available verifier exports:
+- `shrincsVerifyStatefulRaw(...)`
+- `shrincsVerifyStatefulAction(...)`
+- `shrincsVerifyStatelessRaw(...)`
+- `shrincsVerifyStatelessAction(...)`
 
-- `shrincs_verify_stateful_raw(...)`
-- `shrincs_verify_stateful_action(...)`
-- `shrincs_verify_stateless_raw(...)`
-- `shrincs_verify_stateless_action(...)`
-
-Minimal TS example:
+Malformed hex or wrong-length fields throw an `Error` with a typed
+`error.code` (`ERR_HEX_INVALID`, `ERR_BAD_LENGTH`, or `ERR_INVALID_INPUT` for
+serde shape errors). Cryptographic verification failure returns `false` and
+does not throw.
 
 ```ts
-import { shrincs_verify_stateless_action } from "./pkg/bundler/hashsigs_rs";
+import { loadShrincsWasm } from "@quip.network/hashsigs-wasm";
 
-const ok = shrincs_verify_stateless_action(
+const wasm = await loadShrincsWasm();
+const ok = wasm.shrincsVerifyStatelessAction(
   publicKey.publicKeyCommitment,
   publicKey,
   {
@@ -206,78 +164,84 @@ const ok = shrincs_verify_stateless_action(
 
 ### Signer exports
 
-Available signer exports:
-
-- `shrincsKeygen(...)`
+- `shrincsKeygen(seedHex, maxStatefulSignatures)`
+- `shrincsImportSigningKey(exportedKey)`
 - `WasmShrincsKeypair.publicKey()`
-- `WasmShrincsKeypair.destroy()`
-- `WasmShrincsKeypair.signStatefulRaw(...)`
+- `WasmShrincsKeypair.signStatefulRaw(...)` — returns
+  `{ signature, nextStatefulLeafIndex }`
+- `WasmShrincsKeypair.signStatefulRawAt(messageHex, leaf)`
 - `WasmShrincsKeypair.signStatelessRaw(...)`
 - `WasmShrincsKeypair.exportSigningKeyUnsafe()`
-- `WasmShrincsKeypair.exportSigningKey()`
-  - legacy compatibility alias; new code should prefer the explicit `Unsafe`
-    form
-
-Minimal TS example:
+- `WasmShrincsKeypair.exportSigningKey()` — legacy alias of the `Unsafe` form
+- `WasmShrincsKeypair.destroy()`
+- getters: `nextStatefulLeafIndex`, `maxStatefulSignatures`,
+  `remainingStatefulSignatures`
+- `version()`
 
 ```ts
-import { shrincsKeygen } from "./pkg/bundler/hashsigs_rs";
+import { loadShrincsWasm } from "@quip.network/hashsigs-wasm";
 
-const keypair = shrincsKeygen("0x00112233445566778899aabbccddeeff", 16);
+const wasm = await loadShrincsWasm();
+// Seed must be at least 32 bytes of hex.
+const keypair = wasm.shrincsKeygen("0x" + "11".repeat(32), 16);
 
 const publicKey = keypair.publicKey();
-const statefulSignature = keypair.signStatefulRaw("0xdeadbeef");
+const { signature: statefulSignature, nextStatefulLeafIndex } =
+  keypair.signStatefulRaw("0xdeadbeef");
 const statelessSignature = keypair.signStatelessRaw("0xdeadbeef");
 const signingKeySnapshot = keypair.exportSigningKeyUnsafe();
+// signingKeySnapshot.formatVersion === 1 (required on import)
 ```
+
+### Keypair lifecycle: `destroy()` and `free()`
+
+`destroy()` is the supported explicit lifecycle method:
+
+- clears in-memory signing and public-key state on the handle (best-effort wipe)
+- permanently invalidates the handle
+- later method or getter calls throw an `Error` with
+  `error.code === "ERR_HANDLE_DESTROYED"`
+
+`free()` is the `wasm-bindgen`-generated finalizer that drops the underlying
+wasm object when the JS wrapper is garbage-collected. Prefer `destroy()` when
+you still hold a reference and want secrets cleared early. After `destroy()`,
+do not call other keypair methods; you may still call `free()` if your
+embedding requires an explicit drop, but the handle is already empty.
 
 ### WASM Secret Handling
 
-The WASM signer surface is suitable only for environments where the surrounding
-JS context is trusted.
+The WASM signer surface is for environments where the surrounding JS context
+is trusted.
 
-Important implications:
-
-- `WasmShrincsKeypair` holds live signing-key material in wasm memory for as
-  long as the handle exists
+- `WasmShrincsKeypair` holds live signing-key material in wasm memory while the
+  handle exists
 - `exportSigningKeyUnsafe()` materializes the full private signing state into JS
-- any XSS, malicious same-origin script, compromised dependency, or hostile
-  browser extension with access to the page context can exfiltrate that key
-  material
+- XSS, same-origin script, compromised dependencies, or hostile extensions that
+  run in the page can exfiltrate that material
 
 Operational guidance:
 
 - do not use the browser signer in pages that execute untrusted third-party JS
-- avoid calling `exportSigningKeyUnsafe()` except for explicit backup /
-  migration
-  flows
-- call `destroy()` as soon as the keypair is no longer needed; this performs a
-  best-effort early wipe and permanently invalidates the handle
-- still assume browser memory is a soft boundary, not a hardware-backed secret
-  store
+- avoid `exportSigningKeyUnsafe()` except for explicit backup or migration
+- call `destroy()` as soon as the keypair is no longer needed
+- treat browser memory as a soft boundary, not a hardware-backed secret store
 
-Safe-default guidance:
+Safe defaults:
 
-- keep the keypair live in wasm and use `signStatefulRaw(...)` /
-  `signStatelessRaw(...)` for routine operation
-- export secret state only at explicit persistence boundaries such as backup,
-  migration, or a durable post-signature checkpoint
-- treat `exportSigningKey()` exactly like `exportSigningKeyUnsafe()`; it exists
-  only as a legacy alias for compatibility
+- keep the keypair in wasm and use `signStatefulRaw` / `signStatelessRaw` for
+  routine operation
+- export secret state only at explicit persistence boundaries
+- treat `exportSigningKey()` the same as `exportSigningKeyUnsafe()`
 
-`shrincsKeygen(seedHex, maxStatefulSignatures)` rejects
-`maxStatefulSignatures === 0` and values over `4096`. Stateful signing consumes
-one stateful leaf per signature, so `signStatefulRaw(...)` can fail once the
-key has used its configured stateful signature budget.
-
-`exportSigningKeyUnsafe()` returns secret material. Treat it as private key
-data. `exportSigningKey()` is a legacy alias with the same risk.
+`shrincsKeygen(seedHex, maxStatefulSignatures)` rejects seeds shorter than 32
+bytes (`ERR_SEED_TOO_SHORT`) and `maxStatefulSignatures` outside `1..=4096`
+(`ERR_INVALID_INPUT`). Stateful signing consumes one leaf per signature;
+`signStatefulRaw` throws `ERR_STATEFUL_LEAVES_EXHAUSTED` when the budget is
+spent.
 
 ### Account exports
 
-Available account exports:
-
-- `new WasmShrincsAccount(...)`
+- `new WasmShrincsAccount(owner, chainId, contractAddress, publicKeyCommitment)`
 - `snapshot()`
 - `verifyStatefulAction(...)`
 - `verifyStatelessAction(...)`
@@ -295,19 +259,18 @@ Canonical message helpers:
 - `shrincsStatefulRotationMessageHash(...)`
 - `shrincsFullRotationMessageHash(...)`
 
-Minimal TS example:
-
 ```ts
-import { WasmShrincsAccount, shrincsKeygen } from "./pkg/bundler/hashsigs_rs";
+import { loadShrincsWasm } from "@quip.network/hashsigs-wasm";
 
+const wasm = await loadShrincsWasm();
 const owner = "0x" + "11".repeat(32);
 const chainId = "0x" + "22".repeat(32);
 const contractAddress = "0x" + "33".repeat(20);
 
-const keypair = shrincsKeygen("0x1234", 8);
+const keypair = wasm.shrincsKeygen("0x" + "12".repeat(32), 8);
 const publicKey = keypair.publicKey();
 
-const account = new WasmShrincsAccount(
+const account = new wasm.WasmShrincsAccount(
   owner,
   chainId,
   contractAddress,
@@ -320,24 +283,21 @@ account.enterRecoveryMode(owner);
 console.log(account.snapshot());
 ```
 
-Stateful action verification example:
+Stateful action verification:
 
 ```ts
-import {
-  WasmShrincsAccount,
-  shrincsStatefulActionMessageHash,
-  shrincsKeygen,
-} from "./pkg/bundler/hashsigs_rs";
+import { loadShrincsWasm } from "@quip.network/hashsigs-wasm";
 
+const wasm = await loadShrincsWasm();
 const owner = "0x" + "11".repeat(32);
 const chainId = "0x" + "22".repeat(32);
 const contractAddress = "0x" + "33".repeat(20);
 const actionType = "0x" + "44".repeat(32);
 const payloadHash = "0x" + "55".repeat(32);
 
-const keypair = shrincsKeygen("0x0011223344", 8);
+const keypair = wasm.shrincsKeygen("0x" + "00".repeat(32), 8);
 const publicKey = keypair.publicKey();
-const account = new WasmShrincsAccount(
+const account = new wasm.WasmShrincsAccount(
   owner,
   chainId,
   contractAddress,
@@ -345,7 +305,7 @@ const account = new WasmShrincsAccount(
 );
 
 const snapshot = account.snapshot();
-const message = shrincsStatefulActionMessageHash(
+const message = wasm.shrincsStatefulActionMessageHash(
   publicKey.publicKeyCommitment,
   {
     domainSeparator: snapshot.domainSeparator,
@@ -355,7 +315,7 @@ const message = shrincsStatefulActionMessageHash(
     payloadHash,
   },
 );
-const signature = keypair.signStatefulRaw(message);
+const { signature } = keypair.signStatefulRaw(message);
 const ok = account.verifyStatefulAction(
   publicKey,
   actionType,
@@ -366,24 +326,21 @@ const ok = account.verifyStatefulAction(
 console.log({ ok, snapshot: account.snapshot() });
 ```
 
-Stateless action verification example:
+Stateless action verification:
 
 ```ts
-import {
-  WasmShrincsAccount,
-  shrincsStatelessActionMessageHash,
-  shrincsKeygen,
-} from "./pkg/bundler/hashsigs_rs";
+import { loadShrincsWasm } from "@quip.network/hashsigs-wasm";
 
+const wasm = await loadShrincsWasm();
 const owner = "0x" + "11".repeat(32);
 const chainId = "0x" + "22".repeat(32);
 const contractAddress = "0x" + "33".repeat(20);
 const actionType = "0x" + "66".repeat(32);
 const payloadHash = "0x" + "77".repeat(32);
 
-const keypair = shrincsKeygen("0xabcdef", 8);
+const keypair = wasm.shrincsKeygen("0x" + "ab".repeat(32), 8);
 const publicKey = keypair.publicKey();
-const account = new WasmShrincsAccount(
+const account = new wasm.WasmShrincsAccount(
   owner,
   chainId,
   contractAddress,
@@ -391,7 +348,7 @@ const account = new WasmShrincsAccount(
 );
 
 const snapshot = account.snapshot();
-const message = shrincsStatelessActionMessageHash(
+const message = wasm.shrincsStatelessActionMessageHash(
   publicKey.publicKeyCommitment,
   {
     domainSeparator: snapshot.domainSeparator,
@@ -412,14 +369,10 @@ const ok = account.verifyStatelessAction(
 console.log({ ok, snapshot: account.snapshot() });
 ```
 
-Stateful-only rotation example:
+Stateful-only rotation:
 
 ```ts
-import {
-  WasmShrincsAccount,
-  shrincsStatefulRotationMessageHash,
-  shrincsKeygen,
-} from "./pkg/bundler/hashsigs_rs";
+import { loadShrincsWasm } from "@quip.network/hashsigs-wasm";
 import { concat, getBytes, keccak256, toUtf8Bytes } from "ethers";
 
 function statefulOnlyTargetCommitment(
@@ -436,16 +389,17 @@ function statefulOnlyTargetCommitment(
   );
 }
 
+const wasm = await loadShrincsWasm();
 const owner = "0x" + "11".repeat(32);
 const chainId = "0x" + "22".repeat(32);
 const contractAddress = "0x" + "33".repeat(20);
 
-const currentKeypair = shrincsKeygen("0x1111", 8);
-const nextKeypair = shrincsKeygen("0x2222", 16);
+const currentKeypair = wasm.shrincsKeygen("0x" + "11".repeat(32), 8);
+const nextKeypair = wasm.shrincsKeygen("0x" + "22".repeat(32), 16);
 
 const currentPublicKey = currentKeypair.publicKey();
 const nextPublicKey = nextKeypair.publicKey();
-const account = new WasmShrincsAccount(
+const account = new wasm.WasmShrincsAccount(
   owner,
   chainId,
   contractAddress,
@@ -464,7 +418,7 @@ const nextStatefulTarget = {
   ),
 };
 
-const recoveryMessage = shrincsStatefulRotationMessageHash(
+const recoveryMessage = wasm.shrincsStatefulRotationMessageHash(
   currentPublicKey.publicKeyCommitment,
   currentPublicKey,
   {
@@ -484,25 +438,22 @@ const rotated = account.rotateToFreshKey(
 console.log({ rotated, snapshot: account.snapshot() });
 ```
 
-Full rotation example:
+Full rotation:
 
 ```ts
-import {
-  WasmShrincsAccount,
-  shrincsFullRotationMessageHash,
-  shrincsKeygen,
-} from "./pkg/bundler/hashsigs_rs";
+import { loadShrincsWasm } from "@quip.network/hashsigs-wasm";
 
+const wasm = await loadShrincsWasm();
 const owner = "0x" + "11".repeat(32);
 const chainId = "0x" + "22".repeat(32);
 const contractAddress = "0x" + "33".repeat(20);
 
-const currentKeypair = shrincsKeygen("0xaaaa", 8);
-const nextKeypair = shrincsKeygen("0xbbbb", 16);
+const currentKeypair = wasm.shrincsKeygen("0x" + "aa".repeat(32), 8);
+const nextKeypair = wasm.shrincsKeygen("0x" + "bb".repeat(32), 16);
 
 const currentPublicKey = currentKeypair.publicKey();
 const nextPublicKey = nextKeypair.publicKey();
-const account = new WasmShrincsAccount(
+const account = new wasm.WasmShrincsAccount(
   owner,
   chainId,
   contractAddress,
@@ -520,7 +471,7 @@ const nextFullTarget = {
   hypertreeRoot: nextPublicKey.hypertreeRoot,
 };
 
-const recoveryMessage = shrincsFullRotationMessageHash(
+const recoveryMessage = wasm.shrincsFullRotationMessageHash(
   currentPublicKey.publicKeyCommitment,
   currentPublicKey,
   {
@@ -540,21 +491,22 @@ const rotated = account.rotateFullKey(
 console.log({ rotated, snapshot: account.snapshot() });
 ```
 
-The examples above are canonical end-to-end flows:
+Canonical end-to-end pattern:
 
-- the account snapshot exposes `domainSeparator`, `nonce`, and `keyVersion`
-- derive the message bytes with the exported helper that matches the intended wrapper path
-- sign those exact bytes with `signStatefulRaw(...)` or `signStatelessRaw(...)`
-- submit the signature through the corresponding account verification or rotation method
+- read `domainSeparator`, `nonce`, and `keyVersion` from `account.snapshot()`
+- hash with the matching message helper
+- sign with `signStatefulRaw` or `signStatelessRaw`
+- submit through the matching account verify or rotate method
 
 ### Object shapes
 
-The current JS object shapes follow camelCase field names.
+Names match the generated Tsify types re-exported from
+`@quip.network/hashsigs-wasm` (see `ts/src/index.ts`). Fields are camelCase.
 
-Public key:
+Public key (`ShrincsPublicKey`):
 
 ```ts
-type WasmPublicKey = {
+type ShrincsPublicKey = {
   statefulPublicKey: string;
   publicKeyCommitment: string;
   pkSeed: string;
@@ -562,10 +514,10 @@ type WasmPublicKey = {
 };
 ```
 
-Action context:
+Action context (`ActionContext`):
 
 ```ts
-type WasmActionContext = {
+type ActionContext = {
   domainSeparator: string;
   nonce: string;
   keyVersion: string;
@@ -574,10 +526,10 @@ type WasmActionContext = {
 };
 ```
 
-Account snapshot:
+Account snapshot (`ShrincsAccountSnapshot`):
 
 ```ts
-type WasmAccountSnapshot = {
+type ShrincsAccountSnapshot = {
   currentShrincsPublicKey: string;
   owner: string;
   chainId: string;
@@ -585,36 +537,36 @@ type WasmAccountSnapshot = {
   domainSeparator: string;
   nonce: string;
   keyVersion: string;
-  statelessSignaturesUsed: number;
+  statelessSignaturesUsed: bigint; // u64 over the wasm boundary
   statefulPolicy: string;
   nextStatefulLeafIndex: number;
   recoveryMode: boolean;
 };
 ```
 
-Rotation context:
+Rotation context (`RotationContext`):
 
 ```ts
-type WasmRotationContext = {
+type RotationContext = {
   domainSeparator: string;
   nonce: string;
   keyVersion: string;
 };
 ```
 
-Stateful rotation target:
+Stateful rotation target (`StatefulRotationTarget`):
 
 ```ts
-type WasmStatefulRotationTarget = {
+type StatefulRotationTarget = {
   statefulPublicKey: string;
   publicKeyCommitment: string;
 };
 ```
 
-Full rotation target:
+Full rotation target (`RotationTarget`):
 
 ```ts
-type WasmRotationTarget = {
+type RotationTarget = {
   statefulPublicKey: string;
   publicKeyCommitment: string;
   pkSeed: string;
@@ -622,10 +574,10 @@ type WasmRotationTarget = {
 };
 ```
 
-Stateful signature:
+Stateful signature (`StatefulSignature`):
 
 ```ts
-type WasmStatefulSignature = {
+type StatefulSignature = {
   randomizer: string;
   counter: number;
   chains: string[];
@@ -633,44 +585,46 @@ type WasmStatefulSignature = {
 };
 ```
 
-Stateless signature:
+Stateless signature (`StatelessSignature`):
 
 ```ts
-type WasmForsEntry = {
+type ForsEntry = {
   secretLeaf: string;
   authPath: string[];
 };
 
-type WasmForsSignature = {
+type ForsSignature = {
   randomizer: string;
   counter: number;
-  entries: WasmForsEntry[];
+  entries: ForsEntry[];
 };
 
-type WasmWotsCSignature = {
+type WotsCSignature = {
   randomizer: string;
   counter: number;
   chains: string[];
 };
 
-type WasmHypertreeLayerSignature = {
-  treeIndex: string;
+type HypertreeLayerSignature = {
+  treeIndex: bigint; // u64 over the wasm boundary
   leafIndex: number;
   wotsCPkHash: string;
-  wotsCSignature: WasmWotsCSignature;
+  wotsCSignature: WotsCSignature;
   authPath: string[];
 };
 
-type WasmStatelessSignature = {
-  fors: WasmForsSignature;
-  hypertree: WasmHypertreeLayerSignature[];
+type StatelessSignature = {
+  fors: ForsSignature;
+  hypertree: HypertreeLayerSignature[];
 };
 ```
 
-Signing key snapshot returned by `exportSigningKeyUnsafe()`:
+Signing key snapshot from `exportSigningKeyUnsafe()` /
+`exportSigningKey()` (`ShrincsExportedSigningKey`):
 
 ```ts
-type WasmSigningKey = {
+type ShrincsExportedSigningKey = {
+  formatVersion: 1; // required; import rejects other versions
   statefulSkSeed: string;
   statefulPrfSeed: string;
   statefulPkSeed: string;
@@ -785,12 +739,13 @@ NOTE: if on Mac, do not use brew to install rust and instead use https://www.rus
 ```
 .
 ├── bin/
-│   └── build-wasm.sh  # wasm-pack helper for bundler/web/nodejs builds
+│   └── build-wasm.sh  # cargo + wasm-bindgen helper (nodejs + web → ts/src)
 ├── src/
 │   ├── wotsplus/  # WOTS+ primitives
 │   ├── shrincs/   # SHRINCS signer / verifier primitives
 │   ├── account/   # Rust account-policy wrapper
 │   └── wasm/      # Verifier / signer / account wasm-bindgen surface
+├── ts/            # @quip.network/hashsigs-wasm (loadShrincsWasm entry)
 ├── solana/        # Solana program implementation
 └── tests/         # Test vectors and unit tests
 ```

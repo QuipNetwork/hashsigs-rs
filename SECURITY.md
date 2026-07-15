@@ -213,6 +213,24 @@ Guidance:
 - prefer wrapper-driven flows over ad hoc raw-message signing for production
   authorization use cases
 
+### Verifier timing / constant-time threat model
+
+The SHRINCS verifier uses ordinary short-circuit equality (`==`) and early
+`return false` on failed structural and root checks. It doesn't use
+constant-time comparison (`subtle::ConstantTimeEq` or equivalent) for
+public-key commitment, hypertree root, or intermediate hash equality.
+
+Threat-model assumption:
+
+- verification isn't assumed to resist a local timing adversary on the host
+  that can measure sub-operation latency of `verify*` with chosen signatures
+- remote network timing of full verification requests is outside the intended
+  attacker model for this crate; deployments that face that threat should treat
+  this as residual risk and add their own defenses if needed
+
+Future work, not implemented: constant-time equality on the final root and
+commitment checks, or a documented constant-time verification profile.
+
 ### Browser signer threat model
 
 The wasm signer surface must be treated as running inside the browser's normal

@@ -7,11 +7,42 @@
 #
 # The wasm-bindgen CLI version MUST equal the crate's wasm-bindgen dependency
 # (0.2.100) or wasm-bindgen emits a schema-mismatch error.
+# Node major is pinned to 22 (LTS) for the TS packaging jobs.
 
 stages: [test, publish]
 
 variables:
   WASM_BINDGEN_VERSION: "0.2.100"
+  # Node 22 LTS; install from nodejs.org tarball so the major is fixed (not
+  # whatever Debian ships under apt `nodejs`).
+  NODE_MAJOR: "22"
+  NODE_VERSION: "22.14.0"
+
+# Shared before_script fragments via GitLab !reference (not YAML list anchors,
+# which nest incorrectly when expanded under another list).
+.install-node-pinned:
+  before_script:
+    - |
+      set -euo pipefail
+      ARCH="$(uname -m)"
+      case "$ARCH" in
+        x86_64) NODE_ARCH=x64 ;;
+        aarch64|arm64) NODE_ARCH=arm64 ;;
+        *) echo "unsupported arch: $ARCH" >&2; exit 1 ;;
+      esac
+      curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz" \
+        | tar -xJ -C /usr/local --strip-components=1
+      node --version
+      npm --version
+      case "$(node --version)" in
+        v${NODE_MAJOR}.*) ;;
+        *) echo "expected Node ${NODE_MAJOR}.x, got $(node --version)" >&2; exit 1 ;;
+      esac
+
+.install-wasm-bindgen:
+  before_script:
+    - rustup target add wasm32-unknown-unknown
+    - cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION"
 
 build-test:
   stage: test
@@ -23,6 +54,11 @@ build-test:
     - rustup target add wasm32-unknown-unknown
   script:
     - cargo test --locked --features wasm-bindings
+    # Profile features are mutually exclusive; check each path compiles.
+    - cargo check --locked --features profile-128s-q18
+    - cargo check --locked --features profile-128s-q20
+    # Default-profile wasm build (no profile-* feature). ts-conformance rebuilds
+    # only when packaging via npm run build → build-wasm.sh.
     - cargo build --locked --release --target wasm32-unknown-unknown --features wasm-bindings
 
 # Static clippy gate. Profile features are mutually exclusive, so lint the same
@@ -42,6 +78,8 @@ clippy:
 
 # Conformance test against the BUILT package (dist/): loaders, exports map,
 # ESM/CJS scoping, base64-inline path — the layer cargo tests never touch.
+# npm run build already runs build-wasm.sh + npm test once; do not invoke them
+# again here.
 ts-conformance:
   stage: test
   image: rust:1.89.0
@@ -49,14 +87,11 @@ ts-conformance:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   before_script:
-    - apt-get update && apt-get install -y nodejs npm
-    - rustup target add wasm32-unknown-unknown
-    - cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION"
+    - !reference [.install-node-pinned, before_script]
+    - !reference [.install-wasm-bindgen, before_script]
   script:
-    - ./bin/build-wasm.sh ts/src
     - cd ts && npm ci
     - npm run build
-    - npm test
 
 publish-npm:
   stage: publish
@@ -65,16 +100,14 @@ publish-npm:
   rules:
     - if: $CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$/ # runs only on a semver version tag
   before_script:
-    - apt-get update && apt-get install -y nodejs npm
-    - rustup target add wasm32-unknown-unknown
-    - cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION"
+    - !reference [.install-node-pinned, before_script]
+    - !reference [.install-wasm-bindgen, before_script]
   script:
     # Tag pipelines do not run build-test, so gate the release on the Rust suite here.
     - cargo test --locked --features wasm-bindings
-    - ./bin/build-wasm.sh ts/src
+    # npm run build rebuilds wasm + runs conformance; do not pre-run either.
     - cd ts && npm ci
     - npm version "${CI_COMMIT_TAG#v}" --no-git-tag-version --allow-same-version # tag v0.1.0 -> 0.1.0
     - npm run build
-    - npm test # conformance gate: exercises the built dist/ before it ships
     - echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > .npmrc
     - npm publish --access public
