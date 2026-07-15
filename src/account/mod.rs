@@ -803,7 +803,7 @@ mod tests {
     ) -> [u8; HASH_LEN] {
         let mut packed = Vec::new();
         packed.extend_from_slice(b"shrincs-public-key/");
-        packed.extend_from_slice(crate::shrincs::verifier::PROFILE_NAME.as_bytes());
+        packed.extend_from_slice(crate::shrincs::PROFILE_NAME.as_bytes());
         packed.extend_from_slice(stateful_public_key);
         packed.extend_from_slice(pk_seed);
         packed.extend_from_slice(hypertree_root);

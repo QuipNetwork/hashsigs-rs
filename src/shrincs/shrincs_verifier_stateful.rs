@@ -21,7 +21,7 @@
 // from the signature, then climb the unbalanced stateful Merkle path back to the pinned root.
 
 use super::super::types::{PublicKey, StatefulSignature, ADDRESS_TYPE_WOTS_HASH, HASH_LEN};
-use super::{
+use super::super::profiles::{
     WOTS_BASE_STATEFUL, WOTS_CHAINS_STATEFUL, WOTS_TARGET_SUM_STATEFUL,
 };
 use super::shrincs_verifier_utils::{

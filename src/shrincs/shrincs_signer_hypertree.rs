@@ -25,7 +25,7 @@ use super::shrincs_signer_utils::{
     wots_digest_bytes, WOTS_C_MAX_GRIND_COUNTER,
 };
 use super::super::types::{HypertreeLayerSignature, WotsCSignature, HASH_LEN};
-use super::verifier::{
+use super::super::profiles::{
     HYPERTREE_HEIGHT, NUM_HYPERTREE_LAYERS, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN,
     WOTS_TARGET_SUM_STATEFUL,
 };

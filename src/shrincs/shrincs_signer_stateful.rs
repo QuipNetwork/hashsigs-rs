@@ -23,10 +23,10 @@ use super::shrincs_signer_types::{ShrincsSignerResult, ShrincsSigningKey};
 use super::shrincs_signer_utils::{
     address_word32, base_w16_digit, hash_node, hash_packed, WOTS_C_MAX_GRIND_COUNTER,
 };
-use super::verifier::{
-    StatefulSignature, ADDRESS_TYPE_WOTS_HASH, HASH_LEN, WOTS_BASE_STATEFUL, WOTS_CHAINS_STATEFUL,
-    WOTS_TARGET_SUM_STATEFUL,
+use super::super::profiles::{
+    WOTS_BASE_STATEFUL, WOTS_CHAINS_STATEFUL, WOTS_TARGET_SUM_STATEFUL,
 };
+use super::super::types::{StatefulSignature, ADDRESS_TYPE_WOTS_HASH, HASH_LEN};
 
 pub(crate) fn sign_stateful_raw(
     signing_key: &mut ShrincsSigningKey,

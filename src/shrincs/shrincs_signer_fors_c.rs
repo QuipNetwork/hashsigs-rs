@@ -30,7 +30,7 @@ use super::shrincs_signer_utils::{
     FORS_C_MAX_GRIND_COUNTER,
 };
 use super::super::types::{ForsEntry, ForsSignature, HASH_LEN};
-use super::verifier::{
+use super::super::profiles::{
     FORS_TREE_HEIGHT, HYPERTREE_HEIGHT, NUM_FORS_TREES, NUM_HYPERTREE_LAYERS,
 };
 

@@ -35,12 +35,9 @@ use crate::shrincs::{
     StatefulSignature as SigningStatefulSignature,
     StatelessSignature as CoreStatelessSignature,
     StatelessSignature as SigningStatelessSignature, STATEFUL_PUBLIC_KEY_BYTES,
-    WotsCSignature as CoreWotsCSignature, WOTS_CHAINS_STATEFUL, HASH_LEN,
-};
-#[cfg(any(test, feature = "wasm-bindings"))]
-use crate::shrincs::verifier::{
-    FORS_TREE_HEIGHT, HYPERTREE_HEIGHT, NUM_FORS_TREES, NUM_HYPERTREE_LAYERS,
-    NUM_WOTS_CHAINS,
+    WotsCSignature as CoreWotsCSignature, FORS_TREE_HEIGHT, HASH_LEN,
+    HYPERTREE_HEIGHT, NUM_FORS_TREES, NUM_HYPERTREE_LAYERS, NUM_WOTS_CHAINS,
+    WOTS_CHAINS_STATEFUL,
 };
 #[cfg(any(test, feature = "wasm-bindings"))]
 use zeroize::Zeroize;

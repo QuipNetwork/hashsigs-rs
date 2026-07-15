@@ -31,7 +31,7 @@ pub(crate) use super::super::shrincs_common::{
     hypertree_address_word, read_bits32, read_bits64, word32, wots_digest_bytes,
 };
 
-use super::shrincs_verifier_types::PROFILE_NAME;
+use super::super::profiles::PROFILE_NAME;
 use super::super::types::{
     ActionContext, PublicKey, RotationContext, StatefulPublicKey, HASH_LEN,
     STATEFUL_PUBLIC_KEY_BYTES,

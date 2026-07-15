@@ -23,7 +23,7 @@
 // hypertree root in the public key.
 
 use super::super::types::{HypertreeLayerSignature, PublicKey, WotsCSignature, HASH_LEN};
-use super::{
+use super::super::profiles::{
     HYPERTREE_HEIGHT, NUM_HYPERTREE_LAYERS, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN,
     WOTS_TARGET_SUM_STATEFUL,
 };

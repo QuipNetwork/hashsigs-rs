@@ -28,13 +28,11 @@ mod shrincs_verifier_fors_c;
 mod shrincs_verifier_hypertree;
 #[path = "shrincs_verifier_stateful.rs"]
 mod shrincs_verifier_stateful;
-#[path = "shrincs_verifier_types.rs"]
-mod shrincs_verifier_types;
 #[path = "shrincs_verifier_utils.rs"]
 mod shrincs_verifier_utils;
 
 pub use super::types::*;
-pub use self::shrincs_verifier_types::{
+pub use super::profiles::{
     FORS_TREE_HEIGHT, HASH_TRUNC_LEN, HYPERTREE_HEIGHT, NUM_FORS_TREES, NUM_HYPERTREE_LAYERS,
     NUM_WOTS_CHAINS, PROFILE_NAME, STATELESS_SIGNATURE_LIMIT, WOTS_BASE_STATEFUL,
     WOTS_CHAIN_LEN, WOTS_CHAINS_STATEFUL, WOTS_TARGET_SUM_STATEFUL,

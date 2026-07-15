@@ -22,7 +22,7 @@
 //! verification.
 
 use super::super::types::{ForsEntry, ForsSignature, PublicKey, HASH_LEN};
-use super::{
+use super::super::profiles::{
     FORS_TREE_HEIGHT, HYPERTREE_HEIGHT, NUM_FORS_TREES, NUM_HYPERTREE_LAYERS,
 };
 use super::shrincs_verifier_utils::{

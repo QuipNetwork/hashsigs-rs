@@ -31,7 +31,7 @@ pub(crate) use super::super::shrincs_common::{
 };
 
 use super::super::types::{PublicKey, HASH_LEN, STATEFUL_PUBLIC_KEY_BYTES};
-use super::verifier::PROFILE_NAME;
+use super::super::profiles::PROFILE_NAME;
 
 pub(crate) const WOTS_C_MAX_GRIND_COUNTER: u32 = 1 << 24;
 pub(crate) const FORS_C_MAX_GRIND_COUNTER: u32 = 1 << 24;

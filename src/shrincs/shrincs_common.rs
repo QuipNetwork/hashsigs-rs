@@ -26,8 +26,8 @@
 //! Profile constants are sourced from the `verifier` module (which re-exports the
 //! compile-time `profile::*` tuple), so the same code tracks every build profile.
 
+use crate::shrincs::profiles::{HASH_TRUNC_LEN, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN};
 use crate::shrincs::types::{ADDRESS_TYPE_FORS_TREE, ADDRESS_TYPE_TREE, HASH_LEN};
-use crate::shrincs::verifier::{HASH_TRUNC_LEN, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN};
 use solana_program::keccak::hash as keccak256_hash;
 
 pub(crate) fn keccak256(data: &[u8]) -> [u8; HASH_LEN] {
