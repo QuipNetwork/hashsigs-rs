@@ -1,4 +1,4 @@
-// Copyright (C) 2024 quip.network
+// Copyright (C) 2026 quip.network
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Affero General Public License as published by
@@ -202,7 +202,9 @@ fn process_sign(
 
     // Generate the signature
     let wots = WOTSPlus::new(keccak256);
-    let signature = wots.sign(&private_key, message);
+    let signature = wots
+        .sign(&private_key, message)
+        .ok_or(ProgramError::InvalidInstructionData)?;
 
     // Store the signature in the account
     let signature_account_data = SignatureAccount {

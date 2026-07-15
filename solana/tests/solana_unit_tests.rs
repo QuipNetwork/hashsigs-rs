@@ -1,4 +1,4 @@
-// Copyright (C) 2024 quip.network
+// Copyright (C) 2026 quip.network
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Affero General Public License as published by
@@ -188,7 +188,7 @@ pub mod wotsplus_solana_test {
             .unwrap();
 
         // Verify locally
-        let local_signature = wots.sign(&private_key, &message);
+        let local_signature = wots.sign(&private_key, &message).expect("valid length");
 
         let stored_data = processor::SignatureAccount::deserialize(&mut &signature_account.data[..])
             .expect("Failed to deserialize signature data");
@@ -260,7 +260,7 @@ pub mod wotsplus_solana_test {
         let private_seed = [1u8; 32];
         let (public_key, private_key) = wots.generate_key_pair(&private_seed);
         let message = (0..constants::MESSAGE_LEN).map(|i| i as u8).collect::<Vec<u8>>();
-        let signature = wots.sign(&private_key, &message);
+        let signature = wots.sign(&private_key, &message).expect("valid length");
         
         let instruction = processor::WOTSPlusInstruction::Verify {
             public_key: PublicKeyWrapper::from(public_key),
@@ -301,7 +301,7 @@ pub mod wotsplus_solana_test {
         let (public_key, private_key) = wots.generate_key_pair(&private_seed);
         let message = (0..constants::MESSAGE_LEN).map(|i| i as u8).collect::<Vec<u8>>();
         let randomization_elements = wots.generate_randomization_elements(&public_key.public_seed);
-        let signature = wots.sign(&private_key, &message);
+        let signature = wots.sign(&private_key, &message).expect("valid length");
         
         let instruction = processor::WOTSPlusInstruction::VerifyWithRandomization {
             public_key_hash: public_key.public_key_hash,
@@ -345,7 +345,7 @@ pub mod wotsplus_solana_test {
             
             let (public_key, private_key) = wots.generate_key_pair(&private_seed);
             let message = processor::keccak256(format!("Hello World{}", i).as_bytes()).to_vec();
-            let signature = wots.sign(&private_key, &message);
+            let signature = wots.sign(&private_key, &message).expect("valid length");
 
             let instruction = processor::WOTSPlusInstruction::Verify {
                 public_key: PublicKeyWrapper::from(public_key),
@@ -390,7 +390,7 @@ pub mod wotsplus_solana_test {
             
             let (public_key, private_key) = wots.generate_key_pair(&private_seed);
             let message = processor::keccak256(format!("Hello World{}", i).as_bytes()).to_vec();
-            let signature = wots.sign(&private_key, &message);
+            let signature = wots.sign(&private_key, &message).expect("valid length");
             let randomization_elements = wots.generate_randomization_elements(&public_key.public_seed);
             
             let instruction = processor::WOTSPlusInstruction::VerifyWithRandomization {

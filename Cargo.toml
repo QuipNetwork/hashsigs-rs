@@ -1,27 +1,57 @@
 [package]
 name = "hashsigs-rs"
-version = "0.0.3"
+version = "0.1.0-rc1"
 edition = "2021"
 authors = ["Richard T. Carback III <rick.rust.cargo.383d5@passmail.net>"]
-description = "Hash based signatures, WOTS+"
+description = "Hash-based signatures core library with WOTS+ and SHRINCS primitives"
 license = "AGPL-3.0-or-later"
 repository = "https://github.com/quipnetwork/hashsigs-rs"
 documentation = "https://docs.rs/hashsigs-rs"
 readme = "README.md"
-keywords = ["cryptography", "wots", "signature", "solana"]
+keywords = ["cryptography", "wots", "shrincs", "signature", "solana"]
 categories = ["cryptography", "authentication"]
 
 [lib]
 name = "hashsigs_rs"
 path = "src/lib.rs"
+crate-type = ["rlib", "cdylib"]
 
 [workspace]
 members = [
     "solana"
 ]
+resolver = "2"
+
+[features]
+default = []
+# Compile-time SHRINCS parameter-profile selection. The default build (no
+# profile feature) is shrincs-256s. These mirror the Solidity
+# contracts/profiles/<profile>/SHRINCSParams.sol libraries selected by the
+# Foundry `shrincs-profile/` remapping: one parameter tuple is chosen at
+# build time, so counts stay compile-time constants (no runtime params
+# struct). Select at most one.
+profile-128s-q18 = []
+profile-128s-q20 = []
+wasm-bindings = [
+    "dep:serde-wasm-bindgen",
+    "dep:wasm-bindgen",
+    "dep:tsify",
+    "dep:js-sys",
+]
 
 [dependencies]
+solana-program = "2.3"
+serde = { version = "1.0.219", features = ["derive"] }
+thiserror = "2.0"
+js-sys = { version = "0.3", optional = true }
+serde-wasm-bindgen = { version = "0.6.5", optional = true }
+zeroize = { version = "1.8", features = ["derive"] }
+# =0.5.5: last tsify accepting wasm-bindgen 0.2.100, which the wasm-bindgen CLI
+# pin in bin/build-wasm.sh must match exactly (0.5.6 forces ^0.2.104).
+tsify = { version = "=0.5.5", default-features = false, features = ["js"], optional = true }
+wasm-bindgen = { version = "=0.2.100", optional = true }
 
 [dev-dependencies]
-solana-program = "2.3"
 serde_json = "1.0.143"
+wasm-bindgen-test = "0.3.50"
+proptest = "1.11.0"
