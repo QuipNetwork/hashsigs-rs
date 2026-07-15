@@ -346,7 +346,6 @@ fn bytes32_from_vec(bytes: &[u8]) -> [u8; HASH_LEN] {
 }
 
 #[test]
-#[ignore = "requires manually copied Solidity account vectors; see README"]
 fn solidity_exported_stateful_action_vector_verifies_in_rust() {
     let vectors = load_vectors();
     let encoded = vectors["testExportStatefulActionBundle"]["stateful_vector_abi"]
@@ -382,7 +381,6 @@ fn solidity_exported_stateful_action_vector_verifies_in_rust() {
 }
 
 #[test]
-#[ignore = "requires manually copied Solidity account vectors; see README"]
 fn solidity_exported_stateless_action_vector_verifies_in_rust() {
     let vectors = load_vectors();
     let encoded = vectors["testExportStatelessActionBundle"]["stateless_vector_abi"]
@@ -418,7 +416,6 @@ fn solidity_exported_stateless_action_vector_verifies_in_rust() {
 }
 
 #[test]
-#[ignore = "requires manually copied Solidity account vectors; see README"]
 fn solidity_exported_stateful_only_rotation_vector_verifies_in_rust() {
     let vectors = load_vectors();
     let encoded = vectors["testExportStatefulOnlyRotationBundle"]["stateful_rotation_vector_abi"]
@@ -468,7 +465,6 @@ fn solidity_exported_stateful_only_rotation_vector_verifies_in_rust() {
 }
 
 #[test]
-#[ignore = "requires manually copied Solidity account vectors; see README"]
 fn solidity_exported_full_rotation_vector_verifies_in_rust() {
     let vectors = load_vectors();
     let encoded = vectors["testExportFullRotationBundle"]["full_rotation_vector_abi"]
