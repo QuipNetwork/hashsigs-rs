@@ -68,6 +68,213 @@ These are transitive dependencies from Solana and represent maintenance concerns
 
 4. **Risk Assessment**: Each identified vulnerability is assessed for its practical impact on our specific use case.
 
+## Cryptographic and Integration Security Notes
+
+This repository now contains more than low-level hash-based signature
+primitives. It includes:
+
+- standalone `wotsplus` functionality
+- core `shrincs` signer / verifier primitives
+- an `account` policy wrapper
+- a `wasm` export surface for JS/TS consumers
+
+Those layers have different security responsibilities. The most important rule
+for integrators is:
+
+- low-level signature validity is not the same thing as replay protection or
+  production-safe authorization
+
+### Raw verification APIs are low-level
+
+The core SHRINCS verifier exposes low-level raw verification functionality for
+exact caller-supplied message bytes.
+
+Security implication:
+
+- these paths validate cryptographic correctness only
+- they do **not** provide freshness, nonce management, replay protection, or
+  policy enforcement on their own
+
+Guidance:
+
+- use raw verification only when the calling system already owns freshness and
+  replay state
+- prefer the canonical action / rotation flows in the account wrapper when the
+  use case is account authorization rather than bare signature checking
+
+### Replay protection lives at the account-policy layer
+
+Replay resistance is provided by the higher-level account wrapper, not by raw
+signature verification alone.
+
+The account layer binds signatures to wrapper-owned state such as:
+
+- domain separator
+- nonce
+- key version
+- stateful leaf-use policy
+- stateless usage accounting
+- recovery mode
+
+Guidance:
+
+- production integrations should prefer canonical account-action and recovery
+  flows over raw message validation
+- if you bypass the account layer, you must implement equivalent freshness
+  protections yourself
+
+### Stateful signing must not reuse leaves
+
+The stateful SHRINCS path depends on one-time leaf use.
+
+Security implication:
+
+- reusing a stateful signing leaf is a real misuse hazard
+- production callers should use the canonical stateful signing flow that
+  advances leaf state automatically
+
+Guidance:
+
+- do not build production systems around explicit-leaf signing helpers
+- do not clone, roll back, or restore signer state in a way that can cause the
+  same stateful leaf to sign twice
+- if durable state is externalized, treat state advancement as security-critical
+
+### Stateless recovery rotation is policy-gated
+
+Stateless signatures are supported for recovery and rotation flows, but they are
+ not intended to bypass wrapper policy.
+
+Current intended model:
+
+- normal stateful actions happen through the stateful path
+- stateless recovery rotation is gated by:
+  - `RecoveryRotation`
+  - explicit `recoveryMode`
+
+Guidance:
+
+- use recovery/stateless signatures only through the intended canonical wrapper
+  flows
+- do not treat stateless signatures as unrestricted general-purpose authority in
+  account-style integrations
+
+### Public-key commitment binding is security-critical
+
+The current SHRINCS design uses a fixed public-key model tied together by
+`public_key_commitment`.
+
+Security implication:
+
+- verification depends on correctly binding:
+  - `stateful_public_key`
+  - `pk_seed`
+  - `hypertree_root`
+- callers must not treat those components as independently swappable fields
+
+Guidance:
+
+- always verify against the installed/original public key bundle
+- do not reintroduce message-specific replacement public keys
+- treat `public_key_commitment` as the installed bundle identifier for account
+  and rotation flows
+
+### Rust account layer is an off-chain adaptation
+
+The Rust `account` module is intentionally close to the Solidity example wrapper
+but is not a chain-enforced runtime.
+
+Security implication:
+
+- owner/caller checks in Rust are integration-supplied checks
+- they are not equivalent to `msg.sender` enforcement on-chain
+
+Guidance:
+
+- do not assume the Rust account wrapper is a drop-in authority model for
+  on-chain execution environments
+- treat it as an off-chain policy/state-management helper that still depends on
+  correct embedding by the integrating application
+
+### WASM exports include low-level and high-level surfaces
+
+The WASM layer exposes both primitive and wrapper-oriented APIs.
+
+Security implication:
+
+- JS/TS callers can reach low-level raw signing/verification functionality
+- misuse is possible if integrations ignore canonical message construction or
+  freshness state
+
+Guidance:
+
+- prefer the canonical action / rotation message-hash helpers when using the
+  account wrapper from JS/TS
+- prefer wrapper-driven flows over ad hoc raw-message signing for production
+  authorization use cases
+
+### Verifier timing / constant-time threat model
+
+The SHRINCS verifier uses ordinary short-circuit equality (`==`) and early
+`return false` on failed structural and root checks. It doesn't use
+constant-time comparison (`subtle::ConstantTimeEq` or equivalent) for
+public-key commitment, hypertree root, or intermediate hash equality.
+
+Threat-model assumption:
+
+- verification isn't assumed to resist a local timing adversary on the host
+  that can measure sub-operation latency of `verify*` with chosen signatures
+- remote network timing of full verification requests is outside the intended
+  attacker model for this crate; deployments that face that threat should treat
+  this as residual risk and add their own defenses if needed
+
+Future work, not implemented: constant-time equality on the final root and
+commitment checks, or a documented constant-time verification profile.
+
+### Browser signer threat model
+
+The wasm signer surface must be treated as running inside the browser's normal
+same-origin trust boundary, not inside a hardened enclave.
+
+Security implication:
+
+- `WasmShrincsKeypair` keeps live signing-key material in wasm memory while the
+  handle exists
+- `exportSigningKeyUnsafe()` copies full secret signing state into JS-visible
+  values
+- any XSS, malicious same-origin script, compromised front-end dependency, or
+  hostile extension able to run in the page context can exfiltrate that key
+
+Guidance:
+
+- do not expose the browser signer in pages that execute untrusted third-party
+  JS
+- do not treat browser local storage, IndexedDB, or ordinary JS heap state as a
+  strong secret boundary
+- use `destroy()` on `WasmShrincsKeypair` once a handle is no longer needed;
+  this performs a best-effort early wipe and invalidates the handle
+- treat `exportSigningKeyUnsafe()` as a backup / migration primitive, not a
+  routine operational call
+- `exportSigningKey()` remains only as a legacy alias; it carries the same
+  risk and should not be preferred in new integrations
+
+### WOTS+ robustness note
+
+The standalone `wotsplus` module still includes length-sensitive code paths that
+assume valid message sizing.
+
+Security implication:
+
+- this is primarily a robustness / DoS concern rather than a known signature
+  forgery issue
+
+Guidance:
+
+- do not expose malformed or unvalidated untrusted message lengths to low-level
+  WOTS+ APIs without caller-side validation
+- treat the WOTS+ module as a low-level primitive surface, not a complete
+  policy-enforcing application layer
+
 ## Reporting Security Issues
 
 If you discover a security vulnerability in this project, please report it privately to:

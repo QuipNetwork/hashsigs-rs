@@ -15,11 +15,20 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-#![allow(unexpected_cfgs)]
+//! SHRINCS signer / verifier primitives and shared types.
 
-pub mod processor;
+pub(crate) mod shrincs_common;
+pub mod signer;
+pub mod verifier;
 
-use crate::processor::process_instruction;
+#[cfg(test)]
+mod vector_conformance;
 
-#[cfg(not(feature = "no-entrypoint"))]
-solana_program::entrypoint!(process_instruction);
+pub use signer::{ShrincsSigner, ShrincsSignerResult, ShrincsSigningKey};
+pub use verifier::{
+    ActionContext, ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey, RotationContext,
+    RotationTarget, ShrincsVerifier, StatefulPublicKey, StatefulRotationTarget, StatefulSignature,
+    StatelessSignature, WotsCSignature, ADDRESS_TYPE_FORS_TREE, ADDRESS_TYPE_TREE,
+    ADDRESS_TYPE_WOTS_HASH, HASH_LEN, HASH_SUITE_KECCAK_256, STATEFUL_PUBLIC_KEY_BYTES,
+    STATELESS_SIGNATURE_LIMIT, WOTS_BASE_STATEFUL, WOTS_CHAINS_STATEFUL, WOTS_TARGET_SUM_STATEFUL,
+};

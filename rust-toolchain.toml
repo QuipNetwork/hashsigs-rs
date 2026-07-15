@@ -1,0 +1,6 @@
+# Pin the toolchain the crate is developed and verified against, so vector
+# generation and the profile builds are reproducible across machines. This
+# matches the stable release the repository currently builds and tests with.
+[toolchain]
+channel = "1.89.0"
+components = ["rustfmt", "clippy"]
