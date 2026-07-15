@@ -202,7 +202,9 @@ fn process_sign(
 
     // Generate the signature
     let wots = WOTSPlus::new(keccak256);
-    let signature = wots.sign(&private_key, message);
+    let signature = wots
+        .sign(&private_key, message)
+        .ok_or(ProgramError::InvalidInstructionData)?;
 
     // Store the signature in the account
     let signature_account_data = SignatureAccount {

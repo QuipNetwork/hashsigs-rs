@@ -88,7 +88,7 @@ fn test_wotsplus_keccak256_vectors() {
         );
 
         // Sign message and verify signature matches expected signature
-        let signature = wots.sign(&private_key, &message);
+        let signature = wots.sign(&private_key, &message).expect("valid length");
         assert_eq!(
             signature.to_vec(),
             expected_signature,
