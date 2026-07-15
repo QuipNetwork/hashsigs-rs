@@ -46,12 +46,31 @@ pub const INITIAL_STATEFUL_LEAF_INDEX: u32 = 1;
 // Stable domain tag for this wrapper family.
 pub const DOMAIN_TAG_MESSAGE: &[u8] = b"shrincs-account-v1";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+// Distinct wrapper failure reasons. Each maps to its own typed JS error code in
+// the wasm layer so a rejection is never collapsed into a single boolean. This
+// intentionally departs from the Solidity boolean-parity port (approved review
+// decision for MR !2): crypto-invalid, policy-frozen, budget-exhausted,
+// recovery-not-armed, and leaf/policy rejections are all separately observable.
+#[derive(thiserror::Error, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccountError {
+    #[error("only the account owner may perform this action")]
     OnlyOwner,
+    #[error("the recovery-rotation policy must be active for this operation")]
     RecoveryPolicyRequired,
+    #[error("stateful monotonic leaf index rollback is not allowed")]
     StatefulIndexRollback,
+    #[error("stateful policy changes are frozen after the first stateful use in this key epoch")]
     StatefulPolicyFrozen,
+    #[error("signature verification failed")]
+    InvalidSignature,
+    #[error("the stateless signature budget is exhausted for the current key epoch")]
+    BudgetExhausted,
+    #[error("recovery mode is not armed")]
+    RecoveryNotArmed,
+    #[error("the stateful signing path is disabled under the recovery-rotation policy")]
+    StatefulPathDisabled,
+    #[error("the stateful leaf is not accepted by the active anti-reuse policy")]
+    StatefulLeafRejected,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -159,7 +178,8 @@ impl ShrincsAccountVerifierExample {
         self.recoveryMode
     }
 
-    // verifyStatefulUncheckedMessage: Internal raw stateful verification for tests and support harnesses only.
+    // verifyStatefulUncheckedMessage: Internal raw stateful verification for tests and
+    // support harnesses only.
     // 1. Recover the stateful leaf index from the auth-path length.
     // 2. Check the active leaf-tracking policy before any cryptographic work.
     // 3. Verify the caller-supplied message directly without building canonical action context.
@@ -172,7 +192,13 @@ impl ShrincsAccountVerifierExample {
         message: &[u8],
         signature: &StatefulSignature,
     ) -> bool {
-        // This path bypasses canonical wrapper message construction and therefore remains internal-only.
+        // This path bypasses canonical wrapper message construction and therefore
+        // remains internal-only.
+        // Defense-in-depth: reject an auth path so long its length would truncate when
+        // narrowed to u32 before it becomes the consumed leaf index.
+        if signature.auth_path.len() > u32::MAX as usize {
+            return false;
+        }
         // Recover the consumed stateful leaf from the signature layout.
         let leafIndex = signature.auth_path.len() as u32;
         // Stop early if the active policy disallows this leaf.
@@ -209,13 +235,16 @@ impl ShrincsAccountVerifierExample {
         actionType: [u8; HASH_LEN],
         payloadHash: [u8; HASH_LEN],
         signature: &StatefulSignature,
-    ) -> bool {
+    ) -> Result<(), AccountError> {
+        // Defense-in-depth: reject an auth path so long its length would truncate when
+        // narrowed to u32 before it becomes the consumed leaf index.
+        if signature.auth_path.len() > u32::MAX as usize {
+            return Err(AccountError::InvalidSignature);
+        }
         // Recover the consumed stateful leaf from the signature layout.
         let leafIndex = signature.auth_path.len() as u32;
-        // Stop early if the active policy disallows this leaf.
-        if !self.precheckStatefulLeafUse(leafIndex) {
-            return false;
-        }
+        // Stop early with the distinct reason if the active policy disallows this leaf.
+        self.checkStatefulLeafUse(leafIndex)?;
 
         // Bind the action to this contract instance, nonce, and key epoch.
         let context = ActionContext {
@@ -234,7 +263,7 @@ impl ShrincsAccountVerifierExample {
             signature,
         );
         if !ok {
-            return false;
+            return Err(AccountError::InvalidSignature);
         }
 
         // Consume the leaf only after the action signature verifies.
@@ -242,7 +271,7 @@ impl ShrincsAccountVerifierExample {
         // Solidity emits before nonce advancement so observers see the consumed nonce value.
         // Advance freshness state after a successful action.
         increment_u256_be(&mut self.nonce);
-        true
+        Ok(())
     }
 
     // verifyStatelessAction: Canonical stateless account-action verification path.
@@ -257,14 +286,14 @@ impl ShrincsAccountVerifierExample {
         actionType: [u8; HASH_LEN],
         payloadHash: [u8; HASH_LEN],
         signature: &StatelessSignature,
-    ) -> bool {
+    ) -> Result<(), AccountError> {
         // Recovery-only policy forbids stateless actions until recovery mode is explicitly entered.
         if self.statefulPolicy == StatefulPolicy::RecoveryRotation && !self.recoveryMode {
-            return false;
+            return Err(AccountError::RecoveryNotArmed);
         }
         // Enforce the per-key stateless usage budget.
         if self.statelessSignaturesUsed >= STATELESS_SIGNATURE_LIMIT {
-            return false;
+            return Err(AccountError::BudgetExhausted);
         }
 
         // Bind the action to this contract instance, nonce, and key epoch.
@@ -284,14 +313,14 @@ impl ShrincsAccountVerifierExample {
             signature,
         );
         if !ok {
-            return false;
+            return Err(AccountError::InvalidSignature);
         }
 
         // Advance wrapper freshness and stateless usage state after success.
         increment_u256_be(&mut self.nonce);
         self.statelessSignaturesUsed += 1;
         // Solidity emits the consumed nonce value from the pre-increment state.
-        true
+        Ok(())
     }
 
     // rotateToFreshKey: Recovery-only path that replaces the installed stateful subkey.
@@ -306,18 +335,18 @@ impl ShrincsAccountVerifierExample {
         currentPublicKey: &PublicKey,
         recoverySignature: &StatelessSignature,
         nextKey: &StatefulRotationTarget,
-    ) -> bool {
+    ) -> Result<(), AccountError> {
         // Fresh-key rotation is available only in the dedicated recovery policy.
         if self.statefulPolicy != StatefulPolicy::RecoveryRotation {
-            return false;
+            return Err(AccountError::RecoveryPolicyRequired);
         }
         // The owner must explicitly arm recovery mode before stateless recovery is accepted.
         if !self.recoveryMode {
-            return false;
+            return Err(AccountError::RecoveryNotArmed);
         }
         // Enforce the per-key stateless usage budget.
         if self.statelessSignaturesUsed >= STATELESS_SIGNATURE_LIMIT {
-            return false;
+            return Err(AccountError::BudgetExhausted);
         }
 
         // Bind the rotation to this contract instance, nonce, and key epoch.
@@ -335,7 +364,7 @@ impl ShrincsAccountVerifierExample {
             recoverySignature,
             nextKey,
         ) else {
-            return false;
+            return Err(AccountError::InvalidSignature);
         };
 
         // Count the recovery signature against the current stateless budget before preserving it
@@ -344,7 +373,7 @@ impl ShrincsAccountVerifierExample {
         // Install the next stateful subkey while preserving stateless usage accounting because
         // the stateless key material is unchanged.
         self.installRotatedKey(nextCompositePublicKey, false);
-        true
+        Ok(())
     }
 
     // rotateFullKey: Recovery-only path that replaces the full installed SHRINCS key bundle.
@@ -359,18 +388,18 @@ impl ShrincsAccountVerifierExample {
         currentPublicKey: &PublicKey,
         recoverySignature: &StatelessSignature,
         nextKey: &RotationTarget,
-    ) -> bool {
+    ) -> Result<(), AccountError> {
         // Full-key rotation is available only in the dedicated recovery policy.
         if self.statefulPolicy != StatefulPolicy::RecoveryRotation {
-            return false;
+            return Err(AccountError::RecoveryPolicyRequired);
         }
         // The owner must explicitly arm recovery mode before stateless recovery is accepted.
         if !self.recoveryMode {
-            return false;
+            return Err(AccountError::RecoveryNotArmed);
         }
         // Enforce the per-key stateless usage budget.
         if self.statelessSignaturesUsed >= STATELESS_SIGNATURE_LIMIT {
-            return false;
+            return Err(AccountError::BudgetExhausted);
         }
 
         // Bind the rotation to this contract instance, nonce, and key epoch.
@@ -388,7 +417,7 @@ impl ShrincsAccountVerifierExample {
             recoverySignature,
             nextKey,
         ) else {
-            return false;
+            return Err(AccountError::InvalidSignature);
         };
 
         // Count the recovery signature as the final stateless use under the old key.
@@ -400,7 +429,7 @@ impl ShrincsAccountVerifierExample {
             || nextKey.hypertree_root != currentPublicKey.hypertree_root;
         // Install the next full key bundle and reset wrapper state for the new stateless epoch.
         self.installRotatedKey(nextCompositePublicKey, statelessKeyChanged);
-        true
+        Ok(())
     }
 
     // isLeafUsed: Read bitmap-based stateful leaf usage for the current key epoch.
@@ -432,7 +461,8 @@ impl ShrincsAccountVerifierExample {
         initialLeafIndex: u32,
     ) -> Result<(), AccountError> {
         self.onlyOwner(caller)?;
-        // Freeze the stateful tracking model once any stateful leaf has been consumed in this epoch.
+        // Freeze the stateful tracking model once any stateful leaf has been consumed
+        // in this epoch.
         if self.statefulPolicyFrozen {
             return Err(AccountError::StatefulPolicyFrozen);
         }
@@ -490,7 +520,8 @@ impl ShrincsAccountVerifierExample {
         caller: [u8; HASH_LEN],
     ) -> Result<(), AccountError> {
         self.onlyOwner(caller)?;
-        // Freeze the stateful tracking model once any stateful leaf has been consumed in this epoch.
+        // Freeze the stateful tracking model once any stateful leaf has been consumed
+        // in this epoch.
         if self.statefulPolicyFrozen {
             return Err(AccountError::StatefulPolicyFrozen);
         }
@@ -521,22 +552,43 @@ impl ShrincsAccountVerifierExample {
         Ok(())
     }
 
-    // precheckStatefulLeafUse: Check whether the active policy allows a stateful leaf before verification.
-    // 1. Reject all stateful signatures while the wrapper is configured for recovery-only stateless authority.
+    // checkStatefulLeafUse: Typed anti-reuse gate returning the distinct rejection reason.
+    // 1. Reject all stateful signatures while the wrapper is configured for
+    //    recovery-only authority.
     // 2. Under monotonic tracking, accept only the next expected leaf.
     // 3. Under bitmap tracking, accept only leaves that have not yet been marked used.
     // Exhaustive match: a future StatefulPolicy variant is a compile error here rather
     // than a silent accept, so this one-time-signature anti-reuse gate cannot fail open.
-    pub fn precheckStatefulLeafUse(&self, leafIndex: u32) -> bool {
+    pub(crate) fn checkStatefulLeafUse(&self, leafIndex: u32) -> Result<(), AccountError> {
         match self.statefulPolicy {
             // Recovery-rotation policy disables the stateful path entirely, whether or not
             // recovery mode has been explicitly armed yet.
-            StatefulPolicy::RecoveryRotation => false,
+            StatefulPolicy::RecoveryRotation => Err(AccountError::StatefulPathDisabled),
             // Ordered tracking accepts exactly one next leaf.
-            StatefulPolicy::MonotonicIndex => leafIndex == self.nextStatefulLeafIndex,
+            StatefulPolicy::MonotonicIndex => {
+                if leafIndex == self.nextStatefulLeafIndex {
+                    Ok(())
+                } else {
+                    Err(AccountError::StatefulLeafRejected)
+                }
+            }
             // Bitmap tracking accepts any leaf that has not already been marked used.
-            StatefulPolicy::LeafBitmap => !self.isLeafUsed(leafIndex),
+            StatefulPolicy::LeafBitmap => {
+                if self.isLeafUsed(leafIndex) {
+                    Err(AccountError::StatefulLeafRejected)
+                } else {
+                    Ok(())
+                }
+            }
         }
+    }
+
+    // precheckStatefulLeafUse: Boolean anti-reuse gate for the internal raw stateful helper.
+    // Thin wrapper over `checkStatefulLeafUse` that discards the distinct reason. Only the
+    // test-only `verifyStatefulUncheckedMessage` needs the boolean form.
+    #[cfg(test)]
+    pub(crate) fn precheckStatefulLeafUse(&self, leafIndex: u32) -> bool {
+        self.checkStatefulLeafUse(leafIndex).is_ok()
     }
 
     // commitStatefulLeafUse: Record a successfully verified stateful leaf under the active policy.
@@ -544,7 +596,7 @@ impl ShrincsAccountVerifierExample {
     // 2. Under bitmap tracking, mark the corresponding bit for this leaf as used.
     // 3. Freeze stateful policy changes for the remainder of the key epoch.
     // 4. Leave recovery-only mode unchanged because stateful signatures are blocked there.
-    pub fn commitStatefulLeafUse(&mut self, leafIndex: u32) {
+    pub(crate) fn commitStatefulLeafUse(&mut self, leafIndex: u32) {
         // Exhaustive match so a future StatefulPolicy variant must declare how it records
         // a used leaf; an accepted-but-untracked leaf would reopen one-time-key reuse.
         match self.statefulPolicy {
@@ -621,7 +673,8 @@ impl ShrincsAccountVerifierExample {
         // Advance nonce and key epoch so old authorizations cannot be replayed.
         increment_u256_be(&mut self.nonce);
         increment_u256_be(&mut self.keyVersion);
-        // Reset per-key stateless usage accounting only when the caller rotates the stateless key too.
+        // Reset per-key stateless usage accounting only when the caller rotates the
+        // stateless key too.
         if resetStatelessUsage {
             self.statelessSignaturesUsed = 0;
         }
@@ -648,12 +701,16 @@ pub struct U256([u64; 4]);
 
 impl U256 {
     fn bit(&self, bitIndex: u32) -> bool {
+        // Callers derive bitIndex as `leafIndex & 0xff`, so it is always < 256; this
+        // guard turns a would-be out-of-bounds limb index into a clear debug failure.
+        debug_assert!(bitIndex < 256, "bitIndex {bitIndex} must be < 256");
         let limb = (bitIndex / 64) as usize;
         let offset = bitIndex % 64;
         (self.0[limb] & (1u64 << offset)) != 0
     }
 
     fn set_bit(&mut self, bitIndex: u32) {
+        debug_assert!(bitIndex < 256, "bitIndex {bitIndex} must be < 256");
         let limb = (bitIndex / 64) as usize;
         let offset = bitIndex % 64;
         self.0[limb] |= 1u64 << offset;
@@ -957,7 +1014,9 @@ mod tests {
         let signature = ShrincsSigner::sign_stateful_raw(&mut signing_key, &message).unwrap();
         let signature = to_stateful_signature(&signature);
 
-        assert!(account.verifyStatefulAction(&public_key, action_type, payload_hash, &signature));
+        account
+            .verifyStatefulAction(&public_key, action_type, payload_hash, &signature)
+            .expect("valid stateful action verifies");
         assert_eq!(account.nonce()[HASH_LEN - 1], 1);
         assert_eq!(account.nextStatefulLeafIndex(), 2);
     }
@@ -987,7 +1046,9 @@ mod tests {
         let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &message).unwrap();
         let signature = to_stateless_signature(&signature);
 
-        assert!(account.verifyStatelessAction(&public_key, action_type, payload_hash, &signature));
+        account
+            .verifyStatelessAction(&public_key, action_type, payload_hash, &signature)
+            .expect("valid stateless action verifies");
         assert_eq!(account.nonce()[HASH_LEN - 1], 1);
         assert_eq!(account.statelessSignaturesUsed(), 1);
     }
@@ -1032,7 +1093,9 @@ mod tests {
         let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &message).unwrap();
         let signature = to_stateless_signature(&signature);
 
-        assert!(account.rotateToFreshKey(&public_key, &signature, &next_target));
+        account
+            .rotateToFreshKey(&public_key, &signature, &next_target)
+            .expect("valid stateful rotation succeeds");
         assert_eq!(account.currentShrincsPublicKey(), next_commitment);
         assert_eq!(account.keyVersion()[HASH_LEN - 1], 1);
         assert_eq!(account.nonce()[HASH_LEN - 1], 1);
@@ -1081,7 +1144,9 @@ mod tests {
         let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &message).unwrap();
         let signature = to_stateless_signature(&signature);
 
-        assert!(account.rotateFullKey(&public_key, &signature, &next_target));
+        account
+            .rotateFullKey(&public_key, &signature, &next_target)
+            .expect("valid full rotation succeeds");
         assert_eq!(account.currentShrincsPublicKey(), next_commitment);
         assert_eq!(account.keyVersion()[HASH_LEN - 1], 1);
         assert_eq!(account.nonce()[HASH_LEN - 1], 1);
@@ -1127,7 +1192,10 @@ mod tests {
         // Corrupt the signature so verification fails after the policy precheck passes.
         signature.chains[0][0] ^= 0x01;
 
-        assert!(!account.verifyStatefulAction(&public_key, action_type, payload_hash, &signature));
+        assert_eq!(
+            account.verifyStatefulAction(&public_key, action_type, payload_hash, &signature),
+            Err(AccountError::InvalidSignature)
+        );
         // A failed verification must leave all policy and freshness state untouched.
         assert!(!account.statefulPolicyFrozen());
         assert_eq!(account.nextStatefulLeafIndex(), INITIAL_STATEFUL_LEAF_INDEX);
@@ -1167,7 +1235,9 @@ mod tests {
         let message = verifier.stateful_action_message_hash(expected, &context);
         let signature = ShrincsSigner::sign_stateful_raw(&mut signing_key, &message).unwrap();
         let signature = to_stateful_signature(&signature);
-        assert!(account.verifyStatefulAction(&public_key, action_type, payload_hash, &signature));
+        account
+            .verifyStatefulAction(&public_key, action_type, payload_hash, &signature)
+            .expect("valid stateful action verifies");
         assert!(account.statefulPolicyFrozen());
 
         // The recovery/rotation path must stay reachable — otherwise a used key could
@@ -1203,7 +1273,9 @@ mod tests {
             ShrincsSigner::sign_stateless_raw(&signing_key, &rotation_message).unwrap();
         let rotation_signature = to_stateless_signature(&rotation_signature);
 
-        assert!(account.rotateToFreshKey(&public_key, &rotation_signature, &next_target));
+        account
+            .rotateToFreshKey(&public_key, &rotation_signature, &next_target)
+            .expect("recovery rotation succeeds after stateful use");
         assert_eq!(account.currentShrincsPublicKey(), next_commitment);
         assert!(!account.statefulPolicyFrozen());
     }
@@ -1216,17 +1288,20 @@ mod tests {
             .expect("owner can select recovery policy");
 
         // The policy gate rejects before any cryptographic work, so a dummy signature suffices.
-        assert!(!account.verifyStatelessAction(
-            &PublicKey {
-                stateful_public_key: Vec::new(),
-                public_key_commitment: Vec::new(),
-                pk_seed: Vec::new(),
-                hypertree_root: Vec::new(),
-            },
-            [5u8; HASH_LEN],
-            [6u8; HASH_LEN],
-            &empty_stateless_signature(),
-        ));
+        assert_eq!(
+            account.verifyStatelessAction(
+                &PublicKey {
+                    stateful_public_key: Vec::new(),
+                    public_key_commitment: Vec::new(),
+                    pk_seed: Vec::new(),
+                    hypertree_root: Vec::new(),
+                },
+                [5u8; HASH_LEN],
+                [6u8; HASH_LEN],
+                &empty_stateless_signature(),
+            ),
+            Err(AccountError::RecoveryNotArmed)
+        );
     }
 
     #[test]
@@ -1247,30 +1322,39 @@ mod tests {
             hypertree_root: Vec::new(),
         };
         // All budget gates reject before verification, so dummy inputs suffice.
-        assert!(!account.rotateToFreshKey(
-            &dummy_public_key,
-            &empty_stateless_signature(),
-            &StatefulRotationTarget {
-                stateful_public_key: Vec::new(),
-                public_key_commitment: Vec::new(),
-            },
-        ));
-        assert!(!account.rotateFullKey(
-            &dummy_public_key,
-            &empty_stateless_signature(),
-            &RotationTarget {
-                stateful_public_key: Vec::new(),
-                public_key_commitment: Vec::new(),
-                pk_seed: Vec::new(),
-                hypertree_root: Vec::new(),
-            },
-        ));
-        assert!(!account.verifyStatelessAction(
-            &dummy_public_key,
-            [5u8; HASH_LEN],
-            [6u8; HASH_LEN],
-            &empty_stateless_signature(),
-        ));
+        assert_eq!(
+            account.rotateToFreshKey(
+                &dummy_public_key,
+                &empty_stateless_signature(),
+                &StatefulRotationTarget {
+                    stateful_public_key: Vec::new(),
+                    public_key_commitment: Vec::new(),
+                },
+            ),
+            Err(AccountError::BudgetExhausted)
+        );
+        assert_eq!(
+            account.rotateFullKey(
+                &dummy_public_key,
+                &empty_stateless_signature(),
+                &RotationTarget {
+                    stateful_public_key: Vec::new(),
+                    public_key_commitment: Vec::new(),
+                    pk_seed: Vec::new(),
+                    hypertree_root: Vec::new(),
+                },
+            ),
+            Err(AccountError::BudgetExhausted)
+        );
+        assert_eq!(
+            account.verifyStatelessAction(
+                &dummy_public_key,
+                [5u8; HASH_LEN],
+                [6u8; HASH_LEN],
+                &empty_stateless_signature(),
+            ),
+            Err(AccountError::BudgetExhausted)
+        );
     }
 
     #[cfg_attr(
@@ -1314,16 +1398,21 @@ mod tests {
         let signature = to_stateless_signature(&signature);
 
         // The final budgeted stateless use may fund a stateful-only rotation...
-        assert!(account.rotateToFreshKey(&public_key, &signature, &next_target));
+        account
+            .rotateToFreshKey(&public_key, &signature, &next_target)
+            .expect("final budgeted stateless use funds the rotation");
         // ...but the preserved counter lands the new epoch exhausted: the unchanged
         // stateless key has no remaining budget, so no stateless path remains.
         assert_eq!(account.statelessSignaturesUsed(), STATELESS_SIGNATURE_LIMIT);
-        assert!(!account.verifyStatelessAction(
-            &public_key,
-            [5u8; HASH_LEN],
-            [6u8; HASH_LEN],
-            &empty_stateless_signature(),
-        ));
+        assert_eq!(
+            account.verifyStatelessAction(
+                &public_key,
+                [5u8; HASH_LEN],
+                [6u8; HASH_LEN],
+                &empty_stateless_signature(),
+            ),
+            Err(AccountError::BudgetExhausted)
+        );
     }
 
     #[cfg_attr(
@@ -1370,7 +1459,9 @@ mod tests {
         let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &message).unwrap();
         let signature = to_stateless_signature(&signature);
 
-        assert!(account.rotateFullKey(&public_key, &signature, &next_target));
+        account
+            .rotateFullKey(&public_key, &signature, &next_target)
+            .expect("full rotation with unchanged stateless key succeeds");
         assert_eq!(account.currentShrincsPublicKey(), next_commitment);
         // The stateless key did not change, so its usage budget must NOT be refreshed.
         assert_eq!(account.statelessSignaturesUsed(), 8);
@@ -1433,7 +1524,10 @@ mod tests {
         let signature = ShrincsSigner::sign_stateful_raw(&mut signing_b, &message).unwrap();
         let signature = to_stateful_signature(&signature);
 
-        assert!(!account.verifyStatefulAction(&key_b, action_type, payload_hash, &signature));
+        assert_eq!(
+            account.verifyStatefulAction(&key_b, action_type, payload_hash, &signature),
+            Err(AccountError::InvalidSignature)
+        );
         assert_eq!(account.currentShrincsPublicKey(), expected_a);
         assert_eq!(account.nonce(), [0u8; HASH_LEN]);
         assert_eq!(account.nextStatefulLeafIndex(), INITIAL_STATEFUL_LEAF_INDEX);
@@ -1484,11 +1578,92 @@ mod tests {
         // Corrupt the recovery signature so FORS-C verification fails.
         signature.fors.randomizer[0] ^= 0xff;
 
-        assert!(!account.rotateToFreshKey(&public_key, &signature, &next_target));
+        assert_eq!(
+            account.rotateToFreshKey(&public_key, &signature, &next_target),
+            Err(AccountError::InvalidSignature)
+        );
         assert_eq!(account.currentShrincsPublicKey(), expected);
         assert_eq!(account.keyVersion(), [0u8; HASH_LEN]);
         assert_eq!(account.nonce(), [0u8; HASH_LEN]);
         assert_eq!(account.statelessSignaturesUsed(), 7);
         assert!(account.recoveryMode());
+    }
+
+    #[cfg_attr(
+        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
+    )]
+    #[test]
+    fn verify_stateless_action_rejects_tampered_signature() {
+        // A stateless action with a corrupted signature must fail with a distinct
+        // InvalidSignature and leave the nonce and stateless-usage counter untouched.
+        let verifier = ShrincsVerifier::new();
+        let (signing_key, public_key) =
+            ShrincsSigner::keygen(b"account stateless tamper seed", 4).unwrap();
+        let public_key = to_public_key(&public_key);
+        let expected = expected_key(&public_key);
+        let mut account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), expected);
+        let action_type = [5u8; HASH_LEN];
+        let payload_hash = [6u8; HASH_LEN];
+        let context = ActionContext {
+            domain_separator: account.domainSeparator(),
+            nonce: account.nonce(),
+            key_version: account.keyVersion(),
+            action_type,
+            payload_hash,
+        };
+        let message = verifier.stateless_action_message_hash(expected, &context);
+        let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &message).unwrap();
+        let mut signature = to_stateless_signature(&signature);
+        // Corrupt the FORS randomizer so verification fails after the policy gates pass.
+        signature.fors.randomizer[0] ^= 0xff;
+
+        assert_eq!(
+            account.verifyStatelessAction(&public_key, action_type, payload_hash, &signature),
+            Err(AccountError::InvalidSignature)
+        );
+        assert_eq!(account.nonce(), [0u8; HASH_LEN]);
+        assert_eq!(account.statelessSignaturesUsed(), 0);
+    }
+
+    #[cfg_attr(
+        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
+    )]
+    #[test]
+    fn verify_stateless_action_rejects_wrong_public_key() {
+        // Present a fully valid key-B stateless signature over the account's canonical
+        // message while key A is installed. The account must reject (B's commitment is
+        // not the installed key) and advance no freshness or usage state.
+        let verifier = ShrincsVerifier::new();
+        let (_, key_a) = ShrincsSigner::keygen(b"account stateless wrong-key A", 4).unwrap();
+        let (signing_b, key_b) =
+            ShrincsSigner::keygen(b"account stateless wrong-key B", 4).unwrap();
+        let key_a = to_public_key(&key_a);
+        let key_b = to_public_key(&key_b);
+        let expected_a = expected_key(&key_a);
+        let mut account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), expected_a);
+        let action_type = [5u8; HASH_LEN];
+        let payload_hash = [6u8; HASH_LEN];
+        let context = ActionContext {
+            domain_separator: account.domainSeparator(),
+            nonce: account.nonce(),
+            key_version: account.keyVersion(),
+            action_type,
+            payload_hash,
+        };
+        // Sign the account's canonical message with B's key: valid under B, but B is
+        // not the installed key.
+        let message = verifier.stateless_action_message_hash(expected_a, &context);
+        let signature = ShrincsSigner::sign_stateless_raw(&signing_b, &message).unwrap();
+        let signature = to_stateless_signature(&signature);
+
+        assert_eq!(
+            account.verifyStatelessAction(&key_b, action_type, payload_hash, &signature),
+            Err(AccountError::InvalidSignature)
+        );
+        assert_eq!(account.currentShrincsPublicKey(), expected_a);
+        assert_eq!(account.nonce(), [0u8; HASH_LEN]);
+        assert_eq!(account.statelessSignaturesUsed(), 0);
     }
 }

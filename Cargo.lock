@@ -1733,6 +1733,7 @@ dependencies = [
  "serde-wasm-bindgen",
  "serde_json",
  "solana-program",
+ "thiserror 2.0.16",
  "tsify",
  "wasm-bindgen",
  "wasm-bindgen-test",
