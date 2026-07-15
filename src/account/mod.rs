@@ -1383,4 +1383,96 @@ mod tests {
         increment_u256_be(&mut value);
         assert_eq!(value, [0u8; HASH_LEN]);
     }
+
+    #[cfg_attr(
+        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
+    )]
+    #[test]
+    fn verify_stateful_action_rejects_wrong_public_key() {
+        // Install key A, then present a different, fully valid key B (with a
+        // genuine B-signed action over the account's canonical message). The
+        // account must reject it because B's commitment != the installed key,
+        // and no freshness state may advance.
+        let verifier = ShrincsVerifier::new();
+        let (_, key_a) = ShrincsSigner::keygen(b"account wrong-key installed A", 4).unwrap();
+        let (mut signing_b, key_b) =
+            ShrincsSigner::keygen(b"account wrong-key attacker B", 4).unwrap();
+        let key_a = to_public_key(&key_a);
+        let key_b = to_public_key(&key_b);
+        let expected_a = expected_key(&key_a);
+        let mut account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), expected_a);
+        let action_type = [3u8; HASH_LEN];
+        let payload_hash = [4u8; HASH_LEN];
+        let context = ActionContext {
+            domain_separator: account.domainSeparator(),
+            nonce: account.nonce(),
+            key_version: account.keyVersion(),
+            action_type,
+            payload_hash,
+        };
+        // Sign the account's canonical message with B's key: cryptographically
+        // valid under B, but B is not the installed key.
+        let message = verifier.stateful_action_message_hash(expected_a, &context);
+        let signature = ShrincsSigner::sign_stateful_raw(&mut signing_b, &message).unwrap();
+        let signature = to_stateful_signature(&signature);
+
+        assert!(!account.verifyStatefulAction(&key_b, action_type, payload_hash, &signature));
+        assert_eq!(account.currentShrincsPublicKey(), expected_a);
+        assert_eq!(account.nonce(), [0u8; HASH_LEN]);
+        assert_eq!(account.nextStatefulLeafIndex(), INITIAL_STATEFUL_LEAF_INDEX);
+    }
+
+    #[cfg_attr(
+        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
+    )]
+    #[test]
+    fn rotate_to_fresh_key_rejects_tampered_recovery_signature() {
+        // A recovery rotation with a corrupted stateless signature must fail and
+        // leave every piece of account state untouched (no key install, no nonce
+        // or key-version advance, no stateless-usage consumption).
+        let verifier = ShrincsVerifier::new();
+        let (signing_key, public_key) =
+            ShrincsSigner::keygen(b"account rotate tamper current seed", 4).unwrap();
+        let (_, next_public_key) =
+            ShrincsSigner::keygen(b"account rotate tamper next seed", 8).unwrap();
+        let public_key = to_public_key(&public_key);
+        let expected = expected_key(&public_key);
+        let next_commitment = public_key_commitment(
+            &next_public_key.stateful_public_key,
+            &public_key.pk_seed,
+            &public_key.hypertree_root,
+        );
+        let next_target = StatefulRotationTarget {
+            stateful_public_key: next_public_key.stateful_public_key.clone(),
+            public_key_commitment: next_commitment.to_vec(),
+        };
+        let mut account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), expected);
+        account
+            .setStatefulPolicyRecoveryRotation(id(1))
+            .expect("owner can select recovery policy");
+        account
+            .enterRecoveryMode(id(1))
+            .expect("owner can arm recovery mode");
+        account.statelessSignaturesUsed = 7;
+        let context = RotationContext {
+            domain_separator: account.domainSeparator(),
+            nonce: account.nonce(),
+            key_version: account.keyVersion(),
+        };
+        let message =
+            verifier.stateful_rotation_message_hash(expected, &public_key, &context, &next_target);
+        let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &message).unwrap();
+        let mut signature = to_stateless_signature(&signature);
+        // Corrupt the recovery signature so FORS-C verification fails.
+        signature.fors.randomizer[0] ^= 0xff;
+
+        assert!(!account.rotateToFreshKey(&public_key, &signature, &next_target));
+        assert_eq!(account.currentShrincsPublicKey(), expected);
+        assert_eq!(account.keyVersion(), [0u8; HASH_LEN]);
+        assert_eq!(account.nonce(), [0u8; HASH_LEN]);
+        assert_eq!(account.statelessSignaturesUsed(), 7);
+        assert!(account.recoveryMode());
+    }
 }
