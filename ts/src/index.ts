@@ -18,8 +18,11 @@ export type {
   StatelessSignature,
   ForsSignature,
   ForsEntry,
-  WotsCSignature,
-  HypertreeLayerSignature,
+  // Rust renamed the wasm DTO structs to Wasm*-prefixed names (to disambiguate
+  // them from the core crypto types); alias back to the stable public names so
+  // consumers' imports keep working.
+  WasmWotsCSignature as WotsCSignature,
+  WasmHypertreeLayerSignature as HypertreeLayerSignature,
   ActionContext,
   RotationContext,
   StatefulRotationTarget,

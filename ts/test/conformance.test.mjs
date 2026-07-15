@@ -66,9 +66,11 @@ for (const [name, load] of loaders) {
     const kp = w.shrincsKeygen(SEED, 4);
     const pk = kp.publicKey();
     const sig = kp.signStatefulRawAt(MSG, 1);
-    // Invalid hex digits → ERR_HEX_INVALID (message does not echo the input).
+    // Invalid hex digits at the correct 32-byte width → ERR_HEX_INVALID
+    // (the fixed-width parser checks length before content, so a too-short
+    // "0xzz" would surface as ERR_BAD_LENGTH; use a full-width bad-hex body).
     assert.throws(
-      () => w.shrincsVerifyStatefulRaw("0xzz", pk, MSG, sig),
+      () => w.shrincsVerifyStatefulRaw("0x" + "zz".repeat(32), pk, MSG, sig),
       (e) => e instanceof Error && e.code === "ERR_HEX_INVALID",
     );
     // Odd-length hex body → ERR_BAD_LENGTH.
@@ -121,11 +123,11 @@ for (const [name, load] of loaders) {
     const kp = w.shrincsKeygen(SEED, 4);
     const pk = kp.publicKey();
     const sig = kp.signStatefulRawAt(MSG, 1);
-    const ssig = kp.signStatelessRaw(MSG);
 
     // The bigint drift guard: u64 fields must cross the boundary as BigInt,
-    // not number (the default serializer breaks on values past 2^53).
-    assert.equal(typeof ssig.hypertree[0].treeIndex, "bigint");
+    // not number (the default serializer breaks on values past 2^53). Post-T6
+    // the hypertree wire carries no u64 coordinates, so the account snapshot's
+    // statelessSignaturesUsed (asserted below) is the surviving u64 boundary.
     assert.equal(typeof sig.counter, "number");
 
     const account = new w.WasmShrincsAccount(
