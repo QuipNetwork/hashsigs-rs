@@ -46,6 +46,15 @@ variables:
   # trusted-publishing floor. npm 11.18 engine is node >=22.9, so it's compatible.
   NPM_VERSION: "11.18.0"
 
+# Pin every job to the self-hosted Linux fleet (lovelace/watch/finney all carry
+# these tags; SaaS runners do not). This keeps all jobs on project runners even
+# after shared runners are enabled on the project. publish-npm overrides this
+# with its own `tags` to reach a gitlab.com shared runner, the only place npm
+# OIDC trusted publishing works. A job's own `tags` replaces the default (no
+# merge), so the override is clean.
+default:
+  tags: [linux, x86_64]
+
 # Shared before_script fragments via GitLab !reference (not YAML list anchors,
 # which nest incorrectly when expanded under another list).
 .install-node-pinned:
@@ -127,7 +136,7 @@ ts-conformance:
 build-package:
   stage: package
   image: rust:1.89.0
-  tags: [x86_64] # self-hosted fleet; SaaS runners don't carry this tag
+  # Inherits default tags [linux, x86_64] -> runs on the self-hosted Linux fleet.
   # Anchored semver, optional pre-release suffix (e.g. v0.2.0-rc1); rejects v1.2.3.4 / v1.2.3-foo trailing junk.
   rules:
     - if: $CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$/ # runs only on a semver version tag
