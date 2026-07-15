@@ -215,8 +215,7 @@ impl ShrincsVerifier {
     ///
     /// Packed preimage:
     ///   OP_REGISTER_COMPACT_SLOT32 || HASH_SUITE_KECCAK_2564 ||
-    ///   domain_separator32 || nonce32 || key_version32 ||
-    ///   slot_id32 || sub_pk_seed32 || sub_pk_root32.
+    ///   domain_separator32 || nonce32 || key_version32 || slot_id32.
     pub fn compact_slot_registration_message_hash(
         &self,
         context: &RotationContext,
@@ -231,8 +230,7 @@ impl ShrincsVerifier {
     ///
     /// Packed preimage:
     ///   OP_REVOKE_COMPACT_SLOT32 || HASH_SUITE_KECCAK_2564 ||
-    ///   domain_separator32 || nonce32 || key_version32 ||
-    ///   slot_id32 || sub_pk_seed32 || sub_pk_root32.
+    ///   domain_separator32 || nonce32 || key_version32 || slot_id32.
     pub fn compact_slot_revocation_message_hash(
         &self,
         context: &RotationContext,
@@ -286,8 +284,6 @@ impl ShrincsVerifier {
             &context.nonce,
             &context.key_version,
             &slot_id,
-            sub_pk_seed,
-            sub_pk_root,
         ])
     }
 
