@@ -22,7 +22,8 @@ use super::shrincs_signer_utils::{
     address_word32, base_w16_digit, hash_node, hash_packed, WOTS_C_MAX_GRIND_COUNTER,
 };
 use super::verifier::{
-    StatefulSignature, HASH_LEN, WOTS_BASE_STATEFUL, WOTS_CHAINS_STATEFUL, WOTS_TARGET_SUM_STATEFUL,
+    StatefulSignature, ADDRESS_TYPE_WOTS_HASH, HASH_LEN, WOTS_BASE_STATEFUL, WOTS_CHAINS_STATEFUL,
+    WOTS_TARGET_SUM_STATEFUL,
 };
 
 pub(crate) fn sign_stateful_raw(
@@ -39,13 +40,11 @@ pub(crate) fn sign_stateful_raw(
         return None;
     }
 
-    let mut signature = sign_stateful_raw_at_leaf(signing_key, leaf_index, message)?;
-    signature.auth_path = stateful_auth_path(
-        &signing_key.stateful_sk_seed,
-        &signing_key.stateful_pk_seed,
-        leaf_index,
-        signing_key.max_stateful_signatures,
-    );
+    // sign_stateful_raw_at_leaf already computes the identical auth_path (same
+    // seeds, leaf_index, and max_signatures), so we must not rebuild it here —
+    // stateful_auth_path walks up to max_stateful_signatures nodes and doubled
+    // the dominant signing cost.
+    let signature = sign_stateful_raw_at_leaf(signing_key, leaf_index, message)?;
     signing_key.next_stateful_leaf_index = leaf_index.saturating_add(1);
     Some(signature)
 }
@@ -218,7 +217,14 @@ fn stateful_chain_no_mask(
     // The address word binds the step to the stateful leaf and chain number.
     let mut out = value;
     for step_offset in 0..steps {
-        let address_word = address_word32(0, 0, 0, leaf_index, chain_index, start + step_offset);
+        let address_word = address_word32(
+            0,
+            0,
+            ADDRESS_TYPE_WOTS_HASH,
+            leaf_index,
+            chain_index,
+            start + step_offset,
+        );
         out = hash_node(&[b"wots-c-chain", pk_seed, &address_word, &out]);
     }
     out

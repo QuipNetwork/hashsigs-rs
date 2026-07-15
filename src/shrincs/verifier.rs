@@ -37,7 +37,7 @@ pub use self::shrincs_verifier_types::*;
 
 use self::shrincs_verifier_fors_c::verify_fors_c_and_return_root;
 use self::shrincs_verifier_hypertree::verify_hypertree;
-use self::shrincs_verifier_stateful::verify_stateful_unsafe_raw as verify_stateful_raw_component;
+use self::shrincs_verifier_stateful::verify_stateful_unsafe_raw as verify_stateful_unsafe_raw_component;
 use self::shrincs_verifier_utils::{
     decode_stateful_public_key, hash_packed, matches_expected_public_key_commitment,
     rotation_target_commitment, stateful_rotation_target_commitment, valid_action_context,
@@ -45,6 +45,12 @@ use self::shrincs_verifier_utils::{
 };
 
 pub struct ShrincsVerifier;
+
+impl Default for ShrincsVerifier {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl ShrincsVerifier {
     /// Construct a verifier.
@@ -247,7 +253,7 @@ impl ShrincsVerifier {
     ) -> bool {
         // Low-level verifier path. The caller supplies the signed message directly,
         // so replay protection and domain separation are entirely caller-managed.
-        verify_stateful_raw_component(
+        verify_stateful_unsafe_raw_component(
             expected_public_key_commitment,
             public_key,
             message,

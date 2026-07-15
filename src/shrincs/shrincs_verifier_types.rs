@@ -21,13 +21,13 @@
 // values inside this slot (see HASH_TRUNC_LEN and `mask_hash`).
 pub const HASH_LEN: usize = 32;
 pub const HASH_SUITE_KECCAK_256: u32 = 1;
-pub const STATELESS_SIGNATURE_LIMIT: u64 = 1_048_576;
-pub const HYPERTREE_HEIGHT: u8 = 64;
-pub const NUM_HYPERTREE_LAYERS: u8 = 8;
-pub const FORS_TREE_HEIGHT: u8 = 14;
-pub const NUM_FORS_TREES: u8 = 22;
-pub const WOTS_CHAIN_LEN: u16 = 16;
-pub const NUM_WOTS_CHAINS: u16 = 64;
+
+// The per-profile parameter tuple (STATELESS_SIGNATURE_LIMIT, HYPERTREE_HEIGHT,
+// NUM_HYPERTREE_LAYERS, FORS_TREE_HEIGHT, NUM_FORS_TREES, WOTS_CHAIN_LEN,
+// NUM_WOTS_CHAINS, ...) comes exclusively from the `profile` module below via
+// `pub use profile::*`. These must NOT also be declared unconditionally here:
+// an explicit item silently shadows a glob re-export, so a top-level copy would
+// pin every profile to the 256s values and quietly break `profile-128s-*` builds.
 
 // Per-profile SHRINCS/SPHINCS parameter tuple, selected at compile time by
 // cargo feature. This mirrors the Solidity

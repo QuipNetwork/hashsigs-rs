@@ -149,7 +149,7 @@ fn fors_digest(
     let index_bits = u32::from(NUM_FORS_TREES) * u32::from(FORS_TREE_HEIGHT);
     let subtree_height = u32::from(HYPERTREE_HEIGHT / NUM_HYPERTREE_LAYERS);
     let tree_bits = u32::from(HYPERTREE_HEIGHT) - subtree_height;
-    let digest_bytes = ((index_bits + u32::from(HYPERTREE_HEIGHT) + 7) / 8) as usize;
+    let digest_bytes = (index_bits + u32::from(HYPERTREE_HEIGHT)).div_ceil(8) as usize;
     let digest = fors_digest_bytes(
         pk_seed,
         hypertree_root,

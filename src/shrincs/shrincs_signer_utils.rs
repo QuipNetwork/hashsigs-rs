@@ -157,7 +157,7 @@ pub(crate) fn wots_digest_bytes() -> usize {
     // The signer only needs enough digest bytes to cover the configured WOTS
     // digits. The counter grinding checks the digit sum after this truncation.
     let bits_per_digit = if WOTS_CHAIN_LEN == 256 { 8 } else { 4 };
-    (NUM_WOTS_CHAINS as usize * bits_per_digit + 7) / 8
+    (NUM_WOTS_CHAINS as usize * bits_per_digit).div_ceil(8)
 }
 
 pub(crate) fn read_bits32(input: &[u8], start_bit: usize, bit_len: u32) -> Option<u32> {

@@ -548,7 +548,10 @@ impl ShrincsAccountVerifierExample {
     pub fn commitStatefulLeafUse(&mut self, leafIndex: u32) {
         if self.statefulPolicy == StatefulPolicy::MonotonicIndex {
             // Move the expected cursor forward after one successful monotonic use.
-            self.nextStatefulLeafIndex += 1;
+            // saturating_add avoids an overflow panic (debug) / wrap (release) if
+            // the owner-set cursor is ever near u32::MAX; the verifier already caps
+            // usable leaves at max_signatures, so the saturation point is unreachable.
+            self.nextStatefulLeafIndex = self.nextStatefulLeafIndex.saturating_add(1);
         } else if self.statefulPolicy == StatefulPolicy::LeafBitmap {
             // Group leaves into 256-bit words for compact bitmap storage.
             let wordIndex = u64::from(leafIndex) >> 8;
@@ -1355,5 +1358,29 @@ mod tests {
         assert_eq!(account.currentShrincsPublicKey(), next_commitment);
         // The stateless key did not change, so its usage budget must NOT be refreshed.
         assert_eq!(account.statelessSignaturesUsed(), 8);
+    }
+
+    #[test]
+    fn increment_u256_be_carries_across_byte_boundaries() {
+        // 0 -> 1 in the least-significant byte.
+        let mut value = [0u8; HASH_LEN];
+        increment_u256_be(&mut value);
+        let mut expected = [0u8; HASH_LEN];
+        expected[HASH_LEN - 1] = 1;
+        assert_eq!(value, expected);
+
+        // 0x..00ff -> 0x..0100: carry propagates into the next byte, matching
+        // Solidity uint256 addition semantics.
+        let mut value = [0u8; HASH_LEN];
+        value[HASH_LEN - 1] = 0xff;
+        increment_u256_be(&mut value);
+        let mut expected = [0u8; HASH_LEN];
+        expected[HASH_LEN - 2] = 1;
+        assert_eq!(value, expected);
+
+        // Full-width carry: all-ones wraps to zero (uint256 overflow wrap).
+        let mut value = [0xffu8; HASH_LEN];
+        increment_u256_be(&mut value);
+        assert_eq!(value, [0u8; HASH_LEN]);
     }
 }

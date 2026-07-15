@@ -64,7 +64,7 @@ pub(crate) fn verify_fors_c_and_return_root(
         message,
         &signature.randomizer,
         signature.counter,
-    );
+    )?;
     let fors_tree_height = FORS_TREE_HEIGHT as usize;
     if read_bits32(
         &digest.digest,
@@ -195,14 +195,14 @@ fn fors_digest(
     message: &[u8],
     randomizer: &[u8],
     counter: u32,
-) -> ForsDigest {
+) -> Option<ForsDigest> {
     // Digest bit layout:
     // [FORS indices: k * a bits][hypertree tree index][hypertree leaf index].
     // `digest_bytes` rounds that bit count up to a whole byte count.
     let index_bits = u32::from(NUM_FORS_TREES) * u32::from(FORS_TREE_HEIGHT);
     let subtree_height = u32::from(HYPERTREE_HEIGHT / NUM_HYPERTREE_LAYERS);
     let tree_bits = u32::from(HYPERTREE_HEIGHT) - subtree_height;
-    let digest_bytes = ((index_bits + u32::from(HYPERTREE_HEIGHT) + 7) / 8) as usize;
+    let digest_bytes = (index_bits + u32::from(HYPERTREE_HEIGHT)).div_ceil(8) as usize;
     let digest = fors_digest_bytes(
         &public_key.pk_seed,
         &public_key.hypertree_root,
@@ -213,13 +213,16 @@ fn fors_digest(
     );
 
     let cursor = index_bits as usize;
-    let tree_index = read_bits64(&digest, cursor, tree_bits).unwrap_or(0);
-    let leaf_index = read_bits32(&digest, cursor + tree_bits as usize, subtree_height).unwrap_or(0);
-    ForsDigest {
+    // Fail closed like the signer (shrincs_signer_fors_c.rs) and the rest of this
+    // verifier: a bit-read that over-reads the digest rejects the signature rather
+    // than silently defaulting the hypertree coordinates to tree 0 / leaf 0.
+    let tree_index = read_bits64(&digest, cursor, tree_bits)?;
+    let leaf_index = read_bits32(&digest, cursor + tree_bits as usize, subtree_height)?;
+    Some(ForsDigest {
         tree_index,
         leaf_index,
         digest,
-    }
+    })
 }
 
 fn fors_digest_bytes(

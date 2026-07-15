@@ -45,7 +45,10 @@ pub(crate) fn verify_hypertree(
     if subtree_height == 0 {
         return false;
     }
-    if subtree_height >= u64::BITS {
+    // `leaf_count` below shifts a u32, so the guard must be u32::BITS (not
+    // u64::BITS): a profile with subtree_height in 32..64 would otherwise pass
+    // this check and panic on the `1u32 << subtree_height` shift.
+    if subtree_height >= u32::BITS {
         return false;
     }
     let leaf_count = 1u32 << subtree_height;

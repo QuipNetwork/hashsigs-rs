@@ -48,7 +48,7 @@ zeroize = { version = "1.8", features = ["derive"] }
 # =0.5.5: last tsify accepting wasm-bindgen 0.2.100, which the wasm-bindgen CLI
 # pin in bin/build-wasm.sh must match exactly (0.5.6 forces ^0.2.104).
 tsify = { version = "=0.5.5", default-features = false, features = ["js"], optional = true }
-wasm-bindgen = { version = "0.2.100", optional = true }
+wasm-bindgen = { version = "=0.2.100", optional = true }
 
 [dev-dependencies]
 serde_json = "1.0.143"

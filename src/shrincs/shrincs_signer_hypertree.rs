@@ -37,6 +37,11 @@ pub(crate) fn sign_hypertree(
     // follow the verifier's recurrence, so the signature cannot choose arbitrary
     // upper-layer tree/leaf positions.
     let subtree_height = u32::from(HYPERTREE_HEIGHT / NUM_HYPERTREE_LAYERS);
+    // Mirror the verifier's guard so a retuned profile fails closed instead of
+    // panicking on the shift below.
+    if subtree_height == 0 || subtree_height >= u32::BITS {
+        return None;
+    }
     let leaf_mask = (1u64 << subtree_height) - 1;
     // `stateless_sk_seed` is the shared SK.seed-style master for FORS-C and
     // hypertree WOTS-C signing secrets.
@@ -232,6 +237,10 @@ fn stateless_wots_c_public_key(
     hash_node(&[b"wots-c-pk", pk_seed, &endpoints])
 }
 
+// ADRS-style WOTS coordinates (layer/tree/leaf/chain/step) are passed
+// positionally to mirror the Solidity signer exactly; grouping them into a
+// struct is deferred to keep this audited signing path byte-for-byte comparable.
+#[allow(clippy::too_many_arguments)]
 fn sign_stateless_wots_c(
     pk_seed: &[u8; HASH_LEN],
     sk_seed: &[u8; HASH_LEN],
@@ -305,6 +314,8 @@ fn stateless_wots_c_secret(sk_seed: &[u8; HASH_LEN], chain: u32) -> [u8; HASH_LE
     hash_packed(&[b"wots-c-secret", sk_seed, &chain.to_be_bytes()])
 }
 
+// See sign_stateless_wots_c: positional ADRS coordinates mirror Solidity.
+#[allow(clippy::too_many_arguments)]
 fn stateless_wots_c_chain(
     pk_seed: &[u8; HASH_LEN],
     layer: u32,

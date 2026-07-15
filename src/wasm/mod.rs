@@ -1394,7 +1394,7 @@ fn parse_hex_bytes_with_max(input: &str, max_bytes: usize) -> Result<Vec<u8>, Wa
     Ok(out)
 }
 
-#[cfg(any(test, feature = "wasm-bindings"))]
+#[cfg(test)]
 fn parse_hex_bytes(input: &str) -> Result<Vec<u8>, WasmErr> {
     parse_hex_bytes_with_max(input, MAX_RAW_INPUT_BYTES)
 }

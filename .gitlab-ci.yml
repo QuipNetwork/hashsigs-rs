@@ -15,21 +15,21 @@ variables:
 
 build-test:
   stage: test
-  image: rust:latest
+  image: rust:1.89.0
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   before_script:
     - rustup target add wasm32-unknown-unknown
   script:
-    - cargo test --features wasm-bindings
-    - cargo build --release --target wasm32-unknown-unknown --features wasm-bindings
+    - cargo test --locked --features wasm-bindings
+    - cargo build --locked --release --target wasm32-unknown-unknown --features wasm-bindings
 
 # Conformance test against the BUILT package (dist/): loaders, exports map,
 # ESM/CJS scoping, base64-inline path — the layer cargo tests never touch.
 ts-conformance:
   stage: test
-  image: rust:latest
+  image: rust:1.89.0
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
@@ -45,9 +45,9 @@ ts-conformance:
 
 publish-npm:
   stage: publish
-  image: rust:latest
+  image: rust:1.89.0
   rules:
-    - if: $CI_COMMIT_TAG # runs only on a version tag
+    - if: $CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+/ # runs only on a semver version tag
   before_script:
     - apt-get update && apt-get install -y nodejs npm
     - rustup target add wasm32-unknown-unknown

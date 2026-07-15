@@ -10,12 +10,17 @@ import { wasmBase64 } from "./web/inline.js";
 
 type ShrincsWasmModule = typeof wasm;
 
-let cached: ShrincsWasmModule | undefined;
+let cached: Promise<ShrincsWasmModule> | undefined;
 
 export async function loadShrincsWasm(): Promise<ShrincsWasmModule> {
   if (cached) return cached;
-  const bytes = Uint8Array.from(atob(wasmBase64), (c) => c.charCodeAt(0));
-  await init({ module_or_path: bytes });
-  cached = wasm;
+  cached = (async () => {
+    const bytes = Uint8Array.from(atob(wasmBase64), (c) => c.charCodeAt(0));
+    await init({ module_or_path: bytes });
+    return wasm;
+  })().catch((err) => {
+    cached = undefined;
+    throw err;
+  });
   return cached;
 }

@@ -49,16 +49,6 @@ pub mod constants {
         (8 * HASH_LEN).div_ceil(LG_CHAIN_LEN)
     };
 
-    #[cfg(test)]
-    mod tests {
-        use super::*;
-
-        #[test]
-        fn test_num_message_chunks() {
-            assert_eq!(NUM_MESSAGE_CHUNKS, 64);
-        }
-    }
-
     /// NumChecksumChunks: the `len_2` parameter which is the number of
     /// checksum chunks. This is
     /// floor(lg(len_1 * (w - 1)) / lg(w)) + 1
@@ -81,6 +71,16 @@ pub mod constants {
     pub const PUBLIC_KEY_SIZE: usize = HASH_LEN * 2;
     /// PRF input size (prefix + seed + index)
     pub const PRF_INPUT_SIZE: usize = 1 + HASH_LEN + 2;
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn test_num_message_chunks() {
+            assert_eq!(NUM_MESSAGE_CHUNKS, 64);
+        }
+    }
 }
 
 /// PublicKey consists of two parts:
@@ -219,7 +219,7 @@ impl WOTSPlus {
         // This is left-shifting the checksum to ensure proper alignment when
         // converting to base-w representation
         for i in (0..constants::NUM_CHECKSUM_CHUNKS).rev() {
-            let shift = i * constants::LG_CHAIN_LEN as usize;
+            let shift = i * constants::LG_CHAIN_LEN;
             chain_segments_indexes[idx] =
                 ((checksum >> shift) & (constants::CHAIN_LEN as u32 - 1)) as u8;
             idx += 1;
@@ -238,7 +238,7 @@ impl WOTSPlus {
         private_key: &[u8; constants::HASH_LEN],
         public_seed: &[u8; constants::HASH_LEN],
     ) -> PublicKey {
-        let randomization_elements = self.generate_randomization_elements(&public_seed);
+        let randomization_elements = self.generate_randomization_elements(public_seed);
         let function_key = randomization_elements[0];
 
         let mut public_key_segments = Vec::with_capacity(constants::SIGNATURE_SIZE);
@@ -339,7 +339,7 @@ impl WOTSPlus {
         &self,
         public_key: &PublicKey,
         message: &[u8],
-        signature: &Vec<[u8; constants::HASH_LEN]>,
+        signature: &[[u8; constants::HASH_LEN]],
     ) -> bool {
         if message.len() != constants::MESSAGE_LEN {
             return false;
@@ -382,8 +382,8 @@ impl WOTSPlus {
         &self,
         public_key_hash: &[u8; constants::HASH_LEN],
         message: &[u8],
-        signature: &Vec<[u8; constants::HASH_LEN]>,
-        randomization_elements: &Vec<[u8; constants::HASH_LEN]>,
+        signature: &[[u8; constants::HASH_LEN]],
+        randomization_elements: &[[u8; constants::HASH_LEN]],
     ) -> bool {
         if message.len() != constants::MESSAGE_LEN {
             return false;
@@ -471,8 +471,12 @@ mod tests {
         let (public_key, _) = wots.generate_key_pair(&private_seed);
 
         let message = [2u8; constants::MESSAGE_LEN];
-        let signature: Vec<[u8; 32]> = vec![[0u8; 32]; constants::NUM_SIGNATURE_CHUNKS];
-        assert!(!wots.verify(&public_key, &message, &signature));
+
+        let too_long: Vec<[u8; 32]> = vec![[0u8; 32]; constants::NUM_SIGNATURE_CHUNKS + 1];
+        assert!(!wots.verify(&public_key, &message, &too_long));
+
+        let too_short: Vec<[u8; 32]> = vec![[0u8; 32]; constants::NUM_SIGNATURE_CHUNKS - 1];
+        assert!(!wots.verify(&public_key, &message, &too_short));
     }
 
     #[test]
@@ -489,18 +493,13 @@ mod tests {
         assert_eq!(recovered.public_key_hash, public_key.public_key_hash);
     }
 
-    #[cfg(test)]
-    mod tests {
-        use super::*;
+    #[test]
+    fn test_num_message_chunks() {
+        assert_eq!(constants::NUM_MESSAGE_CHUNKS, 64);
+    }
 
-        #[test]
-        fn test_num_message_chunks() {
-            assert_eq!(constants::NUM_MESSAGE_CHUNKS, 64);
-        }
-
-        #[test]
-        fn test_num_checksum_chunks() {
-            assert_eq!(constants::NUM_CHECKSUM_CHUNKS, 3);
-        }
+    #[test]
+    fn test_num_checksum_chunks() {
+        assert_eq!(constants::NUM_CHECKSUM_CHUNKS, 3);
     }
 }
