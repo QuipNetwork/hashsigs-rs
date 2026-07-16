@@ -28,8 +28,6 @@ mod shrincs_verifier_fors_c;
 mod shrincs_verifier_hypertree;
 #[path = "shrincs_verifier_stateful.rs"]
 mod shrincs_verifier_stateful;
-#[path = "shrincs_verifier_utils.rs"]
-mod shrincs_verifier_utils;
 
 pub use super::types::*;
 pub use super::profiles::{
@@ -41,7 +39,7 @@ pub use super::profiles::{
 use self::shrincs_verifier_fors_c::verify_fors_c_and_return_root;
 use self::shrincs_verifier_hypertree::verify_hypertree;
 use self::shrincs_verifier_stateful::verify_stateful_unsafe_raw as verify_stateful_unsafe_raw_component;
-use self::shrincs_verifier_utils::{
+use super::shrincs_verifier_utils::{
     decode_stateful_public_key, hash_packed, matches_expected_public_key_commitment,
     rotation_target_commitment, stateful_rotation_target_commitment, valid_action_context,
     valid_public_key, valid_rotation_context, word32,

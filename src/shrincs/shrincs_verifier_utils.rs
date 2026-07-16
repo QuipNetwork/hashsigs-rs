@@ -26,14 +26,14 @@
 
 // Re-export the byte-identical helpers shared with the signer. Keeping one copy
 // in `shrincs_common` prevents the two sides from drifting apart (F-08 / Q2).
-pub(crate) use super::super::shrincs_common::{
+pub(crate) use crate::shrincs::shrincs_common::{
     address_word32, base_w16_digit, base_w_digit, fors_address_word, hash_node, hash_packed, pack,
     hypertree_address_word, read_bits32, read_bits64, word32, wots_digest_bytes,
 };
 
-use super::super::profiles::PROFILE_NAME;
-use super::super::types::{
-    ActionContext, PublicKey, RotationContext, StatefulPublicKey, HASH_LEN,
+use crate::shrincs::profiles::PROFILE_NAME;
+use crate::shrincs::types::{
+    ActionContext, PublicKey, RotationContext, RotationTarget, StatefulPublicKey, HASH_LEN,
     STATEFUL_PUBLIC_KEY_BYTES,
 };
 
@@ -77,9 +77,7 @@ pub(crate) fn stateful_rotation_target_commitment(
     ])
 }
 
-pub(crate) fn rotation_target_commitment(
-    target: &super::super::types::RotationTarget,
-) -> Option<[u8; HASH_LEN]> {
+pub(crate) fn rotation_target_commitment(target: &RotationTarget) -> Option<[u8; HASH_LEN]> {
     let pk_seed = word32(&target.pk_seed)?;
     let hypertree_root = word32(&target.hypertree_root)?;
     Some(stateful_rotation_target_commitment(

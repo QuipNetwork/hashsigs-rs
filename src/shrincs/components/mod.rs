@@ -15,23 +15,6 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Compatibility wrapper for the hypertree component verifier path.
-
-use super::super::components::hypertree;
-use super::super::types::{HypertreeLayerSignature, PublicKey, HASH_LEN};
-
-pub(crate) fn verify_hypertree(
-    public_key: &PublicKey,
-    fors_root: [u8; HASH_LEN],
-    seed_tree_index: u64,
-    seed_leaf_index: u32,
-    layers: &[HypertreeLayerSignature],
-) -> bool {
-    hypertree::verify_hypertree(
-        public_key,
-        fors_root,
-        seed_tree_index,
-        seed_leaf_index,
-        layers,
-    )
-}
+pub(crate) mod fors_c;
+pub(crate) mod hypertree;
+pub(crate) mod uxmss;
