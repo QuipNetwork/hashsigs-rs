@@ -19,14 +19,14 @@
 //!
 //! The byte-layout primitives (hashing, packing, address words, base-w digits,
 //! bit-packed digest reads) are shared with the signer and live in
-//! `shrincs_common`; they are re-exported here so verifier call sites keep the
+//! `components::hash`; they are re-exported here so verifier call sites keep the
 //! same import path. Only the helpers that are genuinely verifier-specific
 //! (public-key/context validation, commitment recomputation, stateful key
 //! decoding, WOTS address bases) are defined below.
 
 // Re-export the byte-identical helpers shared with the signer. Keeping one copy
-// in `shrincs_common` prevents the two sides from drifting apart (F-08 / Q2).
-pub(crate) use crate::shrincs::shrincs_common::{
+// in `components::hash` prevents the two sides from drifting apart (F-08 / Q2).
+pub(crate) use crate::shrincs::components::hash::{
     address_word32, base_w16_digit, base_w_digit, fors_address_word, hash_node, hash_packed, pack,
     hypertree_address_word, read_bits32, read_bits64, word32, wots_digest_bytes,
 };

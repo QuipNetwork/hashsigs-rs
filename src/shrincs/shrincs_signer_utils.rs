@@ -19,15 +19,14 @@
 //!
 //! The byte-layout primitives (hashing, packing, address words, base-w digits,
 //! bit-packed digest reads) are shared with the verifier and live in
-//! `shrincs_common`; they are re-exported here so signer call sites keep the same
+//! `components::hash`; they are re-exported here so signer call sites keep the same
 //! import path. Only the helpers that are genuinely signer-specific (seed KDF,
 //! public-key assembly, encoded stateful key layout) are defined below.
 
 // Re-export the byte-identical helpers shared with the verifier. Keeping one copy
-// in `shrincs_common` prevents the two sides from drifting apart (F-08 / Q2).
-pub(crate) use super::super::shrincs_common::{
-    address_word32, base_w16_digit, base_w_digit, fors_address_word, hash_node, hash_packed,
-    hypertree_address_word, pack, read_bits32, read_bits64, word32, wots_digest_bytes,
+// in `components::hash` prevents the two sides from drifting apart (F-08 / Q2).
+pub(crate) use super::super::components::hash::{
+    base_w16_digit, base_w_digit, hash_node, hash_packed, word32, wots_digest_bytes,
 };
 
 use super::super::types::{PublicKey, HASH_LEN, STATEFUL_PUBLIC_KEY_BYTES};

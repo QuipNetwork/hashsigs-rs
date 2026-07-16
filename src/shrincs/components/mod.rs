@@ -16,5 +16,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 pub(crate) mod fors_c;
+pub(crate) mod hash;
 pub(crate) mod hypertree;
 pub(crate) mod uxmss;

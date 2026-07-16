@@ -19,10 +19,10 @@
 
 use zeroize::Zeroizing;
 
+use super::super::components::hypertree;
 use super::shrincs_signer_types::{ShrincsSignerResult, ShrincsSigningKey};
 use super::shrincs_signer_utils::{
-    address_word32, base_w_digit, derive32, hash_node, hash_packed, hypertree_address_word,
-    wots_digest_bytes, WOTS_C_MAX_GRIND_COUNTER,
+    base_w_digit, derive32, hash_packed, wots_digest_bytes, WOTS_C_MAX_GRIND_COUNTER,
 };
 use super::super::types::{HypertreeLayerSignature, WotsCSignature, HASH_LEN};
 use super::super::profiles::{
@@ -208,17 +208,9 @@ fn hypertree_virtual_node(
     height: u32,
     index: u32,
 ) -> [u8; HASH_LEN] {
-    // This recursively materializes a virtual subtree root. The implementation is
-    // simple and reviewable for the current small per-layer height; a production
-    // signer can cache nodes if signing throughput later becomes important.
-    if height == 0 {
-        return hypertree_leaf(pk_seed, layer_seed, layer, tree, index);
-    }
-    let left = hypertree_virtual_node(pk_seed, layer_seed, layer, tree, height - 1, index << 1);
-    let right_index = (index << 1) | 1;
-    let right = hypertree_virtual_node(pk_seed, layer_seed, layer, tree, height - 1, right_index);
-    let address_word = hypertree_address_word(layer, tree, height, u64::from(index));
-    hash_node(&[b"hypertree-node", pk_seed, &address_word, &left, &right])
+    hypertree::hypertree_virtual_node_from(pk_seed, layer, tree, height, index, &|leaf_index| {
+        hypertree_leaf(pk_seed, layer_seed, layer, tree, leaf_index)
+    })
 }
 
 fn hypertree_auth_path(
@@ -228,16 +220,10 @@ fn hypertree_auth_path(
     tree: u64,
     leaf: u32,
 ) -> Vec<Vec<u8>> {
-    // Collect siblings from the signed leaf up to the subtree root. At level 0
-    // the sibling is another WOTS public-key hash; at higher levels it is the
-    // root of a virtual subtree of height `level`.
     let subtree_height = u32::from(HYPERTREE_HEIGHT / NUM_HYPERTREE_LAYERS);
-    (0..subtree_height)
-        .map(|level| {
-            let sibling = (leaf >> level) ^ 1;
-            hypertree_virtual_node(pk_seed, layer_seed, layer, tree, level, sibling).to_vec()
-        })
-        .collect()
+    hypertree::hypertree_auth_path_from(subtree_height, leaf, &|level, sibling| {
+        hypertree_virtual_node(pk_seed, layer_seed, layer, tree, level, sibling)
+    })
 }
 
 fn hypertree_leaf(
@@ -269,11 +255,8 @@ fn stateless_wots_c_public_key(
     sk_seed: &[u8; HASH_LEN],
     coords: &WotsKeypair,
 ) -> [u8; HASH_LEN] {
-    // Build every WOTS chain all the way to its endpoint, then hash the endpoints
-    // together. That aggregate hash is the Merkle leaf used by the hypertree.
-    let mut endpoints = Vec::with_capacity(NUM_WOTS_CHAINS as usize * HASH_LEN);
+    let mut endpoints = Vec::with_capacity(NUM_WOTS_CHAINS as usize);
     for chain in 0..NUM_WOTS_CHAINS {
-        // The chain start is private WOTS material; zeroize the temp on drop.
         let secret = Zeroizing::new(stateless_wots_c_secret(sk_seed, u32::from(chain)));
         let endpoint = stateless_wots_c_chain(
             pk_seed,
@@ -282,9 +265,9 @@ fn stateless_wots_c_public_key(
             0,
             u32::from(WOTS_CHAIN_LEN - 1),
         );
-        endpoints.extend_from_slice(&endpoint);
+        endpoints.push(endpoint);
     }
-    hash_node(&[b"wots-c-pk", pk_seed, &endpoints])
+    hypertree::stateless_wots_public_key_hash(pk_seed, &endpoints)
 }
 
 fn sign_stateless_wots_c(
@@ -303,14 +286,13 @@ fn sign_stateless_wots_c(
         // The verifier derives the same digits from this digest. Grinding keeps
         // only counters whose base-w digits sum to the configured target, which
         // replaces the usual WOTS+ checksum field in this compact variant.
-        let digest = hash_packed(&[
-            b"wots-c-msg",
+        let digest = hypertree::stateless_wots_message_digest(
             seeds.pk_seed,
             pk_hash,
             &randomizer,
-            &counter.to_be_bytes(),
+            counter,
             message,
-        ]);
+        );
         let digest = &digest[..digest_bytes];
         let digits = (0..NUM_WOTS_CHAINS as usize)
             .map(|index| base_w_digit(WOTS_CHAIN_LEN, digest, index))
@@ -361,13 +343,14 @@ fn stateless_wots_c_chain(
     start: u32,
     steps: u32,
 ) -> [u8; HASH_LEN] {
-    // Advance a WOTS chain through address-bound Keccak steps. `start` is the
-    // current digit position and `steps` is how far to move from there.
-    let mut out = value;
-    for step in start..start + steps {
-        let address_word =
-            address_word32(coords.layer, coords.tree, 0, coords.keypair, coords.chain, step);
-        out = hash_node(&[b"wots-c-chain", pk_seed, &address_word, &out]);
-    }
-    out
+    hypertree::stateless_wots_chain(
+        pk_seed,
+        coords.layer,
+        coords.tree,
+        coords.keypair,
+        coords.chain,
+        value,
+        start,
+        steps,
+    )
 }

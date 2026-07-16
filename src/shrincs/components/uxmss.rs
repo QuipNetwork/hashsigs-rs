@@ -69,6 +69,60 @@ pub(crate) fn verify_stateful_unsafe_raw(
     stateful_key.root == root
 }
 
+pub(crate) fn stateful_parent_hash(
+    pk_seed: &[u8; HASH_LEN],
+    left_leaf_index: u32,
+    left: [u8; HASH_LEN],
+    right: [u8; HASH_LEN],
+) -> [u8; HASH_LEN] {
+    hash_node(&[
+        b"uxmss-node".as_ref(),
+        pk_seed.as_ref(),
+        left_leaf_index.to_be_bytes().as_ref(),
+        left.as_ref(),
+        right.as_ref(),
+    ])
+}
+
+pub(crate) fn stateful_empty_tail(
+    pk_seed: &[u8; HASH_LEN],
+    leaf_index: u32,
+) -> [u8; HASH_LEN] {
+    hash_packed(&[
+        b"uxmss-empty-tail".as_ref(),
+        pk_seed.as_ref(),
+        leaf_index.to_be_bytes().as_ref(),
+    ])
+}
+
+pub(crate) fn stateful_chain_no_mask(
+    pk_seed: &[u8; HASH_LEN],
+    leaf_index: u32,
+    chain_index: u32,
+    value: [u8; HASH_LEN],
+    start: u32,
+    steps: u32,
+) -> [u8; HASH_LEN] {
+    let mut out = value;
+    for step_offset in 0..steps {
+        let address_word = address_word32(
+            0,
+            0,
+            ADDRESS_TYPE_WOTS_HASH,
+            leaf_index,
+            chain_index,
+            start + step_offset,
+        );
+        out = hash_node(&[
+            b"uxmss-wots-chain".as_ref(),
+            pk_seed.as_ref(),
+            address_word.as_ref(),
+            out.as_ref(),
+        ]);
+    }
+    out
+}
+
 fn compact_stateful_wots_public_key_from_signature(
     pk_seed: [u8; HASH_LEN],
     leaf_index: u32,
@@ -91,7 +145,7 @@ fn compact_stateful_wots_public_key_from_signature(
         digit_sum = digit_sum.checked_add(digit)?;
         let chain_value = *signature.chains.get(chain_index)?;
         let segment = stateful_chain_no_mask(
-            pk_seed,
+            &pk_seed,
             leaf_index,
             chain_index as u32,
             chain_value,
@@ -121,57 +175,14 @@ fn root_from_unbalanced_path(
     if auth_path.len() != leaf_index as usize || auth_path.is_empty() {
         return None;
     }
-    let mut root = stateful_parent_hash(pk_seed, leaf_index, leaf, *auth_path.first()?);
+    let mut root = stateful_parent_hash(&pk_seed, leaf_index, leaf, *auth_path.first()?);
     for offset in 0..auth_path.len() - 1 {
         root = stateful_parent_hash(
-            pk_seed,
+            &pk_seed,
             leaf_index - offset as u32 - 1,
             *auth_path.get(offset + 1)?,
             root,
         );
     }
     Some(root)
-}
-
-fn stateful_parent_hash(
-    pk_seed: [u8; HASH_LEN],
-    left_leaf_index: u32,
-    left: [u8; HASH_LEN],
-    right: [u8; HASH_LEN],
-) -> [u8; HASH_LEN] {
-    hash_node(&[
-        b"uxmss-node".as_ref(),
-        pk_seed.as_ref(),
-        left_leaf_index.to_be_bytes().as_ref(),
-        left.as_ref(),
-        right.as_ref(),
-    ])
-}
-
-fn stateful_chain_no_mask(
-    pk_seed: [u8; HASH_LEN],
-    leaf_index: u32,
-    chain_index: u32,
-    value: [u8; HASH_LEN],
-    start: u32,
-    steps: u32,
-) -> [u8; HASH_LEN] {
-    let mut out = value;
-    for step_offset in 0..steps {
-        let address_word = address_word32(
-            0,
-            0,
-            ADDRESS_TYPE_WOTS_HASH,
-            leaf_index,
-            chain_index,
-            start + step_offset,
-        );
-        out = hash_node(&[
-            b"uxmss-wots-chain".as_ref(),
-            pk_seed.as_ref(),
-            address_word.as_ref(),
-            out.as_ref(),
-        ]);
-    }
-    out
 }

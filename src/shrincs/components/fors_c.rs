@@ -17,6 +17,8 @@
 
 //! FORS-C primitive verification logic.
 
+use zeroize::Zeroizing;
+
 use super::super::profiles::{
     FORS_TREE_HEIGHT, HYPERTREE_HEIGHT, NUM_FORS_TREES, NUM_HYPERTREE_LAYERS,
 };
@@ -30,6 +32,13 @@ struct ForsDigest {
     tree_index: u64,
     leaf_index: u32,
     digest: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SigningForsDigest {
+    pub tree_index: u64,
+    pub leaf_index: u32,
+    pub indices: Vec<u32>,
 }
 
 pub(crate) fn verify_fors_c_and_return_root(
@@ -90,6 +99,120 @@ pub(crate) fn verify_fors_c_and_return_root(
         digest.tree_index,
         digest.leaf_index,
     ))
+}
+
+pub(crate) fn signer_fors_digest(
+    pk_seed: &[u8; HASH_LEN],
+    hypertree_root: &[u8; HASH_LEN],
+    message: &[u8],
+    randomizer: &[u8; HASH_LEN],
+    counter: u32,
+) -> Option<SigningForsDigest> {
+    let index_bits = u32::from(NUM_FORS_TREES) * u32::from(FORS_TREE_HEIGHT);
+    let subtree_height = u32::from(HYPERTREE_HEIGHT / NUM_HYPERTREE_LAYERS);
+    let tree_bits = u32::from(HYPERTREE_HEIGHT) - subtree_height;
+    let digest_bytes = (index_bits + u32::from(HYPERTREE_HEIGHT)).div_ceil(8) as usize;
+    let digest = fors_digest_bytes(
+        pk_seed,
+        hypertree_root,
+        randomizer,
+        counter,
+        message,
+        digest_bytes,
+    );
+    let indices = (0..NUM_FORS_TREES)
+        .map(|tree| {
+            read_bits32(
+                &digest,
+                tree as usize * FORS_TREE_HEIGHT as usize,
+                FORS_TREE_HEIGHT as u32,
+            )
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let cursor = index_bits as usize;
+    Some(SigningForsDigest {
+        tree_index: read_bits64(&digest, cursor, tree_bits)?,
+        leaf_index: read_bits32(&digest, cursor + tree_bits as usize, subtree_height)?,
+        indices,
+    })
+}
+
+pub(crate) fn fors_leaf_secret(
+    pk_seed: &[u8; HASH_LEN],
+    sk_seed: &[u8; HASH_LEN],
+    tree_index: u64,
+    leaf_index: u32,
+    fors_tree: u32,
+    leaf: u32,
+) -> [u8; HASH_LEN] {
+    let tree_leaf = (u64::from(fors_tree) << FORS_TREE_HEIGHT) + u64::from(leaf);
+    let address_word = fors_address_word(tree_index, leaf_index, 0, tree_leaf);
+    hash_packed(&[
+        b"fors-sk".as_ref(),
+        sk_seed.as_ref(),
+        pk_seed.as_ref(),
+        address_word.as_ref(),
+    ])
+}
+
+pub(crate) fn fors_leaf_hash(
+    pk_seed: &[u8; HASH_LEN],
+    sk_seed: &[u8; HASH_LEN],
+    tree_index: u64,
+    leaf_index: u32,
+    fors_tree: u32,
+    leaf: u32,
+) -> [u8; HASH_LEN] {
+    let secret = Zeroizing::new(fors_leaf_secret(
+        pk_seed, sk_seed, tree_index, leaf_index, fors_tree, leaf,
+    ));
+    let tree_leaf = (u64::from(fors_tree) << FORS_TREE_HEIGHT) + u64::from(leaf);
+    let address_word = fors_address_word(tree_index, leaf_index, 0, tree_leaf);
+    hash_node(&[
+        b"fors-leaf".as_ref(),
+        pk_seed.as_ref(),
+        address_word.as_ref(),
+        secret.as_ref(),
+    ])
+}
+
+pub(crate) fn fors_tree_root_and_auth_path(
+    pk_seed: &[u8; HASH_LEN],
+    sk_seed: &[u8; HASH_LEN],
+    tree_index: u64,
+    leaf_index: u32,
+    fors_tree: u32,
+    leaf: u32,
+) -> ([u8; HASH_LEN], Vec<Vec<u8>>) {
+    let height = u32::from(FORS_TREE_HEIGHT);
+    let leaf_count = 1usize << height;
+    let mut level_nodes = (0..leaf_count)
+        .map(|index| fors_leaf_hash(pk_seed, sk_seed, tree_index, leaf_index, fors_tree, index as u32))
+        .collect::<Vec<_>>();
+    let mut index = leaf as usize;
+    let mut auth_path = Vec::with_capacity(height as usize);
+
+    for node_height in 1..=height {
+        auth_path.push(level_nodes[index ^ 1].to_vec());
+        let mut parents = Vec::with_capacity(level_nodes.len() / 2);
+        for (parent_index, pair) in level_nodes.chunks_exact(2).enumerate() {
+            let shifted_tree = u64::from(fors_tree) << (height - node_height);
+            let parent_low_index = shifted_tree + parent_index as u64;
+            let address_word =
+                fors_address_word(tree_index, leaf_index, node_height, parent_low_index);
+            parents.push(hash_node(&[
+                b"fors-node".as_ref(),
+                pk_seed.as_ref(),
+                address_word.as_ref(),
+                pair[0].as_ref(),
+                pair[1].as_ref(),
+            ]));
+        }
+        level_nodes = parents;
+        index >>= 1;
+    }
+
+    (level_nodes[0], auth_path)
 }
 
 fn fors_entry_root32(

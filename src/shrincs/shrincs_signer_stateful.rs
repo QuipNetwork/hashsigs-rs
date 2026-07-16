@@ -19,14 +19,15 @@
 
 use zeroize::Zeroizing;
 
+use super::super::components::uxmss;
 use super::shrincs_signer_types::{ShrincsSignerResult, ShrincsSigningKey};
 use super::shrincs_signer_utils::{
-    address_word32, base_w16_digit, hash_node, hash_packed, WOTS_C_MAX_GRIND_COUNTER,
+    base_w16_digit, hash_node, hash_packed, WOTS_C_MAX_GRIND_COUNTER,
 };
 use super::super::profiles::{
     WOTS_BASE_STATEFUL, WOTS_CHAINS_STATEFUL, WOTS_TARGET_SUM_STATEFUL,
 };
-use super::super::types::{StatefulSignature, ADDRESS_TYPE_WOTS_HASH, HASH_LEN};
+use super::super::types::{StatefulSignature, HASH_LEN};
 
 pub(crate) fn sign_stateful_raw(
     signing_key: &mut ShrincsSigningKey,
@@ -90,10 +91,10 @@ pub(crate) fn stateful_subtree_root(
     // The stateful tree is unbalanced: leaf 1 is the leftmost live leaf, and
     // each parent combines that leaf with the subtree to its right. Build that
     // chain iteratively so large-but-valid budgets do not recurse once per leaf.
-    let mut right = stateful_empty_tail(pk_seed, max_signatures);
+    let mut right = uxmss::stateful_empty_tail(pk_seed, max_signatures);
     for current_leaf in (leaf_index..=max_signatures).rev() {
         let leaf = stateful_wots_pk_hash(sk_seed, pk_seed, current_leaf);
-        right = stateful_parent_hash(pk_seed, current_leaf, leaf, right);
+        right = uxmss::stateful_parent_hash(pk_seed, current_leaf, leaf, right);
     }
     right
 }
@@ -151,7 +152,14 @@ fn sign_stateful_wots_c(
                     leaf_index,
                     chain_index as u32,
                 ));
-                stateful_chain_no_mask(pk_seed, leaf_index, chain_index as u32, *secret, 0, *digit)
+                uxmss::stateful_chain_no_mask(
+                    pk_seed,
+                    leaf_index,
+                    chain_index as u32,
+                    *secret,
+                    0,
+                    *digit,
+                )
             })
             .collect();
 
@@ -200,7 +208,7 @@ fn stateful_wots_pk_hash(
             leaf_index,
             chain_index as u32,
         ));
-        let endpoint = stateful_chain_no_mask(
+        let endpoint = uxmss::stateful_chain_no_mask(
             pk_seed,
             leaf_index,
             chain_index as u32,
@@ -216,34 +224,6 @@ fn stateful_wots_pk_hash(
         &leaf_index.to_be_bytes(),
         &endpoints,
     ])
-}
-
-fn stateful_chain_no_mask(
-    pk_seed: &[u8; HASH_LEN],
-    leaf_index: u32,
-    chain_index: u32,
-    value: [u8; HASH_LEN],
-    start: u32,
-    steps: u32,
-) -> [u8; HASH_LEN] {
-    // Stateful WOTS-C uses the same unmasked chain hash shape as the verifier.
-    // The address word binds the step to the stateful leaf and chain number.
-    let mut out = value;
-    for step_offset in 0..steps {
-        let address_word = address_word32(
-            0,
-            0,
-            ADDRESS_TYPE_WOTS_HASH,
-            leaf_index,
-            chain_index,
-            start + step_offset,
-        );
-        // Stateful (UXMSS) WOTS-C chains are domain-separated from the stateless
-        // hypertree chains: the stateful tag is `uxmss-wots-chain` (16 bytes,
-        // 112-byte preimage) while the hypertree walk keeps `wots-c-chain`.
-        out = hash_node(&[b"uxmss-wots-chain", pk_seed, &address_word, &out]);
-    }
-    out
 }
 
 fn stateful_auth_path(
@@ -264,34 +244,10 @@ fn stateful_auth_path(
             max_signatures,
         ));
     } else {
-        path.push(stateful_empty_tail(pk_seed, leaf_index));
+        path.push(uxmss::stateful_empty_tail(pk_seed, leaf_index));
     }
     for previous_leaf in (1..leaf_index).rev() {
         path.push(stateful_wots_pk_hash(sk_seed, pk_seed, previous_leaf));
     }
     path
-}
-
-fn stateful_parent_hash(
-    pk_seed: &[u8; HASH_LEN],
-    left_leaf_index: u32,
-    left: [u8; HASH_LEN],
-    right: [u8; HASH_LEN],
-) -> [u8; HASH_LEN] {
-    // The left leaf index is part of the parent hash because this tree is
-    // unbalanced; it tells the verifier which live leaf starts this subtree.
-    hash_node(&[
-        b"uxmss-node",
-        pk_seed,
-        &left_leaf_index.to_be_bytes(),
-        &left,
-        &right,
-    ])
-}
-
-fn stateful_empty_tail(pk_seed: &[u8; HASH_LEN], leaf_index: u32) -> [u8; HASH_LEN] {
-    // The final live leaf pairs with an explicit empty-tail marker. This lets the
-    // root represent "there are no more stateful leaves to the right" without
-    // inventing a fake WOTS public key.
-    hash_packed(&[b"uxmss-empty-tail", pk_seed, &leaf_index.to_be_bytes()])
 }
