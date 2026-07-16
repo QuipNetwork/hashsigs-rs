@@ -742,13 +742,44 @@ NOTE: if on Mac, do not use brew to install rust and instead use https://www.rus
 │   └── build-wasm.sh  # cargo + wasm-bindgen helper (nodejs + web → ts/src)
 ├── src/
 │   ├── wotsplus/  # WOTS+ primitives
-│   ├── shrincs/   # SHRINCS signer / verifier primitives
+│   ├── shrincs/   # SHRINCS types, primitives, orchestration, and public surfaces
+│   │   ├── components/  # low-level SHRINCS primitives (Hash / UXMSS / FORS-C / Hypertree)
+│   │   ├── core/        # scheme orchestration (hybrid SHRINCS / stateless SPHINCS+C)
+│   │   ├── signers/     # canonical SHRINCS signer ownership
+│   │   ├── verifiers/   # canonical SHRINCS verifier ownership
+│   │   ├── signer.rs    # compatibility signer entrypoint
+│   │   ├── verifier.rs  # compatibility verifier entrypoint
+│   │   ├── types.rs     # shared SHRINCS structs
+│   │   └── profiles.rs  # compile-time profile constants
 │   ├── account/   # Rust account-policy wrapper
 │   └── wasm/      # Verifier / signer / account wasm-bindgen surface
 ├── ts/            # @quip.network/hashsigs-wasm (loadShrincsWasm entry)
 ├── solana/        # Solana program implementation
 └── tests/         # Test vectors and unit tests
 ```
+
+## SHRINCS Architecture
+
+The `shrincs` module is layered to mirror the Solidity architecture:
+
+- `components/` owns low-level primitives
+  - `hash.rs`
+  - `uxmss.rs`
+  - `fors_c.rs`
+  - `hypertree.rs`
+- `core/` owns scheme composition and hybrid-key validation
+  - `shrincs.rs`
+  - `sphincs_plus_c.rs`
+- `signers/` and `verifiers/` own the canonical public Rust surfaces
+- `signer.rs` and `verifier.rs` are compatibility shims that preserve the
+  historical public import paths
+
+Public API stability note:
+
+- prefer `hashsigs_rs::shrincs::*`, `hashsigs_rs::shrincs::signer::*`, and
+  `hashsigs_rs::shrincs::verifier::*` as the stable public surface
+- the deeper `components/`, `core/`, `signers/`, and `verifiers/` modules are
+  internal architecture, not the primary external API contract
 
 ## Account Layer Notes
 
