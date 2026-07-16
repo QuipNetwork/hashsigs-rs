@@ -316,8 +316,27 @@ impl<'a> AbiDecoder<'a> {
 }
 
 fn vectors_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/test_vectors/shrincs_account_wrapper_vectors.json")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(vectors_filename())
+}
+
+#[cfg(shrincs_profile_256s)]
+fn vectors_filename() -> &'static str {
+    "tests/test_vectors/shrincs_account_wrapper_vectors.json"
+}
+
+#[cfg(shrincs_profile_256s_sha2)]
+fn vectors_filename() -> &'static str {
+    "tests/test_vectors/shrincs_account_wrapper_vectors_256s_sha2.json"
+}
+
+#[cfg(shrincs_profile_128s_q18)]
+fn vectors_filename() -> &'static str {
+    "tests/test_vectors/shrincs_account_wrapper_vectors_128s_q18_keccak.json"
+}
+
+#[cfg(shrincs_profile_128s_q20)]
+fn vectors_filename() -> &'static str {
+    "tests/test_vectors/shrincs_account_wrapper_vectors_128s_q20_keccak.json"
 }
 
 fn load_vectors() -> Value {
@@ -325,7 +344,8 @@ fn load_vectors() -> Value {
     let encoded = fs::read_to_string(&path).unwrap_or_else(|error| {
         panic!(
             "failed to read Solidity account vectors at {}: {error}. \
-             Generate them in hashsigs-solidity and copy the JSON here manually.",
+             Generate the matching profile's account-wrapper vectors in \
+             hashsigs-solidity and copy the JSON here manually.",
             path.display()
         )
     });
@@ -345,6 +365,14 @@ fn bytes32_from_vec(bytes: &[u8]) -> [u8; HASH_LEN] {
     bytes.try_into().expect("value must be exactly 32 bytes")
 }
 
+#[cfg_attr(
+    any(
+        shrincs_profile_256s_sha2,
+        shrincs_profile_128s_q18,
+        shrincs_profile_128s_q20
+    ),
+    ignore = "no matching Solidity account-wrapper fixture is committed for this profile"
+)]
 #[test]
 fn solidity_exported_stateful_action_vector_verifies_in_rust() {
     let vectors = load_vectors();
@@ -380,6 +408,14 @@ fn solidity_exported_stateful_action_vector_verifies_in_rust() {
     ));
 }
 
+#[cfg_attr(
+    any(
+        shrincs_profile_256s_sha2,
+        shrincs_profile_128s_q18,
+        shrincs_profile_128s_q20
+    ),
+    ignore = "no matching Solidity account-wrapper fixture is committed for this profile"
+)]
 #[test]
 fn solidity_exported_stateless_action_vector_verifies_in_rust() {
     let vectors = load_vectors();
@@ -415,6 +451,14 @@ fn solidity_exported_stateless_action_vector_verifies_in_rust() {
     ));
 }
 
+#[cfg_attr(
+    any(
+        shrincs_profile_256s_sha2,
+        shrincs_profile_128s_q18,
+        shrincs_profile_128s_q20
+    ),
+    ignore = "no matching Solidity account-wrapper fixture is committed for this profile"
+)]
 #[test]
 fn solidity_exported_stateful_only_rotation_vector_verifies_in_rust() {
     let vectors = load_vectors();
@@ -464,6 +508,14 @@ fn solidity_exported_stateful_only_rotation_vector_verifies_in_rust() {
         .is_none());
 }
 
+#[cfg_attr(
+    any(
+        shrincs_profile_256s_sha2,
+        shrincs_profile_128s_q18,
+        shrincs_profile_128s_q20
+    ),
+    ignore = "no matching Solidity account-wrapper fixture is committed for this profile"
+)]
 #[test]
 fn solidity_exported_full_rotation_vector_verifies_in_rust() {
     let vectors = load_vectors();

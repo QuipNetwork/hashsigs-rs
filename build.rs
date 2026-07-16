@@ -13,10 +13,36 @@ fn feature_enabled(name: &str) -> bool {
 }
 
 fn selected_profile() -> SelectedProfile {
+    let default_profile_256s = feature_enabled("CARGO_FEATURE_DEFAULT_PROFILE_256S");
     let profile_256s = feature_enabled("CARGO_FEATURE_PROFILE_256S");
     let profile_128s_q18 = feature_enabled("CARGO_FEATURE_PROFILE_128S_Q18");
     let profile_128s_q20 = feature_enabled("CARGO_FEATURE_PROFILE_128S_Q20");
     let profile_256s_sha2 = feature_enabled("CARGO_FEATURE_PROFILE_256S_SHA2");
+
+    let explicit_count = usize::from(profile_256s)
+        + usize::from(profile_128s_q18)
+        + usize::from(profile_128s_q20)
+        + usize::from(profile_256s_sha2);
+
+    if explicit_count > 1 {
+        panic!(
+            "select at most one explicit SHRINCS profile feature \
+             (profile-256s, profile-128s-q18, profile-128s-q20, or profile-256s-sha2)"
+        );
+    }
+
+    if explicit_count == 0 {
+        if default_profile_256s {
+            return SelectedProfile {
+                cfg_name: "shrincs_profile_256s",
+                profile_name: "shrincs-256s-keccak",
+            };
+        }
+        panic!(
+            "select a SHRINCS profile feature \
+             (profile-256s, profile-128s-q18, profile-128s-q20, or profile-256s-sha2)"
+        );
+    }
 
     match (
         profile_256s,
@@ -40,15 +66,13 @@ fn selected_profile() -> SelectedProfile {
             cfg_name: "shrincs_profile_256s_sha2",
             profile_name: "shrincs-256s-sha2",
         },
-        _ => panic!(
-            "select exactly one SHRINCS profile feature \
-             (profile-256s, profile-128s-q18, profile-128s-q20, or profile-256s-sha2)"
-        ),
+        _ => unreachable!("explicit profile count already validated"),
     }
 }
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-env-changed=CARGO_FEATURE_DEFAULT_PROFILE_256S");
     println!("cargo:rerun-if-env-changed=CARGO_FEATURE_PROFILE_256S");
     println!("cargo:rerun-if-env-changed=CARGO_FEATURE_PROFILE_128S_Q18");
     println!("cargo:rerun-if-env-changed=CARGO_FEATURE_PROFILE_128S_Q20");

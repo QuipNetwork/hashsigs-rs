@@ -24,17 +24,21 @@ members = [
 resolver = "2"
 
 [features]
-default = ["profile-256s"]
-# Compile-time SHRINCS parameter-profile selection. The default build selects
-# the explicit `profile-256s` feature, which mirrors Solidity's named `256s`
-# profile instead of relying on an implicit "no feature selected" fallback.
-# These mirror the Solidity
+# Keep the default-profile selector internal so downstream additive feature use
+# works as expected: `--features profile-128s-q18` should override the default
+# 256s selection instead of conflicting with it.
+default = ["default-profile-256s"]
+# Compile-time SHRINCS parameter-profile selection. These mirror the Solidity
 # contracts/profiles/<profile>/SHRINCSParams.sol libraries selected by the
 # Foundry `shrincs-profile/` remapping: one parameter tuple is chosen at
 # build time, so counts stay compile-time constants (no runtime params
 # struct). `profile-256s-sha2` switches the internal scheme-hash suite to
 # SHA-256 while keeping EVM-domain hashes (profile identity, commitments,
-# canonical action hashes) on keccak to match Solidity. Select at most one.
+# canonical action hashes) on keccak to match Solidity. Consumers may either:
+# - rely on the default internal 256s selection
+# - enable one explicit public profile feature
+# Build selection logic lives in build.rs.
+default-profile-256s = []
 profile-256s = []
 profile-128s-q18 = []
 profile-128s-q20 = []

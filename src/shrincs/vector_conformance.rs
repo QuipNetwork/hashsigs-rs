@@ -55,22 +55,22 @@ fn vector_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(vector_filename())
 }
 
-#[cfg(feature = "profile-256s")]
+#[cfg(shrincs_profile_256s)]
 fn vector_filename() -> &'static str {
     "tests/test_vectors/shrincs_sphincs_256s_keccak.json"
 }
 
-#[cfg(feature = "profile-128s-q18")]
+#[cfg(shrincs_profile_128s_q18)]
 fn vector_filename() -> &'static str {
     "tests/test_vectors/shrincs_sphincs_128s_q18_keccak.json"
 }
 
-#[cfg(all(feature = "profile-128s-q20", not(feature = "profile-128s-q18")))]
+#[cfg(shrincs_profile_128s_q20)]
 fn vector_filename() -> &'static str {
     "tests/test_vectors/shrincs_sphincs_128s_q20_keccak.json"
 }
 
-#[cfg(feature = "profile-256s-sha2")]
+#[cfg(shrincs_profile_256s_sha2)]
 fn vector_filename() -> &'static str {
     "tests/test_vectors/shrincs_sphincs_256s_sha2.json"
 }
