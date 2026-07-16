@@ -21,7 +21,7 @@ use super::super::profiles::{
     HYPERTREE_HEIGHT, NUM_HYPERTREE_LAYERS, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN,
     WOTS_TARGET_SUM_STATEFUL,
 };
-use super::super::shrincs_verifier_utils::{
+use super::hash::{
     address_word32, base_w_digit, hash_node, hash_packed, hypertree_address_word, word32,
     wots_address_base, wots_chain_address_word, wots_digest_bytes,
 };

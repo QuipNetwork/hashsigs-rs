@@ -20,7 +20,6 @@
 pub(crate) mod components;
 pub(crate) mod core;
 pub(crate) mod profiles;
-pub(crate) mod shrincs_verifier_utils;
 pub(crate) mod signers;
 pub(crate) mod verifiers;
 mod types;

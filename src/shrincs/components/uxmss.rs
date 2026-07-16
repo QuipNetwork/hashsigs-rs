@@ -20,28 +20,14 @@
 use super::super::profiles::{
     WOTS_BASE_STATEFUL, WOTS_CHAINS_STATEFUL, WOTS_TARGET_SUM_STATEFUL,
 };
-use super::super::shrincs_verifier_utils::{
-    address_word32, base_w16_digit, decode_stateful_public_key, hash_node, hash_packed,
-    matches_expected_public_key_commitment, valid_public_key,
-};
-use super::super::types::{PublicKey, StatefulSignature, ADDRESS_TYPE_WOTS_HASH, HASH_LEN};
+use super::hash::{address_word32, base_w16_digit, hash_node, hash_packed};
+use super::super::types::{StatefulPublicKey, StatefulSignature, ADDRESS_TYPE_WOTS_HASH, HASH_LEN};
 
 pub(crate) fn verify_stateful_unsafe_raw(
-    expected_public_key_commitment: [u8; HASH_LEN],
-    public_key: &PublicKey,
+    stateful_key: &StatefulPublicKey,
     message: &[u8],
     signature: &StatefulSignature,
 ) -> bool {
-    if !matches_expected_public_key_commitment(public_key, expected_public_key_commitment) {
-        return false;
-    }
-    if !valid_public_key(public_key) {
-        return false;
-    }
-    let Some(stateful_key) = decode_stateful_public_key(&public_key.stateful_public_key) else {
-        return false;
-    };
-
     let leaf_index = signature.auth_path.len() as u32;
     if leaf_index == 0 || leaf_index > stateful_key.max_signatures {
         return false;

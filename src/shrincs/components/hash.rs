@@ -137,6 +137,24 @@ pub(crate) fn address_word32(
     out
 }
 
+pub(crate) fn wots_address_base(layer: u32, tree: u64, keypair: u32) -> [u8; HASH_LEN] {
+    let mut out = [0u8; HASH_LEN];
+    out[0..4].copy_from_slice(&layer.to_be_bytes());
+    out[8..16].copy_from_slice(&tree.to_be_bytes());
+    out[20..24].copy_from_slice(&keypair.to_be_bytes());
+    out
+}
+
+pub(crate) fn wots_chain_address_word(
+    mut address_base: [u8; HASH_LEN],
+    chain_index: u32,
+    step: u32,
+) -> [u8; HASH_LEN] {
+    address_base[24..28].copy_from_slice(&chain_index.to_be_bytes());
+    address_base[28..32].copy_from_slice(&step.to_be_bytes());
+    address_base
+}
+
 pub(crate) fn fors_address_word(
     tree_index: u64,
     leaf_index: u32,

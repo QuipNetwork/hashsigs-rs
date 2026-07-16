@@ -18,7 +18,7 @@
 //! Stateless SHRINCS composition over FORS-C and the hypertree.
 
 use crate::shrincs::components::{fors_c, hypertree};
-use crate::shrincs::shrincs_verifier_utils::{
+use crate::shrincs::core::shrincs::{
     matches_expected_public_key_commitment, valid_public_key,
 };
 use crate::shrincs::types::{PublicKey, StatelessSignature, HASH_LEN};

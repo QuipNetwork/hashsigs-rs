@@ -19,11 +19,9 @@
 
 use zeroize::Zeroizing;
 
+use super::hash::{fors_address_word, hash_node, hash_packed, pack, read_bits32, read_bits64, word32};
 use super::super::profiles::{
     FORS_TREE_HEIGHT, HYPERTREE_HEIGHT, NUM_FORS_TREES, NUM_HYPERTREE_LAYERS,
-};
-use super::super::shrincs_verifier_utils::{
-    fors_address_word, hash_node, hash_packed, pack, read_bits32, read_bits64, word32,
 };
 use super::super::types::{ForsEntry, ForsSignature, PublicKey, HASH_LEN};
 

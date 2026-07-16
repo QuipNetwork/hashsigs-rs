@@ -17,18 +17,92 @@
 
 //! Hybrid SHRINCS scheme orchestration.
 
+use crate::shrincs::components::hash::{hash_packed, word32};
 use crate::shrincs::components::uxmss;
 use crate::shrincs::core::sphincs_plus_c;
-use crate::shrincs::shrincs_verifier_utils::{
-    decode_stateful_public_key, hash_packed, matches_expected_public_key_commitment,
-    rotation_target_commitment, stateful_rotation_target_commitment, valid_action_context,
-    valid_public_key, valid_rotation_context, word32,
-};
+use crate::shrincs::profiles::PROFILE_NAME;
 use crate::shrincs::types::{
     ActionContext, PublicKey, RotationContext, RotationTarget, StatefulRotationTarget,
-    StatefulSignature, StatelessSignature, HASH_LEN, HASH_SUITE_KECCAK_256,
+    StatefulPublicKey, StatefulSignature, StatelessSignature, HASH_LEN, HASH_SUITE_KECCAK_256,
     STATEFUL_PUBLIC_KEY_BYTES,
 };
+
+pub(crate) fn valid_action_context(context: &ActionContext) -> bool {
+    context.domain_separator != [0u8; HASH_LEN]
+        && context.action_type != [0u8; HASH_LEN]
+        && context.payload_hash != [0u8; HASH_LEN]
+}
+
+pub(crate) fn valid_rotation_context(context: &RotationContext) -> bool {
+    context.domain_separator != [0u8; HASH_LEN]
+}
+
+pub(crate) fn public_key_commitment(public_key: &PublicKey) -> Option<[u8; HASH_LEN]> {
+    let pk_seed = word32(&public_key.pk_seed)?;
+    let hypertree_root = word32(&public_key.hypertree_root)?;
+    Some(hash_packed(&[
+        b"shrincs-public-key/",
+        PROFILE_NAME.as_bytes(),
+        &public_key.stateful_public_key,
+        &pk_seed,
+        &hypertree_root,
+    ]))
+}
+
+pub(crate) fn stateful_rotation_target_commitment(
+    stateful_public_key: &[u8],
+    pk_seed: &[u8; HASH_LEN],
+    hypertree_root: &[u8; HASH_LEN],
+) -> [u8; HASH_LEN] {
+    hash_packed(&[
+        b"shrincs-public-key/",
+        PROFILE_NAME.as_bytes(),
+        stateful_public_key,
+        pk_seed,
+        hypertree_root,
+    ])
+}
+
+pub(crate) fn rotation_target_commitment(target: &RotationTarget) -> Option<[u8; HASH_LEN]> {
+    let pk_seed = word32(&target.pk_seed)?;
+    let hypertree_root = word32(&target.hypertree_root)?;
+    Some(stateful_rotation_target_commitment(
+        &target.stateful_public_key,
+        &pk_seed,
+        &hypertree_root,
+    ))
+}
+
+pub(crate) fn matches_expected_public_key_commitment(
+    public_key: &PublicKey,
+    expected_public_key_commitment: [u8; HASH_LEN],
+) -> bool {
+    expected_public_key_commitment != [0u8; HASH_LEN]
+        && word32(&public_key.public_key_commitment) == Some(expected_public_key_commitment)
+        && public_key_commitment(public_key) == Some(expected_public_key_commitment)
+}
+
+pub(crate) fn valid_public_key(public_key: &PublicKey) -> bool {
+    public_key.stateful_public_key.len() == STATEFUL_PUBLIC_KEY_BYTES
+        && public_key.public_key_commitment.len() == HASH_LEN
+        && public_key.pk_seed.len() == HASH_LEN
+        && public_key.hypertree_root.len() == HASH_LEN
+        && public_key_commitment(public_key) == word32(&public_key.public_key_commitment)
+}
+
+pub(crate) fn decode_stateful_public_key(encoded: &[u8]) -> Option<StatefulPublicKey> {
+    if encoded.len() != STATEFUL_PUBLIC_KEY_BYTES {
+        return None;
+    }
+    let pk_seed = word32(&encoded[..32])?;
+    let root = word32(&encoded[32..64])?;
+    let max_signatures = u32::from_be_bytes(encoded[64..68].try_into().ok()?);
+    Some(StatefulPublicKey {
+        pk_seed,
+        root,
+        max_signatures,
+    })
+}
 
 pub(crate) fn verify_stateful(
     expected_public_key_commitment: [u8; HASH_LEN],
@@ -174,12 +248,16 @@ pub(crate) fn verify_stateful_unsafe_raw(
     message: &[u8],
     signature: &StatefulSignature,
 ) -> bool {
-    uxmss::verify_stateful_unsafe_raw(
-        expected_public_key_commitment,
-        public_key,
-        message,
-        signature,
-    )
+    if !matches_expected_public_key_commitment(public_key, expected_public_key_commitment) {
+        return false;
+    }
+    if !valid_public_key(public_key) {
+        return false;
+    }
+    let Some(stateful_key) = decode_stateful_public_key(&public_key.stateful_public_key) else {
+        return false;
+    };
+    uxmss::verify_stateful_unsafe_raw(&stateful_key, message, signature)
 }
 
 #[cfg(any(test, feature = "wasm-bindings"))]
