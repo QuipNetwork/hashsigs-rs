@@ -17,17 +17,20 @@
 
 //! Hybrid SHRINCS scheme orchestration.
 
-use crate::shrincs::components::hash::{hash_packed, word32};
+use crate::shrincs::components::hash::word32;
 use crate::shrincs::components::public_key::{
     decode_stateful_public_key, public_key_commitment as public_key_commitment_from_parts,
     stateful_rotation_target_commitment,
 };
 use crate::shrincs::components::uxmss;
+use crate::shrincs::core::messages::{
+    full_rotation_message_hash, stateful_action_message_hash, stateful_rotation_message_hash,
+    stateless_action_message_hash,
+};
 use crate::shrincs::core::sphincs_plus_c;
 use crate::shrincs::types::{
     ActionContext, PublicKey, RotationContext, RotationTarget, StatefulRotationTarget,
-    StatefulSignature, StatelessSignature, HASH_LEN, HASH_SUITE_KECCAK_256,
-    STATEFUL_PUBLIC_KEY_BYTES,
+    StatefulSignature, StatelessSignature, HASH_LEN, STATEFUL_PUBLIC_KEY_BYTES,
 };
 
 pub(crate) fn valid_action_context(context: &ActionContext) -> bool {
@@ -246,76 +249,4 @@ pub(crate) fn verify_stateless_unsafe_raw(
         return false;
     }
     sphincs_plus_c::verify_stateless_raw(public_key, message, signature)
-}
-
-pub(crate) fn stateful_action_message_hash(
-    expected_public_key_commitment: [u8; HASH_LEN],
-    context: &ActionContext,
-) -> [u8; HASH_LEN] {
-    let op = hash_packed(&[b"shrincs-verify-stateful"]);
-    hash_packed(&[
-        &op,
-        &HASH_SUITE_KECCAK_256.to_be_bytes(),
-        &expected_public_key_commitment,
-        &context.domain_separator,
-        &context.nonce,
-        &context.key_version,
-        &context.action_type,
-        &context.payload_hash,
-    ])
-}
-
-pub(crate) fn stateless_action_message_hash(
-    expected_public_key_commitment: [u8; HASH_LEN],
-    context: &ActionContext,
-) -> [u8; HASH_LEN] {
-    let op = hash_packed(&[b"shrincs-verify-stateless"]);
-    hash_packed(&[
-        &op,
-        &HASH_SUITE_KECCAK_256.to_be_bytes(),
-        &expected_public_key_commitment,
-        &context.domain_separator,
-        &context.nonce,
-        &context.key_version,
-        &context.action_type,
-        &context.payload_hash,
-    ])
-}
-
-pub(crate) fn stateful_rotation_message_hash(
-    expected_public_key_commitment: [u8; HASH_LEN],
-    current_public_key: &PublicKey,
-    context: &RotationContext,
-    next_stateful_key: &StatefulRotationTarget,
-) -> [u8; HASH_LEN] {
-    let op = hash_packed(&[b"shrincs-rotate-stateful"]);
-    hash_packed(&[
-        &op,
-        &HASH_SUITE_KECCAK_256.to_be_bytes(),
-        &expected_public_key_commitment,
-        &context.domain_separator,
-        &context.nonce,
-        &context.key_version,
-        &current_public_key.public_key_commitment,
-        &next_stateful_key.public_key_commitment,
-    ])
-}
-
-pub(crate) fn full_rotation_message_hash(
-    expected_public_key_commitment: [u8; HASH_LEN],
-    current_public_key: &PublicKey,
-    context: &RotationContext,
-    next_key: &RotationTarget,
-) -> [u8; HASH_LEN] {
-    let op = hash_packed(&[b"shrincs-rotate-full"]);
-    hash_packed(&[
-        &op,
-        &HASH_SUITE_KECCAK_256.to_be_bytes(),
-        &expected_public_key_commitment,
-        &context.domain_separator,
-        &context.nonce,
-        &context.key_version,
-        &current_public_key.public_key_commitment,
-        &next_key.public_key_commitment,
-    ])
 }

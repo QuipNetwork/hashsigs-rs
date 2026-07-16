@@ -17,6 +17,10 @@
 
 //! Public hybrid SHRINCS verifier surface.
 
+use crate::shrincs::core::messages::{
+    full_rotation_message_hash, stateful_action_message_hash, stateful_rotation_message_hash,
+    stateless_action_message_hash,
+};
 use crate::shrincs::core::shrincs as core_shrincs;
 use crate::shrincs::types::{
     ActionContext, PublicKey, RotationContext, RotationTarget, StatefulRotationTarget,
@@ -127,7 +131,7 @@ impl ShrincsVerifier {
         expected_public_key_commitment: [u8; HASH_LEN],
         context: &ActionContext,
     ) -> [u8; HASH_LEN] {
-        core_shrincs::stateful_action_message_hash(expected_public_key_commitment, context)
+        stateful_action_message_hash(expected_public_key_commitment, context)
     }
 
     pub fn stateless_action_message_hash(
@@ -135,7 +139,7 @@ impl ShrincsVerifier {
         expected_public_key_commitment: [u8; HASH_LEN],
         context: &ActionContext,
     ) -> [u8; HASH_LEN] {
-        core_shrincs::stateless_action_message_hash(expected_public_key_commitment, context)
+        stateless_action_message_hash(expected_public_key_commitment, context)
     }
 
     pub fn stateful_rotation_message_hash(
@@ -145,7 +149,7 @@ impl ShrincsVerifier {
         context: &RotationContext,
         next_stateful_key: &StatefulRotationTarget,
     ) -> [u8; HASH_LEN] {
-        core_shrincs::stateful_rotation_message_hash(
+        stateful_rotation_message_hash(
             expected_public_key_commitment,
             current_public_key,
             context,
@@ -160,7 +164,7 @@ impl ShrincsVerifier {
         context: &RotationContext,
         next_key: &RotationTarget,
     ) -> [u8; HASH_LEN] {
-        core_shrincs::full_rotation_message_hash(
+        full_rotation_message_hash(
             expected_public_key_commitment,
             current_public_key,
             context,

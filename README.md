@@ -135,10 +135,22 @@ implementation:
 
 - hybrid public-key commitment derivation
 - stateful rotation-target commitment derivation
+- encoded stateful public-key encoding
 - encoded stateful public-key decoding
 
 Both the signer and the hybrid core use that module so commitment assembly,
 validation, and rotation decoding stay on one implementation path.
+
+`src/shrincs/core/messages.rs` is the shared owner for canonical SHRINCS
+message-hash construction:
+
+- `stateful_action_message_hash(...)`
+- `stateless_action_message_hash(...)`
+- `stateful_rotation_message_hash(...)`
+- `full_rotation_message_hash(...)`
+
+Both public facades delegate to that lower-level module rather than depending
+on each other for canonical message construction.
 
 ## WASM Testing
 

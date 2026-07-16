@@ -19,8 +19,7 @@
 //!
 //! This is the Rust analogue of Solidity's shared `Hash.sol` support layer.
 //! Primitive components (`uxmss`, `fors_c`, `hypertree`) build on these helpers,
-//! while signer/verifier utils re-export the subset they need so call sites stay
-//! stable.
+//! while higher-level core and signer modules import the subset they need.
 
 use crate::shrincs::profiles::{HASH_TRUNC_LEN, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN};
 use crate::shrincs::types::{ADDRESS_TYPE_FORS_TREE, ADDRESS_TYPE_TREE, HASH_LEN};

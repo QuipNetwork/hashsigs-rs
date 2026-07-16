@@ -43,6 +43,18 @@ pub(crate) fn stateful_rotation_target_commitment(
     public_key_commitment(stateful_public_key, pk_seed, hypertree_root)
 }
 
+pub(crate) fn encode_stateful_public_key(
+    pk_seed: [u8; HASH_LEN],
+    root: [u8; HASH_LEN],
+    max_signatures: u32,
+) -> Vec<u8> {
+    let mut out = Vec::with_capacity(STATEFUL_PUBLIC_KEY_BYTES);
+    out.extend_from_slice(&pk_seed);
+    out.extend_from_slice(&root);
+    out.extend_from_slice(&max_signatures.to_be_bytes());
+    out
+}
+
 pub(crate) fn decode_stateful_public_key(encoded: &[u8]) -> Option<StatefulPublicKey> {
     if encoded.len() != STATEFUL_PUBLIC_KEY_BYTES {
         return None;

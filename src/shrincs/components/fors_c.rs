@@ -23,7 +23,7 @@ use super::hash::{fors_address_word, hash_node, hash_packed, pack, read_bits32, 
 use super::super::profiles::{
     FORS_TREE_HEIGHT, HYPERTREE_HEIGHT, NUM_FORS_TREES, NUM_HYPERTREE_LAYERS,
 };
-use super::super::types::{ForsEntry, ForsSignature, PublicKey, HASH_LEN};
+use super::super::types::{ForsEntry, ForsSignature, HASH_LEN};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ForsDigest {
@@ -40,7 +40,8 @@ pub(crate) struct SigningForsDigest {
 }
 
 pub(crate) fn verify_fors_c_and_return_root(
-    public_key: &PublicKey,
+    pk_seed: &[u8; HASH_LEN],
+    hypertree_root: &[u8; HASH_LEN],
     message: &[u8],
     signature: &ForsSignature,
 ) -> Option<([u8; HASH_LEN], u64, u32)> {
@@ -50,7 +51,8 @@ pub(crate) fn verify_fors_c_and_return_root(
     }
 
     let digest = fors_digest(
-        public_key,
+        pk_seed,
+        hypertree_root,
         message,
         &signature.randomizer,
         signature.counter,
@@ -78,7 +80,7 @@ pub(crate) fn verify_fors_c_and_return_root(
         )?;
         let root = fors_entry_root32(
             fors_tree_height as u32,
-            &public_key.pk_seed,
+            pk_seed,
             digest.tree_index,
             digest.leaf_index,
             fors_tree_index as u32,
@@ -91,7 +93,7 @@ pub(crate) fn verify_fors_c_and_return_root(
     Some((
         hash_node(&[
             b"fors-pk".as_ref(),
-            public_key.pk_seed.as_slice(),
+            pk_seed.as_ref(),
             roots.as_slice(),
         ]),
         digest.tree_index,
@@ -272,7 +274,8 @@ fn hash_fors_node32(
 }
 
 fn fors_digest(
-    public_key: &PublicKey,
+    pk_seed: &[u8; HASH_LEN],
+    hypertree_root: &[u8; HASH_LEN],
     message: &[u8],
     randomizer: &[u8],
     counter: u32,
@@ -282,8 +285,8 @@ fn fors_digest(
     let tree_bits = u32::from(HYPERTREE_HEIGHT) - subtree_height;
     let digest_bytes = (index_bits + u32::from(HYPERTREE_HEIGHT)).div_ceil(8) as usize;
     let digest = fors_digest_bytes(
-        &public_key.pk_seed,
-        &public_key.hypertree_root,
+        pk_seed,
+        hypertree_root,
         randomizer,
         counter,
         message,

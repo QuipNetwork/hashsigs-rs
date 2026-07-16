@@ -34,7 +34,10 @@ use super::uxmss::sign_stateful_raw_at_leaf as sign_stateful_raw_at_leaf_inner;
 use super::uxmss::{
     sign_stateful_raw as sign_stateful_raw_inner, stateful_subtree_root,
 };
-use super::utils::{derive32, encode_stateful_public_key, public_key_from_components, word32};
+use super::utils::{derive32, public_key_from_components, word32};
+use crate::shrincs::components::public_key::encode_stateful_public_key;
+use crate::shrincs::core::messages::stateful_action_message_hash;
+#[cfg(test)]
 use super::super::verifiers::shrincs_verifier::ShrincsVerifier;
 
 pub struct ShrincsSigner;
@@ -143,8 +146,7 @@ impl ShrincsSigner {
         context: &ActionContext,
     ) -> ShrincsSignerResult<StatefulSignature> {
         let expected = word32(&public_key.public_key_commitment)?;
-        let verifier = ShrincsVerifier::new();
-        let message = verifier.stateful_action_message_hash(expected, context);
+        let message = stateful_action_message_hash(expected, context);
         sign_stateful_raw_inner(signing_key, &message)
     }
 

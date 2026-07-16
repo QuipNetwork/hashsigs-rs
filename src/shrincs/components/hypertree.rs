@@ -25,10 +25,11 @@ use super::hash::{
     address_word32, base_w_digit, hash_node, hash_packed, hypertree_address_word, word32,
     wots_address_base, wots_chain_address_word, wots_digest_bytes,
 };
-use super::super::types::{HypertreeLayerSignature, PublicKey, WotsCSignature, HASH_LEN};
+use super::super::types::{HypertreeLayerSignature, WotsCSignature, HASH_LEN};
 
 pub(crate) fn verify_hypertree(
-    public_key: &PublicKey,
+    pk_seed: &[u8; HASH_LEN],
+    expected_hypertree_root: &[u8; HASH_LEN],
     fors_root: [u8; HASH_LEN],
     seed_tree_index: u64,
     seed_leaf_index: u32,
@@ -55,7 +56,7 @@ pub(crate) fn verify_hypertree(
             return false;
         }
         if !verify_wots_c32(
-            &public_key.pk_seed,
+            pk_seed,
             layer_index as u32,
             expected_tree_index,
             expected_leaf_index,
@@ -70,7 +71,7 @@ pub(crate) fn verify_hypertree(
         };
         let Some(next_root) = hypertree_root_from_path32(
             subtree_height,
-            &public_key.pk_seed,
+            pk_seed,
             layer_index as u32,
             expected_tree_index,
             expected_leaf_index,
@@ -84,7 +85,7 @@ pub(crate) fn verify_hypertree(
         expected_tree_index >>= subtree_height;
     }
 
-    expected_tree_index == 0 && word32(&public_key.hypertree_root) == Some(current_root)
+    expected_tree_index == 0 && *expected_hypertree_root == current_root
 }
 
 pub(crate) fn stateless_wots_message_digest(

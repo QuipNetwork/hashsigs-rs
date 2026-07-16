@@ -17,6 +17,7 @@
 
 //! Public stateless-only verifier surface.
 
+use crate::shrincs::core::messages::stateless_action_message_hash;
 use crate::shrincs::core::shrincs as core_shrincs;
 #[cfg(any(test, feature = "wasm-bindings"))]
 use crate::shrincs::core::sphincs_plus_c;
@@ -68,6 +69,6 @@ impl SphincsPlusCVerifier {
         expected_public_key_commitment: [u8; HASH_LEN],
         context: &ActionContext,
     ) -> [u8; HASH_LEN] {
-        core_shrincs::stateless_action_message_hash(expected_public_key_commitment, context)
+        stateless_action_message_hash(expected_public_key_commitment, context)
     }
 }

@@ -20,8 +20,10 @@
 //! The byte-layout primitives (hashing, packing, address words, base-w digits,
 //! bit-packed digest reads) are shared with the verifier and live in
 //! `components::hash`; they are re-exported here so signer call sites keep the same
-//! import path. Only the helpers that are genuinely signer-specific (seed KDF,
-//! public-key assembly, encoded stateful key layout) are defined below.
+//! import path. The encoded stateful public-key wire helper is owned by
+//! `components::public_key` and re-exported here for compatibility. Only the
+//! helpers that are genuinely signer-specific (seed KDF and public-key
+//! assembly) are defined below.
 
 // Re-export the byte-identical helpers shared with the verifier. Keeping one copy
 // in `components::hash` prevents the two sides from drifting apart (F-08 / Q2).
@@ -30,7 +32,7 @@ pub(crate) use super::super::components::hash::{
 };
 
 use super::super::components::public_key::public_key_commitment;
-use super::super::types::{PublicKey, HASH_LEN, STATEFUL_PUBLIC_KEY_BYTES};
+use super::super::types::{PublicKey, HASH_LEN};
 
 pub(crate) const WOTS_C_MAX_GRIND_COUNTER: u32 = 1 << 24;
 pub(crate) const FORS_C_MAX_GRIND_COUNTER: u32 = 1 << 24;
@@ -48,20 +50,6 @@ pub(crate) fn public_key_from_components(
         pk_seed: pk_seed.to_vec(),
         hypertree_root: hypertree_root.to_vec(),
     }
-}
-
-pub(crate) fn encode_stateful_public_key(
-    pk_seed: [u8; HASH_LEN],
-    root: [u8; HASH_LEN],
-    max_signatures: u32,
-) -> Vec<u8> {
-    // Keep this byte layout identical to `decode_stateful_public_key`:
-    // pk_seed || root || max_signatures as big-endian u32.
-    let mut out = Vec::with_capacity(STATEFUL_PUBLIC_KEY_BYTES);
-    out.extend_from_slice(&pk_seed);
-    out.extend_from_slice(&root);
-    out.extend_from_slice(&max_signatures.to_be_bytes());
-    out
 }
 
 pub(crate) fn derive32(domain: &[u8], seed: &[u8], data: &[u8]) -> [u8; HASH_LEN] {

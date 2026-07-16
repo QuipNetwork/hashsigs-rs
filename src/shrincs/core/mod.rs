@@ -15,5 +15,6 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+pub(crate) mod messages;
 pub(crate) mod shrincs;
 pub(crate) mod sphincs_plus_c;

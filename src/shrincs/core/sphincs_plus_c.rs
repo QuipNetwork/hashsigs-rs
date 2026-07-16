@@ -18,6 +18,7 @@
 //! Stateless SHRINCS composition over FORS-C and the hypertree.
 
 use crate::shrincs::components::{fors_c, hypertree};
+use crate::shrincs::components::hash::word32;
 use crate::shrincs::types::{PublicKey, StatelessSignature};
 
 pub(crate) fn verify_stateless_raw(
@@ -28,14 +29,21 @@ pub(crate) fn verify_stateless_raw(
     if signature.hypertree.is_empty() {
         return false;
     }
+    let Some(pk_seed) = word32(&public_key.pk_seed) else {
+        return false;
+    };
+    let Some(hypertree_root) = word32(&public_key.hypertree_root) else {
+        return false;
+    };
 
     let Some((fors_root, seed_tree_index, seed_leaf_index)) =
-        fors_c::verify_fors_c_and_return_root(public_key, message, &signature.fors)
+        fors_c::verify_fors_c_and_return_root(&pk_seed, &hypertree_root, message, &signature.fors)
     else {
         return false;
     };
     hypertree::verify_hypertree(
-        public_key,
+        &pk_seed,
+        &hypertree_root,
         fors_root,
         seed_tree_index,
         seed_leaf_index,
