@@ -103,6 +103,43 @@ Current WASM scope:
   - WOTS-specific wasm bindings
   - a separate `wasm-pack` / `pkg/<target>` layout
 
+## SHRINCS Layout
+
+The SHRINCS Rust code follows the same high-level split as the Solidity
+implementation:
+
+- public compatibility entrypoints
+  - `src/shrincs/signer.rs`
+  - `src/shrincs/verifier.rs`
+- public signer/verifier surfaces
+  - `src/shrincs/signers/shrincs_signer.rs`
+  - `src/shrincs/verifiers/shrincs_verifier.rs`
+  - `src/shrincs/verifiers/sphincs_plus_c_verifier.rs`
+- pure scheme orchestration
+  - `src/shrincs/core/shrincs.rs`
+  - `src/shrincs/core/sphincs_plus_c.rs`
+- shared components
+  - `src/shrincs/components/hash.rs`
+  - `src/shrincs/components/public_key.rs`
+  - `src/shrincs/components/uxmss.rs`
+  - `src/shrincs/components/fors_c.rs`
+  - `src/shrincs/components/hypertree.rs`
+- signer-only implementation modules
+  - `src/shrincs/signers/uxmss.rs`
+  - `src/shrincs/signers/fors_c.rs`
+  - `src/shrincs/signers/hypertree.rs`
+  - `src/shrincs/signers/utils.rs`
+  - `src/shrincs/signers/types.rs`
+
+`src/shrincs/components/public_key.rs` is the canonical shared owner for:
+
+- hybrid public-key commitment derivation
+- stateful rotation-target commitment derivation
+- encoded stateful public-key decoding
+
+Both the signer and the hybrid core use that module so commitment assembly,
+validation, and rotation decoding stay on one implementation path.
+
 ## WASM Testing
 
 Two layers cover the wasm surface:
@@ -237,7 +274,10 @@ Safe defaults:
 bytes (`ERR_SEED_TOO_SHORT`) and `maxStatefulSignatures` outside `1..=4096`
 (`ERR_INVALID_INPUT`). Stateful signing consumes one leaf per signature;
 `signStatefulRaw` throws `ERR_STATEFUL_LEAVES_EXHAUSTED` when the budget is
-spent.
+spent. The returned `PublicKey` is assembled from the encoded stateful key,
+global `pk_seed`, and `hypertree_root`, then committed with the same
+`components/public_key.rs` logic used by verifier-side commitment and rotation
+checks.
 
 ### Account exports
 

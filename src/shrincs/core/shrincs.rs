@@ -18,12 +18,15 @@
 //! Hybrid SHRINCS scheme orchestration.
 
 use crate::shrincs::components::hash::{hash_packed, word32};
+use crate::shrincs::components::public_key::{
+    decode_stateful_public_key, public_key_commitment as public_key_commitment_from_parts,
+    stateful_rotation_target_commitment,
+};
 use crate::shrincs::components::uxmss;
 use crate::shrincs::core::sphincs_plus_c;
-use crate::shrincs::profiles::PROFILE_NAME;
 use crate::shrincs::types::{
     ActionContext, PublicKey, RotationContext, RotationTarget, StatefulRotationTarget,
-    StatefulPublicKey, StatefulSignature, StatelessSignature, HASH_LEN, HASH_SUITE_KECCAK_256,
+    StatefulSignature, StatelessSignature, HASH_LEN, HASH_SUITE_KECCAK_256,
     STATEFUL_PUBLIC_KEY_BYTES,
 };
 
@@ -37,30 +40,14 @@ pub(crate) fn valid_rotation_context(context: &RotationContext) -> bool {
     context.domain_separator != [0u8; HASH_LEN]
 }
 
-pub(crate) fn public_key_commitment(public_key: &PublicKey) -> Option<[u8; HASH_LEN]> {
+fn recompute_public_key_commitment(public_key: &PublicKey) -> Option<[u8; HASH_LEN]> {
     let pk_seed = word32(&public_key.pk_seed)?;
     let hypertree_root = word32(&public_key.hypertree_root)?;
-    Some(hash_packed(&[
-        b"shrincs-public-key/",
-        PROFILE_NAME.as_bytes(),
+    Some(public_key_commitment_from_parts(
         &public_key.stateful_public_key,
         &pk_seed,
         &hypertree_root,
-    ]))
-}
-
-pub(crate) fn stateful_rotation_target_commitment(
-    stateful_public_key: &[u8],
-    pk_seed: &[u8; HASH_LEN],
-    hypertree_root: &[u8; HASH_LEN],
-) -> [u8; HASH_LEN] {
-    hash_packed(&[
-        b"shrincs-public-key/",
-        PROFILE_NAME.as_bytes(),
-        stateful_public_key,
-        pk_seed,
-        hypertree_root,
-    ])
+    ))
 }
 
 pub(crate) fn rotation_target_commitment(target: &RotationTarget) -> Option<[u8; HASH_LEN]> {
@@ -79,7 +66,7 @@ pub(crate) fn matches_expected_public_key_commitment(
 ) -> bool {
     expected_public_key_commitment != [0u8; HASH_LEN]
         && word32(&public_key.public_key_commitment) == Some(expected_public_key_commitment)
-        && public_key_commitment(public_key) == Some(expected_public_key_commitment)
+        && recompute_public_key_commitment(public_key) == Some(expected_public_key_commitment)
 }
 
 pub(crate) fn valid_public_key(public_key: &PublicKey) -> bool {
@@ -87,21 +74,7 @@ pub(crate) fn valid_public_key(public_key: &PublicKey) -> bool {
         && public_key.public_key_commitment.len() == HASH_LEN
         && public_key.pk_seed.len() == HASH_LEN
         && public_key.hypertree_root.len() == HASH_LEN
-        && public_key_commitment(public_key) == word32(&public_key.public_key_commitment)
-}
-
-pub(crate) fn decode_stateful_public_key(encoded: &[u8]) -> Option<StatefulPublicKey> {
-    if encoded.len() != STATEFUL_PUBLIC_KEY_BYTES {
-        return None;
-    }
-    let pk_seed = word32(&encoded[..32])?;
-    let root = word32(&encoded[32..64])?;
-    let max_signatures = u32::from_be_bytes(encoded[64..68].try_into().ok()?);
-    Some(StatefulPublicKey {
-        pk_seed,
-        root,
-        max_signatures,
-    })
+        && recompute_public_key_commitment(public_key) == word32(&public_key.public_key_commitment)
 }
 
 pub(crate) fn verify_stateful(

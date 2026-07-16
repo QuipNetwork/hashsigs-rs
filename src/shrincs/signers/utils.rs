@@ -29,8 +29,8 @@ pub(crate) use super::super::components::hash::{
     base_w16_digit, base_w_digit, hash_node, hash_packed, word32, wots_digest_bytes,
 };
 
+use super::super::components::public_key::public_key_commitment;
 use super::super::types::{PublicKey, HASH_LEN, STATEFUL_PUBLIC_KEY_BYTES};
-use super::super::profiles::PROFILE_NAME;
 
 pub(crate) const WOTS_C_MAX_GRIND_COUNTER: u32 = 1 << 24;
 pub(crate) const FORS_C_MAX_GRIND_COUNTER: u32 = 1 << 24;
@@ -48,24 +48,6 @@ pub(crate) fn public_key_from_components(
         pk_seed: pk_seed.to_vec(),
         hypertree_root: hypertree_root.to_vec(),
     }
-}
-
-pub(crate) fn public_key_commitment(
-    stateful_public_key: &[u8],
-    pk_seed: &[u8; HASH_LEN],
-    hypertree_root: &[u8; HASH_LEN],
-) -> [u8; HASH_LEN] {
-    // The commitment tag binds the compile-time profile id (F-08 / Q2), so a
-    // public key from one profile can never collide with another's: the
-    // preimage is `shrincs-public-key/<PROFILE_NAME>`, sourced from the profile
-    // machinery rather than a scattered literal.
-    hash_packed(&[
-        b"shrincs-public-key/",
-        PROFILE_NAME.as_bytes(),
-        stateful_public_key,
-        pk_seed,
-        hypertree_root,
-    ])
 }
 
 pub(crate) fn encode_stateful_public_key(
