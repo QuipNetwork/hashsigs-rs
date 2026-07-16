@@ -20,10 +20,8 @@
 use zeroize::Zeroizing;
 
 use super::super::components::uxmss;
-use super::shrincs_signer_types::{ShrincsSignerResult, ShrincsSigningKey};
-use super::shrincs_signer_utils::{
-    base_w16_digit, hash_node, hash_packed, WOTS_C_MAX_GRIND_COUNTER,
-};
+use super::types::{ShrincsSignerResult, ShrincsSigningKey};
+use super::utils::{base_w16_digit, hash_node, hash_packed, WOTS_C_MAX_GRIND_COUNTER};
 use super::super::profiles::{
     WOTS_BASE_STATEFUL, WOTS_CHAINS_STATEFUL, WOTS_TARGET_SUM_STATEFUL,
 };

@@ -19,7 +19,7 @@
 
 use core::fmt;
 
-use super::verifier::HASH_LEN;
+use crate::shrincs::verifier::HASH_LEN;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// Signer operations return `None` when stateful leaves are exhausted or

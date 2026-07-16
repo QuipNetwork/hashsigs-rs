@@ -20,8 +20,8 @@
 use zeroize::Zeroizing;
 
 use super::super::components::hypertree;
-use super::shrincs_signer_types::{ShrincsSignerResult, ShrincsSigningKey};
-use super::shrincs_signer_utils::{
+use super::types::{ShrincsSignerResult, ShrincsSigningKey};
+use super::utils::{
     base_w_digit, derive32, hash_packed, wots_digest_bytes, WOTS_C_MAX_GRIND_COUNTER,
 };
 use super::super::types::{HypertreeLayerSignature, WotsCSignature, HASH_LEN};

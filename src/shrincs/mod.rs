@@ -18,8 +18,11 @@
 //! SHRINCS signer / verifier primitives and shared types.
 
 pub(crate) mod components;
+pub(crate) mod core;
 pub(crate) mod profiles;
 pub(crate) mod shrincs_verifier_utils;
+pub(crate) mod signers;
+pub(crate) mod verifiers;
 mod types;
 pub mod signer;
 pub mod verifier;
@@ -39,6 +42,4 @@ pub use types::{
     StatelessSignature, WotsCSignature, ADDRESS_TYPE_FORS_TREE, ADDRESS_TYPE_TREE,
     ADDRESS_TYPE_WOTS_HASH, HASH_LEN, HASH_SUITE_KECCAK_256, STATEFUL_PUBLIC_KEY_BYTES,
 };
-pub use verifier::{
-    ShrincsVerifier,
-};
+pub use verifier::{ShrincsVerifier, SphincsPlusCVerifier};

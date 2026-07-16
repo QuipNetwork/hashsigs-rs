@@ -23,10 +23,8 @@
 //! not a selector for a separate FORS public key.
 
 use super::super::components::fors_c;
-use super::shrincs_signer_types::{ShrincsSignerResult, ShrincsSigningKey};
-use super::shrincs_signer_utils::{
-    hash_node, hash_packed, FORS_C_MAX_GRIND_COUNTER,
-};
+use super::types::{ShrincsSignerResult, ShrincsSigningKey};
+use super::utils::{hash_node, hash_packed, FORS_C_MAX_GRIND_COUNTER};
 use super::super::types::{ForsEntry, ForsSignature, HASH_LEN};
 use super::super::profiles::NUM_FORS_TREES;
 

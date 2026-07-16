@@ -15,15 +15,5 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Compatibility wrapper for the FORS-C component verifier path.
-
-use super::super::components::fors_c;
-use super::super::types::{ForsSignature, PublicKey, HASH_LEN};
-
-pub(crate) fn verify_fors_c_and_return_root(
-    public_key: &PublicKey,
-    message: &[u8],
-    signature: &ForsSignature,
-) -> Option<([u8; HASH_LEN], u64, u32)> {
-    fors_c::verify_fors_c_and_return_root(public_key, message, signature)
-}
+pub(crate) mod shrincs_verifier;
+pub(crate) mod sphincs_plus_c_verifier;

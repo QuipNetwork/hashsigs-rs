@@ -15,21 +15,5 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Compatibility wrapper for the UXMSS component verifier path.
-
-use super::super::components::uxmss;
-use super::super::types::{PublicKey, StatefulSignature, HASH_LEN};
-
-pub(crate) fn verify_stateful_unsafe_raw(
-    expected_public_key_commitment: [u8; HASH_LEN],
-    public_key: &PublicKey,
-    message: &[u8],
-    signature: &StatefulSignature,
-) -> bool {
-    uxmss::verify_stateful_unsafe_raw(
-        expected_public_key_commitment,
-        public_key,
-        message,
-        signature,
-    )
-}
+pub(crate) mod shrincs;
+pub(crate) mod sphincs_plus_c;
