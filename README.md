@@ -119,6 +119,16 @@ The scheme-hash suite follows the selected profile:
 - `256s-keccak`, `128s-q18-keccak`, `128s-q20-keccak`: internal scheme hashes use keccak
 - `256s-sha2`: internal scheme hashes use SHA-256
 
+`build.rs` is the single owner of Rust-side profile selection and profile
+identity generation. It selects exactly one active profile for the build and
+emits the corresponding profile cfg plus generated identity constants.
+
+Profile identity follows the Solidity `SHRINCSParams` model:
+
+- `PROFILE_NAME` is the canonical suite-qualified profile string
+- `PROFILE_ID` is derived as `keccak256(PROFILE_NAME)`
+- Rust generates that identity at build time so the name and ID cannot drift
+
 EVM-domain hashes remain keccak under every profile so Rust stays aligned with
 the Solidity verifier on:
 

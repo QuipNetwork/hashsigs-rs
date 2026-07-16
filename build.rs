@@ -1,0 +1,83 @@
+use sha3::{Digest, Keccak256};
+use std::env;
+use std::fs;
+use std::path::PathBuf;
+
+struct SelectedProfile {
+    cfg_name: &'static str,
+    profile_name: &'static str,
+}
+
+fn feature_enabled(name: &str) -> bool {
+    env::var_os(name).is_some()
+}
+
+fn selected_profile() -> SelectedProfile {
+    let profile_256s = feature_enabled("CARGO_FEATURE_PROFILE_256S");
+    let profile_128s_q18 = feature_enabled("CARGO_FEATURE_PROFILE_128S_Q18");
+    let profile_128s_q20 = feature_enabled("CARGO_FEATURE_PROFILE_128S_Q20");
+    let profile_256s_sha2 = feature_enabled("CARGO_FEATURE_PROFILE_256S_SHA2");
+
+    match (
+        profile_256s,
+        profile_128s_q18,
+        profile_128s_q20,
+        profile_256s_sha2,
+    ) {
+        (true, false, false, false) => SelectedProfile {
+            cfg_name: "shrincs_profile_256s",
+            profile_name: "shrincs-256s-keccak",
+        },
+        (false, true, false, false) => SelectedProfile {
+            cfg_name: "shrincs_profile_128s_q18",
+            profile_name: "shrincs-128s-q18-keccak",
+        },
+        (false, false, true, false) => SelectedProfile {
+            cfg_name: "shrincs_profile_128s_q20",
+            profile_name: "shrincs-128s-q20-keccak",
+        },
+        (false, false, false, true) => SelectedProfile {
+            cfg_name: "shrincs_profile_256s_sha2",
+            profile_name: "shrincs-256s-sha2",
+        },
+        _ => panic!(
+            "select exactly one SHRINCS profile feature \
+             (profile-256s, profile-128s-q18, profile-128s-q20, or profile-256s-sha2)"
+        ),
+    }
+}
+
+fn main() {
+    println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-env-changed=CARGO_FEATURE_PROFILE_256S");
+    println!("cargo:rerun-if-env-changed=CARGO_FEATURE_PROFILE_128S_Q18");
+    println!("cargo:rerun-if-env-changed=CARGO_FEATURE_PROFILE_128S_Q20");
+    println!("cargo:rerun-if-env-changed=CARGO_FEATURE_PROFILE_256S_SHA2");
+
+    println!("cargo:rustc-check-cfg=cfg(shrincs_profile_256s)");
+    println!("cargo:rustc-check-cfg=cfg(shrincs_profile_128s_q18)");
+    println!("cargo:rustc-check-cfg=cfg(shrincs_profile_128s_q20)");
+    println!("cargo:rustc-check-cfg=cfg(shrincs_profile_256s_sha2)");
+
+    let selected = selected_profile();
+    println!("cargo:rustc-cfg={}", selected.cfg_name);
+
+    let profile_id = Keccak256::digest(selected.profile_name.as_bytes());
+
+    let profile_id_bytes = profile_id
+        .iter()
+        .map(|byte| format!("0x{byte:02x}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let generated = format!(
+        "pub const PROFILE_NAME: &str = \"{}\";\n\
+         pub const PROFILE_ID: [u8; 32] = [{profile_id_bytes}];\n"
+        ,
+        selected.profile_name
+    );
+
+    let out_dir = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR must be set"));
+    fs::write(out_dir.join("shrincs_profile_identity.rs"), generated)
+        .expect("write generated SHRINCS profile identity");
+}

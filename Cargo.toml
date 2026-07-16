@@ -10,6 +10,7 @@ documentation = "https://docs.rs/hashsigs-rs"
 readme = "README.md"
 keywords = ["cryptography", "wots", "shrincs", "signature", "solana"]
 categories = ["cryptography", "authentication"]
+build = "build.rs"
 
 [lib]
 name = "hashsigs_rs"
@@ -61,3 +62,6 @@ wasm-bindgen = { version = "=0.2.100", optional = true }
 serde_json = "1.0.143"
 wasm-bindgen-test = "0.3.50"
 proptest = "1.11.0"
+
+[build-dependencies]
+sha3 = "0.10"

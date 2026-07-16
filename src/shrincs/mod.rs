@@ -79,4 +79,10 @@ mod compatibility_tests {
         let _shim_profile = verifier::PROFILE_NAME;
         let _legacy_profile = signer::verifier::PROFILE_NAME;
     }
+
+    #[test]
+    fn active_profile_id_matches_keccak_of_profile_name() {
+        let expected = solana_program::keccak::hash(shrincs::PROFILE_NAME.as_bytes()).to_bytes();
+        assert_eq!(shrincs::PROFILE_ID, expected);
+    }
 }

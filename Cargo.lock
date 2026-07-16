@@ -1732,6 +1732,7 @@ dependencies = [
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
+ "sha3",
  "solana-program",
  "thiserror 2.0.16",
  "tsify",
