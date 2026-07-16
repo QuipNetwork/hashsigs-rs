@@ -11,16 +11,12 @@ use std::path::Path;
 use std::process::Command;
 
 // Output path per compiled profile, mirroring the profile the crate was built
-// with. The default (256s) build keeps the original filename. Emitting the two
-// 128s sets requires building this test crate with the matching profile feature
-// (e.g. `--features profile-128s-q18`); note that 128s stateless generation is
+// with. The default (`profile-256s`) build keeps the original filename.
+// Emitting the non-default profiles requires building this test crate with
+// `--no-default-features --features <profile>`; note that 128s stateless generation is
 // the heavy, cache-backed regeneration event (2^24-leaf FORS trees, 2^18-leaf
 // hypertree) rather than an in-line run.
-#[cfg(not(any(
-    feature = "profile-128s-q18",
-    feature = "profile-128s-q20",
-    feature = "profile-256s-sha2"
-)))]
+#[cfg(feature = "profile-256s")]
 const OUT_PATH: &str = "tests/test_vectors/shrincs_sphincs_256s_keccak.json";
 #[cfg(feature = "profile-128s-q18")]
 const OUT_PATH: &str = "tests/test_vectors/shrincs_sphincs_128s_q18_keccak.json";
@@ -109,8 +105,8 @@ fn generate_shrincs_sphincs_vectors() {
 // compile-time profile. The Solidity test drives keygen("solidity public key
 // seed", 4); this reproduces the same call so the printed constants can be
 // pasted directly into the per-profile golden block. Run once per profile
-// feature (`--features profile-128s-q18` / `-q20`); under a 128s profile this
-// performs the heavy 2^18-leaf hypertree keygen.
+// feature (`--no-default-features --features profile-128s-q18` / `-q20`);
+// under a 128s profile this performs the heavy 2^18-leaf hypertree keygen.
 #[test]
 #[ignore = "run explicitly to refresh SHRINCSSignerKeygen anchors"]
 fn emit_keygen_goldens() {

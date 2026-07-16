@@ -55,11 +55,7 @@ fn vector_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(vector_filename())
 }
 
-#[cfg(not(any(
-    feature = "profile-128s-q18",
-    feature = "profile-128s-q20",
-    feature = "profile-256s-sha2"
-)))]
+#[cfg(feature = "profile-256s")]
 fn vector_filename() -> &'static str {
     "tests/test_vectors/shrincs_sphincs_256s_keccak.json"
 }

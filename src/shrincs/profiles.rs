@@ -32,20 +32,41 @@
 // below matches the corresponding Solidity `SHRINCSParams` values for the
 // Rust-implemented profiles.
 #[cfg(any(
+    all(feature = "profile-256s", feature = "profile-128s-q18"),
+    all(feature = "profile-256s", feature = "profile-128s-q20"),
+    all(feature = "profile-256s", feature = "profile-256s-sha2"),
     all(feature = "profile-128s-q18", feature = "profile-128s-q20"),
     all(feature = "profile-128s-q18", feature = "profile-256s-sha2"),
     all(feature = "profile-128s-q20", feature = "profile-256s-sha2")
 ))]
 compile_error!(
     "select at most one SHRINCS profile feature \
-     (profile-128s-q18, profile-128s-q20, or profile-256s-sha2)"
+     (profile-256s, profile-128s-q18, profile-128s-q20, or profile-256s-sha2)"
 );
 
 #[cfg(not(any(
+    feature = "profile-256s",
     feature = "profile-128s-q18",
     feature = "profile-128s-q20",
     feature = "profile-256s-sha2"
 )))]
+#[cfg(not(any(doc, doctest)))]
+compile_error!(
+    "select exactly one SHRINCS profile feature \
+     (profile-256s, profile-128s-q18, profile-128s-q20, or profile-256s-sha2)"
+);
+
+#[cfg(any(
+    feature = "profile-256s",
+    all(
+        not(any(
+            feature = "profile-128s-q18",
+            feature = "profile-128s-q20",
+            feature = "profile-256s-sha2"
+        )),
+        any(doc, doctest)
+    )
+))]
 mod profile {
     #[allow(dead_code)]
     pub const PROFILE_NAME: &str = "shrincs-256s-keccak";

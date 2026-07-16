@@ -135,7 +135,8 @@ The ignored vector generator writes one golden file per compiled profile:
 
 ### Testing Profiles
 
-Run the default profile (`shrincs-256s-keccak`):
+Run the default profile (`shrincs-256s-keccak`, via the default
+`profile-256s` feature):
 
 ```bash
 cargo test
@@ -144,22 +145,23 @@ cargo test
 Run a specific non-default profile:
 
 ```bash
-cargo test --features profile-256s-sha2
-cargo test --features profile-128s-q18
-cargo test --features profile-128s-q20
+cargo test --no-default-features --features profile-256s-sha2
+cargo test --no-default-features --features profile-128s-q18
+cargo test --no-default-features --features profile-128s-q20
 ```
 
 For a fast compile-only check:
 
 ```bash
 cargo test --no-run
-cargo test --no-run --features profile-256s-sha2
-cargo test --no-run --features profile-128s-q18
-cargo test --no-run --features profile-128s-q20
+cargo test --no-run --no-default-features --features profile-256s-sha2
+cargo test --no-run --no-default-features --features profile-128s-q18
+cargo test --no-run --no-default-features --features profile-128s-q20
 ```
 
-Select at most one profile feature at a time:
+Select exactly one profile feature at a time:
 
+- `profile-256s` (enabled by default)
 - `profile-256s-sha2`
 - `profile-128s-q18`
 - `profile-128s-q20`
@@ -168,9 +170,9 @@ To regenerate the ignored SHRINCS golden vectors for the active profile:
 
 ```bash
 cargo test generate_shrincs_sphincs_vectors -- --ignored --nocapture
-cargo test --features profile-256s-sha2 generate_shrincs_sphincs_vectors -- --ignored --nocapture
-cargo test --features profile-128s-q18 generate_shrincs_sphincs_vectors -- --ignored --nocapture
-cargo test --features profile-128s-q20 generate_shrincs_sphincs_vectors -- --ignored --nocapture
+cargo test --no-default-features --features profile-256s-sha2 generate_shrincs_sphincs_vectors -- --ignored --nocapture
+cargo test --no-default-features --features profile-128s-q18 generate_shrincs_sphincs_vectors -- --ignored --nocapture
+cargo test --no-default-features --features profile-128s-q20 generate_shrincs_sphincs_vectors -- --ignored --nocapture
 ```
 
 ## SHRINCS Layout
@@ -786,6 +788,15 @@ Generate SHRINCS vectors for the Solidity verifier:
 cargo test --test generate_shrincs_vectors -- --ignored --nocapture
 ```
 
+Or run the generator for a specific profile:
+
+```bash
+cargo test --test generate_shrincs_vectors -- --ignored --nocapture
+cargo test --no-default-features --features profile-256s-sha2 --test generate_shrincs_vectors -- --ignored --nocapture
+cargo test --no-default-features --features profile-128s-q18 --test generate_shrincs_vectors -- --ignored --nocapture
+cargo test --no-default-features --features profile-128s-q20 --test generate_shrincs_vectors -- --ignored --nocapture
+```
+
 The generator writes the profile-selected SHRINCS vector JSON inside this Rust
 repository:
 
@@ -802,12 +813,30 @@ path, while the full hybrid bundle stays bound together by
 `public_key_commitment`.
 
 To use those vectors with the Solidity verifier tests, copy the generated file
-into the Solidity repository's expected fixture path:
+for the active profile into the Solidity repository's matching fixture path:
 
 ```bash
-# copy the generated JSON to the Solidity repository's expected fixture path
+# example: 256s-keccak
 cp tests/test_vectors/shrincs_sphincs_256s_keccak.json \
   /path/to/hashsigs-solidity/test/test_vectors/shrincs_sphincs_256s_keccak.json
+
+# example: 256s-sha2
+cp tests/test_vectors/shrincs_sphincs_256s_sha2.json \
+  /path/to/hashsigs-solidity/test/test_vectors/shrincs_sphincs_256s_sha2.json
+
+# example: 128s-q18-keccak
+cp tests/test_vectors/shrincs_sphincs_128s_q18_keccak.json \
+  /path/to/hashsigs-solidity/test/test_vectors/shrincs_sphincs_128s_q18_keccak.json
+
+# example: 128s-q20-keccak
+cp tests/test_vectors/shrincs_sphincs_128s_q20_keccak.json \
+  /path/to/hashsigs-solidity/test/test_vectors/shrincs_sphincs_128s_q20_keccak.json
+```
+
+For a quick local profile-matrix sweep, run:
+
+```bash
+./bin/test-shrincs-profiles.sh
 ```
 
 To cross-check Solidity-exported account vectors against the Rust verifier,
