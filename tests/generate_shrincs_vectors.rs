@@ -16,12 +16,18 @@ use std::process::Command;
 // (e.g. `--features profile-128s-q18`); note that 128s stateless generation is
 // the heavy, cache-backed regeneration event (2^24-leaf FORS trees, 2^18-leaf
 // hypertree) rather than an in-line run.
-#[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
+#[cfg(not(any(
+    feature = "profile-128s-q18",
+    feature = "profile-128s-q20",
+    feature = "profile-256s-sha2"
+)))]
 const OUT_PATH: &str = "tests/test_vectors/shrincs_sphincs_256s_keccak.json";
 #[cfg(feature = "profile-128s-q18")]
 const OUT_PATH: &str = "tests/test_vectors/shrincs_sphincs_128s_q18_keccak.json";
 #[cfg(all(feature = "profile-128s-q20", not(feature = "profile-128s-q18")))]
 const OUT_PATH: &str = "tests/test_vectors/shrincs_sphincs_128s_q20_keccak.json";
+#[cfg(feature = "profile-256s-sha2")]
+const OUT_PATH: &str = "tests/test_vectors/shrincs_sphincs_256s_sha2.json";
 
 #[test]
 #[ignore = "run explicitly to refresh Solidity SHRINCS vectors"]

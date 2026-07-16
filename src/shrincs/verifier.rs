@@ -21,10 +21,12 @@
 //! preserves the frozen `hashsigs_rs::shrincs::verifier::*` path by re-exporting
 //! the same types and constants.
 
+pub use super::hash_suite::HASH_SUITE_ID;
 pub use super::profiles::{
     FORS_TREE_HEIGHT, HASH_TRUNC_LEN, HYPERTREE_HEIGHT, NUM_FORS_TREES, NUM_HYPERTREE_LAYERS,
-    NUM_WOTS_CHAINS, PROFILE_NAME, STATELESS_SIGNATURE_LIMIT, WOTS_BASE_STATEFUL,
+    NUM_WOTS_CHAINS, PROFILE_ID, PROFILE_NAME, STATELESS_SIGNATURE_LIMIT, WOTS_BASE_STATEFUL,
     WOTS_CHAIN_LEN, WOTS_CHAINS_STATEFUL, WOTS_TARGET_SUM_STATEFUL,
+    WOTS_TARGET_SUM_STATELESS,
 };
 pub use super::types::*;
 pub use super::verifiers::shrincs_verifier::ShrincsVerifier;

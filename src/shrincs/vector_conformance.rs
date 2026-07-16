@@ -17,12 +17,13 @@
 
 //! Regression guard over the committed SHRINCS golden vector.
 //!
-//! `tests/test_vectors/shrincs_sphincs_256s_keccak.json` is the cross-implementation
-//! reference the Solidity verifier is also checked against. It is produced by the
-//! (ignored) generator in `tests/generate_shrincs_vectors.rs`. Without a consuming
-//! test, a signer change could silently emit a different — possibly unverifiable —
-//! golden file with nothing failing. This test loads the committed file and asserts
-//! the Rust verifier accepts the `valid` case and rejects every tampered case.
+//! The profile-selected `tests/test_vectors/shrincs_sphincs_*.json` file is the
+//! cross-implementation reference the Solidity verifier is also checked against.
+//! It is produced by the (ignored) generator in
+//! `tests/generate_shrincs_vectors.rs`. Without a consuming test, a signer
+//! change could silently emit a different — possibly unverifiable — golden file
+//! with nothing failing. This test loads the committed file and asserts the
+//! Rust verifier accepts the `valid` case and rejects every tampered case.
 //!
 //! Scope: the stateless section only. Its `publicKey` records the full public key
 //! (stateful key, commitment, pk_seed, hypertree root), which is exactly what
@@ -51,8 +52,31 @@ const STATEFUL_SEED: &[u8] = b"shrincs solidity vector stateful seed";
 const STATEFUL_MAX_SIGNATURES: u32 = 4;
 
 fn vector_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/test_vectors/shrincs_sphincs_256s_keccak.json")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(vector_filename())
+}
+
+#[cfg(not(any(
+    feature = "profile-128s-q18",
+    feature = "profile-128s-q20",
+    feature = "profile-256s-sha2"
+)))]
+fn vector_filename() -> &'static str {
+    "tests/test_vectors/shrincs_sphincs_256s_keccak.json"
+}
+
+#[cfg(feature = "profile-128s-q18")]
+fn vector_filename() -> &'static str {
+    "tests/test_vectors/shrincs_sphincs_128s_q18_keccak.json"
+}
+
+#[cfg(all(feature = "profile-128s-q20", not(feature = "profile-128s-q18")))]
+fn vector_filename() -> &'static str {
+    "tests/test_vectors/shrincs_sphincs_128s_q20_keccak.json"
+}
+
+#[cfg(feature = "profile-256s-sha2")]
+fn vector_filename() -> &'static str {
+    "tests/test_vectors/shrincs_sphincs_256s_sha2.json"
 }
 
 fn load_vectors() -> Value {

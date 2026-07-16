@@ -103,6 +103,36 @@ Current WASM scope:
   - WOTS-specific wasm bindings
   - a separate `wasm-pack` / `pkg/<target>` layout
 
+## SHRINCS Profiles
+
+Rust currently supports the same SHRINCS profile identities as the active
+Solidity implementation:
+
+- `shrincs-256s-keccak`
+- `shrincs-256s-sha2`
+- `shrincs-128s-q18-keccak`
+- `shrincs-128s-q20-keccak`
+
+The profile selects the compile-time parameter tuple and profile identity.
+The scheme-hash suite follows the selected profile:
+
+- `256s-keccak`, `128s-q18-keccak`, `128s-q20-keccak`: internal scheme hashes use keccak
+- `256s-sha2`: internal scheme hashes use SHA-256
+
+EVM-domain hashes remain keccak under every profile so Rust stays aligned with
+the Solidity verifier on:
+
+- profile identity framing
+- hybrid public-key commitments
+- canonical action-message hashes
+
+The ignored vector generator writes one golden file per compiled profile:
+
+- `tests/test_vectors/shrincs_sphincs_256s_keccak.json`
+- `tests/test_vectors/shrincs_sphincs_256s_sha2.json`
+- `tests/test_vectors/shrincs_sphincs_128s_q18_keccak.json`
+- `tests/test_vectors/shrincs_sphincs_128s_q20_keccak.json`
+
 ## SHRINCS Layout
 
 The SHRINCS Rust code follows the same high-level split as the Solidity
@@ -698,6 +728,12 @@ Run all tests:
 cargo test
 ```
 
+Rust currently supports the SHRINCS keccak profiles (`256s`, `128s-q18`,
+`128s-q20`) and the `256s-sha2` profile. The SHA-256 suite switch applies only
+to SHRINCS scheme hashes (FORS-C, hypertree, WOTS-C, UXMSS); EVM-domain hashes
+such as canonical action hashes and public-key commitments remain keccak to
+match the Solidity design.
+
 Run specific test vectors:
 
 ```bash
@@ -710,10 +746,14 @@ Generate SHRINCS vectors for the Solidity verifier:
 cargo test --test generate_shrincs_vectors -- --ignored --nocapture
 ```
 
-The generator writes the SHRINCS vector JSON inside this Rust repository:
+The generator writes the profile-selected SHRINCS vector JSON inside this Rust
+repository:
 
 ```text
 tests/test_vectors/shrincs_sphincs_256s_keccak.json
+tests/test_vectors/shrincs_sphincs_128s_q18_keccak.json
+tests/test_vectors/shrincs_sphincs_128s_q20_keccak.json
+tests/test_vectors/shrincs_sphincs_256s_sha2.json
 ```
 
 SHRINCS public keys use one stateless `pkSeed` and one `hypertreeRoot`, matching

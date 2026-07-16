@@ -25,13 +25,16 @@ resolver = "2"
 [features]
 default = []
 # Compile-time SHRINCS parameter-profile selection. The default build (no
-# profile feature) is shrincs-256s. These mirror the Solidity
+# profile feature) is shrincs-256s-keccak. These mirror the Solidity
 # contracts/profiles/<profile>/SHRINCSParams.sol libraries selected by the
 # Foundry `shrincs-profile/` remapping: one parameter tuple is chosen at
 # build time, so counts stay compile-time constants (no runtime params
-# struct). Select at most one.
+# struct). `profile-256s-sha2` switches the internal scheme-hash suite to
+# SHA-256 while keeping EVM-domain hashes (profile identity, commitments,
+# canonical action hashes) on keccak to match Solidity. Select at most one.
 profile-128s-q18 = []
 profile-128s-q20 = []
+profile-256s-sha2 = []
 wasm-bindings = [
     "dep:serde-wasm-bindgen",
     "dep:wasm-bindgen",

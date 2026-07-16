@@ -19,6 +19,7 @@
 
 pub(crate) mod components;
 pub(crate) mod core;
+pub(crate) mod hash_suite;
 pub(crate) mod profiles;
 pub(crate) mod signers;
 pub(crate) mod verifiers;
@@ -30,16 +31,19 @@ pub mod verifier;
 mod vector_conformance;
 
 pub use signer::{ShrincsSigner, ShrincsSignerResult, ShrincsSigningKey};
+pub use hash_suite::HASH_SUITE_ID;
 pub use profiles::{
     FORS_TREE_HEIGHT, HASH_TRUNC_LEN, HYPERTREE_HEIGHT, NUM_FORS_TREES, NUM_HYPERTREE_LAYERS,
-    NUM_WOTS_CHAINS, PROFILE_NAME, STATELESS_SIGNATURE_LIMIT, WOTS_BASE_STATEFUL,
+    NUM_WOTS_CHAINS, PROFILE_ID, PROFILE_NAME, STATELESS_SIGNATURE_LIMIT, WOTS_BASE_STATEFUL,
     WOTS_CHAIN_LEN, WOTS_CHAINS_STATEFUL, WOTS_TARGET_SUM_STATEFUL,
+    WOTS_TARGET_SUM_STATELESS,
 };
 pub use types::{
     ActionContext, ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey, RotationContext,
     RotationTarget, StatefulPublicKey, StatefulRotationTarget, StatefulSignature,
     StatelessSignature, WotsCSignature, ADDRESS_TYPE_FORS_TREE, ADDRESS_TYPE_TREE,
-    ADDRESS_TYPE_WOTS_HASH, HASH_LEN, HASH_SUITE_KECCAK_256, STATEFUL_PUBLIC_KEY_BYTES,
+    ADDRESS_TYPE_WOTS_HASH, HASH_LEN, HASH_SUITE_KECCAK_256, HASH_SUITE_SHA2_256,
+    STATEFUL_PUBLIC_KEY_BYTES,
 };
 pub use verifier::{ShrincsVerifier, SphincsPlusCVerifier};
 

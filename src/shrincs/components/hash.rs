@@ -17,20 +17,19 @@
 
 //! Shared hashing, packing, addressing, and bit-layout helpers.
 //!
-//! This is the Rust analogue of Solidity's shared `Hash.sol` support layer.
-//! Primitive components (`uxmss`, `fors_c`, `hypertree`) build on these helpers,
-//! while higher-level core and signer modules import the subset they need.
+//! This is the Rust analogue of Solidity's shared scheme-hash support layer.
+//! Primitive components (`uxmss`, `fors_c`, `hypertree`) build on these
+//! helpers, while higher-level core and signer modules import the subset they
+//! need. EVM-domain hashes such as canonical action-message construction and
+//! public-key commitments stay on keccak under every suite and are therefore
+//! owned outside this module.
 
+use crate::shrincs::hash_suite::scheme_hash;
 use crate::shrincs::profiles::{HASH_TRUNC_LEN, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN};
 use crate::shrincs::types::{ADDRESS_TYPE_FORS_TREE, ADDRESS_TYPE_TREE, HASH_LEN};
-use solana_program::keccak::hash as keccak256_hash;
-
-pub(crate) fn keccak256(data: &[u8]) -> [u8; HASH_LEN] {
-    keccak256_hash(data).to_bytes()
-}
 
 pub(crate) fn hash_packed(parts: &[&[u8]]) -> [u8; HASH_LEN] {
-    keccak256(&pack(parts))
+    scheme_hash(&pack(parts))
 }
 
 pub(crate) fn pack(parts: &[&[u8]]) -> Vec<u8> {
@@ -202,7 +201,7 @@ mod tests {
     #[test]
     fn solana_keccak256_matches_known_empty_vector() {
         assert_eq!(
-            keccak256(&[]),
+            solana_program::keccak::hash(&[]).to_bytes(),
             [
                 0xc5, 0xd2, 0x46, 0x01, 0x86, 0xf7, 0x23, 0x3c, 0x92, 0x7e, 0x7d, 0xb2, 0xdc, 0xc7,
                 0x03, 0xc0, 0xe5, 0x00, 0xb6, 0x53, 0xca, 0x82, 0x27, 0x3b, 0x7b, 0xfa, 0xd8, 0x04,

@@ -27,7 +27,7 @@ use super::utils::{
 use super::super::types::{HypertreeLayerSignature, WotsCSignature, HASH_LEN};
 use super::super::profiles::{
     HYPERTREE_HEIGHT, NUM_HYPERTREE_LAYERS, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN,
-    WOTS_TARGET_SUM_STATEFUL,
+    WOTS_TARGET_SUM_STATELESS,
 };
 
 /// ADRS coordinates identifying one stateless WOTS-C keypair (its Merkle-leaf
@@ -297,7 +297,7 @@ fn sign_stateless_wots_c(
         let digits = (0..NUM_WOTS_CHAINS as usize)
             .map(|index| base_w_digit(WOTS_CHAIN_LEN, digest, index))
             .collect::<Vec<_>>();
-        if digits.iter().sum::<u32>() != WOTS_TARGET_SUM_STATEFUL {
+        if digits.iter().sum::<u32>() != WOTS_TARGET_SUM_STATELESS {
             continue;
         }
 

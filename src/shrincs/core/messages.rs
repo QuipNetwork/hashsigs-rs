@@ -17,20 +17,28 @@
 
 //! Shared canonical SHRINCS message-hash constructors.
 
-use crate::shrincs::components::hash::hash_packed;
+use crate::shrincs::hash_suite::HASH_SUITE_ID;
 use crate::shrincs::types::{
     ActionContext, PublicKey, RotationContext, RotationTarget, StatefulRotationTarget, HASH_LEN,
-    HASH_SUITE_KECCAK_256,
 };
+
+fn keccak_packed(parts: &[&[u8]]) -> [u8; HASH_LEN] {
+    let len = parts.iter().map(|part| part.len()).sum();
+    let mut out = Vec::with_capacity(len);
+    for part in parts {
+        out.extend_from_slice(part);
+    }
+    solana_program::keccak::hash(&out).to_bytes()
+}
 
 pub(crate) fn stateful_action_message_hash(
     expected_public_key_commitment: [u8; HASH_LEN],
     context: &ActionContext,
 ) -> [u8; HASH_LEN] {
-    let op = hash_packed(&[b"shrincs-verify-stateful"]);
-    hash_packed(&[
+    let op = keccak_packed(&[b"shrincs-verify-stateful"]);
+    keccak_packed(&[
         &op,
-        &HASH_SUITE_KECCAK_256.to_be_bytes(),
+        &HASH_SUITE_ID.to_be_bytes(),
         &expected_public_key_commitment,
         &context.domain_separator,
         &context.nonce,
@@ -44,10 +52,10 @@ pub(crate) fn stateless_action_message_hash(
     expected_public_key_commitment: [u8; HASH_LEN],
     context: &ActionContext,
 ) -> [u8; HASH_LEN] {
-    let op = hash_packed(&[b"shrincs-verify-stateless"]);
-    hash_packed(&[
+    let op = keccak_packed(&[b"shrincs-verify-stateless"]);
+    keccak_packed(&[
         &op,
-        &HASH_SUITE_KECCAK_256.to_be_bytes(),
+        &HASH_SUITE_ID.to_be_bytes(),
         &expected_public_key_commitment,
         &context.domain_separator,
         &context.nonce,
@@ -63,10 +71,10 @@ pub(crate) fn stateful_rotation_message_hash(
     context: &RotationContext,
     next_stateful_key: &StatefulRotationTarget,
 ) -> [u8; HASH_LEN] {
-    let op = hash_packed(&[b"shrincs-rotate-stateful"]);
-    hash_packed(&[
+    let op = keccak_packed(&[b"shrincs-rotate-stateful"]);
+    keccak_packed(&[
         &op,
-        &HASH_SUITE_KECCAK_256.to_be_bytes(),
+        &HASH_SUITE_ID.to_be_bytes(),
         &expected_public_key_commitment,
         &context.domain_separator,
         &context.nonce,
@@ -82,10 +90,10 @@ pub(crate) fn full_rotation_message_hash(
     context: &RotationContext,
     next_key: &RotationTarget,
 ) -> [u8; HASH_LEN] {
-    let op = hash_packed(&[b"shrincs-rotate-full"]);
-    hash_packed(&[
+    let op = keccak_packed(&[b"shrincs-rotate-full"]);
+    keccak_packed(&[
         &op,
-        &HASH_SUITE_KECCAK_256.to_be_bytes(),
+        &HASH_SUITE_ID.to_be_bytes(),
         &expected_public_key_commitment,
         &context.domain_separator,
         &context.nonce,

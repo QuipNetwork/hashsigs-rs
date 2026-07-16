@@ -19,7 +19,7 @@
 
 use super::super::profiles::{
     HYPERTREE_HEIGHT, NUM_HYPERTREE_LAYERS, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN,
-    WOTS_TARGET_SUM_STATEFUL,
+    WOTS_TARGET_SUM_STATELESS,
 };
 use super::hash::{
     address_word32, base_w_digit, hash_node, hash_packed, hypertree_address_word, word32,
@@ -275,7 +275,7 @@ fn verify_wots_c32(
             wots_chain32_no_mask_base(WOTS_CHAIN_LEN, pk_seed, address_base, chain_index as u32, chain_value, digit);
         pk_input_segments.extend_from_slice(&segment);
     }
-    if digit_sum != WOTS_TARGET_SUM_STATEFUL {
+    if digit_sum != WOTS_TARGET_SUM_STATELESS {
         return false;
     }
 

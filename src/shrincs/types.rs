@@ -23,6 +23,7 @@
 // values inside this slot (see HASH_TRUNC_LEN and `mask_hash`).
 pub const HASH_LEN: usize = 32;
 pub const HASH_SUITE_KECCAK_256: u32 = 1;
+pub const HASH_SUITE_SHA2_256: u32 = 2;
 
 // Encoded stateful public key layout, kept 68 bytes across all profiles:
 // 32-byte pkSeed slot || 32-byte root slot || 4-byte maxSignatures.

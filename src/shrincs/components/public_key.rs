@@ -17,16 +17,25 @@
 
 //! Shared SHRINCS public-key layout and commitment helpers.
 
-use crate::shrincs::components::hash::{hash_packed, word32};
+use crate::shrincs::components::hash::word32;
 use crate::shrincs::profiles::PROFILE_NAME;
 use crate::shrincs::types::{StatefulPublicKey, HASH_LEN, STATEFUL_PUBLIC_KEY_BYTES};
+
+fn keccak_packed(parts: &[&[u8]]) -> [u8; HASH_LEN] {
+    let len = parts.iter().map(|part| part.len()).sum();
+    let mut out = Vec::with_capacity(len);
+    for part in parts {
+        out.extend_from_slice(part);
+    }
+    solana_program::keccak::hash(&out).to_bytes()
+}
 
 pub(crate) fn public_key_commitment(
     stateful_public_key: &[u8],
     pk_seed: &[u8; HASH_LEN],
     hypertree_root: &[u8; HASH_LEN],
 ) -> [u8; HASH_LEN] {
-    hash_packed(&[
+    keccak_packed(&[
         b"shrincs-public-key/",
         PROFILE_NAME.as_bytes(),
         stateful_public_key,
