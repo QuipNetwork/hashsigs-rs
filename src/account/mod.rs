@@ -731,12 +731,11 @@ fn increment_u256_be(value: &mut [u8; HASH_LEN]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shrincs::signer::verifier::{
-        PublicKey as SignerPublicKey, StatefulSignature as SignerStatefulSignature,
-        StatelessSignature as SignerStatelessSignature,
+    use crate::shrincs::{
+        ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey as SignerPublicKey,
+        ShrincsSigner, StatefulSignature as SignerStatefulSignature,
+        StatelessSignature as SignerStatelessSignature, WotsCSignature,
     };
-    use crate::shrincs::ShrincsSigner;
-    use crate::shrincs::{ForsEntry, ForsSignature, HypertreeLayerSignature, WotsCSignature};
     use solana_program::keccak::hash as keccak256_hash;
 
     fn id(byte: u8) -> [u8; HASH_LEN] {

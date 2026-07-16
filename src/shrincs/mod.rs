@@ -30,6 +30,40 @@ pub mod verifier;
 #[cfg(test)]
 mod vector_conformance;
 
+#[cfg(test)]
+mod compatibility_tests {
+    use super::{signer, verifier};
+    use crate::shrincs;
+
+    #[test]
+    fn root_and_module_signer_paths_still_match() {
+        fn assert_result_type(_: signer::ShrincsSignerResult<()>) {}
+
+        let _root_signer = shrincs::ShrincsSigner::keygen;
+        let _module_signer = signer::ShrincsSigner::keygen;
+        let _root_import = shrincs::ShrincsSigner::import_signing_key;
+        let _module_import = signer::ShrincsSigner::import_signing_key;
+        let _root_stateful = shrincs::ShrincsSigner::sign_stateful_raw;
+        let _module_stateful = signer::ShrincsSigner::sign_stateful_raw;
+        let _root_stateless = shrincs::ShrincsSigner::sign_stateless_raw;
+        let _module_stateless = signer::ShrincsSigner::sign_stateless_raw;
+
+        assert_result_type(None::<()>);
+    }
+
+    #[test]
+    fn root_and_module_verifier_paths_still_match() {
+        let _root_verifier = shrincs::ShrincsVerifier::new;
+        let _module_verifier = verifier::ShrincsVerifier::new;
+        let _root_stateless_only = shrincs::SphincsPlusCVerifier::new;
+        let _module_stateless_only = verifier::SphincsPlusCVerifier::new;
+
+        let _root_profile = shrincs::PROFILE_NAME;
+        let _shim_profile = verifier::PROFILE_NAME;
+        let _legacy_profile = signer::verifier::PROFILE_NAME;
+    }
+}
+
 pub use signer::{ShrincsSigner, ShrincsSignerResult, ShrincsSigningKey};
 pub use profiles::{
     FORS_TREE_HEIGHT, HASH_TRUNC_LEN, HYPERTREE_HEIGHT, NUM_FORS_TREES, NUM_HYPERTREE_LAYERS,

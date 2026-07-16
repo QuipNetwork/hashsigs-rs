@@ -1754,10 +1754,10 @@ fn js_value_from_serde<T: serde::Serialize>(value: &T) -> Result<JsValue, JsValu
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shrincs::signer::verifier::{
-        PublicKey as SignerPublicKey, StatefulSignature as SignerStatefulSignature,
+    use crate::shrincs::{
+        PublicKey as SignerPublicKey, ShrincsSigner, ShrincsSigningKey,
+        StatefulSignature as SignerStatefulSignature, StatelessSignature as CoreStatelessSignature,
     };
-    use crate::shrincs::{ShrincsSigner, ShrincsSigningKey};
     #[cfg(all(feature = "wasm-bindings", target_arch = "wasm32"))]
     use wasm_bindgen_test::wasm_bindgen_test;
 
@@ -1780,7 +1780,7 @@ mod tests {
     }
 
     fn stateless_signature_dto(
-        signature: &crate::shrincs::signer::verifier::StatelessSignature,
+        signature: &CoreStatelessSignature,
     ) -> StatelessSignature {
         StatelessSignature {
             fors: ForsSignature {

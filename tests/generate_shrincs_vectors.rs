@@ -108,7 +108,7 @@ fn generate_shrincs_sphincs_vectors() {
 #[test]
 #[ignore = "run explicitly to refresh SHRINCSSignerKeygen anchors"]
 fn emit_keygen_goldens() {
-    let profile = hashsigs_rs::shrincs::verifier::PROFILE_NAME;
+    let profile = hashsigs_rs::shrincs::PROFILE_NAME;
     let (signing_key, public_key) =
         ShrincsSigner::keygen(b"solidity public key seed", 4).expect("keygen");
 
