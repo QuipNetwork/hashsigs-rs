@@ -126,13 +126,14 @@ pub(crate) fn verify_stateless(
     if !valid_action_context(context) {
         return false;
     }
+    if !matches_expected_public_key_commitment(public_key, expected_public_key_commitment) {
+        return false;
+    }
+    if !valid_public_key(public_key) {
+        return false;
+    }
     let message = stateless_action_message_hash(expected_public_key_commitment, context);
-    sphincs_plus_c::verify_stateless_raw(
-        expected_public_key_commitment,
-        public_key,
-        &message,
-        signature,
-    )
+    sphincs_plus_c::verify_stateless_raw(public_key, &message, signature)
 }
 
 pub(crate) fn rotate_stateful_via_stateless(
@@ -180,7 +181,6 @@ pub(crate) fn rotate_stateful_via_stateless(
         next_stateful_key,
     );
     if !sphincs_plus_c::verify_stateless_raw(
-        expected_public_key_commitment,
         current_public_key,
         &recovery_message,
         recovery_signature,
@@ -232,7 +232,6 @@ pub(crate) fn stateless_rotate(
         next_key,
     );
     if !sphincs_plus_c::verify_stateless_raw(
-        expected_public_key_commitment,
         current_public_key,
         &recovery_message,
         recovery_signature,
@@ -270,12 +269,10 @@ pub(crate) fn verify_stateless_unsafe_raw(
     if !matches_expected_public_key_commitment(public_key, expected_public_key_commitment) {
         return false;
     }
-    sphincs_plus_c::verify_stateless_raw(
-        expected_public_key_commitment,
-        public_key,
-        message,
-        signature,
-    )
+    if !valid_public_key(public_key) {
+        return false;
+    }
+    sphincs_plus_c::verify_stateless_raw(public_key, message, signature)
 }
 
 pub(crate) fn stateful_action_message_hash(

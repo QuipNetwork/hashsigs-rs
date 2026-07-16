@@ -59,12 +59,8 @@ impl SphincsPlusCVerifier {
         message: &[u8],
         signature: &StatelessSignature,
     ) -> bool {
-        sphincs_plus_c::verify_stateless_raw(
-            expected_public_key_commitment,
-            public_key,
-            message,
-            signature,
-        )
+        let _ = expected_public_key_commitment;
+        sphincs_plus_c::verify_stateless_raw(public_key, message, signature)
     }
 
     pub fn action_message_hash(

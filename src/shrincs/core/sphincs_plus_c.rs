@@ -18,23 +18,13 @@
 //! Stateless SHRINCS composition over FORS-C and the hypertree.
 
 use crate::shrincs::components::{fors_c, hypertree};
-use crate::shrincs::core::shrincs::{
-    matches_expected_public_key_commitment, valid_public_key,
-};
-use crate::shrincs::types::{PublicKey, StatelessSignature, HASH_LEN};
+use crate::shrincs::types::{PublicKey, StatelessSignature};
 
 pub(crate) fn verify_stateless_raw(
-    expected_public_key_commitment: [u8; HASH_LEN],
     public_key: &PublicKey,
     message: &[u8],
     signature: &StatelessSignature,
 ) -> bool {
-    if !matches_expected_public_key_commitment(public_key, expected_public_key_commitment) {
-        return false;
-    }
-    if !valid_public_key(public_key) {
-        return false;
-    }
     if signature.hypertree.is_empty() {
         return false;
     }
