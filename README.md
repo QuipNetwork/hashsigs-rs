@@ -133,6 +133,46 @@ The ignored vector generator writes one golden file per compiled profile:
 - `tests/test_vectors/shrincs_sphincs_128s_q18_keccak.json`
 - `tests/test_vectors/shrincs_sphincs_128s_q20_keccak.json`
 
+### Testing Profiles
+
+Run the default profile (`shrincs-256s-keccak`):
+
+```bash
+cargo test
+```
+
+Run a specific non-default profile:
+
+```bash
+cargo test --features profile-256s-sha2
+cargo test --features profile-128s-q18
+cargo test --features profile-128s-q20
+```
+
+For a fast compile-only check:
+
+```bash
+cargo test --no-run
+cargo test --no-run --features profile-256s-sha2
+cargo test --no-run --features profile-128s-q18
+cargo test --no-run --features profile-128s-q20
+```
+
+Select at most one profile feature at a time:
+
+- `profile-256s-sha2`
+- `profile-128s-q18`
+- `profile-128s-q20`
+
+To regenerate the ignored SHRINCS golden vectors for the active profile:
+
+```bash
+cargo test generate_shrincs_sphincs_vectors -- --ignored --nocapture
+cargo test --features profile-256s-sha2 generate_shrincs_sphincs_vectors -- --ignored --nocapture
+cargo test --features profile-128s-q18 generate_shrincs_sphincs_vectors -- --ignored --nocapture
+cargo test --features profile-128s-q20 generate_shrincs_sphincs_vectors -- --ignored --nocapture
+```
+
 ## SHRINCS Layout
 
 The SHRINCS Rust code follows the same high-level split as the Solidity
