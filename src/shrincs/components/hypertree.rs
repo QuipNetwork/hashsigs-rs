@@ -105,22 +105,33 @@ pub(crate) fn stateless_wots_message_digest(
     .to_vec()
 }
 
+pub(crate) struct StatelessWotsChainCtx<'a> {
+    pub(crate) pk_seed: &'a [u8; HASH_LEN],
+    pub(crate) layer: u32,
+    pub(crate) tree: u64,
+    pub(crate) keypair: u32,
+    pub(crate) chain_index: u32,
+}
+
 pub(crate) fn stateless_wots_chain(
-    pk_seed: &[u8; HASH_LEN],
-    layer: u32,
-    tree: u64,
-    keypair: u32,
-    chain_index: u32,
+    ctx: &StatelessWotsChainCtx<'_>,
     value: [u8; HASH_LEN],
     start: u32,
     steps: u32,
 ) -> [u8; HASH_LEN] {
     let mut out = value;
     for step in start..start + steps {
-        let address_word = address_word32(layer, tree, 0, keypair, chain_index, step);
+        let address_word = address_word32(
+            ctx.layer,
+            ctx.tree,
+            0,
+            ctx.keypair,
+            ctx.chain_index,
+            step,
+        );
         out = hash_node(&[
             b"wots-c-chain".as_ref(),
-            pk_seed.as_ref(),
+            ctx.pk_seed.as_ref(),
             address_word.as_ref(),
             out.as_ref(),
         ]);

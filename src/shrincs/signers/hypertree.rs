@@ -343,12 +343,15 @@ fn stateless_wots_c_chain(
     start: u32,
     steps: u32,
 ) -> [u8; HASH_LEN] {
-    hypertree::stateless_wots_chain(
+    let ctx = hypertree::StatelessWotsChainCtx {
         pk_seed,
-        coords.layer,
-        coords.tree,
-        coords.keypair,
-        coords.chain,
+        layer: coords.layer,
+        tree: coords.tree,
+        keypair: coords.keypair,
+        chain_index: coords.chain,
+    };
+    hypertree::stateless_wots_chain(
+        &ctx,
         value,
         start,
         steps,
