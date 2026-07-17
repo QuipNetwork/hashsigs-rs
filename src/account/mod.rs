@@ -731,6 +731,13 @@ fn increment_u256_be(value: &mut [u8; HASH_LEN]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shrincs::components::public_key::encode_stateful_public_key;
+    use crate::shrincs::signers::types::ShrincsSigningKey;
+    use crate::shrincs::signers::utils::{derive32, public_key_from_components};
+    use crate::shrincs::signers::uxmss::stateful_subtree_root;
+    use crate::shrincs::test_fixtures::{
+        fixture_entry, fixture_pair, fixture_path, load_fixture_file, TestKeyMode,
+    };
     use crate::shrincs::{
         ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey as SignerPublicKey,
         ShrincsSigner, StatefulSignature as SignerStatefulSignature,
@@ -811,6 +818,66 @@ mod tests {
 
     fn expected_key(public_key: &PublicKey) -> [u8; HASH_LEN] {
         public_key.public_key_commitment.clone().try_into().unwrap()
+    }
+
+    fn stateful_only_key(seed: &[u8], max: u32) -> (ShrincsSigningKey, SignerPublicKey) {
+        let stateful_sk_seed = derive32(b"shrincs-stateful-sk-seed", seed, &[]);
+        let stateful_prf_seed = derive32(b"shrincs-stateful-prf-seed", seed, &[]);
+        let stateful_pk_seed = derive32(b"shrincs-stateful-pk-seed", seed, &[]);
+        let stateful_root = stateful_subtree_root(
+            &stateful_sk_seed,
+            &stateful_pk_seed,
+            INITIAL_STATEFUL_LEAF_INDEX,
+            max,
+        );
+        let pk_seed = derive32(b"shrincs-pk-seed", seed, &[]);
+        let hypertree_root = derive32(b"placeholder-hypertree-root", seed, &[]);
+        let signing_key = ShrincsSigningKey {
+            stateful_sk_seed,
+            stateful_prf_seed,
+            stateful_pk_seed,
+            stateful_root,
+            max_stateful_signatures: max,
+            next_stateful_leaf_index: INITIAL_STATEFUL_LEAF_INDEX,
+            stateless_sk_seed: derive32(b"shrincs-stateless-sk-seed", seed, &[]),
+            stateless_prf_seed: derive32(b"shrincs-stateless-prf-seed", seed, &[]),
+            pk_seed,
+            hypertree_root,
+        };
+        let public_key = public_key_from_components(
+            encode_stateful_public_key(stateful_pk_seed, stateful_root, max),
+            pk_seed,
+            hypertree_root,
+        );
+        (signing_key, public_key)
+    }
+
+    fn fixture_or_fresh_key(seed_label: &'static str, max: u32) -> (ShrincsSigningKey, SignerPublicKey) {
+        match TestKeyMode::from_env() {
+            TestKeyMode::Fresh => ShrincsSigner::keygen(seed_label.as_bytes(), max)
+                .unwrap_or_else(|| panic!("fresh keygen failed for seed label {seed_label:?}")),
+            TestKeyMode::Fixture => {
+                let fixture_file = load_fixture_file(&fixture_path());
+                assert_eq!(
+                    fixture_file.profile_name,
+                    crate::shrincs::PROFILE_NAME,
+                    "fixture profile mismatch",
+                );
+                let entry = fixture_entry(&fixture_file, seed_label);
+                fixture_pair(entry)
+            }
+        }
+    }
+
+    fn cheap_or_fresh_stateful_key(
+        seed_label: &'static str,
+        max: u32,
+    ) -> (ShrincsSigningKey, SignerPublicKey) {
+        match TestKeyMode::from_env() {
+            TestKeyMode::Fresh => ShrincsSigner::keygen(seed_label.as_bytes(), max)
+                .unwrap_or_else(|| panic!("fresh keygen failed for seed label {seed_label:?}")),
+            TestKeyMode::Fixture => stateful_only_key(seed_label.as_bytes(), max),
+        }
     }
 
     #[test]
@@ -975,7 +1042,7 @@ mod tests {
     #[test]
     fn raw_stateful_helper_verifies_message_without_advancing_nonce() {
         let (mut signing_key, public_key) =
-            ShrincsSigner::keygen(b"account raw helper seed", 4).unwrap();
+            cheap_or_fresh_stateful_key("account raw helper seed", 4);
         let public_key = to_public_key(&public_key);
         let expected = expected_key(&public_key);
         let mut account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), expected);
@@ -996,7 +1063,7 @@ mod tests {
     fn verify_stateful_action_advances_nonce_and_leaf() {
         let verifier = ShrincsVerifier::new();
         let (mut signing_key, public_key) =
-            ShrincsSigner::keygen(b"account stateful action seed", 4).unwrap();
+            cheap_or_fresh_stateful_key("account stateful action seed", 4);
         let public_key = to_public_key(&public_key);
         let expected = expected_key(&public_key);
         let mut account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), expected);
@@ -1028,7 +1095,7 @@ mod tests {
     fn verify_stateless_action_advances_nonce_and_usage_counter() {
         let verifier = ShrincsVerifier::new();
         let (signing_key, public_key) =
-            ShrincsSigner::keygen(b"account stateless action seed", 4).unwrap();
+            fixture_or_fresh_key("account stateless action seed", 4);
         let public_key = to_public_key(&public_key);
         let expected = expected_key(&public_key);
         let mut account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), expected);
@@ -1060,9 +1127,9 @@ mod tests {
     fn rotate_to_fresh_key_installs_next_stateful_commitment() {
         let verifier = ShrincsVerifier::new();
         let (signing_key, public_key) =
-            ShrincsSigner::keygen(b"account rotate stateful current seed", 4).unwrap();
+            fixture_or_fresh_key("account rotate stateful current seed", 4);
         let (_, next_public_key) =
-            ShrincsSigner::keygen(b"account rotate stateful next seed", 8).unwrap();
+            fixture_or_fresh_key("account rotate stateful next seed", 8);
         let public_key = to_public_key(&public_key);
         let expected = expected_key(&public_key);
         let next_commitment = public_key_commitment(
@@ -1112,9 +1179,9 @@ mod tests {
     fn rotate_full_key_installs_next_full_commitment() {
         let verifier = ShrincsVerifier::new();
         let (signing_key, public_key) =
-            ShrincsSigner::keygen(b"account rotate full current seed", 4).unwrap();
+            fixture_or_fresh_key("account rotate full current seed", 4);
         let (_, next_public_key) =
-            ShrincsSigner::keygen(b"account rotate full next seed", 8).unwrap();
+            fixture_or_fresh_key("account rotate full next seed", 8);
         let public_key = to_public_key(&public_key);
         let next_public_key = to_public_key(&next_public_key);
         let expected = expected_key(&public_key);
@@ -1172,7 +1239,7 @@ mod tests {
     fn failed_stateful_verification_does_not_freeze_policy() {
         let verifier = ShrincsVerifier::new();
         let (mut signing_key, public_key) =
-            ShrincsSigner::keygen(b"account failed stateful freeze seed", 4).unwrap();
+            cheap_or_fresh_stateful_key("account failed stateful freeze seed", 4);
         let public_key = to_public_key(&public_key);
         let expected = expected_key(&public_key);
         let mut account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), expected);
@@ -1214,9 +1281,9 @@ mod tests {
     fn recovery_rotation_remains_reachable_after_stateful_use() {
         let verifier = ShrincsVerifier::new();
         let (mut signing_key, public_key) =
-            ShrincsSigner::keygen(b"account recovery after use seed", 4).unwrap();
+            fixture_or_fresh_key("account recovery after use seed", 4);
         let (_, next_public_key) =
-            ShrincsSigner::keygen(b"account recovery after use next seed", 8).unwrap();
+            fixture_or_fresh_key("account recovery after use next seed", 8);
         let public_key = to_public_key(&public_key);
         let expected = expected_key(&public_key);
         let mut account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), expected);
@@ -1364,9 +1431,9 @@ mod tests {
     fn stateful_only_rotation_at_budget_boundary_lands_exhausted() {
         let verifier = ShrincsVerifier::new();
         let (signing_key, public_key) =
-            ShrincsSigner::keygen(b"account boundary rotate seed", 4).unwrap();
+            fixture_or_fresh_key("account boundary rotate seed", 4);
         let (_, next_public_key) =
-            ShrincsSigner::keygen(b"account boundary rotate next seed", 8).unwrap();
+            fixture_or_fresh_key("account boundary rotate next seed", 8);
         let public_key = to_public_key(&public_key);
         let expected = expected_key(&public_key);
         let next_commitment = public_key_commitment(
@@ -1422,9 +1489,9 @@ mod tests {
     fn full_rotation_with_unchanged_stateless_key_preserves_usage() {
         let verifier = ShrincsVerifier::new();
         let (signing_key, public_key) =
-            ShrincsSigner::keygen(b"account same stateless rotate seed", 4).unwrap();
+            fixture_or_fresh_key("account same stateless rotate seed", 4);
         let (_, next_public_key) =
-            ShrincsSigner::keygen(b"account same stateless rotate next seed", 8).unwrap();
+            fixture_or_fresh_key("account same stateless rotate next seed", 8);
         let public_key = to_public_key(&public_key);
         let expected = expected_key(&public_key);
         // Rotation target that installs a fresh stateful subkey but reuses the current
@@ -1501,9 +1568,9 @@ mod tests {
         // account must reject it because B's commitment != the installed key,
         // and no freshness state may advance.
         let verifier = ShrincsVerifier::new();
-        let (_, key_a) = ShrincsSigner::keygen(b"account wrong-key installed A", 4).unwrap();
+        let (_, key_a) = cheap_or_fresh_stateful_key("account wrong-key installed A", 4);
         let (mut signing_b, key_b) =
-            ShrincsSigner::keygen(b"account wrong-key attacker B", 4).unwrap();
+            cheap_or_fresh_stateful_key("account wrong-key attacker B", 4);
         let key_a = to_public_key(&key_a);
         let key_b = to_public_key(&key_b);
         let expected_a = expected_key(&key_a);
@@ -1543,9 +1610,9 @@ mod tests {
         // or key-version advance, no stateless-usage consumption).
         let verifier = ShrincsVerifier::new();
         let (signing_key, public_key) =
-            ShrincsSigner::keygen(b"account rotate tamper current seed", 4).unwrap();
+            fixture_or_fresh_key("account rotate tamper current seed", 4);
         let (_, next_public_key) =
-            ShrincsSigner::keygen(b"account rotate tamper next seed", 8).unwrap();
+            fixture_or_fresh_key("account rotate tamper next seed", 8);
         let public_key = to_public_key(&public_key);
         let expected = expected_key(&public_key);
         let next_commitment = public_key_commitment(
@@ -1598,7 +1665,7 @@ mod tests {
         // InvalidSignature and leave the nonce and stateless-usage counter untouched.
         let verifier = ShrincsVerifier::new();
         let (signing_key, public_key) =
-            ShrincsSigner::keygen(b"account stateless tamper seed", 4).unwrap();
+            fixture_or_fresh_key("account stateless tamper seed", 4);
         let public_key = to_public_key(&public_key);
         let expected = expected_key(&public_key);
         let mut account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), expected);
@@ -1635,9 +1702,9 @@ mod tests {
         // message while key A is installed. The account must reject (B's commitment is
         // not the installed key) and advance no freshness or usage state.
         let verifier = ShrincsVerifier::new();
-        let (_, key_a) = ShrincsSigner::keygen(b"account stateless wrong-key A", 4).unwrap();
+        let (_, key_a) = fixture_or_fresh_key("account stateless wrong-key A", 4);
         let (signing_b, key_b) =
-            ShrincsSigner::keygen(b"account stateless wrong-key B", 4).unwrap();
+            fixture_or_fresh_key("account stateless wrong-key B", 4);
         let key_a = to_public_key(&key_a);
         let key_b = to_public_key(&key_b);
         let expected_a = expected_key(&key_a);
