@@ -197,6 +197,7 @@ mod tests {
     use self::verifier::HASH_LEN;
     use super::super::utils::hash_packed;
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
     use proptest::prelude::*;
 
     // Build a signing key that exercises only the stateful subsystem, with a
@@ -785,6 +786,7 @@ mod tests {
         assert!(!verifier.verify_stateless_unsafe_raw(expected, &public_key, &[0u8], &signature));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     proptest! {
         // Modest case count: each case builds a placeholder-hypertree stateful
         // key and grinds one WOTS-C signature. (Bead aur.)

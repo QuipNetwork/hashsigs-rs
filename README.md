@@ -185,6 +185,58 @@ cargo test --features profile-128s-q18 generate_shrincs_sphincs_vectors -- --ign
 cargo test --features profile-128s-q20 generate_shrincs_sphincs_vectors -- --ignored --nocapture
 ```
 
+### Fast Local Loops
+
+During development, prefer a narrow local loop over rerunning the full matrix
+after every edit. `bin/test-fast.sh` wraps the common targeted commands:
+
+```bash
+./bin/test-fast.sh compile-default
+./bin/test-fast.sh signer-stateful
+./bin/test-fast.sh signer-exact generated_stateful_signature_verifies
+./bin/test-fast.sh wasm-exact wasm_keypair_binding_signs_and_exports_public_key
+./bin/test-fast.sh signer-import
+./bin/test-fast.sh account-policy
+./bin/test-fast.sh account-exact full_rotation_with_replaced_stateless_key_resets_usage
+./bin/test-fast.sh vectors-exact solidity_exported_stateful_action_vector_verifies_in_rust
+./bin/test-fast.sh wasm-compile
+./bin/test-fast.sh sha2-compile
+```
+
+Typical usage:
+
+- use `compile-default` when you only need a fast native compile check
+- use `signer-stateful`, `signer-import`, `signer-boundary`, `signer-stateless`,
+  `signer-import-exact <test-name>`, or `signer-exact <test-name>` while
+  editing SHRINCS signer code
+- use `account-policy` or `account-rotation` instead of the broader `account`
+  target when you only need one account behavior slice, or `account-exact
+  <test-name>` for one exact case
+- use `vectors-shrincs` when you only care about the SHRINCS Solidity-exported
+  vector cross-checks, or `vectors-exact <test-name>` for one exact vector test
+- use `wasm` for native wasm-module tests, `wasm-exact <test-name>` for one
+  wasm case, and `wasm-compile` for wasm target compile coverage
+- use `solidity-exact <test-name>` when you only want one
+  `solidity_account_vectors` case
+- use `wasm-compile` for wasm target compile coverage without trying to execute
+  the `.wasm` artifact locally
+- use `wasm-node` only when you want the actual Node-based wasm runtime tests
+- run `cargo test` or `./bin/test-shrincs-profiles.sh` only after the narrow
+  loop is clean
+
+For an automatic polling loop on file changes:
+
+```bash
+./bin/test-watch.sh help
+./bin/test-watch.sh signer-stateful
+./bin/test-watch.sh signer-exact 1 generated_stateful_signature_verifies
+./bin/test-watch.sh account-exact 1 full_rotation_with_replaced_stateless_key_resets_usage
+./bin/test-watch.sh wasm-compile 2
+```
+
+`test-watch.sh` watches the crate's Rust, test, script, and build files and
+reruns the selected `test-fast.sh` area whenever something changes.
+
 ## SHRINCS Layout
 
 The SHRINCS Rust code follows the same high-level split as the Solidity
