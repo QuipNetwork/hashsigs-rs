@@ -24,22 +24,27 @@
 
 use crate::shrincs::types::HASH_LEN;
 
-#[cfg(feature = "profile-256s-sha2")]
+// The suite is selected by the `shrincs_hash_suite_sha2` cfg that build.rs
+// derives from the active profile, not by a Cargo feature directly. build.rs
+// owns the profile -> suite mapping outright, so a future non-keccak profile
+// cannot pick up keccak scheme hashes here while `profiles.rs` selects its
+// real parameters.
+#[cfg(shrincs_hash_suite_sha2)]
 use crate::shrincs::types::HASH_SUITE_SHA2_256;
-#[cfg(not(feature = "profile-256s-sha2"))]
+#[cfg(not(shrincs_hash_suite_sha2))]
 use crate::shrincs::types::HASH_SUITE_KECCAK_256;
 
-#[cfg(feature = "profile-256s-sha2")]
+#[cfg(shrincs_hash_suite_sha2)]
 pub const HASH_SUITE_ID: u32 = HASH_SUITE_SHA2_256;
-#[cfg(not(feature = "profile-256s-sha2"))]
+#[cfg(not(shrincs_hash_suite_sha2))]
 pub const HASH_SUITE_ID: u32 = HASH_SUITE_KECCAK_256;
 
-#[cfg(feature = "profile-256s-sha2")]
+#[cfg(shrincs_hash_suite_sha2)]
 pub(crate) fn scheme_hash(data: &[u8]) -> [u8; HASH_LEN] {
     solana_program::hash::hash(data).to_bytes()
 }
 
-#[cfg(not(feature = "profile-256s-sha2"))]
+#[cfg(not(shrincs_hash_suite_sha2))]
 pub(crate) fn scheme_hash(data: &[u8]) -> [u8; HASH_LEN] {
     solana_program::keccak::hash(data).to_bytes()
 }

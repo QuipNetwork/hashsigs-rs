@@ -6,6 +6,9 @@ use std::path::PathBuf;
 struct SelectedProfile {
     cfg_name: &'static str,
     profile_name: &'static str,
+    /// Scheme-hash suite for this profile. EVM-domain hashes stay on keccak
+    /// under every profile; this governs only the scheme hashes.
+    hash_suite_sha2: bool,
 }
 
 fn feature_enabled(name: &str) -> bool {
@@ -36,6 +39,7 @@ fn selected_profile() -> SelectedProfile {
             return SelectedProfile {
                 cfg_name: "shrincs_profile_256s",
                 profile_name: "shrincs-256s-keccak",
+                hash_suite_sha2: false,
             };
         }
         panic!(
@@ -53,18 +57,22 @@ fn selected_profile() -> SelectedProfile {
         (true, false, false, false) => SelectedProfile {
             cfg_name: "shrincs_profile_256s",
             profile_name: "shrincs-256s-keccak",
+            hash_suite_sha2: false,
         },
         (false, true, false, false) => SelectedProfile {
             cfg_name: "shrincs_profile_128s_q18",
             profile_name: "shrincs-128s-q18-keccak",
+            hash_suite_sha2: false,
         },
         (false, false, true, false) => SelectedProfile {
             cfg_name: "shrincs_profile_128s_q20",
             profile_name: "shrincs-128s-q20-keccak",
+            hash_suite_sha2: false,
         },
         (false, false, false, true) => SelectedProfile {
             cfg_name: "shrincs_profile_256s_sha2",
             profile_name: "shrincs-256s-sha2",
+            hash_suite_sha2: true,
         },
         _ => unreachable!("explicit profile count already validated"),
     }
@@ -82,9 +90,13 @@ fn main() {
     println!("cargo:rustc-check-cfg=cfg(shrincs_profile_128s_q18)");
     println!("cargo:rustc-check-cfg=cfg(shrincs_profile_128s_q20)");
     println!("cargo:rustc-check-cfg=cfg(shrincs_profile_256s_sha2)");
+    println!("cargo:rustc-check-cfg=cfg(shrincs_hash_suite_sha2)");
 
     let selected = selected_profile();
     println!("cargo:rustc-cfg={}", selected.cfg_name);
+    if selected.hash_suite_sha2 {
+        println!("cargo:rustc-cfg=shrincs_hash_suite_sha2");
+    }
 
     let profile_id = Keccak256::digest(selected.profile_name.as_bytes());
 
