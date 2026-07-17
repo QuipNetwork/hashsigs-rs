@@ -154,6 +154,14 @@ pub(crate) fn load_fixture_file(path: &Path) -> KeyFixtureFile {
 }
 
 pub(crate) fn write_fixture_file(path: &Path, fixture_file: &KeyFixtureFile) {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).unwrap_or_else(|error| {
+            panic!(
+                "failed to create fixture directory {}: {error}",
+                parent.display()
+            )
+        });
+    }
     let json = serde_json::to_string_pretty(fixture_file)
         .expect("fixture file must serialize");
     fs::write(path, json).unwrap_or_else(|error| {
@@ -177,4 +185,61 @@ pub(crate) fn fixture_pair(entry: &KeyFixtureEntry) -> (ShrincsSigningKey, Publi
         entry.signing_key.clone().into(),
         entry.public_key.clone().into(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::shrincs::{PROFILE_NAME, ShrincsSigner};
+
+    fn account_fixture_specs() -> [(&'static str, u32); 16] {
+        [
+            ("account stateless action seed", 4),
+            ("account rotate stateful current seed", 4),
+            ("account rotate stateful next seed", 8),
+            ("account rotate full current seed", 4),
+            ("account rotate full next seed", 8),
+            ("account recovery after use seed", 4),
+            ("account recovery after use next seed", 8),
+            ("account boundary rotate seed", 4),
+            ("account boundary rotate next seed", 8),
+            ("account same stateless rotate seed", 4),
+            ("account same stateless rotate next seed", 8),
+            ("account rotate tamper current seed", 4),
+            ("account rotate tamper next seed", 8),
+            ("account stateless tamper seed", 4),
+            ("account stateless wrong-key A", 4),
+            ("account stateless wrong-key B", 4),
+        ]
+    }
+
+    #[test]
+    #[ignore = "writes checked-in test fixtures on demand"]
+    fn write_account_key_fixture_file() {
+        let entries = account_fixture_specs()
+            .into_iter()
+            .map(|(seed_label, max_stateful_signatures)| {
+                let (signing_key, public_key) = ShrincsSigner::keygen(
+                    seed_label.as_bytes(),
+                    max_stateful_signatures,
+                )
+                .unwrap_or_else(|| {
+                    panic!(
+                        "fixture keygen failed for seed label {seed_label:?} with max_stateful_signatures={max_stateful_signatures}"
+                    )
+                });
+                KeyFixtureEntry {
+                    seed_label: seed_label.to_string(),
+                    signing_key: SigningKeyDto::from(&signing_key),
+                    public_key: PublicKeyDto::from(&public_key),
+                }
+            })
+            .collect();
+
+        let fixture_file = KeyFixtureFile {
+            profile_name: PROFILE_NAME.to_string(),
+            entries,
+        };
+        write_fixture_file(&fixture_path(), &fixture_file);
+    }
 }
