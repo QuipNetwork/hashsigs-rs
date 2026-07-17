@@ -91,7 +91,15 @@ build-test:
     - rustup target add wasm32-unknown-unknown
   script:
     - cargo test --locked --features wasm-bindings
+    # The sha2 profile shares every crypto constant with the default 256s
+    # profile, so its suite costs about the same to test. It gets a full test
+    # run rather than a check: it is the only profile whose scheme hashes are
+    # SHA-256, and its committed vectors anchor the Solidity sha2 verifier.
+    - cargo test --locked --features profile-256s-sha2
     # Profile features are mutually exclusive; check each path compiles.
+    # The 128s profiles are check-only: their unignored tests build a 2^18-leaf
+    # hypertree, which is not viable on a CI runner. bin/test-shrincs-profiles.sh
+    # runs them in release for local/scheduled use.
     - cargo check --locked --features profile-128s-q18
     - cargo check --locked --features profile-128s-q20
     # Default-profile wasm build (no profile-* feature). ts-conformance rebuilds
