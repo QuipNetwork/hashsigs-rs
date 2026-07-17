@@ -192,7 +192,7 @@ mod tests {
     use super::*;
     use crate::shrincs::{PROFILE_NAME, ShrincsSigner};
 
-    fn account_fixture_specs() -> [(&'static str, u32); 16] {
+    fn account_fixture_specs() -> [(&'static str, u32); 20] {
         [
             ("account stateless action seed", 4),
             ("account rotate stateful current seed", 4),
@@ -210,6 +210,10 @@ mod tests {
             ("account stateless tamper seed", 4),
             ("account stateless wrong-key A", 4),
             ("account stateless wrong-key B", 4),
+            ("stateless negative seed", 2),
+            ("stateless malformed seed", 2),
+            ("stateless empty message seed", 2),
+            ("stateless signer seed", 2),
         ]
     }
 

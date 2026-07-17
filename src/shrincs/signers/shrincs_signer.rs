@@ -195,6 +195,9 @@ impl ShrincsSigner {
 #[cfg(test)]
 mod tests {
     use self::verifier::HASH_LEN;
+    use crate::shrincs::test_fixtures::{
+        fixture_entry, fixture_pair, fixture_path, load_fixture_file, TestKeyMode,
+    };
     use super::super::utils::hash_packed;
     use super::*;
     #[cfg(not(target_arch = "wasm32"))]
@@ -248,6 +251,31 @@ mod tests {
 
     fn expected_key(public_key: &PublicKey) -> [u8; HASH_LEN] {
         word32(&public_key.public_key_commitment).unwrap()
+    }
+
+    fn fixture_or_fresh_full_key(
+        seed_label: &'static str,
+        max_stateful_signatures: u32,
+    ) -> (ShrincsSigningKey, PublicKey) {
+        match TestKeyMode::from_env() {
+            TestKeyMode::Fresh => ShrincsSigner::keygen(
+                seed_label.as_bytes(),
+                max_stateful_signatures,
+            )
+            .unwrap_or_else(|| {
+                panic!("fresh keygen failed for seed label {seed_label:?}")
+            }),
+            TestKeyMode::Fixture => {
+                let fixture_file = load_fixture_file(&fixture_path());
+                assert_eq!(
+                    fixture_file.profile_name,
+                    crate::shrincs::PROFILE_NAME,
+                    "fixture profile mismatch",
+                );
+                let entry = fixture_entry(&fixture_file, seed_label);
+                fixture_pair(entry)
+            }
+        }
     }
 
     // The 256s profile pins these exact counts; the 128s profiles use a
@@ -568,7 +596,7 @@ mod tests {
     #[test]
     fn stateless_signature_rejects_wrong_message_and_tampered_hypertree_path() {
         let (signing_key, public_key) =
-            ShrincsSigner::keygen(b"stateless negative seed", 2).unwrap();
+            fixture_or_fresh_full_key("stateless negative seed", 2);
         let message = hash_packed(&[b"stateless valid message"]);
         let wrong_message = hash_packed(&[b"stateless wrong message"]);
         let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &message).unwrap();
@@ -598,7 +626,7 @@ mod tests {
     #[test]
     fn stateless_signature_rejects_malformed_lengths() {
         let (signing_key, public_key) =
-            ShrincsSigner::keygen(b"stateless malformed seed", 2).unwrap();
+            fixture_or_fresh_full_key("stateless malformed seed", 2);
         let message = hash_packed(&[b"stateless malformed message"]);
         let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &message).unwrap();
         let expected = expected_key(&public_key);
@@ -773,7 +801,7 @@ mod tests {
     fn stateless_empty_message_round_trip_and_fors_boundary() {
         use self::verifier::NUM_FORS_TREES;
         let (signing_key, public_key) =
-            ShrincsSigner::keygen(b"stateless empty message seed", 2).unwrap();
+            fixture_or_fresh_full_key("stateless empty message seed", 2);
         let expected = expected_key(&public_key);
         let verifier = ShrincsVerifier::new();
 
