@@ -19,8 +19,6 @@
 
 use crate::shrincs::core::messages::stateless_action_message_hash;
 use crate::shrincs::core::shrincs as core_shrincs;
-#[cfg(any(test, feature = "wasm-bindings"))]
-use crate::shrincs::core::sphincs_plus_c;
 use crate::shrincs::types::{ActionContext, PublicKey, StatelessSignature, HASH_LEN};
 
 pub struct SphincsPlusCVerifier;
@@ -49,19 +47,6 @@ impl SphincsPlusCVerifier {
             context,
             signature,
         )
-    }
-
-    #[cfg(any(test, feature = "wasm-bindings"))]
-    #[allow(dead_code)]
-    pub(crate) fn verify_unsafe_raw(
-        &self,
-        expected_public_key_commitment: [u8; HASH_LEN],
-        public_key: &PublicKey,
-        message: &[u8],
-        signature: &StatelessSignature,
-    ) -> bool {
-        let _ = expected_public_key_commitment;
-        sphincs_plus_c::verify_stateless_raw(public_key, message, signature)
     }
 
     pub fn action_message_hash(
