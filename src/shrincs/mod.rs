@@ -29,6 +29,8 @@ pub mod verifier;
 
 #[cfg(test)]
 mod vector_conformance;
+#[cfg(test)]
+pub(crate) mod test_fixtures;
 
 pub use signer::{ShrincsSigner, ShrincsSignerResult, ShrincsSigningKey};
 pub use hash_suite::HASH_SUITE_ID;
