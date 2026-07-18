@@ -36,7 +36,8 @@ struct ForsDigest {
 pub(crate) struct SigningForsDigest {
     pub tree_index: u64,
     pub leaf_index: u32,
-    pub indices: Vec<u32>,
+    pub signed_tree_indices: Vec<u32>,
+    pub omitted_final_tree_is_zero: bool,
 }
 
 pub(crate) fn verify_fors_c_and_return_root(
@@ -108,6 +109,7 @@ pub(crate) fn signer_fors_digest(
     randomizer: &[u8; HASH_LEN],
     counter: u32,
 ) -> Option<SigningForsDigest> {
+    let signed_trees = NUM_FORS_TREES as usize - 1;
     let index_bits = u32::from(NUM_FORS_TREES) * u32::from(FORS_TREE_HEIGHT);
     let subtree_height = u32::from(HYPERTREE_HEIGHT / NUM_HYPERTREE_LAYERS);
     let tree_bits = u32::from(HYPERTREE_HEIGHT) - subtree_height;
@@ -120,7 +122,7 @@ pub(crate) fn signer_fors_digest(
         message,
         digest_bytes,
     );
-    let indices = (0..NUM_FORS_TREES)
+    let signed_tree_indices = (0..signed_trees)
         .map(|tree| {
             read_bits32(
                 &digest,
@@ -129,11 +131,17 @@ pub(crate) fn signer_fors_digest(
             )
         })
         .collect::<Option<Vec<_>>>()?;
+    let omitted_final_tree_is_zero = read_bits32(
+        &digest,
+        signed_trees * FORS_TREE_HEIGHT as usize,
+        FORS_TREE_HEIGHT as u32,
+    )? == 0;
     let cursor = index_bits as usize;
     Some(SigningForsDigest {
         tree_index: read_bits64(&digest, cursor, tree_bits)?,
         leaf_index: read_bits32(&digest, cursor + tree_bits as usize, subtree_height)?,
-        indices,
+        signed_tree_indices,
+        omitted_final_tree_is_zero,
     })
 }
 
@@ -166,6 +174,17 @@ pub(crate) fn fors_leaf_hash(
     let secret = Zeroizing::new(fors_leaf_secret(
         pk_seed, sk_seed, tree_index, leaf_index, fors_tree, leaf,
     ));
+    fors_leaf_hash_from_secret(pk_seed, tree_index, leaf_index, fors_tree, leaf, &secret)
+}
+
+fn fors_leaf_hash_from_secret(
+    pk_seed: &[u8; HASH_LEN],
+    tree_index: u64,
+    leaf_index: u32,
+    fors_tree: u32,
+    leaf: u32,
+    secret: &[u8; HASH_LEN],
+) -> [u8; HASH_LEN] {
     let tree_leaf = (u64::from(fors_tree) << FORS_TREE_HEIGHT) + u64::from(leaf);
     let address_word = fors_address_word(tree_index, leaf_index, 0, tree_leaf);
     hash_node(&[
@@ -183,12 +202,28 @@ pub(crate) fn fors_tree_root_and_auth_path(
     leaf_index: u32,
     fors_tree: u32,
     leaf: u32,
-) -> ([u8; HASH_LEN], Vec<Vec<u8>>) {
+) -> ([u8; HASH_LEN], [u8; HASH_LEN], Vec<Vec<u8>>) {
     let height = u32::from(FORS_TREE_HEIGHT);
     let leaf_count = 1usize << height;
-    let mut level_nodes = (0..leaf_count)
-        .map(|index| fors_leaf_hash(pk_seed, sk_seed, tree_index, leaf_index, fors_tree, index as u32))
-        .collect::<Vec<_>>();
+    let selected_secret_leaf =
+        fors_leaf_secret(pk_seed, sk_seed, tree_index, leaf_index, fors_tree, leaf);
+    let mut level_nodes = Vec::with_capacity(leaf_count);
+    for index in 0..leaf_count {
+        let index = index as u32;
+        let leaf_hash = if index == leaf {
+            fors_leaf_hash_from_secret(
+                pk_seed,
+                tree_index,
+                leaf_index,
+                fors_tree,
+                leaf,
+                &selected_secret_leaf,
+            )
+        } else {
+            fors_leaf_hash(pk_seed, sk_seed, tree_index, leaf_index, fors_tree, index)
+        };
+        level_nodes.push(leaf_hash);
+    }
     let mut index = leaf as usize;
     let mut auth_path = Vec::with_capacity(height as usize);
 
@@ -212,7 +247,7 @@ pub(crate) fn fors_tree_root_and_auth_path(
         index >>= 1;
     }
 
-    (level_nodes[0], auth_path)
+    (level_nodes[0], selected_secret_leaf, auth_path)
 }
 
 fn fors_entry_root32(
@@ -330,4 +365,33 @@ fn fors_digest_bytes(
         block_counter = block_counter.wrapping_add(1);
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn selected_leaf_hash_reuse_matches_direct_leaf_hash() {
+        let pk_seed = [0x11u8; HASH_LEN];
+        let sk_seed = [0x22u8; HASH_LEN];
+        let tree_index = 7u64;
+        let leaf_index = 3u32;
+        let fors_tree = 5u32;
+        let leaf = 9u32;
+
+        let secret =
+            fors_leaf_secret(&pk_seed, &sk_seed, tree_index, leaf_index, fors_tree, leaf);
+        let reused = fors_leaf_hash_from_secret(
+            &pk_seed,
+            tree_index,
+            leaf_index,
+            fors_tree,
+            leaf,
+            &secret,
+        );
+        let direct = fors_leaf_hash(&pk_seed, &sk_seed, tree_index, leaf_index, fors_tree, leaf);
+
+        assert_eq!(reused, direct);
+    }
 }

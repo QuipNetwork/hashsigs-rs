@@ -67,7 +67,7 @@ pub(crate) fn sign_fors_c(
         ) else {
             continue;
         };
-        if digest.indices.last() != Some(&0) {
+        if !digest.omitted_final_tree_is_zero {
             continue;
         }
 
@@ -76,8 +76,8 @@ pub(crate) fn sign_fors_c(
         for fors_tree in 0..signed_trees {
             // For each selected tree, reveal exactly the chosen secret leaf and
             // provide the siblings needed to recompute that tree's root.
-            let leaf = digest.indices[fors_tree];
-            let (root, auth_path) = fors_c::fors_tree_root_and_auth_path(
+            let leaf = digest.signed_tree_indices[fors_tree];
+            let (root, secret_leaf, auth_path) = fors_c::fors_tree_root_and_auth_path(
                 &signing_key.pk_seed,
                 &signing_key.stateless_sk_seed,
                 digest.tree_index,
@@ -87,15 +87,7 @@ pub(crate) fn sign_fors_c(
             );
             roots.extend_from_slice(&root);
             entries.push(ForsEntry {
-                secret_leaf: fors_c::fors_leaf_secret(
-                    &signing_key.pk_seed,
-                    &signing_key.stateless_sk_seed,
-                    digest.tree_index,
-                    digest.leaf_index,
-                    fors_tree as u32,
-                    leaf,
-                )
-                .to_vec(),
+                secret_leaf: secret_leaf.to_vec(),
                 auth_path,
             });
         }
