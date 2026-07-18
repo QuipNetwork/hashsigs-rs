@@ -118,7 +118,7 @@ pub(crate) fn sign_hypertree(
             layer,
             tree,
             leaf,
-        );
+        )?;
         let coords = WotsKeypair { layer, tree, keypair: leaf };
         let (_, sk_seed) = hypertree_leaf_seeds(&layer_seeds[layer as usize], tree, leaf);
         let seeds = WotsSeeds {
@@ -175,7 +175,8 @@ pub(crate) fn hypertree_public_root(
         0,
         0,
     )
-    .root
+    .map(|subtree| subtree.root)
+    .expect("top-level hypertree leaf index 0 must be in range")
 }
 
 fn hypertree_layer_seeds(stateless_sk_seed: &[u8; HASH_LEN]) -> Vec<[u8; HASH_LEN]> {
@@ -192,9 +193,12 @@ fn hypertree_subtree(
     layer: u32,
     tree: u64,
     selected_leaf: u32,
-) -> HypertreeSubtree {
+) -> Option<HypertreeSubtree> {
     let subtree_height = u32::from(HYPERTREE_HEIGHT / NUM_HYPERTREE_LAYERS);
     let leaf_count = 1usize << subtree_height;
+    if selected_leaf as usize >= leaf_count {
+        return None;
+    }
     let mut current_level = Vec::with_capacity(leaf_count);
     for leaf in 0..leaf_count as u32 {
         current_level.push(hypertree_leaf(pk_seed, layer_seed, layer, tree, leaf));
@@ -221,11 +225,11 @@ fn hypertree_subtree(
         index >>= 1;
     }
 
-    HypertreeSubtree {
+    Some(HypertreeSubtree {
         root: current_level[0],
         selected_leaf_hash,
         auth_path,
-    }
+    })
 }
 
 fn hypertree_leaf_seeds(
