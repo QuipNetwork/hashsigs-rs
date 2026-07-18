@@ -731,12 +731,18 @@ fn increment_u256_be(value: &mut [u8; HASH_LEN]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::OnceLock;
+
     use crate::shrincs::components::public_key::encode_stateful_public_key;
     use crate::shrincs::signers::types::ShrincsSigningKey;
     use crate::shrincs::signers::utils::{derive32, public_key_from_components};
     use crate::shrincs::signers::uxmss::stateful_subtree_root;
     use crate::shrincs::test_fixtures::{
-        fixture_entry, fixture_pair, fixture_path, load_fixture_file, TestKeyMode,
+        account_cases_fixture_path, fixture_entry, fixture_entry_opt, fixture_pair, fixture_path,
+        load_account_cases_fixture_file, load_fixture_file, write_account_cases_fixture_file,
+        AccountFullRotationCaseDto, AccountSignatureFixtureFile,
+        AccountStatefulRotationCaseDto, AccountStatelessActionCaseDto,
+        AccountWrongKeyStatelessActionCaseDto, KeyFixtureFile, TestKeyMode,
     };
     use crate::shrincs::{
         ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey as SignerPublicKey,
@@ -857,13 +863,8 @@ mod tests {
             TestKeyMode::Fresh => ShrincsSigner::keygen(seed_label.as_bytes(), max)
                 .unwrap_or_else(|| panic!("fresh keygen failed for seed label {seed_label:?}")),
             TestKeyMode::Fixture => {
-                let fixture_file = load_fixture_file(&fixture_path());
-                assert_eq!(
-                    fixture_file.profile_name,
-                    crate::shrincs::PROFILE_NAME,
-                    "fixture profile mismatch",
-                );
-                let entry = fixture_entry(&fixture_file, seed_label);
+                let fixture_file = cached_fixture_file().expect("fixture mode must load fixture file");
+                let entry = fixture_entry(fixture_file, seed_label);
                 fixture_pair(entry)
             }
         }
@@ -876,8 +877,446 @@ mod tests {
         match TestKeyMode::from_env() {
             TestKeyMode::Fresh => ShrincsSigner::keygen(seed_label.as_bytes(), max)
                 .unwrap_or_else(|| panic!("fresh keygen failed for seed label {seed_label:?}")),
-            TestKeyMode::Fixture => stateful_only_key(seed_label.as_bytes(), max),
+            TestKeyMode::Fixture => cached_fixture_file()
+                .and_then(|fixture_file| fixture_entry_opt(fixture_file, seed_label))
+                .map(fixture_pair)
+                .unwrap_or_else(|| stateful_only_key(seed_label.as_bytes(), max)),
         }
+    }
+
+    fn cached_fixture_file() -> Option<&'static KeyFixtureFile> {
+        static FIXTURE_FILE: OnceLock<Option<KeyFixtureFile>> = OnceLock::new();
+        FIXTURE_FILE
+            .get_or_init(|| match TestKeyMode::from_env() {
+                TestKeyMode::Fresh => None,
+                TestKeyMode::Fixture => {
+                    let fixture_file = load_fixture_file(&fixture_path());
+                    assert_eq!(
+                        fixture_file.profile_name,
+                        crate::shrincs::PROFILE_NAME,
+                        "fixture profile mismatch",
+                    );
+                    Some(fixture_file)
+                }
+            })
+            .as_ref()
+    }
+
+    #[derive(Debug, Clone)]
+    struct CachedStatelessActionCase {
+        public_key: PublicKey,
+        action_type: [u8; HASH_LEN],
+        payload_hash: [u8; HASH_LEN],
+        signature: StatelessSignature,
+    }
+
+    #[derive(Debug, Clone)]
+    struct CachedStatefulRotationCase {
+        public_key: PublicKey,
+        next_target: StatefulRotationTarget,
+        next_commitment: [u8; HASH_LEN],
+        signature: StatelessSignature,
+    }
+
+    #[derive(Debug, Clone)]
+    struct CachedFullRotationCase {
+        public_key: PublicKey,
+        next_target: RotationTarget,
+        next_commitment: [u8; HASH_LEN],
+        signature: StatelessSignature,
+    }
+
+    #[derive(Debug, Clone)]
+    struct CachedWrongKeyStatelessActionCase {
+        installed_public_key: PublicKey,
+        signing_public_key: PublicKey,
+        action_type: [u8; HASH_LEN],
+        payload_hash: [u8; HASH_LEN],
+        signature: StatelessSignature,
+    }
+
+    #[derive(Debug, Clone)]
+    struct CachedAccountSignatureFixtures {
+        stateless_action: CachedStatelessActionCase,
+        rotate_stateful: CachedStatefulRotationCase,
+        rotate_stateful_boundary: CachedStatefulRotationCase,
+        rotate_stateful_tamper: CachedStatefulRotationCase,
+        rotate_full: CachedFullRotationCase,
+        rotate_full_same_stateless: CachedFullRotationCase,
+        stateless_tamper: CachedStatelessActionCase,
+        stateless_wrong_key: CachedWrongKeyStatelessActionCase,
+    }
+
+    impl From<AccountStatelessActionCaseDto> for CachedStatelessActionCase {
+        fn from(value: AccountStatelessActionCaseDto) -> Self {
+            Self {
+                public_key: value.public_key.into(),
+                action_type: value.action_type,
+                payload_hash: value.payload_hash,
+                signature: value.signature.into(),
+            }
+        }
+    }
+
+    impl From<&CachedStatelessActionCase> for AccountStatelessActionCaseDto {
+        fn from(value: &CachedStatelessActionCase) -> Self {
+            Self {
+                public_key: (&value.public_key).into(),
+                action_type: value.action_type,
+                payload_hash: value.payload_hash,
+                signature: (&value.signature).into(),
+            }
+        }
+    }
+
+    impl From<AccountStatefulRotationCaseDto> for CachedStatefulRotationCase {
+        fn from(value: AccountStatefulRotationCaseDto) -> Self {
+            Self {
+                public_key: value.public_key.into(),
+                next_target: value.next_target.into(),
+                next_commitment: value.next_commitment,
+                signature: value.signature.into(),
+            }
+        }
+    }
+
+    impl From<&CachedStatefulRotationCase> for AccountStatefulRotationCaseDto {
+        fn from(value: &CachedStatefulRotationCase) -> Self {
+            Self {
+                public_key: (&value.public_key).into(),
+                next_target: (&value.next_target).into(),
+                next_commitment: value.next_commitment,
+                signature: (&value.signature).into(),
+            }
+        }
+    }
+
+    impl From<AccountFullRotationCaseDto> for CachedFullRotationCase {
+        fn from(value: AccountFullRotationCaseDto) -> Self {
+            Self {
+                public_key: value.public_key.into(),
+                next_target: value.next_target.into(),
+                next_commitment: value.next_commitment,
+                signature: value.signature.into(),
+            }
+        }
+    }
+
+    impl From<&CachedFullRotationCase> for AccountFullRotationCaseDto {
+        fn from(value: &CachedFullRotationCase) -> Self {
+            Self {
+                public_key: (&value.public_key).into(),
+                next_target: (&value.next_target).into(),
+                next_commitment: value.next_commitment,
+                signature: (&value.signature).into(),
+            }
+        }
+    }
+
+    impl From<AccountWrongKeyStatelessActionCaseDto> for CachedWrongKeyStatelessActionCase {
+        fn from(value: AccountWrongKeyStatelessActionCaseDto) -> Self {
+            Self {
+                installed_public_key: value.installed_public_key.into(),
+                signing_public_key: value.signing_public_key.into(),
+                action_type: value.action_type,
+                payload_hash: value.payload_hash,
+                signature: value.signature.into(),
+            }
+        }
+    }
+
+    impl From<&CachedWrongKeyStatelessActionCase> for AccountWrongKeyStatelessActionCaseDto {
+        fn from(value: &CachedWrongKeyStatelessActionCase) -> Self {
+            Self {
+                installed_public_key: (&value.installed_public_key).into(),
+                signing_public_key: (&value.signing_public_key).into(),
+                action_type: value.action_type,
+                payload_hash: value.payload_hash,
+                signature: (&value.signature).into(),
+            }
+        }
+    }
+
+    fn build_account_signature_fixtures_parallel() -> CachedAccountSignatureFixtures {
+        std::thread::scope(|scope| {
+            let stateless_action = scope.spawn(|| {
+                build_cached_stateless_action_case(
+                    "account stateless action seed",
+                    4,
+                    [5u8; HASH_LEN],
+                    [6u8; HASH_LEN],
+                )
+            });
+            let rotate_stateful = scope.spawn(|| {
+                build_cached_stateful_rotation_case(
+                    "account rotate stateful current seed",
+                    4,
+                    "account rotate stateful next seed",
+                    8,
+                )
+            });
+            let rotate_stateful_boundary = scope.spawn(|| {
+                build_cached_stateful_rotation_case(
+                    "account boundary rotate seed",
+                    4,
+                    "account boundary rotate next seed",
+                    8,
+                )
+            });
+            let rotate_stateful_tamper = scope.spawn(|| {
+                build_cached_stateful_rotation_case(
+                    "account rotate tamper current seed",
+                    4,
+                    "account rotate tamper next seed",
+                    8,
+                )
+            });
+            let rotate_full = scope.spawn(|| {
+                build_cached_full_rotation_case(
+                    "account rotate full current seed",
+                    4,
+                    "account rotate full next seed",
+                    8,
+                    false,
+                )
+            });
+            let rotate_full_same_stateless = scope.spawn(|| {
+                build_cached_full_rotation_case(
+                    "account same stateless rotate seed",
+                    4,
+                    "account same stateless rotate next seed",
+                    8,
+                    true,
+                )
+            });
+            let stateless_tamper = scope.spawn(|| {
+                build_cached_stateless_action_case(
+                    "account stateless tamper seed",
+                    4,
+                    [5u8; HASH_LEN],
+                    [6u8; HASH_LEN],
+                )
+            });
+            let stateless_wrong_key =
+                scope.spawn(build_cached_wrong_key_stateless_action_case);
+
+            CachedAccountSignatureFixtures {
+                stateless_action: stateless_action.join().unwrap(),
+                rotate_stateful: rotate_stateful.join().unwrap(),
+                rotate_stateful_boundary: rotate_stateful_boundary.join().unwrap(),
+                rotate_stateful_tamper: rotate_stateful_tamper.join().unwrap(),
+                rotate_full: rotate_full.join().unwrap(),
+                rotate_full_same_stateless: rotate_full_same_stateless.join().unwrap(),
+                stateless_tamper: stateless_tamper.join().unwrap(),
+                stateless_wrong_key: stateless_wrong_key.join().unwrap(),
+            }
+        })
+    }
+
+    fn cached_account_signature_fixtures() -> &'static CachedAccountSignatureFixtures {
+        static FIXTURES: OnceLock<CachedAccountSignatureFixtures> = OnceLock::new();
+        FIXTURES.get_or_init(|| {
+            let path = account_cases_fixture_path();
+            if path.is_file() {
+                let fixture_file = load_account_cases_fixture_file(&path);
+                assert_eq!(
+                    fixture_file.profile_name,
+                    crate::shrincs::PROFILE_NAME,
+                    "account signature fixture profile mismatch",
+                );
+                CachedAccountSignatureFixtures {
+                    stateless_action: fixture_file.stateless_action.into(),
+                    rotate_stateful: fixture_file.rotate_stateful.into(),
+                    rotate_stateful_boundary: fixture_file.rotate_stateful_boundary.into(),
+                    rotate_stateful_tamper: fixture_file.rotate_stateful_tamper.into(),
+                    rotate_full: fixture_file.rotate_full.into(),
+                    rotate_full_same_stateless: fixture_file.rotate_full_same_stateless.into(),
+                    stateless_tamper: fixture_file.stateless_tamper.into(),
+                    stateless_wrong_key: fixture_file.stateless_wrong_key.into(),
+                }
+            } else {
+                build_account_signature_fixtures_parallel()
+            }
+        })
+    }
+
+    fn build_cached_stateless_action_case(
+        seed_label: &'static str,
+        max: u32,
+        action_type: [u8; HASH_LEN],
+        payload_hash: [u8; HASH_LEN],
+    ) -> CachedStatelessActionCase {
+        let verifier = ShrincsVerifier::new();
+        let (signing_key, public_key) = fixture_or_fresh_key(seed_label, max);
+        let public_key = to_public_key(&public_key);
+        let expected = expected_key(&public_key);
+        let account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), expected);
+        let context = ActionContext {
+            domain_separator: account.domainSeparator(),
+            nonce: account.nonce(),
+            key_version: account.keyVersion(),
+            action_type,
+            payload_hash,
+        };
+        let message = verifier.stateless_action_message_hash(expected, &context);
+        let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &message).unwrap();
+        CachedStatelessActionCase {
+            public_key,
+            action_type,
+            payload_hash,
+            signature: to_stateless_signature(&signature),
+        }
+    }
+
+    fn build_cached_stateful_rotation_case(
+        current_seed: &'static str,
+        current_max: u32,
+        next_seed: &'static str,
+        next_max: u32,
+    ) -> CachedStatefulRotationCase {
+        let verifier = ShrincsVerifier::new();
+        let (signing_key, public_key) = fixture_or_fresh_key(current_seed, current_max);
+        let (_, next_public_key) = fixture_or_fresh_key(next_seed, next_max);
+        let public_key = to_public_key(&public_key);
+        let expected = expected_key(&public_key);
+        let next_commitment = public_key_commitment(
+            &next_public_key.stateful_public_key,
+            &public_key.pk_seed,
+            &public_key.hypertree_root,
+        );
+        let next_target = StatefulRotationTarget {
+            stateful_public_key: next_public_key.stateful_public_key.clone(),
+            public_key_commitment: next_commitment.to_vec(),
+        };
+        let mut account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), expected);
+        account
+            .setStatefulPolicyRecoveryRotation(id(1))
+            .expect("owner can select recovery policy");
+        account
+            .enterRecoveryMode(id(1))
+            .expect("owner can arm recovery mode");
+        account.statelessSignaturesUsed = 7;
+        let context = RotationContext {
+            domain_separator: account.domainSeparator(),
+            nonce: account.nonce(),
+            key_version: account.keyVersion(),
+        };
+        let message =
+            verifier.stateful_rotation_message_hash(expected, &public_key, &context, &next_target);
+        let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &message).unwrap();
+        CachedStatefulRotationCase {
+            public_key,
+            next_target,
+            next_commitment,
+            signature: to_stateless_signature(&signature),
+        }
+    }
+
+    fn build_cached_full_rotation_case(
+        current_seed: &'static str,
+        current_max: u32,
+        next_seed: &'static str,
+        next_max: u32,
+        reuse_stateless_key: bool,
+    ) -> CachedFullRotationCase {
+        let verifier = ShrincsVerifier::new();
+        let (signing_key, public_key) = fixture_or_fresh_key(current_seed, current_max);
+        let (_, next_public_key) = fixture_or_fresh_key(next_seed, next_max);
+        let public_key = to_public_key(&public_key);
+        let next_public_key = to_public_key(&next_public_key);
+        let expected = expected_key(&public_key);
+        let next_target = RotationTarget {
+            stateful_public_key: next_public_key.stateful_public_key.clone(),
+            public_key_commitment: if reuse_stateless_key {
+                public_key_commitment(
+                    &next_public_key.stateful_public_key,
+                    &public_key.pk_seed,
+                    &public_key.hypertree_root,
+                )
+                .to_vec()
+            } else {
+                next_public_key.public_key_commitment.clone()
+            },
+            pk_seed: if reuse_stateless_key {
+                public_key.pk_seed.clone()
+            } else {
+                next_public_key.pk_seed.clone()
+            },
+            hypertree_root: if reuse_stateless_key {
+                public_key.hypertree_root.clone()
+            } else {
+                next_public_key.hypertree_root.clone()
+            },
+        };
+        let next_commitment = next_target.public_key_commitment.clone().try_into().unwrap();
+        let mut account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), expected);
+        account
+            .setStatefulPolicyRecoveryRotation(id(1))
+            .expect("owner can select recovery policy");
+        account
+            .enterRecoveryMode(id(1))
+            .expect("owner can arm recovery mode");
+        account.statelessSignaturesUsed = 7;
+        let context = RotationContext {
+            domain_separator: account.domainSeparator(),
+            nonce: account.nonce(),
+            key_version: account.keyVersion(),
+        };
+        let message =
+            verifier.full_rotation_message_hash(expected, &public_key, &context, &next_target);
+        let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &message).unwrap();
+        CachedFullRotationCase {
+            public_key,
+            next_target,
+            next_commitment,
+            signature: to_stateless_signature(&signature),
+        }
+    }
+
+    fn build_cached_wrong_key_stateless_action_case() -> CachedWrongKeyStatelessActionCase {
+        let verifier = ShrincsVerifier::new();
+        let (_, key_a) = fixture_or_fresh_key("account stateless wrong-key A", 4);
+        let (signing_b, key_b) = fixture_or_fresh_key("account stateless wrong-key B", 4);
+        let installed_public_key = to_public_key(&key_a);
+        let signing_public_key = to_public_key(&key_b);
+        let expected_a = expected_key(&installed_public_key);
+        let account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), expected_a);
+        let action_type = [5u8; HASH_LEN];
+        let payload_hash = [6u8; HASH_LEN];
+        let context = ActionContext {
+            domain_separator: account.domainSeparator(),
+            nonce: account.nonce(),
+            key_version: account.keyVersion(),
+            action_type,
+            payload_hash,
+        };
+        let message = verifier.stateless_action_message_hash(expected_a, &context);
+        let signature = ShrincsSigner::sign_stateless_raw(&signing_b, &message).unwrap();
+        CachedWrongKeyStatelessActionCase {
+            installed_public_key,
+            signing_public_key,
+            action_type,
+            payload_hash,
+            signature: to_stateless_signature(&signature),
+        }
+    }
+
+    #[test]
+    #[ignore = "writes checked-in account signature fixtures on demand"]
+    fn write_account_signature_fixture_file() {
+        let fixtures = build_account_signature_fixtures_parallel();
+        let fixture_file = AccountSignatureFixtureFile {
+            profile_name: crate::shrincs::PROFILE_NAME.to_string(),
+            stateless_action: (&fixtures.stateless_action).into(),
+            rotate_stateful: (&fixtures.rotate_stateful).into(),
+            rotate_stateful_boundary: (&fixtures.rotate_stateful_boundary).into(),
+            rotate_stateful_tamper: (&fixtures.rotate_stateful_tamper).into(),
+            rotate_full: (&fixtures.rotate_full).into(),
+            rotate_full_same_stateless: (&fixtures.rotate_full_same_stateless).into(),
+            stateless_tamper: (&fixtures.stateless_tamper).into(),
+            stateless_wrong_key: (&fixtures.stateless_wrong_key).into(),
+        };
+        write_account_cases_fixture_file(&account_cases_fixture_path(), &fixture_file);
     }
 
     #[test]
@@ -1093,27 +1532,13 @@ mod tests {
     )]
     #[test]
     fn verify_stateless_action_advances_nonce_and_usage_counter() {
-        let verifier = ShrincsVerifier::new();
-        let (signing_key, public_key) =
-            fixture_or_fresh_key("account stateless action seed", 4);
-        let public_key = to_public_key(&public_key);
+        let case = &cached_account_signature_fixtures().stateless_action;
+        let public_key = case.public_key.clone();
         let expected = expected_key(&public_key);
         let mut account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), expected);
-        let action_type = [5u8; HASH_LEN];
-        let payload_hash = [6u8; HASH_LEN];
-        let context = ActionContext {
-            domain_separator: account.domainSeparator(),
-            nonce: account.nonce(),
-            key_version: account.keyVersion(),
-            action_type,
-            payload_hash,
-        };
-        let message = verifier.stateless_action_message_hash(expected, &context);
-        let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &message).unwrap();
-        let signature = to_stateless_signature(&signature);
 
         account
-            .verifyStatelessAction(&public_key, action_type, payload_hash, &signature)
+            .verifyStatelessAction(&public_key, case.action_type, case.payload_hash, &case.signature)
             .expect("valid stateless action verifies");
         assert_eq!(account.nonce()[HASH_LEN - 1], 1);
         assert_eq!(account.statelessSignaturesUsed(), 1);
@@ -1125,22 +1550,9 @@ mod tests {
     )]
     #[test]
     fn rotate_to_fresh_key_installs_next_stateful_commitment() {
-        let verifier = ShrincsVerifier::new();
-        let (signing_key, public_key) =
-            fixture_or_fresh_key("account rotate stateful current seed", 4);
-        let (_, next_public_key) =
-            fixture_or_fresh_key("account rotate stateful next seed", 8);
-        let public_key = to_public_key(&public_key);
+        let case = &cached_account_signature_fixtures().rotate_stateful;
+        let public_key = case.public_key.clone();
         let expected = expected_key(&public_key);
-        let next_commitment = public_key_commitment(
-            &next_public_key.stateful_public_key,
-            &public_key.pk_seed,
-            &public_key.hypertree_root,
-        );
-        let next_target = StatefulRotationTarget {
-            stateful_public_key: next_public_key.stateful_public_key.clone(),
-            public_key_commitment: next_commitment.to_vec(),
-        };
         let mut account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), expected);
         account
             .setStatefulPolicyRecoveryRotation(id(1))
@@ -1149,20 +1561,11 @@ mod tests {
             .enterRecoveryMode(id(1))
             .expect("owner can arm recovery mode");
         account.statelessSignaturesUsed = 7;
-        let context = RotationContext {
-            domain_separator: account.domainSeparator(),
-            nonce: account.nonce(),
-            key_version: account.keyVersion(),
-        };
-        let message =
-            verifier.stateful_rotation_message_hash(expected, &public_key, &context, &next_target);
-        let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &message).unwrap();
-        let signature = to_stateless_signature(&signature);
 
         account
-            .rotateToFreshKey(&public_key, &signature, &next_target)
+            .rotateToFreshKey(&public_key, &case.signature, &case.next_target)
             .expect("valid stateful rotation succeeds");
-        assert_eq!(account.currentShrincsPublicKey(), next_commitment);
+        assert_eq!(account.currentShrincsPublicKey(), case.next_commitment);
         assert_eq!(account.keyVersion()[HASH_LEN - 1], 1);
         assert_eq!(account.nonce()[HASH_LEN - 1], 1);
         assert_eq!(account.statelessSignaturesUsed(), 8);
@@ -1177,21 +1580,9 @@ mod tests {
     )]
     #[test]
     fn rotate_full_key_installs_next_full_commitment() {
-        let verifier = ShrincsVerifier::new();
-        let (signing_key, public_key) =
-            fixture_or_fresh_key("account rotate full current seed", 4);
-        let (_, next_public_key) =
-            fixture_or_fresh_key("account rotate full next seed", 8);
-        let public_key = to_public_key(&public_key);
-        let next_public_key = to_public_key(&next_public_key);
+        let case = &cached_account_signature_fixtures().rotate_full;
+        let public_key = case.public_key.clone();
         let expected = expected_key(&public_key);
-        let next_commitment = expected_key(&next_public_key);
-        let next_target = RotationTarget {
-            stateful_public_key: next_public_key.stateful_public_key.clone(),
-            public_key_commitment: next_public_key.public_key_commitment.clone(),
-            pk_seed: next_public_key.pk_seed.clone(),
-            hypertree_root: next_public_key.hypertree_root.clone(),
-        };
         let mut account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), expected);
         account
             .setStatefulPolicyRecoveryRotation(id(1))
@@ -1200,20 +1591,11 @@ mod tests {
             .enterRecoveryMode(id(1))
             .expect("owner can arm recovery mode");
         account.statelessSignaturesUsed = 7;
-        let context = RotationContext {
-            domain_separator: account.domainSeparator(),
-            nonce: account.nonce(),
-            key_version: account.keyVersion(),
-        };
-        let message =
-            verifier.full_rotation_message_hash(expected, &public_key, &context, &next_target);
-        let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &message).unwrap();
-        let signature = to_stateless_signature(&signature);
 
         account
-            .rotateFullKey(&public_key, &signature, &next_target)
+            .rotateFullKey(&public_key, &case.signature, &case.next_target)
             .expect("valid full rotation succeeds");
-        assert_eq!(account.currentShrincsPublicKey(), next_commitment);
+        assert_eq!(account.currentShrincsPublicKey(), case.next_commitment);
         assert_eq!(account.keyVersion()[HASH_LEN - 1], 1);
         assert_eq!(account.nonce()[HASH_LEN - 1], 1);
         assert_eq!(account.statelessSignaturesUsed(), 0);
@@ -1429,22 +1811,9 @@ mod tests {
     )]
     #[test]
     fn stateful_only_rotation_at_budget_boundary_lands_exhausted() {
-        let verifier = ShrincsVerifier::new();
-        let (signing_key, public_key) =
-            fixture_or_fresh_key("account boundary rotate seed", 4);
-        let (_, next_public_key) =
-            fixture_or_fresh_key("account boundary rotate next seed", 8);
-        let public_key = to_public_key(&public_key);
+        let case = &cached_account_signature_fixtures().rotate_stateful_boundary;
+        let public_key = case.public_key.clone();
         let expected = expected_key(&public_key);
-        let next_commitment = public_key_commitment(
-            &next_public_key.stateful_public_key,
-            &public_key.pk_seed,
-            &public_key.hypertree_root,
-        );
-        let next_target = StatefulRotationTarget {
-            stateful_public_key: next_public_key.stateful_public_key.clone(),
-            public_key_commitment: next_commitment.to_vec(),
-        };
         let mut account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), expected);
         account
             .setStatefulPolicyRecoveryRotation(id(1))
@@ -1453,19 +1822,10 @@ mod tests {
             .enterRecoveryMode(id(1))
             .expect("owner can arm recovery mode");
         account.statelessSignaturesUsed = STATELESS_SIGNATURE_LIMIT - 1;
-        let context = RotationContext {
-            domain_separator: account.domainSeparator(),
-            nonce: account.nonce(),
-            key_version: account.keyVersion(),
-        };
-        let message =
-            verifier.stateful_rotation_message_hash(expected, &public_key, &context, &next_target);
-        let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &message).unwrap();
-        let signature = to_stateless_signature(&signature);
 
         // The final budgeted stateless use may fund a stateful-only rotation...
         account
-            .rotateToFreshKey(&public_key, &signature, &next_target)
+            .rotateToFreshKey(&public_key, &case.signature, &case.next_target)
             .expect("final budgeted stateless use funds the rotation");
         // ...but the preserved counter lands the new epoch exhausted: the unchanged
         // stateless key has no remaining budget, so no stateless path remains.
@@ -1487,26 +1847,9 @@ mod tests {
     )]
     #[test]
     fn full_rotation_with_unchanged_stateless_key_preserves_usage() {
-        let verifier = ShrincsVerifier::new();
-        let (signing_key, public_key) =
-            fixture_or_fresh_key("account same stateless rotate seed", 4);
-        let (_, next_public_key) =
-            fixture_or_fresh_key("account same stateless rotate next seed", 8);
-        let public_key = to_public_key(&public_key);
+        let case = &cached_account_signature_fixtures().rotate_full_same_stateless;
+        let public_key = case.public_key.clone();
         let expected = expected_key(&public_key);
-        // Rotation target that installs a fresh stateful subkey but reuses the current
-        // stateless key material.
-        let next_commitment = public_key_commitment(
-            &next_public_key.stateful_public_key,
-            &public_key.pk_seed,
-            &public_key.hypertree_root,
-        );
-        let next_target = RotationTarget {
-            stateful_public_key: next_public_key.stateful_public_key.clone(),
-            public_key_commitment: next_commitment.to_vec(),
-            pk_seed: public_key.pk_seed.clone(),
-            hypertree_root: public_key.hypertree_root.clone(),
-        };
         let mut account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), expected);
         account
             .setStatefulPolicyRecoveryRotation(id(1))
@@ -1515,20 +1858,11 @@ mod tests {
             .enterRecoveryMode(id(1))
             .expect("owner can arm recovery mode");
         account.statelessSignaturesUsed = 7;
-        let context = RotationContext {
-            domain_separator: account.domainSeparator(),
-            nonce: account.nonce(),
-            key_version: account.keyVersion(),
-        };
-        let message =
-            verifier.full_rotation_message_hash(expected, &public_key, &context, &next_target);
-        let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &message).unwrap();
-        let signature = to_stateless_signature(&signature);
 
         account
-            .rotateFullKey(&public_key, &signature, &next_target)
+            .rotateFullKey(&public_key, &case.signature, &case.next_target)
             .expect("full rotation with unchanged stateless key succeeds");
-        assert_eq!(account.currentShrincsPublicKey(), next_commitment);
+        assert_eq!(account.currentShrincsPublicKey(), case.next_commitment);
         // The stateless key did not change, so its usage budget must NOT be refreshed.
         assert_eq!(account.statelessSignaturesUsed(), 8);
     }
@@ -1608,22 +1942,9 @@ mod tests {
         // A recovery rotation with a corrupted stateless signature must fail and
         // leave every piece of account state untouched (no key install, no nonce
         // or key-version advance, no stateless-usage consumption).
-        let verifier = ShrincsVerifier::new();
-        let (signing_key, public_key) =
-            fixture_or_fresh_key("account rotate tamper current seed", 4);
-        let (_, next_public_key) =
-            fixture_or_fresh_key("account rotate tamper next seed", 8);
-        let public_key = to_public_key(&public_key);
+        let case = &cached_account_signature_fixtures().rotate_stateful_tamper;
+        let public_key = case.public_key.clone();
         let expected = expected_key(&public_key);
-        let next_commitment = public_key_commitment(
-            &next_public_key.stateful_public_key,
-            &public_key.pk_seed,
-            &public_key.hypertree_root,
-        );
-        let next_target = StatefulRotationTarget {
-            stateful_public_key: next_public_key.stateful_public_key.clone(),
-            public_key_commitment: next_commitment.to_vec(),
-        };
         let mut account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), expected);
         account
             .setStatefulPolicyRecoveryRotation(id(1))
@@ -1632,20 +1953,12 @@ mod tests {
             .enterRecoveryMode(id(1))
             .expect("owner can arm recovery mode");
         account.statelessSignaturesUsed = 7;
-        let context = RotationContext {
-            domain_separator: account.domainSeparator(),
-            nonce: account.nonce(),
-            key_version: account.keyVersion(),
-        };
-        let message =
-            verifier.stateful_rotation_message_hash(expected, &public_key, &context, &next_target);
-        let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &message).unwrap();
-        let mut signature = to_stateless_signature(&signature);
+        let mut signature = case.signature.clone();
         // Corrupt the recovery signature so FORS-C verification fails.
         signature.fors.randomizer[0] ^= 0xff;
 
         assert_eq!(
-            account.rotateToFreshKey(&public_key, &signature, &next_target),
+            account.rotateToFreshKey(&public_key, &signature, &case.next_target),
             Err(AccountError::InvalidSignature)
         );
         assert_eq!(account.currentShrincsPublicKey(), expected);
@@ -1663,29 +1976,16 @@ mod tests {
     fn verify_stateless_action_rejects_tampered_signature() {
         // A stateless action with a corrupted signature must fail with a distinct
         // InvalidSignature and leave the nonce and stateless-usage counter untouched.
-        let verifier = ShrincsVerifier::new();
-        let (signing_key, public_key) =
-            fixture_or_fresh_key("account stateless tamper seed", 4);
-        let public_key = to_public_key(&public_key);
+        let case = &cached_account_signature_fixtures().stateless_tamper;
+        let public_key = case.public_key.clone();
         let expected = expected_key(&public_key);
         let mut account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), expected);
-        let action_type = [5u8; HASH_LEN];
-        let payload_hash = [6u8; HASH_LEN];
-        let context = ActionContext {
-            domain_separator: account.domainSeparator(),
-            nonce: account.nonce(),
-            key_version: account.keyVersion(),
-            action_type,
-            payload_hash,
-        };
-        let message = verifier.stateless_action_message_hash(expected, &context);
-        let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &message).unwrap();
-        let mut signature = to_stateless_signature(&signature);
+        let mut signature = case.signature.clone();
         // Corrupt the FORS randomizer so verification fails after the policy gates pass.
         signature.fors.randomizer[0] ^= 0xff;
 
         assert_eq!(
-            account.verifyStatelessAction(&public_key, action_type, payload_hash, &signature),
+            account.verifyStatelessAction(&public_key, case.action_type, case.payload_hash, &signature),
             Err(AccountError::InvalidSignature)
         );
         assert_eq!(account.nonce(), [0u8; HASH_LEN]);
@@ -1701,31 +2001,17 @@ mod tests {
         // Present a fully valid key-B stateless signature over the account's canonical
         // message while key A is installed. The account must reject (B's commitment is
         // not the installed key) and advance no freshness or usage state.
-        let verifier = ShrincsVerifier::new();
-        let (_, key_a) = fixture_or_fresh_key("account stateless wrong-key A", 4);
-        let (signing_b, key_b) =
-            fixture_or_fresh_key("account stateless wrong-key B", 4);
-        let key_a = to_public_key(&key_a);
-        let key_b = to_public_key(&key_b);
-        let expected_a = expected_key(&key_a);
+        let case = &cached_account_signature_fixtures().stateless_wrong_key;
+        let expected_a = expected_key(&case.installed_public_key);
         let mut account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), expected_a);
-        let action_type = [5u8; HASH_LEN];
-        let payload_hash = [6u8; HASH_LEN];
-        let context = ActionContext {
-            domain_separator: account.domainSeparator(),
-            nonce: account.nonce(),
-            key_version: account.keyVersion(),
-            action_type,
-            payload_hash,
-        };
-        // Sign the account's canonical message with B's key: valid under B, but B is
-        // not the installed key.
-        let message = verifier.stateless_action_message_hash(expected_a, &context);
-        let signature = ShrincsSigner::sign_stateless_raw(&signing_b, &message).unwrap();
-        let signature = to_stateless_signature(&signature);
 
         assert_eq!(
-            account.verifyStatelessAction(&key_b, action_type, payload_hash, &signature),
+            account.verifyStatelessAction(
+                &case.signing_public_key,
+                case.action_type,
+                case.payload_hash,
+                &case.signature,
+            ),
             Err(AccountError::InvalidSignature)
         );
         assert_eq!(account.currentShrincsPublicKey(), expected_a);

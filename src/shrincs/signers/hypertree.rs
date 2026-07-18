@@ -308,22 +308,25 @@ fn sign_stateless_wots_c(
             message,
         );
         let digest = &digest[..digest_bytes];
-        let digits = (0..NUM_WOTS_CHAINS as usize)
-            .map(|index| base_w_digit(WOTS_CHAIN_LEN, digest, index))
-            .collect::<Vec<_>>();
-        if digits.iter().sum::<u32>() != WOTS_TARGET_SUM_STATELESS {
+        let mut digits = [0u32; NUM_WOTS_CHAINS as usize];
+        let mut digit_sum = 0u32;
+        for (index, digit) in digits.iter_mut().enumerate() {
+            let value = base_w_digit(WOTS_CHAIN_LEN, digest, index);
+            *digit = value;
+            digit_sum += value;
+        }
+        if digit_sum != WOTS_TARGET_SUM_STATELESS {
             continue;
         }
 
-        let chains = digits
-            .iter()
-            .enumerate()
-            .map(|(chain, digit)| {
-                // A signature chain stops at the selected digit. The verifier
-                // continues the chain from that digit to the endpoint and checks
-                // that the reconstructed public-key hash matches `pk_hash`.
-                // The chain start is private WOTS material; zeroize it on drop.
-                let secret = Zeroizing::new(stateless_wots_c_secret(seeds.sk_seed, chain as u32));
+        let mut chains = Vec::with_capacity(NUM_WOTS_CHAINS as usize);
+        for (chain, digit) in digits.iter().enumerate() {
+            // A signature chain stops at the selected digit. The verifier
+            // continues the chain from that digit to the endpoint and checks
+            // that the reconstructed public-key hash matches `pk_hash`.
+            // The chain start is private WOTS material; zeroize it on drop.
+            let secret = Zeroizing::new(stateless_wots_c_secret(seeds.sk_seed, chain as u32));
+            chains.push(
                 stateless_wots_c_chain(
                     seeds.pk_seed,
                     &coords.chain(chain as u32),
@@ -331,9 +334,9 @@ fn sign_stateless_wots_c(
                     0,
                     *digit,
                 )
-                .to_vec()
-            })
-            .collect();
+                .to_vec(),
+            );
+        }
         return Some(WotsCSignature {
             randomizer: randomizer.to_vec(),
             counter,

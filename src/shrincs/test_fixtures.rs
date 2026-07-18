@@ -24,11 +24,17 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use super::signers::types::ShrincsSigningKey;
-use super::{PublicKey, HASH_LEN};
+use super::{
+    ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey, RotationTarget,
+    StatefulRotationTarget, StatelessSignature, WotsCSignature, HASH_LEN,
+};
 
 pub(crate) const FIXTURE_PATH_ENV: &str = "SHRINCS_TEST_KEY_FIXTURE_PATH";
 pub(crate) const KEY_MODE_ENV: &str = "SHRINCS_TEST_KEY_MODE";
 pub(crate) const DEFAULT_FIXTURE_PATH: &str = "tests/test_fixtures/account_keys.json";
+pub(crate) const ACCOUNT_CASES_FIXTURE_PATH_ENV: &str = "SHRINCS_TEST_ACCOUNT_CASES_FIXTURE_PATH";
+pub(crate) const DEFAULT_ACCOUNT_CASES_FIXTURE_PATH: &str =
+    "tests/test_fixtures/account_signature_cases.json";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TestKeyMode {
@@ -138,10 +144,249 @@ pub(crate) struct KeyFixtureFile {
     pub(crate) entries: Vec<KeyFixtureEntry>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct ForsEntryDto {
+    pub(crate) secret_leaf: Vec<u8>,
+    pub(crate) auth_path: Vec<Vec<u8>>,
+}
+
+impl From<&ForsEntry> for ForsEntryDto {
+    fn from(value: &ForsEntry) -> Self {
+        Self {
+            secret_leaf: value.secret_leaf.clone(),
+            auth_path: value.auth_path.clone(),
+        }
+    }
+}
+
+impl From<ForsEntryDto> for ForsEntry {
+    fn from(value: ForsEntryDto) -> Self {
+        Self {
+            secret_leaf: value.secret_leaf,
+            auth_path: value.auth_path,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct ForsSignatureDto {
+    pub(crate) randomizer: Vec<u8>,
+    pub(crate) counter: u32,
+    pub(crate) entries: Vec<ForsEntryDto>,
+}
+
+impl From<&ForsSignature> for ForsSignatureDto {
+    fn from(value: &ForsSignature) -> Self {
+        Self {
+            randomizer: value.randomizer.clone(),
+            counter: value.counter,
+            entries: value.entries.iter().map(ForsEntryDto::from).collect(),
+        }
+    }
+}
+
+impl From<ForsSignatureDto> for ForsSignature {
+    fn from(value: ForsSignatureDto) -> Self {
+        Self {
+            randomizer: value.randomizer,
+            counter: value.counter,
+            entries: value.entries.into_iter().map(ForsEntry::from).collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct WotsCSignatureDto {
+    pub(crate) randomizer: Vec<u8>,
+    pub(crate) counter: u32,
+    pub(crate) chains: Vec<Vec<u8>>,
+}
+
+impl From<&WotsCSignature> for WotsCSignatureDto {
+    fn from(value: &WotsCSignature) -> Self {
+        Self {
+            randomizer: value.randomizer.clone(),
+            counter: value.counter,
+            chains: value.chains.clone(),
+        }
+    }
+}
+
+impl From<WotsCSignatureDto> for WotsCSignature {
+    fn from(value: WotsCSignatureDto) -> Self {
+        Self {
+            randomizer: value.randomizer,
+            counter: value.counter,
+            chains: value.chains,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct HypertreeLayerSignatureDto {
+    pub(crate) wots_c_pk_hash: Vec<u8>,
+    pub(crate) wots_c_signature: WotsCSignatureDto,
+    pub(crate) auth_path: Vec<Vec<u8>>,
+}
+
+impl From<&HypertreeLayerSignature> for HypertreeLayerSignatureDto {
+    fn from(value: &HypertreeLayerSignature) -> Self {
+        Self {
+            wots_c_pk_hash: value.wots_c_pk_hash.clone(),
+            wots_c_signature: WotsCSignatureDto::from(&value.wots_c_signature),
+            auth_path: value.auth_path.clone(),
+        }
+    }
+}
+
+impl From<HypertreeLayerSignatureDto> for HypertreeLayerSignature {
+    fn from(value: HypertreeLayerSignatureDto) -> Self {
+        Self {
+            wots_c_pk_hash: value.wots_c_pk_hash,
+            wots_c_signature: value.wots_c_signature.into(),
+            auth_path: value.auth_path,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct StatelessSignatureDto {
+    pub(crate) fors: ForsSignatureDto,
+    pub(crate) hypertree: Vec<HypertreeLayerSignatureDto>,
+}
+
+impl From<&StatelessSignature> for StatelessSignatureDto {
+    fn from(value: &StatelessSignature) -> Self {
+        Self {
+            fors: ForsSignatureDto::from(&value.fors),
+            hypertree: value
+                .hypertree
+                .iter()
+                .map(HypertreeLayerSignatureDto::from)
+                .collect(),
+        }
+    }
+}
+
+impl From<StatelessSignatureDto> for StatelessSignature {
+    fn from(value: StatelessSignatureDto) -> Self {
+        Self {
+            fors: value.fors.into(),
+            hypertree: value.hypertree.into_iter().map(HypertreeLayerSignature::from).collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct StatefulRotationTargetDto {
+    pub(crate) stateful_public_key: Vec<u8>,
+    pub(crate) public_key_commitment: Vec<u8>,
+}
+
+impl From<&StatefulRotationTarget> for StatefulRotationTargetDto {
+    fn from(value: &StatefulRotationTarget) -> Self {
+        Self {
+            stateful_public_key: value.stateful_public_key.clone(),
+            public_key_commitment: value.public_key_commitment.clone(),
+        }
+    }
+}
+
+impl From<StatefulRotationTargetDto> for StatefulRotationTarget {
+    fn from(value: StatefulRotationTargetDto) -> Self {
+        Self {
+            stateful_public_key: value.stateful_public_key,
+            public_key_commitment: value.public_key_commitment,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct RotationTargetDto {
+    pub(crate) stateful_public_key: Vec<u8>,
+    pub(crate) public_key_commitment: Vec<u8>,
+    pub(crate) pk_seed: Vec<u8>,
+    pub(crate) hypertree_root: Vec<u8>,
+}
+
+impl From<&RotationTarget> for RotationTargetDto {
+    fn from(value: &RotationTarget) -> Self {
+        Self {
+            stateful_public_key: value.stateful_public_key.clone(),
+            public_key_commitment: value.public_key_commitment.clone(),
+            pk_seed: value.pk_seed.clone(),
+            hypertree_root: value.hypertree_root.clone(),
+        }
+    }
+}
+
+impl From<RotationTargetDto> for RotationTarget {
+    fn from(value: RotationTargetDto) -> Self {
+        Self {
+            stateful_public_key: value.stateful_public_key,
+            public_key_commitment: value.public_key_commitment,
+            pk_seed: value.pk_seed,
+            hypertree_root: value.hypertree_root,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct AccountStatelessActionCaseDto {
+    pub(crate) public_key: PublicKeyDto,
+    pub(crate) action_type: [u8; HASH_LEN],
+    pub(crate) payload_hash: [u8; HASH_LEN],
+    pub(crate) signature: StatelessSignatureDto,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct AccountStatefulRotationCaseDto {
+    pub(crate) public_key: PublicKeyDto,
+    pub(crate) next_target: StatefulRotationTargetDto,
+    pub(crate) next_commitment: [u8; HASH_LEN],
+    pub(crate) signature: StatelessSignatureDto,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct AccountFullRotationCaseDto {
+    pub(crate) public_key: PublicKeyDto,
+    pub(crate) next_target: RotationTargetDto,
+    pub(crate) next_commitment: [u8; HASH_LEN],
+    pub(crate) signature: StatelessSignatureDto,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct AccountWrongKeyStatelessActionCaseDto {
+    pub(crate) installed_public_key: PublicKeyDto,
+    pub(crate) signing_public_key: PublicKeyDto,
+    pub(crate) action_type: [u8; HASH_LEN],
+    pub(crate) payload_hash: [u8; HASH_LEN],
+    pub(crate) signature: StatelessSignatureDto,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct AccountSignatureFixtureFile {
+    pub(crate) profile_name: String,
+    pub(crate) stateless_action: AccountStatelessActionCaseDto,
+    pub(crate) rotate_stateful: AccountStatefulRotationCaseDto,
+    pub(crate) rotate_stateful_boundary: AccountStatefulRotationCaseDto,
+    pub(crate) rotate_stateful_tamper: AccountStatefulRotationCaseDto,
+    pub(crate) rotate_full: AccountFullRotationCaseDto,
+    pub(crate) rotate_full_same_stateless: AccountFullRotationCaseDto,
+    pub(crate) stateless_tamper: AccountStatelessActionCaseDto,
+    pub(crate) stateless_wrong_key: AccountWrongKeyStatelessActionCaseDto,
+}
+
 pub(crate) fn fixture_path() -> PathBuf {
     env::var_os(FIXTURE_PATH_ENV)
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(DEFAULT_FIXTURE_PATH))
+}
+
+pub(crate) fn account_cases_fixture_path() -> PathBuf {
+    env::var_os(ACCOUNT_CASES_FIXTURE_PATH_ENV)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_ACCOUNT_CASES_FIXTURE_PATH))
 }
 
 pub(crate) fn load_fixture_file(path: &Path) -> KeyFixtureFile {
@@ -162,10 +407,47 @@ pub(crate) fn write_fixture_file(path: &Path, fixture_file: &KeyFixtureFile) {
             )
         });
     }
-    let json = serde_json::to_string_pretty(fixture_file)
+    let json = serde_json::to_string(fixture_file)
         .expect("fixture file must serialize");
     fs::write(path, json).unwrap_or_else(|error| {
         panic!("failed to write fixture file {}: {error}", path.display())
+    });
+}
+
+pub(crate) fn load_account_cases_fixture_file(path: &Path) -> AccountSignatureFixtureFile {
+    let json = fs::read_to_string(path).unwrap_or_else(|error| {
+        panic!(
+            "failed to read account cases fixture file {}: {error}",
+            path.display()
+        )
+    });
+    serde_json::from_str(&json).unwrap_or_else(|error| {
+        panic!(
+            "failed to parse account cases fixture file {}: {error}",
+            path.display()
+        )
+    })
+}
+
+pub(crate) fn write_account_cases_fixture_file(
+    path: &Path,
+    fixture_file: &AccountSignatureFixtureFile,
+) {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).unwrap_or_else(|error| {
+            panic!(
+                "failed to create fixture directory {}: {error}",
+                parent.display()
+            )
+        });
+    }
+    let json = serde_json::to_string(fixture_file)
+        .expect("account cases fixture file must serialize");
+    fs::write(path, json).unwrap_or_else(|error| {
+        panic!(
+            "failed to write account cases fixture file {}: {error}",
+            path.display()
+        )
     });
 }
 
@@ -173,11 +455,18 @@ pub(crate) fn fixture_entry<'a>(
     fixture_file: &'a KeyFixtureFile,
     seed_label: &str,
 ) -> &'a KeyFixtureEntry {
+    fixture_entry_opt(fixture_file, seed_label)
+        .unwrap_or_else(|| panic!("missing fixture entry for seed label {seed_label:?}"))
+}
+
+pub(crate) fn fixture_entry_opt<'a>(
+    fixture_file: &'a KeyFixtureFile,
+    seed_label: &str,
+) -> Option<&'a KeyFixtureEntry> {
     fixture_file
         .entries
         .iter()
         .find(|entry| entry.seed_label == seed_label)
-        .unwrap_or_else(|| panic!("missing fixture entry for seed label {seed_label:?}"))
 }
 
 pub(crate) fn fixture_pair(entry: &KeyFixtureEntry) -> (ShrincsSigningKey, PublicKey) {
@@ -190,6 +479,11 @@ pub(crate) fn fixture_pair(entry: &KeyFixtureEntry) -> (ShrincsSigningKey, Publi
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::account::INITIAL_STATEFUL_LEAF_INDEX;
+    use crate::shrincs::components::public_key::encode_stateful_public_key;
+    use crate::shrincs::signers::types::ShrincsSigningKey;
+    use crate::shrincs::signers::utils::{derive32, public_key_from_components};
+    use crate::shrincs::signers::uxmss::stateful_subtree_root;
     use crate::shrincs::{PROFILE_NAME, ShrincsSigner};
 
     fn account_fixture_specs() -> [(&'static str, u32); 20] {
@@ -217,10 +511,52 @@ mod tests {
         ]
     }
 
+    fn account_stateful_only_fixture_specs() -> [(&'static str, u32); 5] {
+        [
+            ("account raw helper seed", 4),
+            ("account stateful action seed", 4),
+            ("account failed stateful freeze seed", 4),
+            ("account wrong-key installed A", 4),
+            ("account wrong-key attacker B", 4),
+        ]
+    }
+
+    fn stateful_only_key(seed: &[u8], max: u32) -> (ShrincsSigningKey, PublicKey) {
+        let stateful_sk_seed = derive32(b"shrincs-stateful-sk-seed", seed, &[]);
+        let stateful_prf_seed = derive32(b"shrincs-stateful-prf-seed", seed, &[]);
+        let stateful_pk_seed = derive32(b"shrincs-stateful-pk-seed", seed, &[]);
+        let stateful_root = stateful_subtree_root(
+            &stateful_sk_seed,
+            &stateful_pk_seed,
+            INITIAL_STATEFUL_LEAF_INDEX,
+            max,
+        );
+        let pk_seed = derive32(b"shrincs-pk-seed", seed, &[]);
+        let hypertree_root = derive32(b"placeholder-hypertree-root", seed, &[]);
+        let signing_key = ShrincsSigningKey {
+            stateful_sk_seed,
+            stateful_prf_seed,
+            stateful_pk_seed,
+            stateful_root,
+            max_stateful_signatures: max,
+            next_stateful_leaf_index: INITIAL_STATEFUL_LEAF_INDEX,
+            stateless_sk_seed: derive32(b"shrincs-stateless-sk-seed", seed, &[]),
+            stateless_prf_seed: derive32(b"shrincs-stateless-prf-seed", seed, &[]),
+            pk_seed,
+            hypertree_root,
+        };
+        let public_key = public_key_from_components(
+            encode_stateful_public_key(stateful_pk_seed, stateful_root, max),
+            pk_seed,
+            hypertree_root,
+        );
+        (signing_key, public_key)
+    }
+
     #[test]
     #[ignore = "writes checked-in test fixtures on demand"]
     fn write_account_key_fixture_file() {
-        let entries = account_fixture_specs()
+        let full_key_entries = account_fixture_specs()
             .into_iter()
             .map(|(seed_label, max_stateful_signatures)| {
                 let (signing_key, public_key) = ShrincsSigner::keygen(
@@ -238,7 +574,22 @@ mod tests {
                     public_key: PublicKeyDto::from(&public_key),
                 }
             })
-            .collect();
+            .collect::<Vec<_>>();
+        let stateful_only_entries = account_stateful_only_fixture_specs()
+            .into_iter()
+            .map(|(seed_label, max_stateful_signatures)| {
+                let (signing_key, public_key) =
+                    stateful_only_key(seed_label.as_bytes(), max_stateful_signatures);
+                KeyFixtureEntry {
+                    seed_label: seed_label.to_string(),
+                    signing_key: SigningKeyDto::from(&signing_key),
+                    public_key: PublicKeyDto::from(&public_key),
+                }
+            })
+            .collect::<Vec<_>>();
+        let mut entries = Vec::with_capacity(full_key_entries.len() + stateful_only_entries.len());
+        entries.extend(full_key_entries);
+        entries.extend(stateful_only_entries);
 
         let fixture_file = KeyFixtureFile {
             profile_name: PROFILE_NAME.to_string(),
