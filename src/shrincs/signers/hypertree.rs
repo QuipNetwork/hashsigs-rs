@@ -19,10 +19,11 @@
 
 use zeroize::Zeroizing;
 
+use super::super::components::hash::hypertree_address_word;
 use super::super::components::hypertree;
 use super::types::{ShrincsSignerResult, ShrincsSigningKey};
 use super::utils::{
-    base_w_digit, derive32, hash_packed, wots_digest_bytes, WOTS_C_MAX_GRIND_COUNTER,
+    base_w_digit, derive32, hash_node, hash_packed, wots_digest_bytes, WOTS_C_MAX_GRIND_COUNTER,
 };
 use super::super::types::{HypertreeLayerSignature, WotsCSignature, HASH_LEN};
 use super::super::profiles::{
@@ -72,6 +73,12 @@ struct WotsSeeds<'a> {
     prf_seed: &'a [u8; HASH_LEN],
 }
 
+struct HypertreeSubtree {
+    root: [u8; HASH_LEN],
+    selected_leaf_hash: [u8; HASH_LEN],
+    auth_path: Vec<Vec<u8>>,
+}
+
 pub(crate) fn sign_hypertree(
     signing_key: &ShrincsSigningKey,
     fors_root: [u8; HASH_LEN],
@@ -102,58 +109,38 @@ pub(crate) fn sign_hypertree(
     let mut leaf = bottom_leaf;
 
     for layer in 0..u32::from(NUM_HYPERTREE_LAYERS) {
-        // Each WOTS keypair is derived from its exact coordinate. This makes the
-        // stateless hypertree deterministic without storing every WOTS secret.
-        // The derived seed and per-keypair WOTS secret seed are private material,
-        // so they are zeroized on drop rather than left in freed stack memory.
-        let leaf_seed = Zeroizing::new(derive32(
-            b"hypertree-leaf-seed",
-            &layer_seeds[layer as usize],
-            &[tree.to_be_bytes().as_slice(), leaf.to_be_bytes().as_slice()].concat(),
-        ));
-        let sk_seed = Zeroizing::new(derive32(b"hypertree-wots-sk-seed", &*leaf_seed, &[]));
-        let coords = WotsKeypair {
-            layer,
-            tree,
-            keypair: leaf,
-        };
-
-        // The WOTS public-key hash is the Merkle leaf for this coordinate. It is
-        // included in the layer signature so the verifier can bind the WOTS-C
-        // chain reconstruction to the auth path that follows.
-        let pk_hash = stateless_wots_c_public_key(&signing_key.pk_seed, &sk_seed, &coords);
-        let seeds = WotsSeeds {
-            pk_seed: &signing_key.pk_seed,
-            sk_seed: &sk_seed,
-            prf_seed: &signing_key.stateless_prf_seed,
-        };
-        let wots_c_signature = sign_stateless_wots_c(&seeds, &coords, &pk_hash, &current)?;
-
-        // The auth path proves that this WOTS public-key hash belongs to the
-        // current layer's XMSS-like subtree at `tree`.
-        let auth_path = hypertree_auth_path(
+        // Build the whole subtree once, then reuse the selected leaf hash for
+        // signing and extract the auth path and next root from the same node
+        // table instead of recomputing them separately.
+        let subtree = hypertree_subtree(
             &signing_key.pk_seed,
             &layer_seeds[layer as usize],
             layer,
             tree,
             leaf,
         );
+        let coords = WotsKeypair { layer, tree, keypair: leaf };
+        let (_, sk_seed) = hypertree_leaf_seeds(&layer_seeds[layer as usize], tree, leaf);
+        let seeds = WotsSeeds {
+            pk_seed: &signing_key.pk_seed,
+            sk_seed: &sk_seed,
+            prf_seed: &signing_key.stateless_prf_seed,
+        };
+        let wots_c_signature =
+            sign_stateless_wots_c(&seeds, &coords, &subtree.selected_leaf_hash, &current)?;
+
+        // The auth path proves that this WOTS public-key hash belongs to the
+        // current layer's XMSS-like subtree at `tree`.
+        let auth_path = subtree.auth_path;
 
         // Compute the subtree root that the next hypertree layer must sign. This
         // is also what the verifier obtains after it applies the auth path.
-        current = hypertree_virtual_node(
-            &signing_key.pk_seed,
-            &layer_seeds[layer as usize],
-            layer,
-            tree,
-            subtree_height,
-            0,
-        );
+        current = subtree.root;
         // The tree/leaf coordinates are fully derived by the verifier (layer 0
         // from the FORS digest, upper layers by the recurrence below), so they
         // are not serialized into the signature.
         layers.push(HypertreeLayerSignature {
-            wots_c_pk_hash: pk_hash.to_vec(),
+            wots_c_pk_hash: subtree.selected_leaf_hash.to_vec(),
             wots_c_signature,
             auth_path,
         });
@@ -181,15 +168,14 @@ pub(crate) fn hypertree_public_root(
     // Lowest layer has 2^64/2^8 = 2^56 subtrees so 7 of 8 bits are used for the tree index
     let layer_seeds = hypertree_layer_seeds(stateless_sk_seed);
     let top_layer = u32::from(NUM_HYPERTREE_LAYERS - 1);
-    let subtree_height = u32::from(HYPERTREE_HEIGHT / NUM_HYPERTREE_LAYERS);
-    hypertree_virtual_node(
+    hypertree_subtree(
         pk_seed,
         &layer_seeds[top_layer as usize],
         top_layer,
         0,
-        subtree_height,
         0,
     )
+    .root
 }
 
 fn hypertree_layer_seeds(stateless_sk_seed: &[u8; HASH_LEN]) -> Vec<[u8; HASH_LEN]> {
@@ -200,30 +186,59 @@ fn hypertree_layer_seeds(stateless_sk_seed: &[u8; HASH_LEN]) -> Vec<[u8; HASH_LE
         .collect()
 }
 
-fn hypertree_virtual_node(
+fn hypertree_subtree(
     pk_seed: &[u8; HASH_LEN],
     layer_seed: &[u8; HASH_LEN],
     layer: u32,
     tree: u64,
-    height: u32,
-    index: u32,
-) -> [u8; HASH_LEN] {
-    hypertree::hypertree_virtual_node_from(pk_seed, layer, tree, height, index, &|leaf_index| {
-        hypertree_leaf(pk_seed, layer_seed, layer, tree, leaf_index)
-    })
+    selected_leaf: u32,
+) -> HypertreeSubtree {
+    let subtree_height = u32::from(HYPERTREE_HEIGHT / NUM_HYPERTREE_LAYERS);
+    let leaf_count = 1usize << subtree_height;
+    let mut current_level = Vec::with_capacity(leaf_count);
+    for leaf in 0..leaf_count as u32 {
+        current_level.push(hypertree_leaf(pk_seed, layer_seed, layer, tree, leaf));
+    }
+
+    let selected_leaf_hash = current_level[selected_leaf as usize];
+    let mut auth_path = Vec::with_capacity(subtree_height as usize);
+    let mut index = selected_leaf as usize;
+
+    for node_height in 1..=subtree_height {
+        auth_path.push(current_level[index ^ 1].to_vec());
+        let mut parents = Vec::with_capacity(current_level.len() / 2);
+        for (parent_index, pair) in current_level.chunks_exact(2).enumerate() {
+            let address_word = hypertree_address_word(layer, tree, node_height, parent_index as u64);
+            parents.push(hash_node(&[
+                b"hypertree-node".as_ref(),
+                pk_seed.as_ref(),
+                address_word.as_ref(),
+                pair[0].as_ref(),
+                pair[1].as_ref(),
+            ]));
+        }
+        current_level = parents;
+        index >>= 1;
+    }
+
+    HypertreeSubtree {
+        root: current_level[0],
+        selected_leaf_hash,
+        auth_path,
+    }
 }
 
-fn hypertree_auth_path(
-    pk_seed: &[u8; HASH_LEN],
+fn hypertree_leaf_seeds(
     layer_seed: &[u8; HASH_LEN],
-    layer: u32,
     tree: u64,
     leaf: u32,
-) -> Vec<Vec<u8>> {
-    let subtree_height = u32::from(HYPERTREE_HEIGHT / NUM_HYPERTREE_LAYERS);
-    hypertree::hypertree_auth_path_from(subtree_height, leaf, &|level, sibling| {
-        hypertree_virtual_node(pk_seed, layer_seed, layer, tree, level, sibling)
-    })
+) -> (Zeroizing<[u8; HASH_LEN]>, Zeroizing<[u8; HASH_LEN]>) {
+    let mut leaf_context = [0u8; 12];
+    leaf_context[..8].copy_from_slice(&tree.to_be_bytes());
+    leaf_context[8..].copy_from_slice(&leaf.to_be_bytes());
+    let leaf_seed = Zeroizing::new(derive32(b"hypertree-leaf-seed", layer_seed, &leaf_context));
+    let sk_seed = Zeroizing::new(derive32(b"hypertree-wots-sk-seed", &*leaf_seed, &[]));
+    (leaf_seed, sk_seed)
 }
 
 fn hypertree_leaf(
@@ -236,12 +251,7 @@ fn hypertree_leaf(
     // A hypertree leaf is the public hash of the stateless WOTS-C keypair at this
     // coordinate. No per-leaf secret is stored; it is derived from `layer_seed`.
     // The derived seed and WOTS secret seed are zeroized on drop.
-    let leaf_seed = Zeroizing::new(derive32(
-        b"hypertree-leaf-seed",
-        layer_seed,
-        &[tree.to_be_bytes().as_slice(), leaf.to_be_bytes().as_slice()].concat(),
-    ));
-    let sk_seed = Zeroizing::new(derive32(b"hypertree-wots-sk-seed", &*leaf_seed, &[]));
+    let (_leaf_seed, sk_seed) = hypertree_leaf_seeds(layer_seed, tree, leaf);
     let coords = WotsKeypair {
         layer,
         tree,

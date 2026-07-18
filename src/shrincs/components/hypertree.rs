@@ -172,55 +172,6 @@ pub(crate) fn stateless_wots_public_key_hash(
     hash_node(&[b"wots-c-pk".as_ref(), pk_seed.as_ref(), packed.as_slice()])
 }
 
-pub(crate) fn hypertree_virtual_node_from<F>(
-    pk_seed: &[u8; HASH_LEN],
-    layer: u32,
-    tree: u64,
-    height: u32,
-    index: u32,
-    leaf_fn: &F,
-) -> [u8; HASH_LEN]
-where
-    F: Fn(u32) -> [u8; HASH_LEN],
-{
-    if height == 0 {
-        return leaf_fn(index);
-    }
-    let left = hypertree_virtual_node_from(pk_seed, layer, tree, height - 1, index << 1, leaf_fn);
-    let right = hypertree_virtual_node_from(
-        pk_seed,
-        layer,
-        tree,
-        height - 1,
-        (index << 1) | 1,
-        leaf_fn,
-    );
-    let address_word = hypertree_address_word(layer, tree, height, u64::from(index));
-    hash_node(&[
-        b"hypertree-node".as_ref(),
-        pk_seed.as_ref(),
-        address_word.as_ref(),
-        left.as_ref(),
-        right.as_ref(),
-    ])
-}
-
-pub(crate) fn hypertree_auth_path_from<F>(
-    subtree_height: u32,
-    leaf: u32,
-    leaf_fn: &F,
-) -> Vec<Vec<u8>>
-where
-    F: Fn(u32, u32) -> [u8; HASH_LEN],
-{
-    (0..subtree_height)
-        .map(|level| {
-            let sibling = (leaf >> level) ^ 1;
-            leaf_fn(level, sibling).to_vec()
-        })
-        .collect()
-}
-
 fn verify_wots_c32(
     pk_seed_bytes: &[u8],
     layer: u32,
