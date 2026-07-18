@@ -154,18 +154,18 @@ cargo test
 Run a specific non-default profile:
 
 ```bash
-cargo test --features profile-256s-sha2
-cargo test --features profile-128s-q18
-cargo test --features profile-128s-q20
+cargo test --no-default-features --features profile-256s-sha2
+cargo test --no-default-features --features profile-128s-q18
+cargo test --no-default-features --features profile-128s-q20
 ```
 
 For a fast compile-only check:
 
 ```bash
 cargo test --no-run
-cargo test --no-run --features profile-256s-sha2
-cargo test --no-run --features profile-128s-q18
-cargo test --no-run --features profile-128s-q20
+cargo test --no-run --no-default-features --features profile-256s-sha2
+cargo test --no-run --no-default-features --features profile-128s-q18
+cargo test --no-run --no-default-features --features profile-128s-q20
 ```
 
 Select at most one explicit profile feature at a time:
@@ -180,9 +180,9 @@ To regenerate the ignored SHRINCS golden vectors for the active profile:
 
 ```bash
 cargo test generate_shrincs_sphincs_vectors -- --ignored --nocapture
-cargo test --features profile-256s-sha2 generate_shrincs_sphincs_vectors -- --ignored --nocapture
-cargo test --features profile-128s-q18 generate_shrincs_sphincs_vectors -- --ignored --nocapture
-cargo test --features profile-128s-q20 generate_shrincs_sphincs_vectors -- --ignored --nocapture
+cargo test --no-default-features --features profile-256s-sha2 generate_shrincs_sphincs_vectors -- --ignored --nocapture
+cargo test --no-default-features --features profile-128s-q18 generate_shrincs_sphincs_vectors -- --ignored --nocapture
+cargo test --no-default-features --features profile-128s-q20 generate_shrincs_sphincs_vectors -- --ignored --nocapture
 ```
 
 ### Fast Local Loops
@@ -915,17 +915,33 @@ cp /path/to/hashsigs-solidity/test/test_vectors/shrincs_account_wrapper_vectors.
   tests/test_vectors/shrincs_account_wrapper_vectors.json
 ```
 
-Today the committed Rust-side account-wrapper cross-check fixture exists only
-for the default `shrincs-256s-keccak` profile. The alternate Rust profile legs
-(`256s-sha2`, `128s-q18`, `128s-q20`) therefore ignore
+For the `shrincs-256s-sha2` profile:
+
+```bash
+# in hashsigs-solidity
+FOUNDRY_PROFILE=256s-sha2-export \
+  bash dev/export-account-vectors.sh \
+  test/test_vectors/shrincs_account_wrapper_vectors_256s_sha2.json
+
+# copy the generated JSON into hashsigs-rs manually
+cp /path/to/hashsigs-solidity/test/test_vectors/shrincs_account_wrapper_vectors_256s_sha2.json \
+  tests/test_vectors/shrincs_account_wrapper_vectors_256s_sha2.json
+```
+
+Today the committed Rust-side account-wrapper cross-check fixtures exist for:
+
+- `shrincs-256s-keccak`
+- `shrincs-256s-sha2`
+
+The `128s-q18` and `128s-q20` profile legs still ignore
 `tests/solidity_account_vectors.rs` unless matching per-profile Solidity export
 files are generated and copied in under profile-specific filenames.
 
-Then run the Rust-side cross-check. The tests are `#[ignore]`d because the
-fixture is copied in manually, so pass `--ignored` explicitly:
+Then run the Rust-side cross-check:
 
 ```bash
-cargo test --test solidity_account_vectors -- --ignored
+cargo test --test solidity_account_vectors
+cargo test --no-default-features --features profile-256s-sha2 --test solidity_account_vectors
 ```
 
 Generate the kth stateful gas vector for Solidity gas benchmarks. The

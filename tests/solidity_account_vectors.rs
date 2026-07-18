@@ -16,8 +16,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 use std::fs;
+use std::io::Read;
 use std::path::PathBuf;
 
+use flate2::read::GzDecoder;
 use hashsigs_rs::shrincs::{
     ActionContext, ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey, RotationContext,
     RotationTarget, ShrincsVerifier, StatefulRotationTarget, StatefulSignature, StatelessSignature,
@@ -341,15 +343,35 @@ fn vectors_filename() -> &'static str {
 
 fn load_vectors() -> Value {
     let path = vectors_path();
-    let encoded = fs::read_to_string(&path).unwrap_or_else(|error| {
+    let encoded = read_json_or_gzip(&path).unwrap_or_else(|error| {
+        let gz_path = gz_path(&path);
         panic!(
-            "failed to read Solidity account vectors at {}: {error}. \
+            "failed to read Solidity account vectors at {} or {}: {error}. \
              Generate the matching profile's account-wrapper vectors in \
              hashsigs-solidity and copy the JSON here manually.",
-            path.display()
+            path.display(),
+            gz_path.display()
         )
     });
     serde_json::from_str(&encoded).expect("failed to parse Solidity account vectors JSON")
+}
+
+fn gz_path(path: &PathBuf) -> PathBuf {
+    PathBuf::from(format!("{}.gz", path.display()))
+}
+
+fn read_json_or_gzip(path: &PathBuf) -> std::io::Result<String> {
+    match fs::read_to_string(path) {
+        Ok(text) => Ok(text),
+        Err(json_error) => {
+            let gz_path = gz_path(path);
+            let file = fs::File::open(&gz_path).map_err(|_| json_error)?;
+            let mut decoder = GzDecoder::new(file);
+            let mut text = String::new();
+            decoder.read_to_string(&mut text)?;
+            Ok(text)
+        }
+    }
 }
 
 fn hex_to_bytes(hex: &str) -> Vec<u8> {
@@ -366,12 +388,8 @@ fn bytes32_from_vec(bytes: &[u8]) -> [u8; HASH_LEN] {
 }
 
 #[cfg_attr(
-    any(
-        shrincs_profile_256s_sha2,
-        shrincs_profile_128s_q18,
-        shrincs_profile_128s_q20
-    ),
-    ignore = "no matching Solidity account-wrapper fixture is committed for this profile"
+    any(shrincs_profile_128s_q18, shrincs_profile_128s_q20),
+    ignore = "no matching Solidity account-wrapper fixture is committed for this profile; generate it in hashsigs-solidity with FOUNDRY_PROFILE=<profile> bash dev/export-account-vectors.sh test/test_vectors/<profile-specific-name>.json, then copy it into hashsigs-rs/tests/test_vectors/"
 )]
 #[test]
 fn solidity_exported_stateful_action_vector_verifies_in_rust() {
@@ -409,12 +427,8 @@ fn solidity_exported_stateful_action_vector_verifies_in_rust() {
 }
 
 #[cfg_attr(
-    any(
-        shrincs_profile_256s_sha2,
-        shrincs_profile_128s_q18,
-        shrincs_profile_128s_q20
-    ),
-    ignore = "no matching Solidity account-wrapper fixture is committed for this profile"
+    any(shrincs_profile_128s_q18, shrincs_profile_128s_q20),
+    ignore = "no matching Solidity account-wrapper fixture is committed for this profile; generate it in hashsigs-solidity with FOUNDRY_PROFILE=<profile> bash dev/export-account-vectors.sh test/test_vectors/<profile-specific-name>.json, then copy it into hashsigs-rs/tests/test_vectors/"
 )]
 #[test]
 fn solidity_exported_stateless_action_vector_verifies_in_rust() {
@@ -452,12 +466,8 @@ fn solidity_exported_stateless_action_vector_verifies_in_rust() {
 }
 
 #[cfg_attr(
-    any(
-        shrincs_profile_256s_sha2,
-        shrincs_profile_128s_q18,
-        shrincs_profile_128s_q20
-    ),
-    ignore = "no matching Solidity account-wrapper fixture is committed for this profile"
+    any(shrincs_profile_128s_q18, shrincs_profile_128s_q20),
+    ignore = "no matching Solidity account-wrapper fixture is committed for this profile; generate it in hashsigs-solidity with FOUNDRY_PROFILE=<profile> bash dev/export-account-vectors.sh test/test_vectors/<profile-specific-name>.json, then copy it into hashsigs-rs/tests/test_vectors/"
 )]
 #[test]
 fn solidity_exported_stateful_only_rotation_vector_verifies_in_rust() {
@@ -509,12 +519,8 @@ fn solidity_exported_stateful_only_rotation_vector_verifies_in_rust() {
 }
 
 #[cfg_attr(
-    any(
-        shrincs_profile_256s_sha2,
-        shrincs_profile_128s_q18,
-        shrincs_profile_128s_q20
-    ),
-    ignore = "no matching Solidity account-wrapper fixture is committed for this profile"
+    any(shrincs_profile_128s_q18, shrincs_profile_128s_q20),
+    ignore = "no matching Solidity account-wrapper fixture is committed for this profile; generate it in hashsigs-solidity with FOUNDRY_PROFILE=<profile> bash dev/export-account-vectors.sh test/test_vectors/<profile-specific-name>.json, then copy it into hashsigs-rs/tests/test_vectors/"
 )]
 #[test]
 fn solidity_exported_full_rotation_vector_verifies_in_rust() {

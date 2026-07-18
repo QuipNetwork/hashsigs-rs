@@ -33,8 +33,10 @@
 //! `review` bead).
 
 use std::fs;
+use std::io::Read;
 use std::path::PathBuf;
 
+use flate2::read::GzDecoder;
 use serde_json::Value;
 
 use super::verifier::{
@@ -76,13 +78,33 @@ fn vector_filename() -> &'static str {
 }
 
 fn load_vectors() -> Value {
-    let raw = fs::read_to_string(vector_path()).unwrap_or_else(|error| {
+    let path = vector_path();
+    let raw = read_json_or_gzip(&path).unwrap_or_else(|error| {
         panic!(
-            "failed to read committed golden vector at {}: {error}",
-            vector_path().display()
+            "failed to read committed golden vector at {} or {}: {error}",
+            path.display(),
+            gz_path(&path).display()
         )
     });
     serde_json::from_str(&raw).expect("golden vector must be valid JSON")
+}
+
+fn gz_path(path: &PathBuf) -> PathBuf {
+    PathBuf::from(format!("{}.gz", path.display()))
+}
+
+fn read_json_or_gzip(path: &PathBuf) -> std::io::Result<String> {
+    match fs::read_to_string(path) {
+        Ok(text) => Ok(text),
+        Err(json_error) => {
+            let gz_path = gz_path(path);
+            let file = fs::File::open(&gz_path).map_err(|_| json_error)?;
+            let mut decoder = GzDecoder::new(file);
+            let mut text = String::new();
+            decoder.read_to_string(&mut text)?;
+            Ok(text)
+        }
+    }
 }
 
 fn hex_to_vec(value: &Value) -> Vec<u8> {
@@ -179,13 +201,7 @@ fn verify_stateless_case(case: &Value) -> bool {
 
 #[test]
 fn stateless_golden_vector_accepts_valid_and_rejects_tampered() {
-    let raw = fs::read_to_string(vector_path()).unwrap_or_else(|error| {
-        panic!(
-            "failed to read committed golden vector at {}: {error}",
-            vector_path().display()
-        )
-    });
-    let vectors: Value = serde_json::from_str(&raw).expect("golden vector must be valid JSON");
+    let vectors = load_vectors();
     let cases = &vectors["stateless"]["cases"];
 
     assert!(

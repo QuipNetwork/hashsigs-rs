@@ -6,11 +6,12 @@ cd "$(dirname "$0")/.."
 
 usage() {
   cat <<'EOF'
-Usage: ./bin/test-watch.sh <area> [poll-seconds] [extra args...]
+Usage: ./bin/test-watch.sh [--profile <profile>] <area> [poll-seconds] [extra args...]
        ./bin/test-watch.sh help
 
 Examples:
   ./bin/test-watch.sh signer-stateful
+  ./bin/test-watch.sh --profile 256s-sha2 signer-stateful
   ./bin/test-watch.sh signer-exact 1 generated_stateful_signature_verifies
   ./bin/test-watch.sh account-exact 1 full_rotation_with_replaced_stateless_key_resets_usage
   ./bin/test-watch.sh wasm-compile 2
@@ -26,6 +27,17 @@ EOF
 if [ "${1:-}" = "" ] || [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ] || [ "${1:-}" = "help" ]; then
   usage
   exit 0
+fi
+
+profile_args=()
+if [ "${1:-}" = "--profile" ]; then
+  if [ "${2:-}" = "" ]; then
+    echo "error: --profile requires a value" >&2
+    usage >&2
+    exit 1
+  fi
+  profile_args=(--profile "$2")
+  shift 2
 fi
 
 area="$1"
@@ -49,8 +61,8 @@ watch_fingerprint() {
 run_once() {
   local start_ts end_ts duration
   start_ts="$(date +%s)"
-  printf '\n==> %s | %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "./bin/test-fast.sh $area $*"
-  ./bin/test-fast.sh "$area" "$@"
+  printf '\n==> %s | %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "./bin/test-fast.sh ${profile_args[*]} $area $*"
+  ./bin/test-fast.sh "${profile_args[@]}" "$area" "$@"
   end_ts="$(date +%s)"
   duration="$((end_ts - start_ts))"
   printf '\n'

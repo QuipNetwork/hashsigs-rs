@@ -5,8 +5,11 @@
 use hashsigs_rs::shrincs::{
     PublicKey, ShrincsSigner, StatefulSignature, StatelessSignature, HASH_LEN,
 };
+use flate2::write::GzEncoder;
+use flate2::Compression;
 use serde_json::{json, Value};
 use std::fs;
+use std::io::Write;
 use std::path::Path;
 use std::process::Command;
 
@@ -17,13 +20,13 @@ use std::process::Command;
 // the heavy, cache-backed regeneration event (2^24-leaf FORS trees, 2^18-leaf
 // hypertree) rather than an in-line run.
 #[cfg(shrincs_profile_256s)]
-const OUT_PATH: &str = "tests/test_vectors/shrincs_sphincs_256s_keccak.json";
+const OUT_PATH: &str = "tests/test_vectors/shrincs_sphincs_256s_keccak.json.gz";
 #[cfg(shrincs_profile_128s_q18)]
-const OUT_PATH: &str = "tests/test_vectors/shrincs_sphincs_128s_q18_keccak.json";
+const OUT_PATH: &str = "tests/test_vectors/shrincs_sphincs_128s_q18_keccak.json.gz";
 #[cfg(shrincs_profile_128s_q20)]
-const OUT_PATH: &str = "tests/test_vectors/shrincs_sphincs_128s_q20_keccak.json";
+const OUT_PATH: &str = "tests/test_vectors/shrincs_sphincs_128s_q20_keccak.json.gz";
 #[cfg(shrincs_profile_256s_sha2)]
-const OUT_PATH: &str = "tests/test_vectors/shrincs_sphincs_256s_sha2.json";
+const OUT_PATH: &str = "tests/test_vectors/shrincs_sphincs_256s_sha2.json.gz";
 
 #[test]
 #[ignore = "run explicitly to refresh Solidity SHRINCS vectors"]
@@ -96,9 +99,23 @@ fn generate_shrincs_sphincs_vectors() {
         }
     });
 
-    let out = serde_json::to_string_pretty(&vectors).expect("serialize vectors");
-    fs::write(Path::new(OUT_PATH), format!("{out}\n")).expect("write SHRINCS Solidity vectors");
+    let out = serde_json::to_vec_pretty(&vectors).expect("serialize vectors");
+    write_gzip_json(Path::new(OUT_PATH), &out);
     println!("wrote {OUT_PATH}");
+}
+
+fn write_gzip_json(path: &Path, json: &[u8]) {
+    let file = fs::File::create(path).expect("create SHRINCS Solidity vectors");
+    let mut encoder = GzEncoder::new(file, Compression::default());
+    encoder
+        .write_all(json)
+        .expect("write compressed SHRINCS Solidity vectors");
+    encoder
+        .write_all(b"\n")
+        .expect("terminate compressed SHRINCS Solidity vectors");
+    encoder
+        .finish()
+        .expect("finish compressed SHRINCS Solidity vectors");
 }
 
 // Emit the SHRINCSSignerKeygen.t.sol `EXPECTED_*` anchors for the active

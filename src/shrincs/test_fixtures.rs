@@ -31,10 +31,17 @@ use super::{
 
 pub(crate) const FIXTURE_PATH_ENV: &str = "SHRINCS_TEST_KEY_FIXTURE_PATH";
 pub(crate) const KEY_MODE_ENV: &str = "SHRINCS_TEST_KEY_MODE";
-pub(crate) const DEFAULT_FIXTURE_PATH: &str = "tests/test_fixtures/account_keys.json";
+pub(crate) const DEFAULT_FIXTURE_DIR: &str = "tests/test_fixtures";
 pub(crate) const ACCOUNT_CASES_FIXTURE_PATH_ENV: &str = "SHRINCS_TEST_ACCOUNT_CASES_FIXTURE_PATH";
-pub(crate) const DEFAULT_ACCOUNT_CASES_FIXTURE_PATH: &str =
-    "tests/test_fixtures/account_signature_cases.json";
+pub(crate) const KEY_FIXTURE_BASENAME: &str = "account_keys";
+pub(crate) const ACCOUNT_CASES_FIXTURE_BASENAME: &str = "account_signature_cases";
+
+fn profile_fixture_path(base_name: &str) -> PathBuf {
+    PathBuf::from(DEFAULT_FIXTURE_DIR).join(format!(
+        "{base_name}.{}.json",
+        crate::shrincs::PROFILE_NAME
+    ))
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TestKeyMode {
@@ -380,13 +387,13 @@ pub(crate) struct AccountSignatureFixtureFile {
 pub(crate) fn fixture_path() -> PathBuf {
     env::var_os(FIXTURE_PATH_ENV)
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(DEFAULT_FIXTURE_PATH))
+        .unwrap_or_else(|| profile_fixture_path(KEY_FIXTURE_BASENAME))
 }
 
 pub(crate) fn account_cases_fixture_path() -> PathBuf {
     env::var_os(ACCOUNT_CASES_FIXTURE_PATH_ENV)
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(DEFAULT_ACCOUNT_CASES_FIXTURE_PATH))
+        .unwrap_or_else(|| profile_fixture_path(ACCOUNT_CASES_FIXTURE_BASENAME))
 }
 
 pub(crate) fn load_fixture_file(path: &Path) -> KeyFixtureFile {
