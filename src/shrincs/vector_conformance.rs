@@ -39,6 +39,9 @@ use std::path::PathBuf;
 use flate2::read::GzDecoder;
 use serde_json::Value;
 
+use crate::shrincs::test_fixtures::{
+    fixture_entry_opt, fixture_pair, fixture_path, load_fixture_file, TestKeyMode,
+};
 use super::verifier::{
     ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey, ShrincsVerifier,
     StatefulSignature, StatelessSignature, WotsCSignature, HASH_LEN,
@@ -87,6 +90,32 @@ fn load_vectors() -> Value {
         )
     });
     serde_json::from_str(&raw).expect("golden vector must be valid JSON")
+}
+
+fn fixture_or_fresh_full_key(
+    seed_label: &'static str,
+    max_stateful_signatures: u32,
+) -> (super::signers::types::ShrincsSigningKey, PublicKey) {
+    match TestKeyMode::from_env() {
+        TestKeyMode::Fresh => ShrincsSigner::keygen(seed_label.as_bytes(), max_stateful_signatures)
+            .unwrap_or_else(|| panic!("fresh keygen failed for seed label {seed_label:?}")),
+        TestKeyMode::Fixture => {
+            let path = fixture_path();
+            if path.is_file() {
+                let fixture_file = load_fixture_file(&path);
+                assert_eq!(
+                    fixture_file.profile_name,
+                    crate::shrincs::PROFILE_NAME,
+                    "fixture profile mismatch",
+                );
+                if let Some(entry) = fixture_entry_opt(&fixture_file, seed_label) {
+                    return fixture_pair(entry);
+                }
+            }
+            ShrincsSigner::keygen(seed_label.as_bytes(), max_stateful_signatures)
+                .unwrap_or_else(|| panic!("fresh keygen failed for seed label {seed_label:?}"))
+        }
+    }
 }
 
 fn gz_path(path: &PathBuf) -> PathBuf {
@@ -361,15 +390,17 @@ fn stateful_public_key_from_case(base: &PublicKey, case_public_key: &Value) -> P
 /// corruptedSignature. (Bead p8a.)
 #[cfg_attr(
     any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
-    ignore = "128s stateful keygen rebuilds the hypertree, compute-infeasible in-process"
+    ignore = "128s stateful golden conformance still needs a full key fixture/manual regeneration path"
 )]
 #[test]
 fn stateful_golden_vector_accepts_valid_and_rejects_tampered() {
     let vectors = load_vectors();
     let section = &vectors["stateful"];
 
-    let (_, base_public_key) =
-        ShrincsSigner::keygen(STATEFUL_SEED, STATEFUL_MAX_SIGNATURES).expect("stateful keygen");
+    let (_, base_public_key) = fixture_or_fresh_full_key(
+        std::str::from_utf8(STATEFUL_SEED).expect("generator seed must be utf-8"),
+        STATEFUL_MAX_SIGNATURES,
+    );
     let expected: [u8; HASH_LEN] = base_public_key
         .public_key_commitment
         .clone()

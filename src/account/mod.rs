@@ -738,7 +738,7 @@ mod tests {
     use crate::shrincs::signers::utils::{derive32, public_key_from_components};
     use crate::shrincs::signers::uxmss::stateful_subtree_root;
     use crate::shrincs::test_fixtures::{
-        account_cases_fixture_path, fixture_entry, fixture_entry_opt, fixture_pair, fixture_path,
+        account_cases_fixture_path, fixture_entry_opt, fixture_pair, fixture_path,
         load_account_cases_fixture_file, load_fixture_file, write_account_cases_fixture_file,
         AccountFullRotationCaseDto, AccountSignatureFixtureFile,
         AccountStatefulRotationCaseDto, AccountStatelessActionCaseDto,
@@ -862,11 +862,14 @@ mod tests {
         match TestKeyMode::from_env() {
             TestKeyMode::Fresh => ShrincsSigner::keygen(seed_label.as_bytes(), max)
                 .unwrap_or_else(|| panic!("fresh keygen failed for seed label {seed_label:?}")),
-            TestKeyMode::Fixture => {
-                let fixture_file = cached_fixture_file().expect("fixture mode must load fixture file");
-                let entry = fixture_entry(fixture_file, seed_label);
-                fixture_pair(entry)
-            }
+            TestKeyMode::Fixture => cached_fixture_file()
+                .and_then(|fixture_file| fixture_entry_opt(fixture_file, seed_label))
+                .map(fixture_pair)
+                .unwrap_or_else(|| {
+                    ShrincsSigner::keygen(seed_label.as_bytes(), max).unwrap_or_else(|| {
+                        panic!("fresh keygen failed for seed label {seed_label:?}")
+                    })
+                }),
         }
     }
 
@@ -890,7 +893,11 @@ mod tests {
             .get_or_init(|| match TestKeyMode::from_env() {
                 TestKeyMode::Fresh => None,
                 TestKeyMode::Fixture => {
-                    let fixture_file = load_fixture_file(&fixture_path());
+                    let path = fixture_path();
+                    if !path.is_file() {
+                        return None;
+                    }
+                    let fixture_file = load_fixture_file(&path);
                     assert_eq!(
                         fixture_file.profile_name,
                         crate::shrincs::PROFILE_NAME,
@@ -1474,10 +1481,6 @@ mod tests {
         assert!(!account.precheckStatefulLeafUse(1));
     }
 
-    #[cfg_attr(
-        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
-        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
-    )]
     #[test]
     fn raw_stateful_helper_verifies_message_without_advancing_nonce() {
         let (mut signing_key, public_key) =
@@ -1494,10 +1497,6 @@ mod tests {
         assert_eq!(account.nextStatefulLeafIndex(), 2);
     }
 
-    #[cfg_attr(
-        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
-        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
-    )]
     #[test]
     fn verify_stateful_action_advances_nonce_and_leaf() {
         let verifier = ShrincsVerifier::new();
@@ -1891,10 +1890,6 @@ mod tests {
         assert_eq!(value, [0u8; HASH_LEN]);
     }
 
-    #[cfg_attr(
-        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
-        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
-    )]
     #[test]
     fn verify_stateful_action_rejects_wrong_public_key() {
         // Install key A, then present a different, fully valid key B (with a

@@ -35,6 +35,9 @@ pub(crate) const DEFAULT_FIXTURE_DIR: &str = "tests/test_fixtures";
 pub(crate) const ACCOUNT_CASES_FIXTURE_PATH_ENV: &str = "SHRINCS_TEST_ACCOUNT_CASES_FIXTURE_PATH";
 pub(crate) const KEY_FIXTURE_BASENAME: &str = "account_keys";
 pub(crate) const ACCOUNT_CASES_FIXTURE_BASENAME: &str = "account_signature_cases";
+pub(crate) const STATEFUL_SIGNER_FIXTURE_PATH_ENV: &str =
+    "SHRINCS_TEST_STATEFUL_SIGNER_FIXTURE_PATH";
+pub(crate) const STATEFUL_SIGNER_FIXTURE_BASENAME: &str = "stateful_signer_keys";
 
 fn profile_fixture_path(base_name: &str) -> PathBuf {
     PathBuf::from(DEFAULT_FIXTURE_DIR).join(format!(
@@ -396,6 +399,12 @@ pub(crate) fn account_cases_fixture_path() -> PathBuf {
         .unwrap_or_else(|| profile_fixture_path(ACCOUNT_CASES_FIXTURE_BASENAME))
 }
 
+pub(crate) fn stateful_signer_fixture_path() -> PathBuf {
+    env::var_os(STATEFUL_SIGNER_FIXTURE_PATH_ENV)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| profile_fixture_path(STATEFUL_SIGNER_FIXTURE_BASENAME))
+}
+
 pub(crate) fn load_fixture_file(path: &Path) -> KeyFixtureFile {
     let json = fs::read_to_string(path).unwrap_or_else(|error| {
         panic!("failed to read fixture file {}: {error}", path.display())
@@ -458,14 +467,6 @@ pub(crate) fn write_account_cases_fixture_file(
     });
 }
 
-pub(crate) fn fixture_entry<'a>(
-    fixture_file: &'a KeyFixtureFile,
-    seed_label: &str,
-) -> &'a KeyFixtureEntry {
-    fixture_entry_opt(fixture_file, seed_label)
-        .unwrap_or_else(|| panic!("missing fixture entry for seed label {seed_label:?}"))
-}
-
 pub(crate) fn fixture_entry_opt<'a>(
     fixture_file: &'a KeyFixtureFile,
     seed_label: &str,
@@ -493,8 +494,17 @@ mod tests {
     use crate::shrincs::signers::uxmss::stateful_subtree_root;
     use crate::shrincs::{PROFILE_NAME, ShrincsSigner};
 
-    fn account_fixture_specs() -> [(&'static str, u32); 20] {
-        [
+    #[cfg(any(shrincs_profile_128s_q18, shrincs_profile_128s_q20))]
+    fn full_key_fixture_specs() -> Vec<(&'static str, u32)> {
+        vec![
+            ("deterministic keygen seed", 4),
+            ("shrincs solidity vector stateful seed", 4),
+        ]
+    }
+
+    #[cfg(not(any(shrincs_profile_128s_q18, shrincs_profile_128s_q20)))]
+    fn full_key_fixture_specs() -> Vec<(&'static str, u32)> {
+        vec![
             ("account stateless action seed", 4),
             ("account rotate stateful current seed", 4),
             ("account rotate stateful next seed", 8),
@@ -515,6 +525,17 @@ mod tests {
             ("stateless malformed seed", 2),
             ("stateless empty message seed", 2),
             ("stateless signer seed", 2),
+            ("deterministic keygen seed", 4),
+            ("public key structure seed", 8),
+            ("initial stateful leaf seed", 8),
+            ("stateful signer seed", 4),
+            ("action signer seed", 4),
+            ("explicit leaf helper seed", 4),
+            ("stateful exhaustion seed", 1),
+            ("stateful negative seed", 4),
+            ("action negative seed", 4),
+            ("public key negative seed", 4),
+            ("shrincs solidity vector stateful seed", 4),
         ]
     }
 
@@ -560,10 +581,22 @@ mod tests {
         (signing_key, public_key)
     }
 
+    fn stateful_signer_fixture_specs() -> Vec<(&'static str, u32)> {
+        vec![
+            ("stateful signer seed", 4),
+            ("action signer seed", 4),
+            ("explicit leaf helper seed", 4),
+            ("stateful exhaustion seed", 1),
+            ("stateful negative seed", 4),
+            ("action negative seed", 4),
+            ("public key negative seed", 4),
+        ]
+    }
+
     #[test]
     #[ignore = "writes checked-in test fixtures on demand"]
     fn write_account_key_fixture_file() {
-        let full_key_entries = account_fixture_specs()
+        let full_key_entries = full_key_fixture_specs()
             .into_iter()
             .map(|(seed_label, max_stateful_signatures)| {
                 let (signing_key, public_key) = ShrincsSigner::keygen(
@@ -603,5 +636,28 @@ mod tests {
             entries,
         };
         write_fixture_file(&fixture_path(), &fixture_file);
+    }
+
+    #[test]
+    #[ignore = "writes checked-in stateful signer fixtures on demand"]
+    fn write_stateful_signer_fixture_file() {
+        let entries = stateful_signer_fixture_specs()
+            .into_iter()
+            .map(|(seed_label, max_stateful_signatures)| {
+                let (signing_key, public_key) =
+                    stateful_only_key(seed_label.as_bytes(), max_stateful_signatures);
+                KeyFixtureEntry {
+                    seed_label: seed_label.to_string(),
+                    signing_key: SigningKeyDto::from(&signing_key),
+                    public_key: PublicKeyDto::from(&public_key),
+                }
+            })
+            .collect();
+
+        let fixture_file = KeyFixtureFile {
+            profile_name: PROFILE_NAME.to_string(),
+            entries,
+        };
+        write_fixture_file(&stateful_signer_fixture_path(), &fixture_file);
     }
 }

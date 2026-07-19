@@ -1754,6 +1754,14 @@ fn js_value_from_serde<T: serde::Serialize>(value: &T) -> Result<JsValue, JsValu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::account::INITIAL_STATEFUL_LEAF_INDEX;
+    use crate::shrincs::components::public_key::encode_stateful_public_key;
+    use crate::shrincs::signers::utils::{derive32, public_key_from_components};
+    use crate::shrincs::signers::uxmss::stateful_subtree_root;
+    use crate::shrincs::test_fixtures::{
+        fixture_entry_opt, fixture_pair, load_fixture_file, stateful_signer_fixture_path,
+        TestKeyMode,
+    };
     use crate::shrincs::{
         PublicKey as SignerPublicKey, ShrincsSigner, ShrincsSigningKey,
         StatefulSignature as SignerStatefulSignature, StatelessSignature as CoreStatelessSignature,
@@ -1864,6 +1872,60 @@ mod tests {
         ShrincsSigner::keygen(b"wasm verifier test seed", 4).unwrap()
     }
 
+    fn stateful_only_key(seed: &[u8], max: u32) -> (ShrincsSigningKey, SignerPublicKey) {
+        let stateful_sk_seed = derive32(b"shrincs-stateful-sk-seed", seed, &[]);
+        let stateful_prf_seed = derive32(b"shrincs-stateful-prf-seed", seed, &[]);
+        let stateful_pk_seed = derive32(b"shrincs-stateful-pk-seed", seed, &[]);
+        let stateful_root = stateful_subtree_root(
+            &stateful_sk_seed,
+            &stateful_pk_seed,
+            INITIAL_STATEFUL_LEAF_INDEX,
+            max,
+        );
+        let pk_seed = derive32(b"shrincs-pk-seed", seed, &[]);
+        let hypertree_root = derive32(b"placeholder-hypertree-root", seed, &[]);
+        let signing_key = ShrincsSigningKey {
+            stateful_sk_seed,
+            stateful_prf_seed,
+            stateful_pk_seed,
+            stateful_root,
+            max_stateful_signatures: max,
+            next_stateful_leaf_index: INITIAL_STATEFUL_LEAF_INDEX,
+            stateless_sk_seed: derive32(b"shrincs-stateless-sk-seed", seed, &[]),
+            stateless_prf_seed: derive32(b"shrincs-stateless-prf-seed", seed, &[]),
+            pk_seed,
+            hypertree_root,
+        };
+        let public_key = public_key_from_components(
+            encode_stateful_public_key(stateful_pk_seed, stateful_root, max),
+            pk_seed,
+            hypertree_root,
+        );
+        (signing_key, public_key)
+    }
+
+    fn stateful_signing_key_and_public_key() -> (ShrincsSigningKey, SignerPublicKey) {
+        match TestKeyMode::from_env() {
+            TestKeyMode::Fresh => stateful_only_key(b"wasm verifier test seed", 4),
+            TestKeyMode::Fixture => {
+                let path = stateful_signer_fixture_path();
+                if path.is_file() {
+                    let fixture_file = load_fixture_file(&path);
+                    assert_eq!(
+                        fixture_file.profile_name,
+                        crate::shrincs::PROFILE_NAME,
+                        "stateful signer fixture profile mismatch",
+                    );
+                    if let Some(entry) = fixture_entry_opt(&fixture_file, "stateful signer seed") {
+                        return fixture_pair(entry);
+                    }
+                }
+
+                stateful_only_key(b"wasm verifier test seed", 4)
+            }
+        }
+    }
+
     #[test]
     fn parses_prefixed_and_unprefixed_hex() {
         assert_eq!(parse_hex_bytes("0x0102").unwrap(), vec![1u8, 2u8]);
@@ -1936,13 +1998,9 @@ mod tests {
         assert!(ok);
     }
 
-    #[cfg_attr(
-        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
-        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
-    )]
     #[test]
     fn stateful_raw_helper_verifies_signer_output() {
-        let (mut signing_key, public_key) = signing_key_and_public_key();
+        let (mut signing_key, public_key) = stateful_signing_key_and_public_key();
         let message = b"wasm-stateful-message".to_vec();
         let signature = ShrincsSigner::sign_stateful_raw(&mut signing_key, &message).unwrap();
 
@@ -1957,14 +2015,10 @@ mod tests {
         assert!(ok);
     }
 
-    #[cfg_attr(
-        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
-        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
-    )]
     #[test]
     fn stateful_action_helper_verifies_signer_output() {
         let verifier = ShrincsVerifier::new();
-        let (mut signing_key, public_key) = signing_key_and_public_key();
+        let (mut signing_key, public_key) = stateful_signing_key_and_public_key();
         let public_key_dto = public_key_dto(&public_key);
         let expected = expected_key(&public_key);
         let context = CoreActionContext {

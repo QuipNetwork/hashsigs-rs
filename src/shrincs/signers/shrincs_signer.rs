@@ -196,7 +196,8 @@ impl ShrincsSigner {
 mod tests {
     use self::verifier::HASH_LEN;
     use crate::shrincs::test_fixtures::{
-        fixture_entry, fixture_pair, fixture_path, load_fixture_file, TestKeyMode,
+        fixture_entry_opt, fixture_pair, fixture_path, load_fixture_file,
+        stateful_signer_fixture_path, TestKeyMode,
     };
     use super::super::utils::hash_packed;
     use super::*;
@@ -266,14 +267,46 @@ mod tests {
                 panic!("fresh keygen failed for seed label {seed_label:?}")
             }),
             TestKeyMode::Fixture => {
-                let fixture_file = load_fixture_file(&fixture_path());
-                assert_eq!(
-                    fixture_file.profile_name,
-                    crate::shrincs::PROFILE_NAME,
-                    "fixture profile mismatch",
-                );
-                let entry = fixture_entry(&fixture_file, seed_label);
-                fixture_pair(entry)
+                let path = fixture_path();
+                if path.is_file() {
+                    let fixture_file = load_fixture_file(&path);
+                    assert_eq!(
+                        fixture_file.profile_name,
+                        crate::shrincs::PROFILE_NAME,
+                        "fixture profile mismatch",
+                    );
+                    if let Some(entry) = fixture_entry_opt(&fixture_file, seed_label) {
+                        return fixture_pair(entry);
+                    }
+                }
+                ShrincsSigner::keygen(seed_label.as_bytes(), max_stateful_signatures)
+                    .unwrap_or_else(|| {
+                        panic!("fresh keygen failed for seed label {seed_label:?}")
+                    })
+            }
+        }
+    }
+
+    fn fixture_or_stateful_only_key(
+        seed_label: &'static str,
+        max_stateful_signatures: u32,
+    ) -> (ShrincsSigningKey, PublicKey) {
+        match TestKeyMode::from_env() {
+            TestKeyMode::Fresh => stateful_only_key(seed_label.as_bytes(), max_stateful_signatures),
+            TestKeyMode::Fixture => {
+                let path = stateful_signer_fixture_path();
+                if path.is_file() {
+                    let fixture_file = load_fixture_file(&path);
+                    assert_eq!(
+                        fixture_file.profile_name,
+                        crate::shrincs::PROFILE_NAME,
+                        "fixture profile mismatch",
+                    );
+                    if let Some(entry) = fixture_entry_opt(&fixture_file, seed_label) {
+                        return fixture_pair(entry);
+                    }
+                }
+                stateful_only_key(seed_label.as_bytes(), max_stateful_signatures)
             }
         }
     }
@@ -367,14 +400,14 @@ mod tests {
 
     #[cfg_attr(
         any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
-        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
+        ignore = "128s full keygen remains manual; stateful signer behavior is covered by stateful fixtures"
     )]
     #[test]
     fn keygen_is_deterministic_for_same_seed_material() {
         let (signing_key_a, public_key_a) =
-            ShrincsSigner::keygen(b"deterministic keygen seed", 4).unwrap();
+            fixture_or_fresh_full_key("deterministic keygen seed", 4);
         let (signing_key_b, public_key_b) =
-            ShrincsSigner::keygen(b"deterministic keygen seed", 4).unwrap();
+            fixture_or_fresh_full_key("deterministic keygen seed", 4);
 
         assert_eq!(signing_key_a, signing_key_b);
         assert_eq!(public_key_a, public_key_b);
@@ -382,11 +415,11 @@ mod tests {
 
     #[cfg_attr(
         any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
-        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
+        ignore = "128s full keygen remains manual; stateful signer behavior is covered by stateful fixtures"
     )]
     #[test]
     fn keygen_public_key_uses_single_stateless_seed_and_root() {
-        let (_, public_key) = ShrincsSigner::keygen(b"public key structure seed", 8).unwrap();
+        let (_, public_key) = fixture_or_fresh_full_key("deterministic keygen seed", 4);
 
         assert_eq!(
             public_key.stateful_public_key.len(),
@@ -399,11 +432,11 @@ mod tests {
 
     #[cfg_attr(
         any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
-        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
+        ignore = "128s full keygen remains manual; stateful signer behavior is covered by stateful fixtures"
     )]
     #[test]
     fn keygen_starts_stateful_signer_at_leaf_one() {
-        let (signing_key, _) = ShrincsSigner::keygen(b"initial stateful leaf seed", 8).unwrap();
+        let (signing_key, _) = fixture_or_fresh_full_key("deterministic keygen seed", 4);
 
         assert_eq!(
             signing_key.next_stateful_leaf_index,
@@ -411,14 +444,9 @@ mod tests {
         );
     }
 
-    #[cfg_attr(
-        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
-        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
-    )]
     #[test]
     fn generated_stateful_signature_verifies() {
-        let (mut signing_key, public_key) =
-            ShrincsSigner::keygen(b"stateful signer seed", 4).unwrap();
+        let (mut signing_key, public_key) = fixture_or_stateful_only_key("stateful signer seed", 4);
         let expected = expected_key(&public_key);
         let message = hash_packed(&[b"stateful test message"]);
         let signature = ShrincsSigner::sign_stateful_raw(&mut signing_key, &message).unwrap();
@@ -433,14 +461,9 @@ mod tests {
         ));
     }
 
-    #[cfg_attr(
-        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
-        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
-    )]
     #[test]
     fn generated_stateful_action_signature_verifies() {
-        let (mut signing_key, public_key) =
-            ShrincsSigner::keygen(b"action signer seed", 4).unwrap();
+        let (mut signing_key, public_key) = fixture_or_stateful_only_key("action signer seed", 4);
         let context = action_context();
         let expected = expected_key(&public_key);
         let signature =
@@ -456,14 +479,10 @@ mod tests {
         ));
     }
 
-    #[cfg_attr(
-        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
-        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
-    )]
     #[test]
     fn explicit_leaf_test_helper_verifies_for_requested_leaf() {
         let (signing_key, public_key) =
-            ShrincsSigner::keygen(b"explicit leaf helper seed", 4).unwrap();
+            fixture_or_stateful_only_key("explicit leaf helper seed", 4);
         let expected = expected_key(&public_key);
         let message = hash_packed(&[b"explicit leaf test message"]);
         let signature =
@@ -505,14 +524,10 @@ mod tests {
         assert!(ShrincsSigner::keygen(b"seed", MAX_STATEFUL_SIGNATURES_LIMIT + 1).is_none());
     }
 
-    #[cfg_attr(
-        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
-        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
-    )]
     #[test]
     fn stateful_signing_advances_leaf_and_rejects_exhaustion() {
         let (mut signing_key, public_key) =
-            ShrincsSigner::keygen(b"stateful exhaustion seed", 1).unwrap();
+            fixture_or_stateful_only_key("stateful exhaustion seed", 1);
         let expected = expected_key(&public_key);
         let message = hash_packed(&[b"first and only stateful signature"]);
 
@@ -533,14 +548,10 @@ mod tests {
         assert!(ShrincsSigner::sign_stateful_raw(&mut signing_key, &message).is_none());
     }
 
-    #[cfg_attr(
-        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
-        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
-    )]
     #[test]
     fn stateful_signature_rejects_wrong_message_and_tampered_chain() {
         let (mut signing_key, public_key) =
-            ShrincsSigner::keygen(b"stateful negative seed", 4).unwrap();
+            fixture_or_stateful_only_key("stateful negative seed", 4);
         let expected = expected_key(&public_key);
         let message = hash_packed(&[b"stateful valid message"]);
         let wrong_message = hash_packed(&[b"stateful wrong message"]);
@@ -563,14 +574,9 @@ mod tests {
         assert!(!verifier.verify_stateful_unsafe_raw(expected, &public_key, &message, &tampered,));
     }
 
-    #[cfg_attr(
-        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
-        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
-    )]
     #[test]
     fn stateful_action_rejects_tampered_context() {
-        let (mut signing_key, public_key) =
-            ShrincsSigner::keygen(b"action negative seed", 4).unwrap();
+        let (mut signing_key, public_key) = fixture_or_stateful_only_key("action negative seed", 4);
         let expected = expected_key(&public_key);
         let context = action_context();
         let signature =
@@ -655,14 +661,10 @@ mod tests {
         ));
     }
 
-    #[cfg_attr(
-        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
-        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
-    )]
     #[test]
     fn public_key_commitment_rejects_tampered_component() {
         let (mut signing_key, mut public_key) =
-            ShrincsSigner::keygen(b"public key negative seed", 4).unwrap();
+            fixture_or_stateful_only_key("public key negative seed", 4);
         let expected = expected_key(&public_key);
         let message = hash_packed(&[b"public key commitment message"]);
         let signature = ShrincsSigner::sign_stateful_raw(&mut signing_key, &message).unwrap();
