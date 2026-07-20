@@ -35,10 +35,10 @@ pub(crate) mod test_fixtures;
 pub use signer::{ShrincsSigner, ShrincsSignerResult, ShrincsSigningKey};
 pub use hash_suite::HASH_SUITE_ID;
 pub use profiles::{
-    FORS_TREE_HEIGHT, HASH_TRUNC_LEN, HYPERTREE_HEIGHT, NUM_FORS_TREES, NUM_HYPERTREE_LAYERS,
-    NUM_WOTS_CHAINS, PROFILE_ID, PROFILE_NAME, STATELESS_SIGNATURE_LIMIT, WOTS_BASE_STATEFUL,
-    WOTS_CHAIN_LEN, WOTS_CHAINS_STATEFUL, WOTS_TARGET_SUM_STATEFUL,
-    WOTS_TARGET_SUM_STATELESS,
+    FORS_C_MAX_GRIND_COUNTER, FORS_TREE_HEIGHT, HASH_TRUNC_LEN, HYPERTREE_HEIGHT,
+    NUM_FORS_TREES, NUM_HYPERTREE_LAYERS, NUM_WOTS_CHAINS, PROFILE_ID, PROFILE_NAME,
+    STATELESS_SIGNATURE_LIMIT, WOTS_BASE_STATEFUL, WOTS_CHAIN_LEN, WOTS_CHAINS_STATEFUL,
+    WOTS_TARGET_SUM_STATEFUL, WOTS_TARGET_SUM_STATELESS,
 };
 pub use types::{
     ActionContext, ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey, RotationContext,
@@ -86,5 +86,18 @@ mod compatibility_tests {
     fn active_profile_id_matches_keccak_of_profile_name() {
         let expected = solana_program::keccak::hash(shrincs::PROFILE_NAME.as_bytes()).to_bytes();
         assert_eq!(shrincs::PROFILE_ID, expected);
+    }
+
+    #[cfg(any(feature = "profile-128s-q18", feature = "profile-128s-q20"))]
+    #[test]
+    fn active_128_profile_uses_raised_fors_grind_budget() {
+        assert_eq!(shrincs::FORS_TREE_HEIGHT, 24);
+        assert_eq!(shrincs::FORS_C_MAX_GRIND_COUNTER, 1 << 28);
+    }
+
+    #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
+    #[test]
+    fn active_non_128_profile_keeps_default_fors_grind_budget() {
+        assert_eq!(shrincs::FORS_C_MAX_GRIND_COUNTER, 1 << 24);
     }
 }

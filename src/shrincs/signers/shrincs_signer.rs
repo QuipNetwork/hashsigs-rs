@@ -45,6 +45,13 @@ pub struct ShrincsSigner;
 const INITIAL_STATEFUL_LEAF_INDEX: u32 = 1;
 const MAX_STATEFUL_SIGNATURES_LIMIT: u32 = 4096;
 
+fn stateless_trace_enabled() -> bool {
+    matches!(
+        std::env::var("SHRINCS_TRACE_STATELESS").as_deref(),
+        Ok("1") | Ok("true") | Ok("yes") | Ok("on")
+    )
+}
+
 impl ShrincsSigner {
     /// Deterministically derive signing material and a public key from seed material.
     ///
@@ -178,13 +185,28 @@ impl ShrincsSigner {
         signing_key: &ShrincsSigningKey,
         message: &[u8],
     ) -> ShrincsSignerResult<StatelessSignature> {
+        if stateless_trace_enabled() {
+            println!(
+                "stateless trace: signer start message_len={}",
+                message.len()
+            );
+        }
         let signed_fors = sign_fors_c(signing_key, message)?;
+        if stateless_trace_enabled() {
+            println!(
+                "stateless trace: signer FORS done bottom_tree={} bottom_leaf={}",
+                signed_fors.tree_index, signed_fors.leaf_index
+            );
+        }
         let hypertree = sign_hypertree(
             signing_key,
             signed_fors.root,
             signed_fors.tree_index,
             signed_fors.leaf_index,
         )?;
+        if stateless_trace_enabled() {
+            println!("stateless trace: signer hypertree done");
+        }
         Some(StatelessSignature {
             fors: signed_fors.signature,
             hypertree,

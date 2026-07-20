@@ -261,6 +261,23 @@ fn stateless_golden_vector_accepts_valid_and_rejects_tampered() {
     }
 }
 
+#[cfg(any(feature = "profile-128s-q18", feature = "profile-128s-q20"))]
+#[test]
+fn logs_committed_128_stateless_fors_counter() {
+    use crate::shrincs::{FORS_C_MAX_GRIND_COUNTER, PROFILE_NAME};
+
+    let vectors = load_vectors();
+    let counter = u64_field(&vectors["stateless"]["signature"]["fors"], "counter") as u32;
+    eprintln!(
+        "profile={PROFILE_NAME} committed valid stateless FORS counter={counter} budget={}",
+        FORS_C_MAX_GRIND_COUNTER
+    );
+    assert!(
+        counter < FORS_C_MAX_GRIND_COUNTER,
+        "committed 128 stateless vector uses FORS counter outside active grind budget"
+    );
+}
+
 /// Re-run keygen + sign with the generator's seeds and assert the produced public
 /// key and signature are byte-identical to the committed stateless golden vector.
 /// This proves the signer still *reproduces* the reference bytes, not only that

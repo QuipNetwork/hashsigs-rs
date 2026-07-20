@@ -19,7 +19,8 @@
 
 // The per-profile parameter tuple (STATELESS_SIGNATURE_LIMIT, HYPERTREE_HEIGHT,
 // NUM_HYPERTREE_LAYERS, FORS_TREE_HEIGHT, NUM_FORS_TREES, WOTS_CHAIN_LEN,
-// NUM_WOTS_CHAINS, ...) comes exclusively from the `profile` module below via
+// NUM_WOTS_CHAINS, FORS_C_MAX_GRIND_COUNTER, ...) comes exclusively from the
+// `profile` module below via
 // `pub use profile::*`. These must NOT also be declared unconditionally here:
 // an explicit item silently shadows a glob re-export, so a top-level copy would
 // pin every profile to the 256s values and quietly break `profile-128s-*` builds.
@@ -43,6 +44,7 @@ mod profile {
     pub const NUM_FORS_TREES: u8 = 22;
     pub const WOTS_CHAIN_LEN: u16 = 16;
     pub const NUM_WOTS_CHAINS: u16 = 64;
+    pub const FORS_C_MAX_GRIND_COUNTER: u32 = 1 << 24;
     pub const WOTS_CHAINS_STATEFUL: usize = 64;
     pub const WOTS_BASE_STATEFUL: u32 = 16;
     pub const WOTS_TARGET_SUM_STATEFUL: u32 = 480;
@@ -61,6 +63,7 @@ mod profile {
     pub const NUM_FORS_TREES: u8 = 6;
     pub const WOTS_CHAIN_LEN: u16 = 16;
     pub const NUM_WOTS_CHAINS: u16 = 32;
+    pub const FORS_C_MAX_GRIND_COUNTER: u32 = 1 << 28;
     pub const WOTS_CHAINS_STATEFUL: usize = 32;
     pub const WOTS_BASE_STATEFUL: u32 = 16;
     pub const WOTS_TARGET_SUM_STATEFUL: u32 = 240;
@@ -79,6 +82,7 @@ mod profile {
     pub const NUM_FORS_TREES: u8 = 6;
     pub const WOTS_CHAIN_LEN: u16 = 16;
     pub const NUM_WOTS_CHAINS: u16 = 32;
+    pub const FORS_C_MAX_GRIND_COUNTER: u32 = 1 << 28;
     pub const WOTS_CHAINS_STATEFUL: usize = 32;
     pub const WOTS_BASE_STATEFUL: u32 = 16;
     pub const WOTS_TARGET_SUM_STATEFUL: u32 = 240;
@@ -97,6 +101,7 @@ mod profile {
     pub const NUM_FORS_TREES: u8 = 22;
     pub const WOTS_CHAIN_LEN: u16 = 16;
     pub const NUM_WOTS_CHAINS: u16 = 64;
+    pub const FORS_C_MAX_GRIND_COUNTER: u32 = 1 << 24;
     pub const WOTS_CHAINS_STATEFUL: usize = 64;
     pub const WOTS_BASE_STATEFUL: u32 = 16;
     pub const WOTS_TARGET_SUM_STATEFUL: u32 = 480;

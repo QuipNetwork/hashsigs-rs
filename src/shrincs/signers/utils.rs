@@ -35,7 +35,6 @@ use super::super::components::public_key::public_key_commitment;
 use super::super::types::{PublicKey, HASH_LEN};
 
 pub(crate) const WOTS_C_MAX_GRIND_COUNTER: u32 = 1 << 24;
-pub(crate) const FORS_C_MAX_GRIND_COUNTER: u32 = 1 << 24;
 
 pub(crate) fn public_key_from_components(
     stateful_public_key: Vec<u8>,

@@ -31,6 +31,13 @@ use super::super::profiles::{
     WOTS_TARGET_SUM_STATELESS,
 };
 
+fn stateless_trace_enabled() -> bool {
+    matches!(
+        std::env::var("SHRINCS_TRACE_STATELESS").as_deref(),
+        Ok("1") | Ok("true") | Ok("yes") | Ok("on")
+    )
+}
+
 /// ADRS coordinates identifying one stateless WOTS-C keypair (its Merkle-leaf
 /// position). Grouping `layer`/`tree`/`keypair` keeps the signing entry points
 /// under the positional-argument limit without a `too_many_arguments` allow.
@@ -85,6 +92,14 @@ pub(crate) fn sign_hypertree(
     bottom_tree: u64,
     bottom_leaf: u32,
 ) -> ShrincsSignerResult<Vec<HypertreeLayerSignature>> {
+    if stateless_trace_enabled() {
+        println!(
+            "stateless trace: hypertree start bottom_tree={} bottom_leaf={} layers={}",
+            bottom_tree,
+            bottom_leaf,
+            NUM_HYPERTREE_LAYERS
+        );
+    }
     // Layer 0 starts at the FORS-selected coordinate. Every higher layer must
     // follow the verifier's recurrence, so the signature cannot choose arbitrary
     // upper-layer tree/leaf positions.
@@ -109,6 +124,12 @@ pub(crate) fn sign_hypertree(
     let mut leaf = bottom_leaf;
 
     for layer in 0..u32::from(NUM_HYPERTREE_LAYERS) {
+        if stateless_trace_enabled() {
+            println!(
+                "stateless trace: hypertree layer={} tree={} leaf={}",
+                layer, tree, leaf
+            );
+        }
         // Build the whole subtree once, then reuse the selected leaf hash for
         // signing and extract the auth path and next root from the same node
         // table instead of recomputing them separately.
@@ -153,6 +174,9 @@ pub(crate) fn sign_hypertree(
         // next_tree_index = current_tree_index >> 8
         leaf = (tree & leaf_mask) as u32;
         tree >>= subtree_height;
+    }
+    if stateless_trace_enabled() {
+        println!("stateless trace: hypertree complete");
     }
     Some(layers)
 }
