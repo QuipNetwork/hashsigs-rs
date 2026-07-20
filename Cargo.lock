@@ -1725,7 +1725,7 @@ checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
 
 [[package]]
 name = "hashsigs-rs"
-version = "0.2.0-rc1"
+version = "0.2.0-rc2"
 dependencies = [
  "js-sys",
  "proptest",

@@ -15,6 +15,7 @@ export type ShrincsWasmModule = typeof import("./nodejs/hashsigs_rs.js");
 export type {
   ShrincsPublicKey,
   StatefulSignature,
+  StatefulSignResult,
   StatelessSignature,
   ForsSignature,
   ForsEntry,
@@ -29,4 +30,39 @@ export type {
   RotationTarget,
   ShrincsExportedSigningKey,
   ShrincsAccountSnapshot,
+  ShrincsErrorCode,
 } from "./nodejs/hashsigs_rs.js";
+
+// The live handle classes, exported TYPE-ONLY. Consumers never construct
+// these (private constructors — instances come from `shrincsKeygen` /
+// `shrincsImportSigningKey` / the account factories); they only need the
+// names to annotate variables and fields. Type-only is also load-bearing
+// for the browser: the `browser` exports condition maps the package entry
+// to loader.browser.js, which has no runtime class bindings — a VALUE
+// export here would exist in Node and silently not exist in browser
+// bundles. (This also spares downstream consumers the
+// `ReturnType<ShrincsWasmModule["shrincsKeygen"]>` workaround, needed
+// because `InstanceType` rejects private constructors.)
+export type {
+  WasmShrincsKeypair,
+  WasmShrincsAccount,
+} from "./nodejs/hashsigs_rs.js";
+
+// ── compile-time conformance (zero emit, zero runtime) ─────────────────────
+import type {
+  StatefulSignResult as _StatefulSignResult,
+  WasmShrincsKeypair as _WasmShrincsKeypair,
+} from "./nodejs/hashsigs_rs.js";
+
+// type _Expect<T extends true> = T;
+// type _Equal<A, B> =
+//   (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2)
+//     ? true
+//     : false;
+
+// type _KeygenMintsExportedKeypair = _Expect<
+//   _Equal<ReturnType<ShrincsWasmModule["shrincsKeygen"]>, _WasmShrincsKeypair>
+// >;
+// type _SignStatefulRawReturnsSignResult = _Expect<
+//   _Equal<ReturnType<_WasmShrincsKeypair["signStatefulRaw"]>, _StatefulSignResult>
+// >;
