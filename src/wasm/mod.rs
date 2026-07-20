@@ -1422,7 +1422,7 @@ fn normalized_hex_body(input: &str) -> Result<&str, WasmErr> {
             message: "hex string must be ASCII".into(),
         });
     }
-    if trimmed.len() % 2 != 0 {
+    if !trimmed.len().is_multiple_of(2) {
         return Err(WasmErr {
             code: ERR_BAD_LENGTH,
             message: format!("hex string must have even length (got {} chars)", trimmed.len()),

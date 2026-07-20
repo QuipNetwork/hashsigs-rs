@@ -34,7 +34,7 @@
 
 use std::fs;
 use std::io::Read;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use flate2::read::GzDecoder;
 use serde_json::Value;
@@ -118,11 +118,11 @@ fn fixture_or_fresh_full_key(
     }
 }
 
-fn gz_path(path: &PathBuf) -> PathBuf {
+fn gz_path(path: &Path) -> PathBuf {
     PathBuf::from(format!("{}.gz", path.display()))
 }
 
-fn read_json_or_gzip(path: &PathBuf) -> std::io::Result<String> {
+fn read_json_or_gzip(path: &Path) -> std::io::Result<String> {
     match fs::read_to_string(path) {
         Ok(text) => Ok(text),
         Err(json_error) => {
@@ -139,7 +139,7 @@ fn read_json_or_gzip(path: &PathBuf) -> std::io::Result<String> {
 fn hex_to_vec(value: &Value) -> Vec<u8> {
     let text = value.as_str().expect("hex field must be a string");
     let body = text.strip_prefix("0x").unwrap_or(text);
-    assert!(body.len() % 2 == 0, "hex string must have even length");
+    assert!(body.len().is_multiple_of(2), "hex string must have even length");
     (0..body.len())
         .step_by(2)
         .map(|i| u8::from_str_radix(&body[i..i + 2], 16).expect("valid hex byte"))

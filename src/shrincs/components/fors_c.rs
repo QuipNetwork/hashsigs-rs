@@ -126,7 +126,7 @@ pub(crate) fn signer_fors_digest(
         .map(|tree| {
             read_bits32(
                 &digest,
-                tree as usize * FORS_TREE_HEIGHT as usize,
+                tree * FORS_TREE_HEIGHT as usize,
                 FORS_TREE_HEIGHT as u32,
             )
         })

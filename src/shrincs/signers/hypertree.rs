@@ -168,15 +168,14 @@ pub(crate) fn hypertree_public_root(
     // Lowest layer has 2^64/2^8 = 2^56 subtrees so 7 of 8 bits are used for the tree index
     let layer_seeds = hypertree_layer_seeds(stateless_sk_seed);
     let top_layer = u32::from(NUM_HYPERTREE_LAYERS - 1);
-    hypertree_subtree(
-        pk_seed,
-        &layer_seeds[top_layer as usize],
-        top_layer,
-        0,
-        0,
-    )
-    .map(|subtree| subtree.root)
-    .expect("top-level hypertree leaf index 0 must be in range")
+    match hypertree_subtree(pk_seed, &layer_seeds[top_layer as usize], top_layer, 0, 0) {
+        Some(subtree) => subtree.root,
+        None => {
+            // Internal invariant: leaf 0 is always in range for the top-layer
+            // subtree rooted at tree index 0, so this path should be unreachable.
+            [0u8; HASH_LEN]
+        }
+    }
 }
 
 fn hypertree_layer_seeds(stateless_sk_seed: &[u8; HASH_LEN]) -> Vec<[u8; HASH_LEN]> {

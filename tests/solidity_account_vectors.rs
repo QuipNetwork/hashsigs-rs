@@ -17,7 +17,7 @@
 
 use std::fs;
 use std::io::Read;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use flate2::read::GzDecoder;
 use hashsigs_rs::shrincs::{
@@ -356,11 +356,11 @@ fn load_vectors() -> Value {
     serde_json::from_str(&encoded).expect("failed to parse Solidity account vectors JSON")
 }
 
-fn gz_path(path: &PathBuf) -> PathBuf {
+fn gz_path(path: &Path) -> PathBuf {
     PathBuf::from(format!("{}.gz", path.display()))
 }
 
-fn read_json_or_gzip(path: &PathBuf) -> std::io::Result<String> {
+fn read_json_or_gzip(path: &Path) -> std::io::Result<String> {
     match fs::read_to_string(path) {
         Ok(text) => Ok(text),
         Err(json_error) => {
@@ -376,7 +376,7 @@ fn read_json_or_gzip(path: &PathBuf) -> std::io::Result<String> {
 
 fn hex_to_bytes(hex: &str) -> Vec<u8> {
     let trimmed = hex.trim_start_matches("0x");
-    assert!(trimmed.len() % 2 == 0, "hex string must have even length");
+    assert!(trimmed.len().is_multiple_of(2), "hex string must have even length");
     (0..trimmed.len())
         .step_by(2)
         .map(|index| u8::from_str_radix(&trimmed[index..index + 2], 16).unwrap())
