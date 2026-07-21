@@ -1,6 +1,6 @@
 [package]
 name = "hashsigs-rs"
-version = "0.2.0-rc2"
+version = "0.2.0-rc.2"
 edition = "2021"
 authors = ["Richard T. Carback III <rick.rust.cargo.383d5@passmail.net>"]
 description = "Hash-based signatures core library with WOTS+ and SHRINCS primitives"
