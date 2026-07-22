@@ -75,3 +75,9 @@ proptest = "1.11.0"
 
 [build-dependencies]
 sha3 = "0.10"
+
+# Opt-level 2 for tests: hash-tree-heavy debug (opt-level 0) is the root cause of
+# 128s profile slowness (>25 min without finishing a test). Keep default
+# debug-assertions and overflow-checks (on) so test builds still catch bugs.
+[profile.test]
+opt-level = 2

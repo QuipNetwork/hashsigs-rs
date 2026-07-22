@@ -45,6 +45,9 @@ variables:
   # Stay on 11.x: npm 12 needs Node >= 22.22, but Node is pinned to the 22.14.0
   # trusted-publishing floor. npm 11.18 engine is node >=22.9, so it's compatible.
   NPM_VERSION: "11.18.0"
+  # Keep cargo home inside the project so GitLab cache can capture registry,
+  # git checkouts, and installed binaries (e.g. wasm-bindgen).
+  CARGO_HOME: "${CI_PROJECT_DIR}/.cargo"
 
 # Pin every job to the self-hosted Linux fleet (lovelace/watch/finney all carry
 # these tags; SaaS runners do not). This keeps all jobs on project runners even
@@ -54,6 +57,19 @@ variables:
 # merge), so the override is clean.
 default:
   tags: [linux, x86_64]
+
+# Shared cargo/target cache keyed on Cargo.lock so stale deps cannot drift
+# under --locked. Applied via extends on Rust jobs only (not publish-npm).
+.rust-cache:
+  cache:
+    key:
+      files:
+        - Cargo.lock
+    paths:
+      - .cargo/registry/
+      - .cargo/git/
+      - .cargo/bin/
+      - target/
 
 # Shared before_script fragments via GitLab !reference (not YAML list anchors,
 # which nest incorrectly when expanded under another list).
@@ -76,14 +92,32 @@ default:
         *) echo "expected Node ${NODE_MAJOR}.x, got $(node --version)" >&2; exit 1 ;;
       esac
 
+# Download the prebuilt wasm-bindgen CLI (musl) instead of compiling from
+# source via `cargo install`. Version is pinned in WASM_BINDGEN_VERSION;
+# .cargo/bin is cache-backed so cold downloads are rare.
 .install-wasm-bindgen:
   before_script:
     - rustup target add wasm32-unknown-unknown
-    - cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION"
+    - |
+      set -euo pipefail
+      mkdir -p "${CARGO_HOME}/bin"
+      export PATH="${CARGO_HOME}/bin:${PATH}"
+      if ! wasm-bindgen --version 2>/dev/null | grep -Fq "${WASM_BINDGEN_VERSION}"; then
+        echo "installing wasm-bindgen-cli ${WASM_BINDGEN_VERSION} (prebuilt musl)"
+        curl -fsSL \
+          "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/${WASM_BINDGEN_VERSION}/wasm-bindgen-${WASM_BINDGEN_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+          | tar -xz -C "${CARGO_HOME}/bin" --strip-components=1
+      fi
+      wasm-bindgen --version
+      case "$(wasm-bindgen --version)" in
+        *" ${WASM_BINDGEN_VERSION}"*) ;;
+        *) echo "expected wasm-bindgen ${WASM_BINDGEN_VERSION}, got $(wasm-bindgen --version)" >&2; exit 1 ;;
+      esac
 
 build-test:
   stage: test
   image: rust:1.89.0
+  extends: .rust-cache
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
@@ -96,15 +130,37 @@ build-test:
     # run rather than a check: it is the only profile whose scheme hashes are
     # SHA-256, and its committed vectors anchor the Solidity sha2 verifier.
     - cargo test --locked --features profile-256s-sha2
-    # Profile features are mutually exclusive; check each path compiles.
-    # The 128s profiles are check-only: their unignored tests build a 2^18-leaf
-    # hypertree, which is not viable on a CI runner. bin/test-shrincs-profiles.sh
-    # runs them in release for local/scheduled use.
-    - cargo check --locked --features profile-128s-q18
-    - cargo check --locked --features profile-128s-q20
     # Default-profile wasm build (no profile-* feature). ts-conformance rebuilds
     # only when packaging via npm run build → build-wasm.sh.
     - cargo build --locked --release --target wasm32-unknown-unknown --features wasm-bindings
+
+# 128s profiles: full cargo test in release (not check-only). Unignored tests
+# build a 2^18-leaf hypertree; debug is unusable (>25 min without finishing a
+# test). Separate job so wall-clock is visible and so this parallelizes with
+# build-test / clippy / ts-conformance. Manual mirror: bin/test-shrincs-profiles.sh.
+test-128s:
+  stage: test
+  image: rust:1.89.0
+  extends: .rust-cache
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  script:
+    - cargo test --locked --release --features profile-128s-q18
+    - cargo test --locked --release --features profile-128s-q20
+
+# Solana workspace member is not a default member of the root package, so it
+# never ran under bare `cargo test`. solana-program-test spins up a validator
+# harness; keep cost visible as its own job.
+test-solana:
+  stage: test
+  image: rust:1.89.0
+  extends: .rust-cache
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  script:
+    - cargo test --locked -p hashsigs-rs-solana
 
 # Static clippy gate. Profile features are mutually exclusive, so lint the same
 # feature set CI tests (wasm-bindings), not --all-features. NOTE: `cargo fmt --check`
@@ -113,6 +169,7 @@ build-test:
 clippy:
   stage: test
   image: rust:1.89.0
+  extends: .rust-cache
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
@@ -128,6 +185,7 @@ clippy:
 ts-conformance:
   stage: test
   image: rust:1.89.0
+  extends: .rust-cache
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
@@ -135,6 +193,7 @@ ts-conformance:
     - !reference [.install-node-pinned, before_script]
     - !reference [.install-wasm-bindgen, before_script]
   script:
+    - export PATH="${CARGO_HOME}/bin:${PATH}"
     - cd ts && npm ci
     - npm run build
 
@@ -144,6 +203,7 @@ ts-conformance:
 build-package:
   stage: package
   image: rust:1.89.0
+  extends: .rust-cache
   # Inherits default tags [linux, x86_64] -> runs on the self-hosted Linux fleet.
   # Anchored semver, optional pre-release suffix (e.g. v0.2.0-rc1); rejects v1.2.3.4 / v1.2.3-foo trailing junk.
   rules:
@@ -152,8 +212,11 @@ build-package:
     - !reference [.install-node-pinned, before_script]
     - !reference [.install-wasm-bindgen, before_script]
   script:
-    # Tag pipelines do not run build-test, so gate the release on the Rust suite here.
-    - cargo test --locked --features wasm-bindings
+    # Do not re-run `cargo test --locked --features wasm-bindings` here. Tag
+    # pipelines require the commit to have already passed the test stage
+    # (build-test / test-128s / clippy / ts-conformance) on MR or default-branch
+    # pipelines; re-running the default suite only adds redundant wall-clock.
+    - export PATH="${CARGO_HOME}/bin:${PATH}"
     - cd ts && npm ci
     - npm version "${CI_COMMIT_TAG#v}" --no-git-tag-version --allow-same-version # tag v0.2.0 -> 0.2.0
     # `npm pack` runs prepack -> npm run build (wasm + tsc + conformance +
