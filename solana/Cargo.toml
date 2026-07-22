@@ -11,6 +11,11 @@ crate-type = ["cdylib", "lib"]
 
 [features]
 no-entrypoint = []
+# Replaces the entrypoint's default 32 KiB-bounded bump allocator with an
+# unbounded one so ComputeBudgetInstruction::request_heap_frame actually
+# extends usable heap (the VM enforces the granted frame size).
+custom-heap = []
+default = ["custom-heap"]
 
 [dependencies]
 solana-program = "2.3"
