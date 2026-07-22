@@ -27,6 +27,7 @@ mod signer_types;
 mod signer_utils;
 
 pub mod envelope;
+pub mod erc7913;
 pub mod signer;
 pub mod verifier;
 
@@ -35,6 +36,7 @@ mod vector_conformance;
 #[cfg(test)]
 pub(crate) mod test_fixtures;
 
+pub use erc7913::{Erc7913Outcome, ShrincsVerifierErc7913};
 pub use signer::{ShrincsSigner, ShrincsSignerResult, ShrincsSigningKey};
 pub use verifier::ShrincsVerifier;
 
@@ -61,7 +63,7 @@ pub(crate) use dispatch::{
     verify_stateful_unsafe_raw, verify_stateless,
 };
 #[allow(unused_imports)]
-#[cfg(any(test, feature = "wasm-bindings"))]
+#[cfg(any(test, feature = "wasm-bindings", feature = "std"))]
 pub(crate) use dispatch::verify_stateless_unsafe_raw;
 #[allow(unused_imports)]
 pub(crate) use messages::{

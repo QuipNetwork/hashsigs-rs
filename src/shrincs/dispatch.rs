@@ -249,7 +249,12 @@ pub(crate) fn verify_stateful_unsafe_raw(
     uxmss::verify_stateful_unsafe_raw(&stateful_key, message, signature)
 }
 
-#[cfg(any(test, feature = "wasm-bindings"))]
+// Also needed unconditionally under `std` (not just `test`/`wasm-bindings`):
+// the account wrapper's ERC-1271 `isValidSignature` (std-gated) verifies a
+// stateless action signature over an already-built message without
+// consuming the stateless budget, which is exactly this raw-message escape
+// hatch.
+#[cfg(any(test, feature = "wasm-bindings", feature = "std"))]
 pub(crate) fn verify_stateless_unsafe_raw(
     expected_public_key_commitment: [u8; HASH_LEN],
     public_key: &PublicKey,

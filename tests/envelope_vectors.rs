@@ -31,10 +31,10 @@ mod common;
 use common::{hex_to_bytes, load_vectors, AbiDecoder};
 use hashsigs_rs::shrincs::envelope::{
     decode_1271_envelope, decode_stateful_action_envelope, decode_stateless_action_envelope,
-    encode_stateful_1271_envelope, encode_stateless_1271_envelope, encode_stateless_envelope,
-    prepare_stateless_delegation, Erc1271Envelope,
+    encode_stateful_1271_envelope, encode_stateful_envelope, encode_stateless_1271_envelope,
+    encode_stateless_envelope, prepare_stateless_delegation, Erc1271Envelope,
 };
-use hashsigs_rs::shrincs::ShrincsVerifier;
+use hashsigs_rs::shrincs::{Erc7913Outcome, ShrincsVerifier, ShrincsVerifierErc7913};
 
 #[cfg_attr(
     any(shrincs_profile_128s_q18, shrincs_profile_128s_q20),
@@ -219,6 +219,115 @@ fn stateful_only_rotation_bundle_feeds_prepare_stateless_delegation() {
     let mut wrong_commitment = oracle.current_shrincs_public_key;
     wrong_commitment[0] ^= 0x01;
     assert!(prepare_stateless_delegation(wrong_commitment, &envelope).is_none());
+}
+
+#[cfg_attr(
+    any(shrincs_profile_128s_q18, shrincs_profile_128s_q20),
+    ignore = "no matching Solidity account-wrapper fixture is committed for this profile; generate it in hashsigs-solidity with FOUNDRY_PROFILE=<profile> bash dev/export-account-vectors.sh test/test_vectors/<profile-specific-name>.json, then copy it into hashsigs-rs/tests/test_vectors/"
+)]
+#[test]
+fn stateful_erc7913_adapter_byte_pins_against_solidity_vector() {
+    let vectors = load_vectors();
+    let bundle = &vectors["testExportStatefulActionBundle"];
+    let vector_abi = hex_to_bytes(
+        bundle["stateful_vector_abi"]
+            .as_str()
+            .expect("missing stateful action vector blob"),
+    );
+    let oracle = AbiDecoder::new(&vector_abi).decode_root_stateful_action_vector();
+
+    // The ERC-7913 raw-hash `verify` entrypoint is not itself one of the
+    // exported Solidity vector shapes (only the mode-prefixed ERC-1271
+    // action envelope and the `verifyStatefulAction` calldata are exported);
+    // build the plain `abi.encode(PublicKey, SHRINCS.Signature)` envelope
+    // the codec's own encoder produces from the oracle-decoded fields —
+    // the same pattern `stateful_only_rotation_bundle_feeds_prepare_stateless_delegation`
+    // uses below for `prepare_stateless_delegation`. `oracle.message` is
+    // already proven (in `solidity_account_vectors.rs`) to equal the
+    // canonical stateful action hash, which is exactly the `hash` this
+    // adapter's raw-hash path expects.
+    let hash: [u8; 32] = oracle
+        .message
+        .clone()
+        .try_into()
+        .expect("stateful action message must be exactly 32 bytes");
+    let envelope_bytes = encode_stateful_envelope(&oracle.public_key, &oracle.signature);
+
+    let outcome = ShrincsVerifierErc7913::new().verify(
+        &oracle.current_shrincs_public_key,
+        &hash,
+        &envelope_bytes,
+    );
+    assert_eq!(outcome, Erc7913Outcome::Valid);
+
+    // A key of the wrong length is reported Invalid (Solidity: 0xffffffff),
+    // never Malformed.
+    let mut short_key = oracle.current_shrincs_public_key.to_vec();
+    short_key.pop();
+    assert_eq!(
+        ShrincsVerifierErc7913::new().verify(&short_key, &hash, &envelope_bytes),
+        Erc7913Outcome::Invalid
+    );
+
+    // A truncated envelope is reported Malformed (Solidity: revert).
+    assert_eq!(
+        ShrincsVerifierErc7913::new().verify(
+            &oracle.current_shrincs_public_key,
+            &hash,
+            &envelope_bytes[..envelope_bytes.len() - 1],
+        ),
+        Erc7913Outcome::Malformed
+    );
+}
+
+#[cfg_attr(
+    any(shrincs_profile_128s_q18, shrincs_profile_128s_q20),
+    ignore = "no matching Solidity account-wrapper fixture is committed for this profile; generate it in hashsigs-solidity with FOUNDRY_PROFILE=<profile> bash dev/export-account-vectors.sh test/test_vectors/<profile-specific-name>.json, then copy it into hashsigs-rs/tests/test_vectors/"
+)]
+#[test]
+fn stateless_erc7913_adapter_byte_pins_against_solidity_vector() {
+    let vectors = load_vectors();
+    let bundle = &vectors["testExportStatelessActionBundle"];
+    let vector_abi = hex_to_bytes(
+        bundle["stateless_vector_abi"]
+            .as_str()
+            .expect("missing stateless action vector blob"),
+    );
+    let oracle = AbiDecoder::new(&vector_abi).decode_root_stateless_action_vector();
+
+    // Same reasoning as the stateful adapter test above: build the plain
+    // stateless envelope `SHRINCSVerifier.verifyStateless` expects from the
+    // oracle-decoded fields, and reuse `oracle.message` (proven equal to the
+    // canonical stateless action hash) as the ERC-7913 `hash` argument.
+    let hash: [u8; 32] = oracle
+        .message
+        .clone()
+        .try_into()
+        .expect("stateless action message must be exactly 32 bytes");
+    let envelope_bytes = encode_stateless_envelope(&oracle.public_key, &oracle.signature);
+
+    let outcome = ShrincsVerifierErc7913::new().verify_stateless(
+        &oracle.current_shrincs_public_key,
+        &hash,
+        &envelope_bytes,
+    );
+    assert_eq!(outcome, Erc7913Outcome::Valid);
+
+    let mut short_key = oracle.current_shrincs_public_key.to_vec();
+    short_key.pop();
+    assert_eq!(
+        ShrincsVerifierErc7913::new().verify_stateless(&short_key, &hash, &envelope_bytes),
+        Erc7913Outcome::Invalid
+    );
+
+    assert_eq!(
+        ShrincsVerifierErc7913::new().verify_stateless(
+            &oracle.current_shrincs_public_key,
+            &hash,
+            &envelope_bytes[..envelope_bytes.len() - 1],
+        ),
+        Erc7913Outcome::Malformed
+    );
 }
 
 #[cfg_attr(
