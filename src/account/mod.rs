@@ -81,6 +81,50 @@ pub enum AccountError {
     StatefulLeafRejected,
 }
 
+// Typed mirror of the six Solidity contract events. The Solidity wrapper emits
+// these via `emit` at fixed points in each state transition; this port records
+// the same payloads in an in-memory log so callers can observe the transition
+// trail. Field names and values mirror the Solidity events exactly, including
+// which nonce/keyVersion snapshot each emission captures.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AccountEvent {
+    // Solidity: StatefulPolicySet(StatefulPolicy indexed policy, uint32 nextStatefulLeafIndex).
+    StatefulPolicySet {
+        policy: StatefulPolicy,
+        nextStatefulLeafIndex: u32,
+    },
+    // Solidity: RecoveryModeEntered(uint256 indexed keyVersion).
+    RecoveryModeEntered {
+        keyVersion: [u8; HASH_LEN],
+    },
+    // Solidity: KeyRotated(bytes32 indexed previous, bytes32 indexed next, uint256 nextKeyVersion).
+    KeyRotated {
+        previousShrincsPublicKey: [u8; HASH_LEN],
+        nextShrincsPublicKey: [u8; HASH_LEN],
+        nextKeyVersion: [u8; HASH_LEN],
+    },
+    // Solidity: StatefulSignatureVerified(uint32 indexed leafIndex, uint256 indexed nonce, uint256 indexed keyVersion).
+    StatefulSignatureVerified {
+        leafIndex: u32,
+        nonce: [u8; HASH_LEN],
+        keyVersion: [u8; HASH_LEN],
+    },
+    // Solidity: StatelessSignatureVerified(uint64 usedCount, uint256 indexed nonce, uint256 indexed keyVersion).
+    StatelessSignatureVerified {
+        usedCount: u64,
+        nonce: [u8; HASH_LEN],
+        keyVersion: [u8; HASH_LEN],
+    },
+    // Solidity: StatelessRotationConsumed(uint64 usedCount, uint256 indexed nonce, uint256 indexed keyVersion, bytes32 indexed next, bool fullRotation).
+    StatelessRotationConsumed {
+        usedCount: u64,
+        nonce: [u8; HASH_LEN],
+        keyVersion: [u8; HASH_LEN],
+        nextShrincsPublicKey: [u8; HASH_LEN],
+        fullRotation: bool,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShrincsAccountVerifierExample {
     // Installed bundle commitment currently trusted by the wrapper.
@@ -107,6 +151,11 @@ pub struct ShrincsAccountVerifierExample {
     recoveryMode: bool,
 
     usedLeafBitmap: HashMap<([u8; HASH_LEN], u64), U256>,
+
+    // Ordered log of emitted contract events, mirroring Solidity's `emit`
+    // trail. Not part of the Solidity storage layout; it is observability the
+    // EVM provides through the transaction receipt.
+    events: Vec<AccountEvent>,
 }
 
 impl ShrincsAccountVerifierExample {
@@ -139,6 +188,7 @@ impl ShrincsAccountVerifierExample {
             nextStatefulLeafIndex: INITIAL_STATEFUL_LEAF_INDEX,
             recoveryMode: false,
             usedLeafBitmap: HashMap::new(),
+            events: Vec::new(),
         }
     }
 
@@ -186,6 +236,23 @@ impl ShrincsAccountVerifierExample {
         self.recoveryMode
     }
 
+    // events: Borrow the ordered event trail emitted so far without clearing it.
+    pub fn events(&self) -> &[AccountEvent] {
+        &self.events
+    }
+
+    // drain_events: Take and clear the accumulated event trail. Mirrors reading
+    // and consuming the events a Solidity transaction would have emitted.
+    pub fn drain_events(&mut self) -> Vec<AccountEvent> {
+        std::mem::take(&mut self.events)
+    }
+
+    // emit: Append one contract event to the ordered trail at a Solidity `emit`
+    // point.
+    fn emit(&mut self, event: AccountEvent) {
+        self.events.push(event);
+    }
+
     // verifyStatefulUncheckedMessage: Internal raw stateful verification for tests and
     // support harnesses only.
     // 1. Recover the stateful leaf index from the auth-path length.
@@ -227,7 +294,13 @@ impl ShrincsAccountVerifierExample {
 
         // Record the leaf only after the signature is known to be valid.
         self.commitStatefulLeafUse(leafIndex);
-        // Solidity emits StatefulSignatureVerified here; Rust returns the boolean result.
+        // Emit the same observability event as the canonical stateful action flow.
+        // This path does not advance the nonce, so the emitted nonce is the current one.
+        self.emit(AccountEvent::StatefulSignatureVerified {
+            leafIndex,
+            nonce: self.nonce,
+            keyVersion: self.keyVersion,
+        });
         true
     }
 
@@ -276,7 +349,12 @@ impl ShrincsAccountVerifierExample {
 
         // Consume the leaf only after the action signature verifies.
         self.commitStatefulLeafUse(leafIndex);
-        // Solidity emits before nonce advancement so observers see the consumed nonce value.
+        // Emit before nonce advancement so observers see the consumed nonce value.
+        self.emit(AccountEvent::StatefulSignatureVerified {
+            leafIndex,
+            nonce: self.nonce,
+            keyVersion: self.keyVersion,
+        });
         // Advance freshness state after a successful action.
         increment_u256_be(&mut self.nonce);
         Ok(())
@@ -324,10 +402,18 @@ impl ShrincsAccountVerifierExample {
             return Err(AccountError::InvalidSignature);
         }
 
+        // Capture the consumed nonce before advancing; Solidity emits `nonce - 1`,
+        // i.e. the pre-increment value.
+        let consumedNonce = self.nonce;
         // Advance wrapper freshness and stateless usage state after success.
         increment_u256_be(&mut self.nonce);
         self.statelessSignaturesUsed += 1;
-        // Solidity emits the consumed nonce value from the pre-increment state.
+        // Emit the consumed nonce value from the pre-increment state.
+        self.emit(AccountEvent::StatelessSignatureVerified {
+            usedCount: self.statelessSignaturesUsed,
+            nonce: consumedNonce,
+            keyVersion: self.keyVersion,
+        });
         Ok(())
     }
 
@@ -378,6 +464,15 @@ impl ShrincsAccountVerifierExample {
         // Count the recovery signature against the current stateless budget before preserving it
         // into the next stateful-only epoch.
         self.statelessSignaturesUsed += 1;
+        // Announce the consumed recovery signature before any install resets wrapper state.
+        // nonce/keyVersion are still the pre-install epoch values; fullRotation is false.
+        self.emit(AccountEvent::StatelessRotationConsumed {
+            usedCount: self.statelessSignaturesUsed,
+            nonce: self.nonce,
+            keyVersion: self.keyVersion,
+            nextShrincsPublicKey: nextCompositePublicKey,
+            fullRotation: false,
+        });
         // Install the next stateful subkey while preserving stateless usage accounting because
         // the stateless key material is unchanged.
         self.installRotatedKey(nextCompositePublicKey, false);
@@ -430,6 +525,17 @@ impl ShrincsAccountVerifierExample {
 
         // Count the recovery signature as the final stateless use under the old key.
         self.statelessSignaturesUsed += 1;
+        // Announce the consumed recovery signature before any install resets wrapper state.
+        // nonce/keyVersion are still the pre-install epoch values. Solidity's rotateFullKey
+        // always tags this as a full rotation (fullRotation = true), independent of whether
+        // the stateless key material actually changed.
+        self.emit(AccountEvent::StatelessRotationConsumed {
+            usedCount: self.statelessSignaturesUsed,
+            nonce: self.nonce,
+            keyVersion: self.keyVersion,
+            nextShrincsPublicKey: nextCompositePublicKey,
+            fullRotation: true,
+        });
         // Reset the stateless budget only if the target actually replaces the stateless key
         // material. A rotation target that reuses the current pk_seed and hypertree_root keeps
         // the same few-time stateless key, so its usage accounting must carry forward.
@@ -484,6 +590,10 @@ impl ShrincsAccountVerifierExample {
         self.nextStatefulLeafIndex = initialLeafIndex;
         // Leaving recovery-only mode returns the wrapper to normal operation.
         self.recoveryMode = false;
+        self.emit(AccountEvent::StatefulPolicySet {
+            policy: self.statefulPolicy,
+            nextStatefulLeafIndex: self.nextStatefulLeafIndex,
+        });
         Ok(())
     }
 
@@ -514,6 +624,10 @@ impl ShrincsAccountVerifierExample {
         }
         // Require an explicit enterRecoveryMode() call before recovery signatures are accepted.
         self.recoveryMode = false;
+        self.emit(AccountEvent::StatefulPolicySet {
+            policy: self.statefulPolicy,
+            nextStatefulLeafIndex: self.nextStatefulLeafIndex,
+        });
         Ok(())
     }
 
@@ -541,6 +655,10 @@ impl ShrincsAccountVerifierExample {
         }
         // Leaving recovery-only mode returns the wrapper to normal operation.
         self.recoveryMode = false;
+        self.emit(AccountEvent::StatefulPolicySet {
+            policy: self.statefulPolicy,
+            nextStatefulLeafIndex: self.nextStatefulLeafIndex,
+        });
         Ok(())
     }
 
@@ -557,6 +675,9 @@ impl ShrincsAccountVerifierExample {
         }
         // Arm the wrapper so stateless recovery rotations are now accepted.
         self.recoveryMode = true;
+        self.emit(AccountEvent::RecoveryModeEntered {
+            keyVersion: self.keyVersion,
+        });
         Ok(())
     }
 
@@ -676,6 +797,8 @@ impl ShrincsAccountVerifierExample {
         nextCompositePublicKey: [u8; HASH_LEN],
         resetStatelessUsage: bool,
     ) {
+        // Preserve the previous key commitment for the rotation event payload.
+        let previousShrincsPublicKey = self.currentShrincsPublicKey;
         // Install the next trusted SHRINCS public-key commitment.
         self.currentShrincsPublicKey = nextCompositePublicKey;
         // Advance nonce and key epoch so old authorizations cannot be replayed.
@@ -694,6 +817,17 @@ impl ShrincsAccountVerifierExample {
         self.statefulPolicy = StatefulPolicy::MonotonicIndex;
         // Recovery mode ends once the new key has been installed.
         self.recoveryMode = false;
+        // Emit rotation then policy-reset events for off-chain observers, in the
+        // same order as Solidity. keyVersion is the post-increment value.
+        self.emit(AccountEvent::KeyRotated {
+            previousShrincsPublicKey,
+            nextShrincsPublicKey: nextCompositePublicKey,
+            nextKeyVersion: self.keyVersion,
+        });
+        self.emit(AccountEvent::StatefulPolicySet {
+            policy: self.statefulPolicy,
+            nextStatefulLeafIndex: self.nextStatefulLeafIndex,
+        });
     }
 
     fn onlyOwner(&self, caller: [u8; HASH_LEN]) -> Result<(), AccountError> {
@@ -1985,6 +2119,234 @@ mod tests {
         );
         assert_eq!(account.currentShrincsPublicKey(), expected_a);
         assert_eq!(account.nonce(), [0u8; HASH_LEN]);
+        assert_eq!(account.statelessSignaturesUsed(), 0);
+    }
+
+    fn key_version_one() -> [u8; HASH_LEN] {
+        let mut kv = [0u8; HASH_LEN];
+        kv[HASH_LEN - 1] = 1;
+        kv
+    }
+
+    #[test]
+    fn policy_setters_emit_stateful_policy_set_with_new_values() {
+        let mut account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), id(3));
+
+        // The constructor must not emit (Solidity's constructor emits nothing).
+        assert!(account.events().is_empty());
+
+        account
+            .setStatefulPolicyMonotonicIndex(id(1), 5)
+            .expect("owner sets monotonic policy");
+        account
+            .setStatefulPolicyLeafBitmap(id(1))
+            .expect("owner sets bitmap policy");
+        account
+            .setStatefulPolicyRecoveryRotation(id(1))
+            .expect("owner sets recovery policy");
+
+        assert_eq!(
+            account.drain_events(),
+            vec![
+                AccountEvent::StatefulPolicySet {
+                    policy: StatefulPolicy::MonotonicIndex,
+                    nextStatefulLeafIndex: 5,
+                },
+                AccountEvent::StatefulPolicySet {
+                    policy: StatefulPolicy::LeafBitmap,
+                    nextStatefulLeafIndex: 5,
+                },
+                AccountEvent::StatefulPolicySet {
+                    policy: StatefulPolicy::RecoveryRotation,
+                    nextStatefulLeafIndex: 5,
+                },
+            ],
+        );
+        // drain_events clears the log.
+        assert!(account.events().is_empty());
+    }
+
+    #[test]
+    fn enter_recovery_mode_emits_recovery_entered_after_policy_set() {
+        let mut account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), id(3));
+        account
+            .setStatefulPolicyRecoveryRotation(id(1))
+            .expect("owner sets recovery policy");
+        account
+            .enterRecoveryMode(id(1))
+            .expect("owner arms recovery mode");
+
+        assert_eq!(
+            account.drain_events(),
+            vec![
+                AccountEvent::StatefulPolicySet {
+                    policy: StatefulPolicy::RecoveryRotation,
+                    nextStatefulLeafIndex: INITIAL_STATEFUL_LEAF_INDEX,
+                },
+                AccountEvent::RecoveryModeEntered {
+                    keyVersion: [0u8; HASH_LEN],
+                },
+            ],
+        );
+    }
+
+    #[test]
+    fn verify_stateful_action_emits_signature_verified_with_consumed_nonce() {
+        let verifier = ShrincsVerifier::new();
+        let (mut signing_key, public_key) =
+            cheap_or_fresh_stateful_key("account stateful event seed", 4);
+        let public_key = to_public_key(&public_key);
+        let expected = expected_key(&public_key);
+        let mut account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), expected);
+        let action_type = [3u8; HASH_LEN];
+        let payload_hash = [4u8; HASH_LEN];
+        let context = ActionContext {
+            domain_separator: account.domainSeparator(),
+            nonce: account.nonce(),
+            key_version: account.keyVersion(),
+            action_type,
+            payload_hash,
+        };
+        let message = verifier.stateful_action_message_hash(expected, &context);
+        let signature = ShrincsSigner::sign_stateful_raw(&mut signing_key, &message).unwrap();
+        let signature = to_stateful_signature(&signature);
+
+        account
+            .verifyStatefulAction(&public_key, action_type, payload_hash, &signature)
+            .expect("valid stateful action verifies");
+
+        // Emitted before the nonce advance: the consumed nonce is the pre-increment 0.
+        assert_eq!(
+            account.drain_events(),
+            vec![AccountEvent::StatefulSignatureVerified {
+                leafIndex: 1,
+                nonce: [0u8; HASH_LEN],
+                keyVersion: [0u8; HASH_LEN],
+            }],
+        );
+    }
+
+    #[cfg_attr(
+        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
+    )]
+    #[test]
+    fn verify_stateless_action_emits_signature_verified_with_consumed_nonce() {
+        let case = &cached_account_signature_fixtures().stateless_action;
+        let public_key = case.public_key.clone();
+        let expected = expected_key(&public_key);
+        let mut account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), expected);
+
+        account
+            .verifyStatelessAction(&public_key, case.action_type, case.payload_hash, &case.signature)
+            .expect("valid stateless action verifies");
+
+        // Post-increment usage count (1) paired with the pre-increment consumed nonce (0).
+        assert_eq!(
+            account.drain_events(),
+            vec![AccountEvent::StatelessSignatureVerified {
+                usedCount: 1,
+                nonce: [0u8; HASH_LEN],
+                keyVersion: [0u8; HASH_LEN],
+            }],
+        );
+    }
+
+    #[cfg_attr(
+        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
+    )]
+    #[test]
+    fn rotate_to_fresh_key_emits_consumed_then_rotated_then_policy_set() {
+        let case = &cached_account_signature_fixtures().rotate_stateful;
+        let public_key = case.public_key.clone();
+        let expected = expected_key(&public_key);
+        let mut account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), expected);
+        account
+            .setStatefulPolicyRecoveryRotation(id(1))
+            .expect("owner sets recovery policy");
+        account
+            .enterRecoveryMode(id(1))
+            .expect("owner arms recovery mode");
+        account.statelessSignaturesUsed = 7;
+        // Clear the setup events so only the rotation trail remains.
+        account.drain_events();
+
+        account
+            .rotateToFreshKey(&public_key, &case.signature, &case.next_target)
+            .expect("valid stateful rotation succeeds");
+
+        assert_eq!(
+            account.drain_events(),
+            vec![
+                AccountEvent::StatelessRotationConsumed {
+                    usedCount: 8,
+                    nonce: [0u8; HASH_LEN],
+                    keyVersion: [0u8; HASH_LEN],
+                    nextShrincsPublicKey: case.next_commitment,
+                    fullRotation: false,
+                },
+                AccountEvent::KeyRotated {
+                    previousShrincsPublicKey: expected,
+                    nextShrincsPublicKey: case.next_commitment,
+                    nextKeyVersion: key_version_one(),
+                },
+                AccountEvent::StatefulPolicySet {
+                    policy: StatefulPolicy::MonotonicIndex,
+                    nextStatefulLeafIndex: INITIAL_STATEFUL_LEAF_INDEX,
+                },
+            ],
+        );
+    }
+
+    #[cfg_attr(
+        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
+    )]
+    #[test]
+    fn rotate_full_key_emits_consumed_then_rotated_then_policy_set() {
+        let case = &cached_account_signature_fixtures().rotate_full;
+        let public_key = case.public_key.clone();
+        let expected = expected_key(&public_key);
+        let mut account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), expected);
+        account
+            .setStatefulPolicyRecoveryRotation(id(1))
+            .expect("owner sets recovery policy");
+        account
+            .enterRecoveryMode(id(1))
+            .expect("owner arms recovery mode");
+        account.statelessSignaturesUsed = 7;
+        // Clear the setup events so only the rotation trail remains.
+        account.drain_events();
+
+        account
+            .rotateFullKey(&public_key, &case.signature, &case.next_target)
+            .expect("valid full rotation succeeds");
+
+        // usedCount is the pre-reset count (8): consumeStatelessRotationUse emits before
+        // installFreshFullKey clears the budget. fullRotation is always true here.
+        assert_eq!(
+            account.drain_events(),
+            vec![
+                AccountEvent::StatelessRotationConsumed {
+                    usedCount: 8,
+                    nonce: [0u8; HASH_LEN],
+                    keyVersion: [0u8; HASH_LEN],
+                    nextShrincsPublicKey: case.next_commitment,
+                    fullRotation: true,
+                },
+                AccountEvent::KeyRotated {
+                    previousShrincsPublicKey: expected,
+                    nextShrincsPublicKey: case.next_commitment,
+                    nextKeyVersion: key_version_one(),
+                },
+                AccountEvent::StatefulPolicySet {
+                    policy: StatefulPolicy::MonotonicIndex,
+                    nextStatefulLeafIndex: INITIAL_STATEFUL_LEAF_INDEX,
+                },
+            ],
+        );
+        // The install reset the stateless budget after the event captured the pre-reset count.
         assert_eq!(account.statelessSignaturesUsed(), 0);
     }
 }
