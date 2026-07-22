@@ -627,8 +627,7 @@ pub fn shrincs_import_signing_key(
         return Err(js_error(WasmErr {
             code: ERR_FORMAT_VERSION_UNSUPPORTED,
             message: format!(
-                "unsupported signing-key format version {} (expected {})",
-                actual, SIGNING_KEY_FORMAT_VERSION
+                "unsupported signing-key format version {actual} (expected {SIGNING_KEY_FORMAT_VERSION})"
             ),
         }));
     }
@@ -2350,7 +2349,7 @@ mod tests {
         let (key, _) = signing_key_and_public_key();
         let mut dto = signing_key_dto(&key);
         let secret = dto.stateful_sk_seed.clone();
-        dto.stateful_sk_seed = format!("{}00", secret); // 33 bytes → bad length
+        dto.stateful_sk_seed = format!("{secret}00"); // 33 bytes → bad length
         let err = parse_exported_signing_key(&dto).unwrap_err();
         assert_eq!(err.code, ERR_BAD_LENGTH);
         assert!(!err.message.contains(secret.trim_start_matches("0x")));
