@@ -49,6 +49,10 @@ wasm-bindings = [
     "dep:tsify",
     "dep:js-sys",
 ]
+# Parallelize grind searches, batched leaf generation, and WOTS-C chain
+# endpoint computation with rayon. Off by default; never implied by any
+# other feature (rayon pulls in a thread pool, unsuitable for wasm targets).
+parallel = ["dep:rayon"]
 
 [dependencies]
 solana-program = "2.3"
@@ -57,6 +61,7 @@ thiserror = "2.0"
 js-sys = { version = "0.3", optional = true }
 serde-wasm-bindgen = { version = "0.6.5", optional = true }
 zeroize = { version = "1.8", features = ["derive"] }
+rayon = { version = "1.12", optional = true }
 # =0.5.5: last tsify accepting wasm-bindgen 0.2.100, which the wasm-bindgen CLI
 # pin in bin/build-wasm.sh must match exactly (0.5.6 forces ^0.2.104).
 tsify = { version = "=0.5.5", default-features = false, features = ["js"], optional = true }

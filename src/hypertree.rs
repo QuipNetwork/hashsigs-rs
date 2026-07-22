@@ -203,8 +203,13 @@ fn verify_wots_c32(
     );
 
     let address_base = wots_address_base(layer, tree, keypair);
+
+    // Pass 1 (cheap, sequential): validate every chain value is present and
+    // accumulate the digit sum. Must stay sequential so a missing/overflowing
+    // chain fails closed before any chain walk runs.
     let mut digit_sum = 0u32;
-    let mut pk_input_segments = Vec::with_capacity(chain_count * HASH_LEN);
+    let mut chain_values = Vec::with_capacity(chain_count);
+    let mut digits = Vec::with_capacity(chain_count);
     for chain_index in 0..chain_count {
         let Some(chain_value) = signature
             .chains
@@ -218,12 +223,37 @@ fn verify_wots_c32(
             return false;
         };
         digit_sum = next_sum;
-        let segment =
-            wots_chain32_no_mask_base(WOTS_CHAIN_LEN, pk_seed, address_base, chain_index as u32, chain_value, digit);
-        pk_input_segments.extend_from_slice(&segment);
+        chain_values.push(chain_value);
+        digits.push(digit);
     }
     if digit_sum != WOTS_TARGET_SUM_STATELESS {
         return false;
+    }
+
+    // Pass 2 (expensive): walk each chain to its endpoint. Chain order must
+    // match the signer's so the pk-hash preimage is byte-identical, which is
+    // why the segments are collected in index order rather than append-on-completion.
+    let segment_at = |chain_index: usize| -> [u8; HASH_LEN] {
+        wots_chain32_no_mask_base(
+            WOTS_CHAIN_LEN,
+            pk_seed,
+            address_base,
+            chain_index as u32,
+            chain_values[chain_index],
+            digits[chain_index],
+        )
+    };
+    #[cfg(feature = "parallel")]
+    let segments: Vec<[u8; HASH_LEN]> = {
+        use rayon::prelude::*;
+        (0..chain_count).into_par_iter().map(segment_at).collect()
+    };
+    #[cfg(not(feature = "parallel"))]
+    let segments: Vec<[u8; HASH_LEN]> = (0..chain_count).map(segment_at).collect();
+
+    let mut pk_input_segments = Vec::with_capacity(chain_count * HASH_LEN);
+    for segment in &segments {
+        pk_input_segments.extend_from_slice(segment);
     }
 
     let computed_pk_hash = hash_node(&[
@@ -560,18 +590,26 @@ fn stateless_wots_c_public_key(
     sk_seed: &[u8; HASH_LEN],
     coords: &WotsKeypair,
 ) -> [u8; HASH_LEN] {
-    let mut endpoints = Vec::with_capacity(NUM_WOTS_CHAINS as usize);
-    for chain in 0..NUM_WOTS_CHAINS {
-        let secret = Zeroizing::new(stateless_wots_c_secret(sk_seed, u32::from(chain)));
-        let endpoint = stateless_wots_c_chain(
+    let chain_count = usize::from(NUM_WOTS_CHAINS);
+    let endpoint_at = |chain: usize| -> [u8; HASH_LEN] {
+        let secret = Zeroizing::new(stateless_wots_c_secret(sk_seed, chain as u32));
+        stateless_wots_c_chain(
             pk_seed,
-            &coords.chain(u32::from(chain)),
+            &coords.chain(chain as u32),
             *secret,
             0,
             u32::from(WOTS_CHAIN_LEN - 1),
-        );
-        endpoints.push(endpoint);
-    }
+        )
+    };
+
+    #[cfg(feature = "parallel")]
+    let endpoints: Vec<[u8; HASH_LEN]> = {
+        use rayon::prelude::*;
+        (0..chain_count).into_par_iter().map(endpoint_at).collect()
+    };
+    #[cfg(not(feature = "parallel"))]
+    let endpoints: Vec<[u8; HASH_LEN]> = (0..chain_count).map(endpoint_at).collect();
+
     stateless_wots_public_key_hash(pk_seed, &endpoints)
 }
 
@@ -609,21 +647,35 @@ fn sign_stateless_wots_c(
             Some((digit_sum, digits))
         },
         |digits| {
-            let mut chains = Vec::with_capacity(digits.len());
-            for (chain, digit) in digits.iter().enumerate() {
+            let chain_at = |chain: usize, digit: u32| -> Vec<u8> {
                 let secret = Zeroizing::new(stateless_wots_c_secret(seeds.sk_seed, chain as u32));
-                chains.push(
-                    stateless_wots_c_chain(
-                        seeds.pk_seed,
-                        &coords.chain(chain as u32),
-                        *secret,
-                        0,
-                        *digit,
-                    )
-                    .to_vec(),
-                );
+                stateless_wots_c_chain(
+                    seeds.pk_seed,
+                    &coords.chain(chain as u32),
+                    *secret,
+                    0,
+                    digit,
+                )
+                .to_vec()
+            };
+
+            #[cfg(feature = "parallel")]
+            {
+                use rayon::prelude::*;
+                digits
+                    .par_iter()
+                    .enumerate()
+                    .map(|(chain, digit)| chain_at(chain, *digit))
+                    .collect()
             }
-            chains
+            #[cfg(not(feature = "parallel"))]
+            {
+                digits
+                    .iter()
+                    .enumerate()
+                    .map(|(chain, digit)| chain_at(chain, *digit))
+                    .collect()
+            }
         },
     )?;
     let (counter, chains) = result;

@@ -31,35 +31,61 @@ use crate::types::HASH_LEN;
 /// - `parent(node_height, parent_index, left, right)` hashes two children into
 ///   the parent at the given height/index (domain separation is caller-owned).
 ///
+/// Number of leaves generated per parallel batch when the `parallel` feature
+/// is enabled. Leaves within a batch are hashed concurrently; the fold back
+/// into the stack always proceeds in strict leaf order, so the resulting
+/// root and auth path are identical to the sequential traversal.
+#[cfg(feature = "parallel")]
+const PARALLEL_LEAF_BATCH: u32 = 256;
+
 /// Memory: stack of ≤ `height + 1` nodes (≤ 25 × 32 B for height 24).
-pub(crate) fn treehash_root_and_auth_path(
+pub(crate) fn treehash_root_and_auth_path<F>(
     height: u32,
     selected_leaf: u32,
-    mut leaf_hash: impl FnMut(u32) -> [u8; HASH_LEN],
+    leaf_hash: F,
     mut parent: impl FnMut(u32, u64, [u8; HASH_LEN], [u8; HASH_LEN]) -> [u8; HASH_LEN],
-) -> ([u8; HASH_LEN], Vec<Vec<u8>>) {
+) -> ([u8; HASH_LEN], Vec<Vec<u8>>)
+where
+    F: Fn(u32) -> [u8; HASH_LEN] + Sync,
+{
     debug_assert!(height < u32::BITS);
     let leaf_count = 1u32 << height;
     let mut stack: Vec<([u8; HASH_LEN], u32)> = Vec::with_capacity(height as usize + 1);
     let mut auth_path = vec![Vec::new(); height as usize];
 
-    for i in 0..leaf_count {
-        let mut node = leaf_hash(i);
-        let mut node_h = 0u32;
-
-        record_auth_sibling(&mut auth_path, selected_leaf, i, node_h, &node);
-
-        while stack.last().is_some_and(|(_, h)| *h == node_h) {
-            let Some((left, _)) = stack.pop() else {
-                break;
-            };
-            let next_h = node_h + 1;
-            let parent_index = u64::from(i >> next_h);
-            node = parent(next_h, parent_index, left, node);
-            node_h = next_h;
-            record_auth_sibling(&mut auth_path, selected_leaf, i, node_h, &node);
+    #[cfg(feature = "parallel")]
+    {
+        use rayon::prelude::*;
+        let mut start = 0u32;
+        while start < leaf_count {
+            let end = start.saturating_add(PARALLEL_LEAF_BATCH).min(leaf_count);
+            let batch: Vec<[u8; HASH_LEN]> = (start..end).into_par_iter().map(&leaf_hash).collect();
+            for (offset, node) in batch.into_iter().enumerate() {
+                fold_leaf(
+                    start + offset as u32,
+                    node,
+                    selected_leaf,
+                    &mut stack,
+                    &mut auth_path,
+                    &mut parent,
+                );
+            }
+            start = end;
         }
-        stack.push((node, node_h));
+    }
+    #[cfg(not(feature = "parallel"))]
+    {
+        for i in 0..leaf_count {
+            let node = leaf_hash(i);
+            fold_leaf(
+                i,
+                node,
+                selected_leaf,
+                &mut stack,
+                &mut auth_path,
+                &mut parent,
+            );
+        }
     }
 
     let root = match stack.pop() {
@@ -68,6 +94,36 @@ pub(crate) fn treehash_root_and_auth_path(
         None => [0u8; HASH_LEN],
     };
     (root, auth_path)
+}
+
+/// Fold one leaf into the streaming stack, merging equal-height siblings and
+/// recording the auth-path sibling whenever a produced node sits next to the
+/// selected leaf's path. Shared by both the sequential and batched-parallel
+/// leaf-generation loops so the merge order (and therefore the result) is
+/// identical between them.
+#[inline]
+fn fold_leaf(
+    i: u32,
+    mut node: [u8; HASH_LEN],
+    selected_leaf: u32,
+    stack: &mut Vec<([u8; HASH_LEN], u32)>,
+    auth_path: &mut [Vec<u8>],
+    parent: &mut impl FnMut(u32, u64, [u8; HASH_LEN], [u8; HASH_LEN]) -> [u8; HASH_LEN],
+) {
+    let mut node_h = 0u32;
+    record_auth_sibling(auth_path, selected_leaf, i, node_h, &node);
+
+    while stack.last().is_some_and(|(_, h)| *h == node_h) {
+        let Some((left, _)) = stack.pop() else {
+            break;
+        };
+        let next_h = node_h + 1;
+        let parent_index = u64::from(i >> next_h);
+        node = parent(next_h, parent_index, left, node);
+        node_h = next_h;
+        record_auth_sibling(auth_path, selected_leaf, i, node_h, &node);
+    }
+    stack.push((node, node_h));
 }
 
 #[inline]

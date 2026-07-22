@@ -402,6 +402,7 @@ fn stateless_trace_enabled() -> bool {
     )
 }
 
+#[cfg(not(feature = "parallel"))]
 fn stateless_trace_counter_every() -> u32 {
     std::env::var("SHRINCS_TRACE_COUNTER_EVERY")
         .ok()
@@ -505,6 +506,9 @@ pub(crate) fn sign_fors_c(
     None
 }
 
+/// Sequential fallback (default / `parallel` feature off). Kept byte-identical
+/// to the parallel version below: both return the lowest winning counter.
+#[cfg(not(feature = "parallel"))]
 fn winning_fors_counter_and_digest(
     signing_key: &SphincsPlusCSigningKey,
     message: &[u8],
@@ -542,6 +546,44 @@ fn winning_fors_counter_and_digest(
         println!("stateless trace: FORS counter search exhausted limit={limit}");
     }
     None
+}
+
+/// Parallel grind: shards the counter range across the rayon global pool.
+/// Uses `find_map_first` so the winner is always the lowest matching counter,
+/// matching the sequential search and keeping signature bytes identical.
+#[cfg(feature = "parallel")]
+fn winning_fors_counter_and_digest(
+    signing_key: &SphincsPlusCSigningKey,
+    message: &[u8],
+    randomizer: &[u8; HASH_LEN],
+    limit: u32,
+) -> Option<(u32, SigningForsDigest)> {
+    use rayon::prelude::*;
+    let trace_enabled = stateless_trace_enabled();
+    if trace_enabled {
+        println!("stateless trace: FORS counter search start (parallel) limit={limit}");
+    }
+    let winner = (0..limit).into_par_iter().find_map_first(|counter| {
+        let digest = signer_fors_digest(
+            &signing_key.pk_seed,
+            &signing_key.hypertree_root,
+            message,
+            randomizer,
+            counter,
+        )?;
+        digest
+            .omitted_final_tree_is_zero
+            .then_some((counter, digest))
+    });
+    if trace_enabled {
+        match &winner {
+            Some((counter, _)) => {
+                println!("stateless trace: FORS counter search success counter={counter}")
+            }
+            None => println!("stateless trace: FORS counter search exhausted limit={limit}"),
+        }
+    }
+    winner
 }
 
 #[cfg(all(test, any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
