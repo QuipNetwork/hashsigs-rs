@@ -16,7 +16,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 
-//! FORS-C sign and verify (merged from components + signers).
+//! FORS-C sign and verify.
+//!
+//! Signs the external message digest with `NUM_FORS_TREES - 1` few-time
+//! secret-tree openings, mirroring Solidity's `ForsC.sol`. Builds on the
+//! shared `hash`/`treehash` helpers and is consumed by `sphincs_plus_c`, which
+//! chains the reconstructed FORS root into the hypertree.
 
 use alloc::format;
 use alloc::vec::Vec;
@@ -583,7 +588,7 @@ fn winning_fors_counter_and_digest(
     use rayon::prelude::*;
     let trace_enabled = stateless_trace_enabled();
     if trace_enabled {
-        println!("stateless trace: FORS counter search start (parallel) limit={limit}");
+        hashsigs_println!("stateless trace: FORS counter search start (parallel) limit={limit}");
     }
     let winner = (0..limit).into_par_iter().find_map_first(|counter| {
         let digest = signer_fors_digest(
@@ -600,9 +605,9 @@ fn winning_fors_counter_and_digest(
     if trace_enabled {
         match &winner {
             Some((counter, _)) => {
-                println!("stateless trace: FORS counter search success counter={counter}")
+                hashsigs_println!("stateless trace: FORS counter search success counter={counter}")
             }
-            None => println!("stateless trace: FORS counter search exhausted limit={limit}"),
+            None => hashsigs_println!("stateless trace: FORS counter search exhausted limit={limit}"),
         }
     }
     winner
