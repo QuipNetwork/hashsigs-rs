@@ -70,11 +70,20 @@ audit.
 
 ## Known gaps
 
-- 128s-q18/q20 Solidity account-wrapper vectors are not exported or
-  committed; the four cross-implementation tests stay ignored under those
-  profiles. Export requires Foundry:
-  `FOUNDRY_PROFILE=128s-q18 bash dev/export-account-vectors.sh` in
-  hashsigs-solidity, then copy into `tests/test_vectors/`.
+- 128s-q18/q20 account-wrapper vectors are Rust-generated, not
+  Solidity-exported: in-EVM stateless signing at 128s is compute-infeasible,
+  and `test/SHRINCSAccountVectorExport.t.sol` is in the 128s `foundry.toml`
+  skip lists, so hashsigs-solidity cannot produce them. `tests/test_vectors/
+  shrincs_account_wrapper_vectors_128s_q18_keccak.json.gz` and the q20 twin
+  are generated in-crate by the `#[ignore]`d
+  `generate_shrincs_account_wrapper_vectors` test in
+  `tests/generate_shrincs_vectors.rs` (`cargo test --release --features
+  profile-128s-q18 --test generate_shrincs_vectors
+  generate_shrincs_account_wrapper_vectors -- --ignored --nocapture`; several
+  minutes per profile: six 2^18-leaf hypertree keygens plus three FORS-C
+  stateless grinds). The four cross-implementation tests in
+  `solidity_account_vectors.rs` and the six in `envelope_vectors.rs` run
+  un-ignored under both 128s profiles against this fixture.
 - No test drives the account state machine against Solidity-produced call
   traces; the exported `*_verify_calldata`/`*_1271_envelope` blobs are
   byte-pinned through the codec but not replayed against a

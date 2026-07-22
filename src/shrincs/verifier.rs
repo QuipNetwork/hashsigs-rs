@@ -31,6 +31,7 @@ use super::messages::{
     full_rotation_message_hash, stateful_action_message_hash, stateful_rotation_message_hash,
     stateless_action_message_hash,
 };
+use super::public_key::public_key_commitment as public_key_commitment_from_parts;
 
 pub struct ShrincsVerifier;
 
@@ -175,5 +176,21 @@ impl ShrincsVerifier {
             context,
             next_key,
         )
+    }
+
+    /// Commitment binding an encoded stateful public key with a stateless
+    /// `pk_seed`/`hypertree_root` pair, mirroring
+    /// `SHRINCS.publicKeyCommitmentFromParts`. Exposed for callers that need
+    /// to derive a candidate bundle's commitment before it is installed
+    /// (e.g. building a `StatefulRotationTarget`, whose commitment mixes a
+    /// replacement stateful key with the *current* key's stateless
+    /// components rather than its own).
+    pub fn public_key_commitment(
+        &self,
+        stateful_public_key: &[u8],
+        pk_seed: [u8; HASH_LEN],
+        hypertree_root: [u8; HASH_LEN],
+    ) -> [u8; HASH_LEN] {
+        public_key_commitment_from_parts(stateful_public_key, &pk_seed, &hypertree_root)
     }
 }
