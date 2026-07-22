@@ -18,6 +18,7 @@
 #![allow(unexpected_cfgs)]
 
 pub mod processor;
+pub mod sphincs_plus_c;
 
 use crate::processor::process_instruction;
 

@@ -83,8 +83,9 @@ pub(crate) mod wotsplusc;
 pub(crate) mod test_support;
 
 pub use sphincs_plus_c::{
-    sign as sphincs_plus_c_sign, to_message as sphincs_plus_c_to_message, verify as sphincs_plus_c_verify,
-    verify_hash as sphincs_plus_c_verify_hash, SphincsPlusCPublicKey, SphincsPlusCSigningKey,
+    keygen as sphincs_plus_c_keygen, sign as sphincs_plus_c_sign, to_message as sphincs_plus_c_to_message,
+    verify as sphincs_plus_c_verify, verify_hash as sphincs_plus_c_verify_hash, SphincsPlusCPublicKey,
+    SphincsPlusCSigningKey,
 };
 pub use sphincs_plus_c_verifier::SphincsPlusCVerifier;
 pub use wotsplus::{constants, HashFn, PublicKey, WOTSPlus};

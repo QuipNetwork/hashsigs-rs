@@ -23,12 +23,15 @@ use solana_program::{
     program::invoke_signed,
     sysvar::{rent::Rent, Sysvar},
 };
-use hashsigs_rs::{WOTSPlus, PublicKey, constants};
+use hashsigs_rs::{WOTSPlus, PublicKey, SphincsPlusCVerifier, constants};
+use hashsigs_rs::shrincs::ShrincsVerifier;
 use borsh::{BorshSerialize, BorshDeserialize};
 use solana_program::keccak::hash as keccak256_hash;
 use solana_program::program::set_return_data;
 use solana_program::system_instruction::create_account;
 use solana_program::account_info::next_account_info;
+
+use crate::sphincs_plus_c::{ActionContextDto, ShrincsPublicKeyDto, StatelessSignatureDto};
 
 // NOTE: The following is supposed to increase the stack size but it does not work in practice.
 /*
@@ -113,6 +116,24 @@ pub enum WOTSPlusInstruction {
         message: Vec<u8>,
         signature: Vec<[u8; constants::HASH_LEN]>,
         randomization_elements: Vec<[u8; constants::HASH_LEN]>,
+    },
+    /// Independent SPHINCS+C verify (ERC-7913 shape): no account state, no
+    /// SHRINCS commitment or action envelope. `key` is `pk_seed ||
+    /// hypertree_root` (64 bytes); `hash` is the signed 32-byte message hash.
+    SphincsPlusCVerify {
+        key: [u8; 64],
+        hash: [u8; constants::HASH_LEN],
+        signature: StatelessSignatureDto,
+    },
+    /// SHRINCS hybrid stateless verify: commitment + shape check, then
+    /// delegates to the same SPHINCS+C verify. No account state -- every
+    /// input (expected commitment, public-key bundle, action context) is
+    /// passed by value.
+    ShrincsVerifyStateless {
+        expected_public_key_commitment: [u8; constants::HASH_LEN],
+        public_key: ShrincsPublicKeyDto,
+        context: ActionContextDto,
+        signature: StatelessSignatureDto,
     },
 }
 
@@ -263,6 +284,39 @@ fn process_verify_with_randomization(
     Ok(())
 }
 
+// View-style: no account state read or written, no signer requirement beyond
+// what `process_instruction` already checks. Kept small for the 4 KB SBF
+// stack-frame limit -- the signature DTO lives on the heap (Vec fields).
+fn process_sphincs_plus_c_verify(
+    key: [u8; 64],
+    hash: [u8; constants::HASH_LEN],
+    signature: StatelessSignatureDto,
+) -> ProgramResult {
+    let signature = signature.into();
+    let is_valid = SphincsPlusCVerifier::new().verify(&key, &hash, &signature);
+    set_return_data(&[is_valid as u8]);
+    Ok(())
+}
+
+fn process_shrincs_verify_stateless(
+    expected_public_key_commitment: [u8; constants::HASH_LEN],
+    public_key: ShrincsPublicKeyDto,
+    context: ActionContextDto,
+    signature: StatelessSignatureDto,
+) -> ProgramResult {
+    let public_key = public_key.into();
+    let context = context.into();
+    let signature = signature.into();
+    let is_valid = ShrincsVerifier::new().verify_stateless(
+        expected_public_key_commitment,
+        &public_key,
+        &context,
+        &signature,
+    );
+    set_return_data(&[is_valid as u8]);
+    Ok(())
+}
+
 pub fn process_instruction(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
@@ -318,5 +372,19 @@ pub fn process_instruction(
                 randomization_elements
             )
         }
+        WOTSPlusInstruction::SphincsPlusCVerify { key, hash, signature } => {
+            process_sphincs_plus_c_verify(key, hash, signature)
+        }
+        WOTSPlusInstruction::ShrincsVerifyStateless {
+            expected_public_key_commitment,
+            public_key,
+            context,
+            signature,
+        } => process_shrincs_verify_stateless(
+            expected_public_key_commitment,
+            public_key,
+            context,
+            signature,
+        ),
     }
 }
