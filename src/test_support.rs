@@ -22,7 +22,7 @@ use crate::shrincs::{
     derive32, encode_stateful_public_key, public_key_from_components, ShrincsSigningKey,
 };
 use crate::types::PublicKey;
-use crate::uxmss;
+use crate::shrincs::uxmss;
 
 const INITIAL_STATEFUL_LEAF_INDEX: u32 = 1;
 

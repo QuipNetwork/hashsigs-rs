@@ -22,9 +22,9 @@
 //! is arbitrary bytes (or raw 32-byte hash via `to_message` / `verify_hash`).
 //! No SHRINCS public-key-bundle commitment and no action envelope.
 
-use crate::fors_c;
-use crate::hash::word32;
-use crate::hypertree;
+use crate::shrincs::fors_c;
+use crate::shrincs::hash::word32;
+use crate::shrincs::hypertree;
 use crate::types::{StatelessSignature, HASH_LEN};
 
 /// Stateless SPHINCS+C public key: public seed + hypertree root.
@@ -93,6 +93,10 @@ pub(crate) fn verify_raw(
 // this layer is its public home.
 pub use crate::types::SphincsPlusCSigningKey;
 
+/// ERC-7913-shaped verifier facade (generic verifier interface on Solana).
+pub mod verifier;
+pub use verifier::SphincsPlusCVerifier;
+
 /// Sign an arbitrary message at the SPHINCS+C layer.
 pub fn sign(
     signing_key: &SphincsPlusCSigningKey,
@@ -140,7 +144,7 @@ pub fn keygen(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hash::hash_packed;
+    use crate::shrincs::hash::hash_packed;
 
     fn derive32(domain: &[u8], seed: &[u8]) -> [u8; HASH_LEN] {
         hash_packed(&[domain, seed, &[]])
@@ -167,7 +171,7 @@ mod tests {
         let mut key = [0u8; 64];
         key[..32].copy_from_slice(&pk.pk_seed);
         key[32..].copy_from_slice(&pk.hypertree_root);
-        assert!(crate::sphincs_plus_c_verifier::SphincsPlusCVerifier::new().verify(
+        assert!(crate::sphincs_plus_c::verifier::SphincsPlusCVerifier::new().verify(
             &key,
             &message,
             &sig,
@@ -201,8 +205,8 @@ mod tests {
     ))]
     #[test]
     fn stateless_verify_hash_count_matches_model_and_reports_cu_floor() {
-        use crate::hash_backend::metrics;
-        use crate::profiles::{
+        use crate::shrincs::hash_backend::metrics;
+        use crate::shrincs::profiles::{
             FORS_TREE_HEIGHT, HYPERTREE_HEIGHT, NUM_FORS_TREES, NUM_HYPERTREE_LAYERS,
             NUM_WOTS_CHAINS, WOTS_CHAIN_LEN, WOTS_TARGET_SUM_STATELESS,
         };
@@ -242,7 +246,7 @@ mod tests {
             "CU estimate profile={}: stateless verify = {calls} hash syscalls, \
              {bytes} bytes hashed, syscall floor ≈ {cu_floor} CU \
              (excludes SBF instruction execution and borsh deserialization)",
-            crate::profiles::PROFILE_NAME
+            crate::shrincs::profiles::PROFILE_NAME
         );
     }
 }

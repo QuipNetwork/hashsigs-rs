@@ -934,14 +934,14 @@ fn sphincs_plus_c_verify_inner(
     }
     let hash = parse_word32(hash_hex)?;
     let signature = parse_stateless_signature(signature)?;
-    Ok(crate::sphincs_plus_c_verifier::SphincsPlusCVerifier::new().verify(
+    Ok(crate::sphincs_plus_c::verifier::SphincsPlusCVerifier::new().verify(
         &key,
         &hash,
         &signature,
     ))
 }
 
-/// ERC-7913 SHRINCS stateful verify (`ShrincsVerifierErc7913::verify`):
+/// ERC-7913 SHRINCS stateful verify (`ShrincsGenericVerifier::verify`):
 /// `key` is the 32-byte SHRINCS `publicKeyCommitment` hex, `signature_hex`
 /// is `abi.encode(PublicKey, SHRINCS.Signature)` hex (no mode prefix — this
 /// is NOT the account wrapper's ERC-1271 envelope; see
@@ -950,7 +950,7 @@ fn sphincs_plus_c_verify_inner(
 /// wrong-length key); THROWS `ERR_ENVELOPE_MALFORMED` only when the envelope
 /// framing itself cannot be decoded.
 #[cfg(feature = "wasm-bindings")]
-#[wasm_bindgen(js_name = shrincsErc7913Verify)]
+#[wasm_bindgen(js_name = shrincsGenericVerify)]
 pub fn shrincs_erc7913_verify(
     key_hex: &str,
     hash_hex: &str,
@@ -968,17 +968,17 @@ fn shrincs_erc7913_verify_inner(
     let key = parse_hex_bytes_with_max(key_hex, MAX_RAW_INPUT_BYTES)?;
     let hash = parse_word32(hash_hex)?;
     let signature_envelope = parse_hex_bytes_with_max(signature_hex, MAX_RAW_INPUT_BYTES)?;
-    match crate::shrincs::ShrincsVerifierErc7913::new().verify(&key, &hash, &signature_envelope) {
-        crate::shrincs::Erc7913Outcome::Valid => Ok(true),
-        crate::shrincs::Erc7913Outcome::Invalid => Ok(false),
-        crate::shrincs::Erc7913Outcome::Malformed => Err(WasmErr {
+    match crate::shrincs::ShrincsGenericVerifier::new().verify(&key, &hash, &signature_envelope) {
+        crate::shrincs::VerifyOutcome::Valid => Ok(true),
+        crate::shrincs::VerifyOutcome::Invalid => Ok(false),
+        crate::shrincs::VerifyOutcome::Malformed => Err(WasmErr {
             code: ERR_ENVELOPE_MALFORMED,
             message: "ERC-7913 stateful envelope could not be decoded".into(),
         }),
     }
 }
 
-/// ERC-7913 SHRINCS stateless verify (`ShrincsVerifierErc7913::verify_stateless`):
+/// ERC-7913 SHRINCS stateless verify (`ShrincsGenericVerifier::verify_stateless`):
 /// `key` is the 32-byte SHRINCS `publicKeyCommitment` hex, `signature_hex`
 /// is `abi.encode(PublicKey, SPHINCSPlusC.Signature)` hex. Delegates to the
 /// pinned `SphincsPlusCVerifier` internally, mirroring
@@ -987,7 +987,7 @@ fn shrincs_erc7913_verify_inner(
 /// `ERR_ENVELOPE_MALFORMED` only when the envelope framing itself cannot be
 /// decoded.
 #[cfg(feature = "wasm-bindings")]
-#[wasm_bindgen(js_name = shrincsErc7913VerifyStateless)]
+#[wasm_bindgen(js_name = shrincsGenericVerifyStateless)]
 pub fn shrincs_erc7913_verify_stateless(
     key_hex: &str,
     hash_hex: &str,
@@ -1005,14 +1005,14 @@ fn shrincs_erc7913_verify_stateless_inner(
     let key = parse_hex_bytes_with_max(key_hex, MAX_RAW_INPUT_BYTES)?;
     let hash = parse_word32(hash_hex)?;
     let signature_envelope = parse_hex_bytes_with_max(signature_hex, MAX_RAW_INPUT_BYTES)?;
-    match crate::shrincs::ShrincsVerifierErc7913::new().verify_stateless(
+    match crate::shrincs::ShrincsGenericVerifier::new().verify_stateless(
         &key,
         &hash,
         &signature_envelope,
     ) {
-        crate::shrincs::Erc7913Outcome::Valid => Ok(true),
-        crate::shrincs::Erc7913Outcome::Invalid => Ok(false),
-        crate::shrincs::Erc7913Outcome::Malformed => Err(WasmErr {
+        crate::shrincs::VerifyOutcome::Valid => Ok(true),
+        crate::shrincs::VerifyOutcome::Invalid => Ok(false),
+        crate::shrincs::VerifyOutcome::Malformed => Err(WasmErr {
             code: ERR_ENVELOPE_MALFORMED,
             message: "ERC-7913 stateless envelope could not be decoded".into(),
         }),

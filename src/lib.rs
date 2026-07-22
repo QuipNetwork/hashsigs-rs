@@ -63,23 +63,18 @@ mod trace_macros;
 
 #[cfg(feature = "std")]
 pub mod account;
-pub(crate) mod buf;
-pub(crate) mod fors_c;
-pub(crate) mod hash;
-pub(crate) mod hash_backend;
-pub(crate) mod hash_suite;
-pub(crate) mod hypertree;
-pub(crate) mod profiles;
+// The SHRINCS implementation home: hash layer, profiles, and the WOTS-C /
+// FORS-C / hypertree / UXMSS primitives live inside `shrincs`. The
+// `sphincs_plus_c` layer stays at the crate root as an independent public
+// scheme; it imports shared primitives from `shrincs::` but does not depend
+// on the SHRINCS dispatch/commitment layers (imports, not module paths,
+// define the dependency graph).
 pub mod shrincs;
 pub mod sphincs_plus_c;
-pub mod sphincs_plus_c_verifier;
-pub(crate) mod treehash;
 pub(crate) mod types;
-pub(crate) mod uxmss;
 #[cfg(feature = "std")]
 pub mod wasm;
 pub mod wotsplus;
-pub(crate) mod wotsplusc;
 
 #[cfg(all(test, feature = "std"))]
 pub(crate) mod test_support;
@@ -89,5 +84,5 @@ pub use sphincs_plus_c::{
     verify as sphincs_plus_c_verify, verify_hash as sphincs_plus_c_verify_hash, SphincsPlusCPublicKey,
     SphincsPlusCSigningKey,
 };
-pub use sphincs_plus_c_verifier::SphincsPlusCVerifier;
+pub use sphincs_plus_c::SphincsPlusCVerifier;
 pub use wotsplus::{constants, HashFn, PublicKey, WOTSPlus};

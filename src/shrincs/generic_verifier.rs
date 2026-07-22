@@ -22,9 +22,9 @@
 //! the hybrid SHRINCS scheme's two ERC-7913-shaped verify entrypoints. `key`
 //! is always the 32-byte SHRINCS `publicKeyCommitment`; `signature` is the
 //! plain (non-mode-prefixed) envelope `abi.encode(PublicKey,
-//! SHRINCS.Signature)` for [`ShrincsVerifierErc7913::verify`], or
+//! SHRINCS.Signature)` for [`ShrincsGenericVerifier::verify`], or
 //! `abi.encode(PublicKey, SPHINCSPlusC.Signature)` for
-//! [`ShrincsVerifierErc7913::verify_stateless`] — see
+//! [`ShrincsGenericVerifier::verify_stateless`] — see
 //! `super::envelope::encode_stateful_envelope` /
 //! `super::envelope::encode_stateless_envelope`. This is a different wire
 //! shape from the mode-prefixed ERC-1271 action envelope the account wrapper
@@ -36,10 +36,10 @@
 //! magic `verify.selector` on success, `0xffffffff` for a well-formed but
 //! cryptographically invalid signature (or a malformed/wrong-length key), or
 //! it reverts when the calldata re-tag cannot even read the envelope's
-//! framing. Rust has no revert channel, so [`Erc7913Outcome`] makes that
+//! framing. Rust has no revert channel, so [`VerifyOutcome`] makes that
 //! third state an explicit variant instead of folding it into `Invalid`:
 //! callers that need Solidity's return-or-revert split can match
-//! `Erc7913Outcome::Malformed` onto their own hard-reject path.
+//! `VerifyOutcome::Malformed` onto their own hard-reject path.
 //!
 //! # Intentional divergences from `SHRINCSVerifier.sol`
 //!
@@ -48,14 +48,14 @@
 //!   entirely rather than stubbed out.
 
 use super::envelope;
-use crate::hash::keccak_packed;
-use crate::sphincs_plus_c_verifier::SphincsPlusCVerifier;
+use crate::shrincs::hash::keccak_packed;
+use crate::sphincs_plus_c::verifier::SphincsPlusCVerifier;
 use crate::types::HASH_LEN;
 
 /// Outcome of an ERC-7913 verify call. See the module docs for the mapping
 /// onto Solidity's magic-value / `0xffffffff` / revert tri-state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Erc7913Outcome {
+pub enum VerifyOutcome {
     /// The signature verified. Mirrors returning
     /// `IERC7913SignatureVerifier.verify.selector`.
     Valid,
@@ -72,15 +72,15 @@ pub enum Erc7913Outcome {
 
 /// ERC-7913 signature verifier for the hybrid SHRINCS scheme. Rust mirror of
 /// `hashsigs-solidity-shrincs`'s `SHRINCSVerifier`; see the module docs.
-pub struct ShrincsVerifierErc7913;
+pub struct ShrincsGenericVerifier;
 
-impl Default for ShrincsVerifierErc7913 {
+impl Default for ShrincsGenericVerifier {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl ShrincsVerifierErc7913 {
+impl ShrincsGenericVerifier {
     pub fn new() -> Self {
         Self
     }
@@ -101,21 +101,21 @@ impl ShrincsVerifierErc7913 {
         key: &[u8],
         hash: &[u8; HASH_LEN],
         signature_envelope: &[u8],
-    ) -> Erc7913Outcome {
+    ) -> VerifyOutcome {
         let Some(commitment) = envelope::decode_public_key_commitment(key) else {
-            return Erc7913Outcome::Invalid;
+            return VerifyOutcome::Invalid;
         };
         let Some((public_key, signature)) =
             envelope::decode_stateful_envelope(signature_envelope)
         else {
-            return Erc7913Outcome::Malformed;
+            return VerifyOutcome::Malformed;
         };
         // `SHRINCS.verify` packs the bytes32 hash into the signed message as
         // its raw 32 bytes (`SPHINCSPlusC.toMessage`); `hash` IS the message.
         if super::verify_stateful_unsafe_raw(commitment, &public_key, hash, &signature) {
-            Erc7913Outcome::Valid
+            VerifyOutcome::Valid
         } else {
-            Erc7913Outcome::Invalid
+            VerifyOutcome::Invalid
         }
     }
 
@@ -131,9 +131,9 @@ impl ShrincsVerifierErc7913 {
         key: &[u8],
         hash: &[u8; HASH_LEN],
         stateless_envelope: &[u8],
-    ) -> Erc7913Outcome {
+    ) -> VerifyOutcome {
         let Some(commitment) = envelope::decode_public_key_commitment(key) else {
-            return Erc7913Outcome::Invalid;
+            return VerifyOutcome::Invalid;
         };
         // `prepare_stateless_delegation` folds envelope-decode failure,
         // commitment mismatch, and public-key shape failure into a single
@@ -142,12 +142,12 @@ impl ShrincsVerifierErc7913 {
         // all" (Malformed) from "well-formed but rejected" (Invalid),
         // without duplicating its commitment/shape-check logic.
         if envelope::decode_stateless_envelope(stateless_envelope).is_none() {
-            return Erc7913Outcome::Malformed;
+            return VerifyOutcome::Malformed;
         }
         let Some((delegate_key, delegate_signature_envelope)) =
             envelope::prepare_stateless_delegation(commitment, stateless_envelope)
         else {
-            return Erc7913Outcome::Invalid;
+            return VerifyOutcome::Invalid;
         };
         // `prepare_stateless_delegation` hands back a re-encoded signature
         // envelope, not a typed signature — Solidity's zero-copy calldata
@@ -162,12 +162,12 @@ impl ShrincsVerifierErc7913 {
             // re-encoded envelope for a delegation it accepted, so this
             // should be unreachable; fail closed as Malformed rather than
             // silently treating a codec-internal inconsistency as Invalid.
-            return Erc7913Outcome::Malformed;
+            return VerifyOutcome::Malformed;
         };
         if SphincsPlusCVerifier::new().verify(&delegate_key, hash, &delegate_signature) {
-            Erc7913Outcome::Valid
+            VerifyOutcome::Valid
         } else {
-            Erc7913Outcome::Invalid
+            VerifyOutcome::Invalid
         }
     }
 }
@@ -197,7 +197,7 @@ mod tests {
             0xd2, 0x4f, 0x68, 0x62, 0x83, 0x29, 0xf9, 0x32, 0x9a, 0x54, 0xb8, 0xe8, 0xc5, 0x3e,
             0x3b, 0x06, 0xda, 0x58,
         ];
-        assert_eq!(ShrincsVerifierErc7913::version_tag(), EXPECTED);
+        assert_eq!(ShrincsGenericVerifier::version_tag(), EXPECTED);
     }
 
     // --- stateful verify -----------------------------------------------------
@@ -211,8 +211,8 @@ mod tests {
         let envelope = envelope::encode_stateful_envelope(&public_key, &signature);
 
         let outcome =
-            ShrincsVerifierErc7913::new().verify(&commitment_of(&public_key), &hash, &envelope);
-        assert_eq!(outcome, Erc7913Outcome::Valid);
+            ShrincsGenericVerifier::new().verify(&commitment_of(&public_key), &hash, &envelope);
+        assert_eq!(outcome, VerifyOutcome::Valid);
     }
 
     #[test]
@@ -224,12 +224,12 @@ mod tests {
         let envelope = envelope::encode_stateful_envelope(&public_key, &signature);
 
         let wrong_hash = [0x22u8; HASH_LEN];
-        let outcome = ShrincsVerifierErc7913::new().verify(
+        let outcome = ShrincsGenericVerifier::new().verify(
             &commitment_of(&public_key),
             &wrong_hash,
             &envelope,
         );
-        assert_eq!(outcome, Erc7913Outcome::Invalid);
+        assert_eq!(outcome, VerifyOutcome::Invalid);
     }
 
     #[test]
@@ -242,8 +242,8 @@ mod tests {
 
         let mut short_key = commitment_of(&public_key);
         short_key.pop();
-        let outcome = ShrincsVerifierErc7913::new().verify(&short_key, &hash, &envelope);
-        assert_eq!(outcome, Erc7913Outcome::Invalid);
+        let outcome = ShrincsGenericVerifier::new().verify(&short_key, &hash, &envelope);
+        assert_eq!(outcome, VerifyOutcome::Invalid);
     }
 
     #[test]
@@ -254,12 +254,12 @@ mod tests {
             .expect("signing must succeed for a fresh key");
         let envelope = envelope::encode_stateful_envelope(&public_key, &signature);
 
-        let outcome = ShrincsVerifierErc7913::new().verify(
+        let outcome = ShrincsGenericVerifier::new().verify(
             &commitment_of(&public_key),
             &hash,
             &envelope[..envelope.len() - 1],
         );
-        assert_eq!(outcome, Erc7913Outcome::Malformed);
+        assert_eq!(outcome, VerifyOutcome::Malformed);
     }
 
     #[test]
@@ -267,8 +267,8 @@ mod tests {
         let (_signing_key, public_key) = keypair(b"erc7913 stateful empty seed");
         let hash = [0x55u8; HASH_LEN];
         let outcome =
-            ShrincsVerifierErc7913::new().verify(&commitment_of(&public_key), &hash, &[]);
-        assert_eq!(outcome, Erc7913Outcome::Malformed);
+            ShrincsGenericVerifier::new().verify(&commitment_of(&public_key), &hash, &[]);
+        assert_eq!(outcome, VerifyOutcome::Malformed);
     }
 
     // --- stateless verify ------------------------------------------------
@@ -281,12 +281,12 @@ mod tests {
             .expect("stateless signing must succeed for a fresh key");
         let envelope = envelope::encode_stateless_envelope(&public_key, &signature);
 
-        let outcome = ShrincsVerifierErc7913::new().verify_stateless(
+        let outcome = ShrincsGenericVerifier::new().verify_stateless(
             &commitment_of(&public_key),
             &hash,
             &envelope,
         );
-        assert_eq!(outcome, Erc7913Outcome::Valid);
+        assert_eq!(outcome, VerifyOutcome::Valid);
     }
 
     #[test]
@@ -298,12 +298,12 @@ mod tests {
         let envelope = envelope::encode_stateless_envelope(&public_key, &signature);
 
         let wrong_hash = [0x88u8; HASH_LEN];
-        let outcome = ShrincsVerifierErc7913::new().verify_stateless(
+        let outcome = ShrincsGenericVerifier::new().verify_stateless(
             &commitment_of(&public_key),
             &wrong_hash,
             &envelope,
         );
-        assert_eq!(outcome, Erc7913Outcome::Invalid);
+        assert_eq!(outcome, VerifyOutcome::Invalid);
     }
 
     #[test]
@@ -317,8 +317,8 @@ mod tests {
         let mut short_key = commitment_of(&public_key);
         short_key.pop();
         let outcome =
-            ShrincsVerifierErc7913::new().verify_stateless(&short_key, &hash, &envelope);
-        assert_eq!(outcome, Erc7913Outcome::Invalid);
+            ShrincsGenericVerifier::new().verify_stateless(&short_key, &hash, &envelope);
+        assert_eq!(outcome, VerifyOutcome::Invalid);
     }
 
     #[test]
@@ -331,12 +331,12 @@ mod tests {
 
         let mut wrong_commitment = commitment_of(&public_key);
         wrong_commitment[0] ^= 0x01;
-        let outcome = ShrincsVerifierErc7913::new().verify_stateless(
+        let outcome = ShrincsGenericVerifier::new().verify_stateless(
             &wrong_commitment,
             &hash,
             &envelope,
         );
-        assert_eq!(outcome, Erc7913Outcome::Invalid);
+        assert_eq!(outcome, VerifyOutcome::Invalid);
     }
 
     #[test]
@@ -347,23 +347,23 @@ mod tests {
             .expect("stateless signing must succeed for a fresh key");
         let envelope = envelope::encode_stateless_envelope(&public_key, &signature);
 
-        let outcome = ShrincsVerifierErc7913::new().verify_stateless(
+        let outcome = ShrincsGenericVerifier::new().verify_stateless(
             &commitment_of(&public_key),
             &hash,
             &envelope[..envelope.len() - 1],
         );
-        assert_eq!(outcome, Erc7913Outcome::Malformed);
+        assert_eq!(outcome, VerifyOutcome::Malformed);
     }
 
     #[test]
     fn verify_stateless_reports_an_empty_envelope_as_malformed() {
         let (_signing_key, public_key) = keypair(b"erc7913 stateless empty seed");
         let hash = [0xccu8; HASH_LEN];
-        let outcome = ShrincsVerifierErc7913::new().verify_stateless(
+        let outcome = ShrincsGenericVerifier::new().verify_stateless(
             &commitment_of(&public_key),
             &hash,
             &[],
         );
-        assert_eq!(outcome, Erc7913Outcome::Malformed);
+        assert_eq!(outcome, VerifyOutcome::Malformed);
     }
 }

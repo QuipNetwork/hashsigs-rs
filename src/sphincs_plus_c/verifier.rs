@@ -42,7 +42,7 @@ impl SphincsPlusCVerifier {
     /// `SPHINCSPlusCVerifier.VERSION_TAG`: names this verifier's key/envelope
     /// format family, not the compiled parameter profile.
     pub fn version_tag() -> [u8; HASH_LEN] {
-        crate::hash::keccak_packed(&[b"quip.sphincsplusc-verifier.v1"])
+        crate::shrincs::hash::keccak_packed(&[b"quip.sphincsplusc-verifier.v1"])
     }
 
     /// Verify a SPHINCS+C signature over a 32-byte hash.

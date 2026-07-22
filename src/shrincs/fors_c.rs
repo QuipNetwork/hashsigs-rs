@@ -28,8 +28,8 @@ use alloc::vec::Vec;
 
 use zeroize::Zeroizing;
 
-use crate::hash::{fors_address_word, hash_node, hash_packed, read_bits32, read_bits64, word32};
-use crate::profiles::{
+use crate::shrincs::hash::{fors_address_word, hash_node, hash_packed, read_bits32, read_bits64, word32};
+use crate::shrincs::profiles::{
     FORS_C_MAX_GRIND_COUNTER, FORS_TREE_HEIGHT, HYPERTREE_HEIGHT, NUM_FORS_TREES,
     NUM_HYPERTREE_LAYERS,
 };
@@ -228,7 +228,7 @@ pub(crate) fn fors_tree_root_and_auth_path(
     let selected_secret_leaf =
         fors_leaf_secret(pk_seed, sk_seed, tree_index, leaf_index, fors_tree, leaf);
 
-    let (root, auth_path) = crate::treehash::treehash_root_and_auth_path(
+    let (root, auth_path) = crate::shrincs::treehash::treehash_root_and_auth_path(
         height,
         leaf,
         |index| {
@@ -638,15 +638,15 @@ fn winning_fors_counter_and_digest(
 #[cfg(all(test, any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
 mod measurement_tests {
     use super::{signer_fors_digest, SigningForsDigest};
-    use crate::hash::hash_packed;
-    use crate::profiles::FORS_C_MAX_GRIND_COUNTER;
+    use crate::shrincs::hash::hash_packed;
+    use crate::shrincs::profiles::FORS_C_MAX_GRIND_COUNTER;
     use crate::types::SphincsPlusCSigningKey;
     use crate::types::HASH_LEN;
 
     fn measurement_key(seed: &[u8], _max: u32) -> SphincsPlusCSigningKey {
         hashsigs_println!(
             "measurement setup: deriving stateless key profile={}",
-            crate::profiles::PROFILE_NAME
+            crate::shrincs::profiles::PROFILE_NAME
         );
         fn d(domain: &[u8], seed: &[u8]) -> [u8; HASH_LEN] {
             hash_packed(&[domain, seed, &[]])
@@ -690,7 +690,7 @@ mod measurement_tests {
             if counter > 0 && counter % counter_progress_every == 0 {
                 hashsigs_println!(
                     "counter progress profile={} sample={}/? tried={counter}/{limit}",
-                    crate::profiles::PROFILE_NAME,
+                    crate::shrincs::profiles::PROFILE_NAME,
                     sample_index + 1
                 );
             }
@@ -720,7 +720,7 @@ mod measurement_tests {
         let counter_progress_every = measurement_counter_progress_interval(limit);
         hashsigs_println!(
             "starting FORS measurement profile={} samples={samples} limit={limit} progress_every={progress_every} counter_progress_every={counter_progress_every}",
-            crate::profiles::PROFILE_NAME,
+            crate::shrincs::profiles::PROFILE_NAME,
         );
         let signing_key = measurement_key(b"fors success-rate measurement key", 4);
 
@@ -760,7 +760,7 @@ mod measurement_tests {
             if completed % progress_every == 0 || completed == samples {
                 hashsigs_println!(
                     "progress profile={} completed={completed}/{samples} successes={successes} failures={failures}",
-                    crate::profiles::PROFILE_NAME
+                    crate::shrincs::profiles::PROFILE_NAME
                 );
             }
         }
@@ -783,7 +783,7 @@ mod measurement_tests {
 
         hashsigs_println!(
             "profile={} samples={samples} limit={limit} successes={successes} failures={failures} success_pct={success_pct:.2} failure_pct={failure_pct:.2} avg_success_counter={avg_success_counter:.2} max_success_counter={max_success_counter}",
-            crate::profiles::PROFILE_NAME
+            crate::shrincs::profiles::PROFILE_NAME
         );
     }
 }

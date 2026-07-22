@@ -17,16 +17,16 @@
 
 //! Signer-specific helpers for the SHRINCS hybrid scheme.
 //!
-//! `hash_packed` is re-exported from the shared `crate::hash` module so signer
+//! `hash_packed` is re-exported from the shared `crate::shrincs::hash` module so signer
 //! call sites keep one import path; keeping a single copy prevents the signer
 //! and verifier from drifting apart. Only the helpers that are genuinely
 //! signer-specific (seed KDF and public-key assembly) are defined below.
 
 // Re-export the byte-identical helper shared with the verifier. Keeping one copy
-// in `crate::hash` prevents the two sides from drifting apart.
+// in `crate::shrincs::hash` prevents the two sides from drifting apart.
 use alloc::vec::Vec;
 
-pub(crate) use crate::hash::hash_packed;
+pub(crate) use crate::shrincs::hash::hash_packed;
 
 use crate::types::{PublicKey, HASH_LEN};
 use super::public_key::public_key_commitment;

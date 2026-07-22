@@ -26,18 +26,18 @@
 use alloc::vec::Vec;
 
 use zeroize::Zeroizing;
-use crate::hash::{
+use crate::shrincs::hash::{
     base_w_digit, hash_node, hash_packed, hypertree_address_word, word32,
     wots_address_base, wots_digest_bytes,
 };
-use crate::profiles::{
+use crate::shrincs::profiles::{
     HYPERTREE_HEIGHT, NUM_HYPERTREE_LAYERS, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN,
     WOTS_TARGET_SUM_STATELESS,
 };
 use crate::types::{HypertreeLayerSignature, WotsCSignature, HASH_LEN};
 use crate::types::SphincsPlusCSigningKey;
-use crate::wotsplusc;
-use crate::wotsplusc::WOTS_C_MAX_GRIND_COUNTER;
+use crate::shrincs::wotsplusc;
+use crate::shrincs::wotsplusc::WOTS_C_MAX_GRIND_COUNTER;
 
 pub(crate) fn verify_hypertree(
     pk_seed: &[u8; HASH_LEN],
@@ -174,7 +174,7 @@ fn verify_wots_c32(
     // fixed-capacity segment buffer (stack by default, Solana heap — see
     // `buf`). Chain order must match the signer's so the pk-hash preimage is
     // byte-identical, which is why segments are stored in index order.
-    let mut segments = crate::buf::node_buf::<{ NUM_WOTS_CHAINS as usize }>();
+    let mut segments = crate::shrincs::buf::node_buf::<{ NUM_WOTS_CHAINS as usize }>();
     let segment_at = |chain_index: usize| -> Option<[u8; HASH_LEN]> {
         let chain_value = signature.chains.get(chain_index).copied()?;
         Some(wots_chain32_no_mask_base(
@@ -490,7 +490,7 @@ fn hypertree_subtree(
     // folded into the tree (same leaf secret derivation path).
     let selected_leaf_hash = hypertree_leaf(pk_seed, layer_seed, layer, tree, selected_leaf);
 
-    let (root, auth_path) = crate::treehash::treehash_root_and_auth_path(
+    let (root, auth_path) = crate::shrincs::treehash::treehash_root_and_auth_path(
         subtree_height,
         selected_leaf,
         |leaf| {
@@ -591,7 +591,7 @@ fn sign_stateless_wots_c(
     let randomizer = hash_packed(&[b"wots-c-randomizer", seeds.prf_seed, message]);
     let digest_bytes = wots_digest_bytes();
 
-    let result = crate::wotsplusc::grind_digit_sum(
+    let result = crate::shrincs::wotsplusc::grind_digit_sum(
         WOTS_C_MAX_GRIND_COUNTER,
         WOTS_TARGET_SUM_STATELESS,
         |counter| {

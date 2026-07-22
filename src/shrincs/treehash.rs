@@ -188,7 +188,7 @@ pub(crate) fn naive_tree_root_and_auth_path(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hash::hash_node;
+    use crate::shrincs::hash::hash_node;
     use proptest::prelude::*;
 
     fn test_parent(

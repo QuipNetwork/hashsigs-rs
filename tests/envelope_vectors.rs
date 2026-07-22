@@ -34,7 +34,7 @@ use hashsigs_rs::shrincs::envelope::{
     encode_stateful_1271_envelope, encode_stateful_envelope, encode_stateless_1271_envelope,
     encode_stateless_envelope, prepare_stateless_delegation, Erc1271Envelope,
 };
-use hashsigs_rs::shrincs::{Erc7913Outcome, ShrincsVerifier, ShrincsVerifierErc7913};
+use hashsigs_rs::shrincs::{VerifyOutcome, ShrincsVerifier, ShrincsGenericVerifier};
 
 #[cfg_attr(
     any(shrincs_profile_128s_q18, shrincs_profile_128s_q20),
@@ -253,30 +253,30 @@ fn stateful_erc7913_adapter_byte_pins_against_solidity_vector() {
         .expect("stateful action message must be exactly 32 bytes");
     let envelope_bytes = encode_stateful_envelope(&oracle.public_key, &oracle.signature);
 
-    let outcome = ShrincsVerifierErc7913::new().verify(
+    let outcome = ShrincsGenericVerifier::new().verify(
         &oracle.current_shrincs_public_key,
         &hash,
         &envelope_bytes,
     );
-    assert_eq!(outcome, Erc7913Outcome::Valid);
+    assert_eq!(outcome, VerifyOutcome::Valid);
 
     // A key of the wrong length is reported Invalid (Solidity: 0xffffffff),
     // never Malformed.
     let mut short_key = oracle.current_shrincs_public_key.to_vec();
     short_key.pop();
     assert_eq!(
-        ShrincsVerifierErc7913::new().verify(&short_key, &hash, &envelope_bytes),
-        Erc7913Outcome::Invalid
+        ShrincsGenericVerifier::new().verify(&short_key, &hash, &envelope_bytes),
+        VerifyOutcome::Invalid
     );
 
     // A truncated envelope is reported Malformed (Solidity: revert).
     assert_eq!(
-        ShrincsVerifierErc7913::new().verify(
+        ShrincsGenericVerifier::new().verify(
             &oracle.current_shrincs_public_key,
             &hash,
             &envelope_bytes[..envelope_bytes.len() - 1],
         ),
-        Erc7913Outcome::Malformed
+        VerifyOutcome::Malformed
     );
 }
 
@@ -306,27 +306,27 @@ fn stateless_erc7913_adapter_byte_pins_against_solidity_vector() {
         .expect("stateless action message must be exactly 32 bytes");
     let envelope_bytes = encode_stateless_envelope(&oracle.public_key, &oracle.signature);
 
-    let outcome = ShrincsVerifierErc7913::new().verify_stateless(
+    let outcome = ShrincsGenericVerifier::new().verify_stateless(
         &oracle.current_shrincs_public_key,
         &hash,
         &envelope_bytes,
     );
-    assert_eq!(outcome, Erc7913Outcome::Valid);
+    assert_eq!(outcome, VerifyOutcome::Valid);
 
     let mut short_key = oracle.current_shrincs_public_key.to_vec();
     short_key.pop();
     assert_eq!(
-        ShrincsVerifierErc7913::new().verify_stateless(&short_key, &hash, &envelope_bytes),
-        Erc7913Outcome::Invalid
+        ShrincsGenericVerifier::new().verify_stateless(&short_key, &hash, &envelope_bytes),
+        VerifyOutcome::Invalid
     );
 
     assert_eq!(
-        ShrincsVerifierErc7913::new().verify_stateless(
+        ShrincsGenericVerifier::new().verify_stateless(
             &oracle.current_shrincs_public_key,
             &hash,
             &envelope_bytes[..envelope_bytes.len() - 1],
         ),
-        Erc7913Outcome::Malformed
+        VerifyOutcome::Malformed
     );
 }
 

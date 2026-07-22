@@ -26,13 +26,13 @@
 use alloc::vec::Vec;
 
 use zeroize::Zeroizing;
-use crate::hash::{base_w16_digit, hash_node, hash_packed};
-use crate::profiles::{
+use crate::shrincs::hash::{base_w16_digit, hash_node, hash_packed};
+use crate::shrincs::profiles::{
     WOTS_BASE_STATEFUL, WOTS_CHAINS_STATEFUL, WOTS_TARGET_SUM_STATEFUL,
 };
 use crate::types::{StatefulPublicKey, StatefulSignature, HASH_LEN};
-use crate::wotsplusc;
-use crate::wotsplusc::WOTS_C_MAX_GRIND_COUNTER;
+use crate::shrincs::wotsplusc;
+use crate::shrincs::wotsplusc::WOTS_C_MAX_GRIND_COUNTER;
 
 pub(crate) fn verify_stateful_unsafe_raw(
     stateful_key: &StatefulPublicKey,
@@ -108,7 +108,7 @@ fn compact_stateful_wots_public_key_from_signature(
     ]);
 
     let mut digit_sum = 0u32;
-    let mut segments = crate::buf::node_buf::<WOTS_CHAINS_STATEFUL>();
+    let mut segments = crate::shrincs::buf::node_buf::<WOTS_CHAINS_STATEFUL>();
     for (chain_index, segment) in segments.iter_mut().enumerate() {
         let digit = base_w16_digit(&digest, chain_index);
         digit_sum = digit_sum.checked_add(digit)?;
@@ -261,7 +261,7 @@ fn sign_stateful_wots_c(
         message,
     ]);
 
-    let result = crate::wotsplusc::grind_digit_sum(
+    let result = crate::shrincs::wotsplusc::grind_digit_sum(
         WOTS_C_MAX_GRIND_COUNTER,
         WOTS_TARGET_SUM_STATEFUL,
         |counter| {
@@ -336,7 +336,7 @@ fn stateful_wots_pk_hash(
 ) -> [u8; HASH_LEN] {
     // This is the public WOTS-C commitment for one stateful leaf. It is computed
     // by advancing every chain to its endpoint and hashing all endpoints together.
-    let mut endpoints = crate::buf::node_buf::<WOTS_CHAINS_STATEFUL>();
+    let mut endpoints = crate::shrincs::buf::node_buf::<WOTS_CHAINS_STATEFUL>();
     for (chain_index, endpoint) in endpoints.iter_mut().enumerate() {
         // The private chain start is zeroized on drop.
         let secret = Zeroizing::new(stateful_chain_secret(

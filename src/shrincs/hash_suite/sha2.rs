@@ -24,5 +24,5 @@ use crate::types::HASH_SUITE_SHA2_256;
 pub const HASH_SUITE_ID: u32 = HASH_SUITE_SHA2_256;
 
 pub fn scheme_hash_parts(parts: &[&[u8]]) -> [u8; HASH_LEN] {
-    crate::hash_backend::sha256v(parts)
+    crate::shrincs::hash_backend::sha256v(parts)
 }

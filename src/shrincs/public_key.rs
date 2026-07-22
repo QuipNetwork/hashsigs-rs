@@ -25,8 +25,8 @@
 
 use alloc::vec::Vec;
 
-use crate::hash::{keccak_packed, word32};
-use crate::profiles::PROFILE_NAME;
+use crate::shrincs::hash::{keccak_packed, word32};
+use crate::shrincs::profiles::PROFILE_NAME;
 use crate::types::{StatefulPublicKey, HASH_LEN, STATEFUL_PUBLIC_KEY_BYTES};
 
 pub(crate) fn public_key_commitment(

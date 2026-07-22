@@ -24,9 +24,9 @@
 //! public-key commitments stay on keccak under every suite and are therefore
 //! owned outside this module.
 
-use crate::hash_backend;
-use crate::hash_suite::scheme_hash_parts;
-use crate::profiles::{HASH_TRUNC_LEN, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN};
+use crate::shrincs::hash_backend;
+use crate::shrincs::hash_suite::scheme_hash_parts;
+use crate::shrincs::profiles::{HASH_TRUNC_LEN, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN};
 use crate::types::{ADDRESS_TYPE_FORS_TREE, ADDRESS_TYPE_TREE, HASH_LEN};
 
 /// Scheme hash over the logical concatenation of `parts`. Hashing is vectored

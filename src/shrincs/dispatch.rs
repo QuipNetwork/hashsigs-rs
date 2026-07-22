@@ -22,13 +22,13 @@
 //! `sphincs_plus_c` (stateless) and `uxmss` (stateful), and computes rotation
 //! commitments. `mod.rs` re-exports the pieces `account`/`wasm` need.
 
-use crate::hash::word32;
+use crate::shrincs::hash::word32;
 use crate::sphincs_plus_c;
 use crate::types::{
     ActionContext, PublicKey, RotationContext, RotationTarget, StatefulRotationTarget,
     StatefulSignature, StatelessSignature, HASH_LEN, STATEFUL_PUBLIC_KEY_BYTES,
 };
-use crate::uxmss;
+use crate::shrincs::uxmss;
 use super::messages::{
     full_rotation_message_hash, stateful_action_message_hash, stateful_rotation_message_hash,
     stateless_action_message_hash,

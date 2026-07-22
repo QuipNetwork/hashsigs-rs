@@ -10,7 +10,10 @@ audit.
 - Crypto core: WOTS-C, FORS-C, hypertree, UXMSS, SPHINCS+C, SHRINCS verify
   and rotation paths; four profiles; keccak and sha2 hash suites; commitment
   scheme; the four canonical message hashes. Cross-pinned by Rust-anchored
-  vectors consumed on both sides (256s keccak and sha2).
+  vectors consumed on both sides (256s keccak and sha2). The primitives live
+  under `src/shrincs/` (one module per Solidity contract: `fors_c` ↔
+  `FORSMinusC.sol`, `hypertree` ↔ `Hypertree.sol`, and so on); the
+  independent SPHINCS+C layer is `src/sphincs_plus_c/`.
 - `shrincs::envelope`: byte-exact Solidity ABI encoders and strict decoders
   for every named envelope shape, including ERC-1271 mode-1/2 action
   envelopes and `prepare_stateless_delegation`. Byte-pinned against the
