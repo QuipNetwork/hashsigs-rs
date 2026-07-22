@@ -230,7 +230,7 @@ fn process_sign(
     // Store the signature in the account
     let signature_account_data = SignatureAccount {
         is_initialized: true,
-        signature: signature.to_vec(),
+        signature,
     };
 
     signature_account_data.serialize(&mut &mut signature_account.try_borrow_mut_data()?[..])?;
