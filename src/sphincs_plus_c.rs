@@ -179,4 +179,70 @@ mod tests {
         let h = [0xabu8; 32];
         assert_eq!(to_message(&h), h);
     }
+
+    /// Solana compute-unit estimator for one stateless verify.
+    ///
+    /// The verify-path hash count is a per-profile structural constant: WOTS-C's
+    /// target-sum check fixes total chain-walk steps at
+    /// `chains * (w-1) - target_sum` regardless of message, and the FORS /
+    /// auth-path counts are structural. This asserts the exact count against
+    /// the analytic model, then prints the agave syscall charge
+    /// `calls * 85 + Σ_slices max(10, len/2)` (agave `SyscallHash`) — a floor:
+    /// SBF instruction execution and instruction deserialization come on top.
+    ///
+    /// Excluded under `parallel` (rayon workers would record into their own
+    /// thread-local counters) and under the 128s profiles (signing there is
+    /// too slow for the default-profile test lanes; the structural model
+    /// covers them analytically).
+    #[cfg(all(
+        feature = "std",
+        not(feature = "parallel"),
+        not(any(feature = "profile-128s-q18", feature = "profile-128s-q20"))
+    ))]
+    #[test]
+    fn stateless_verify_hash_count_matches_model_and_reports_cu_floor() {
+        use crate::hash_backend::metrics;
+        use crate::profiles::{
+            FORS_TREE_HEIGHT, HYPERTREE_HEIGHT, NUM_FORS_TREES, NUM_HYPERTREE_LAYERS,
+            NUM_WOTS_CHAINS, WOTS_CHAIN_LEN, WOTS_TARGET_SUM_STATELESS,
+        };
+
+        let (sk, pk) = independent_keygen(b"sphincs-plus-c cu estimator");
+        let message = hash_packed(&[b"sphincs-plus-c-cu-message"]);
+        let sig = sign(&sk, &message).expect("sign");
+
+        metrics::reset();
+        assert!(verify(&pk, &message, &sig));
+        let (calls, bytes, slice_cost) = metrics::snapshot();
+
+        let signed_trees = u64::from(NUM_FORS_TREES) - 1;
+        let digest_bytes = (u64::from(NUM_FORS_TREES) * u64::from(FORS_TREE_HEIGHT)
+            + u64::from(HYPERTREE_HEIGHT))
+        .div_ceil(8);
+        let fors_digest_blocks = if digest_bytes <= 32 {
+            1
+        } else {
+            digest_bytes.div_ceil(32)
+        };
+        // Per signed FORS tree: one leaf hash + one node hash per level; plus
+        // the aggregate fors-pk hash.
+        let fors_calls =
+            fors_digest_blocks + signed_trees * (1 + u64::from(FORS_TREE_HEIGHT)) + 1;
+        // Per hypertree layer: WOTS message digest + fixed chain-walk total +
+        // wots-c-pk hash + one node hash per subtree auth-path level.
+        let subtree_height = u64::from(HYPERTREE_HEIGHT / NUM_HYPERTREE_LAYERS);
+        let chain_steps = u64::from(NUM_WOTS_CHAINS) * u64::from(WOTS_CHAIN_LEN - 1)
+            - u64::from(WOTS_TARGET_SUM_STATELESS);
+        let per_layer = 1 + chain_steps + 1 + subtree_height;
+        let expected_calls = fors_calls + u64::from(NUM_HYPERTREE_LAYERS) * per_layer;
+        assert_eq!(calls, expected_calls, "verify hash-count model drifted");
+
+        let cu_floor = metrics::estimated_syscall_cu(calls, slice_cost);
+        hashsigs_println!(
+            "CU estimate profile={}: stateless verify = {calls} hash syscalls, \
+             {bytes} bytes hashed, syscall floor ≈ {cu_floor} CU \
+             (excludes SBF instruction execution and borsh deserialization)",
+            crate::profiles::PROFILE_NAME
+        );
+    }
 }

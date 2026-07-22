@@ -24,30 +24,21 @@
 //! public-key commitments stay on keccak under every suite and are therefore
 //! owned outside this module.
 
-use alloc::vec::Vec;
-
 use crate::hash_backend;
-use crate::hash_suite::scheme_hash;
+use crate::hash_suite::scheme_hash_parts;
 use crate::profiles::{HASH_TRUNC_LEN, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN};
 use crate::types::{ADDRESS_TYPE_FORS_TREE, ADDRESS_TYPE_TREE, HASH_LEN};
 
+/// Scheme hash over the logical concatenation of `parts`. Hashing is vectored
+/// (incremental absorb / Solana `hashv`), so no packed buffer is allocated.
 pub(crate) fn hash_packed(parts: &[&[u8]]) -> [u8; HASH_LEN] {
-    scheme_hash(&pack(parts))
+    scheme_hash_parts(parts)
 }
 
-/// EVM-domain keccak over packed preimage parts (action hashes, commitments).
+/// EVM-domain keccak over preimage parts (action hashes, commitments).
 /// Always keccak regardless of the scheme-hash suite.
 pub(crate) fn keccak_packed(parts: &[&[u8]]) -> [u8; HASH_LEN] {
-    hash_backend::keccak256(&pack(parts))
-}
-
-pub(crate) fn pack(parts: &[&[u8]]) -> Vec<u8> {
-    let len = parts.iter().map(|part| part.len()).sum();
-    let mut out = Vec::with_capacity(len);
-    for part in parts {
-        out.extend_from_slice(part);
-    }
-    out
+    hash_backend::keccak256v(parts)
 }
 
 pub(crate) fn mask_hash(mut hash: [u8; HASH_LEN]) -> [u8; HASH_LEN] {

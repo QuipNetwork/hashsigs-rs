@@ -28,7 +28,7 @@ use alloc::vec::Vec;
 
 use zeroize::Zeroizing;
 
-use crate::hash::{fors_address_word, hash_node, hash_packed, pack, read_bits32, read_bits64, word32};
+use crate::hash::{fors_address_word, hash_node, hash_packed, read_bits32, read_bits64, word32};
 use crate::profiles::{
     FORS_C_MAX_GRIND_COUNTER, FORS_TREE_HEIGHT, HYPERTREE_HEIGHT, NUM_FORS_TREES,
     NUM_HYPERTREE_LAYERS,
@@ -36,18 +36,26 @@ use crate::profiles::{
 use crate::types::SphincsPlusCSigningKey;
 use crate::types::{ForsEntry, ForsSignature, HASH_LEN};
 
+/// Signed FORS trees per signature: the final tree is omitted (FORS-C).
+const SIGNED_TREES: usize = NUM_FORS_TREES as usize - 1;
+
+/// FORS digest length: `NUM_FORS_TREES * FORS_TREE_HEIGHT` leaf-index bits
+/// plus `HYPERTREE_HEIGHT` coordinate bits, rounded up to whole bytes.
+const FORS_DIGEST_BYTES: usize =
+    (NUM_FORS_TREES as usize * FORS_TREE_HEIGHT as usize + HYPERTREE_HEIGHT as usize).div_ceil(8);
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ForsDigest {
     tree_index: u64,
     leaf_index: u32,
-    digest: Vec<u8>,
+    digest: [u8; FORS_DIGEST_BYTES],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SigningForsDigest {
     pub tree_index: u64,
     pub leaf_index: u32,
-    pub signed_tree_indices: Vec<u32>,
+    pub signed_tree_indices: [u32; SIGNED_TREES],
     pub omitted_final_tree_is_zero: bool,
 }
 
@@ -79,8 +87,8 @@ pub(crate) fn verify_fors_c_and_return_root(
         return None;
     }
 
-    let mut roots = Vec::with_capacity(signed_trees * HASH_LEN);
-    for fors_tree_index in 0..signed_trees {
+    let mut roots = [[0u8; HASH_LEN]; SIGNED_TREES];
+    for (fors_tree_index, root_slot) in roots.iter_mut().enumerate() {
         let entry = signature.entries.get(fors_tree_index)?;
         if entry.secret_leaf.len() != HASH_LEN || entry.auth_path.len() != fors_tree_height {
             return None;
@@ -90,7 +98,7 @@ pub(crate) fn verify_fors_c_and_return_root(
             fors_tree_index * fors_tree_height,
             FORS_TREE_HEIGHT as u32,
         )?;
-        let root = fors_entry_root32(
+        *root_slot = fors_entry_root32(
             fors_tree_height as u32,
             pk_seed,
             digest.tree_index,
@@ -99,18 +107,28 @@ pub(crate) fn verify_fors_c_and_return_root(
             entry_leaf_index,
             entry,
         )?;
-        roots.extend_from_slice(&root);
     }
 
     Some((
-        hash_node(&[
-            b"fors-pk".as_ref(),
-            pk_seed.as_ref(),
-            roots.as_slice(),
-        ]),
+        fors_public_key_hash(pk_seed, &roots),
         digest.tree_index,
         digest.leaf_index,
     ))
+}
+
+/// Aggregate FORS public key hash: `"fors-pk" ‖ pk_seed ‖ root_0 ‖ …` fed to
+/// the hash vectored, byte-identical to the packed form.
+fn fors_public_key_hash(
+    pk_seed: &[u8],
+    roots: &[[u8; HASH_LEN]; SIGNED_TREES],
+) -> [u8; HASH_LEN] {
+    let mut parts: [&[u8]; SIGNED_TREES + 2] = [&[]; SIGNED_TREES + 2];
+    parts[0] = b"fors-pk";
+    parts[1] = pk_seed;
+    for (part, root) in parts[2..].iter_mut().zip(roots) {
+        *part = root.as_ref();
+    }
+    hash_node(&parts)
 }
 
 pub(crate) fn signer_fors_digest(
@@ -120,31 +138,21 @@ pub(crate) fn signer_fors_digest(
     randomizer: &[u8; HASH_LEN],
     counter: u32,
 ) -> Option<SigningForsDigest> {
-    let signed_trees = NUM_FORS_TREES as usize - 1;
     let index_bits = u32::from(NUM_FORS_TREES) * u32::from(FORS_TREE_HEIGHT);
     let subtree_height = u32::from(HYPERTREE_HEIGHT / NUM_HYPERTREE_LAYERS);
     let tree_bits = u32::from(HYPERTREE_HEIGHT) - subtree_height;
-    let digest_bytes = (index_bits + u32::from(HYPERTREE_HEIGHT)).div_ceil(8) as usize;
-    let digest = fors_digest_bytes(
-        pk_seed,
-        hypertree_root,
-        randomizer,
-        counter,
-        message,
-        digest_bytes,
-    );
-    let signed_tree_indices = (0..signed_trees)
-        .map(|tree| {
-            read_bits32(
-                &digest,
-                tree * FORS_TREE_HEIGHT as usize,
-                FORS_TREE_HEIGHT as u32,
-            )
-        })
-        .collect::<Option<Vec<_>>>()?;
+    let digest = fors_digest_bytes(pk_seed, hypertree_root, randomizer, counter, message);
+    let mut signed_tree_indices = [0u32; SIGNED_TREES];
+    for (tree, index_slot) in signed_tree_indices.iter_mut().enumerate() {
+        *index_slot = read_bits32(
+            &digest,
+            tree * FORS_TREE_HEIGHT as usize,
+            FORS_TREE_HEIGHT as u32,
+        )?;
+    }
     let omitted_final_tree_is_zero = read_bits32(
         &digest,
-        signed_trees * FORS_TREE_HEIGHT as usize,
+        SIGNED_TREES * FORS_TREE_HEIGHT as usize,
         FORS_TREE_HEIGHT as u32,
     )? == 0;
     let cursor = index_bits as usize;
@@ -323,15 +331,7 @@ fn fors_digest(
     let index_bits = u32::from(NUM_FORS_TREES) * u32::from(FORS_TREE_HEIGHT);
     let subtree_height = u32::from(HYPERTREE_HEIGHT / NUM_HYPERTREE_LAYERS);
     let tree_bits = u32::from(HYPERTREE_HEIGHT) - subtree_height;
-    let digest_bytes = (index_bits + u32::from(HYPERTREE_HEIGHT)).div_ceil(8) as usize;
-    let digest = fors_digest_bytes(
-        pk_seed,
-        hypertree_root,
-        randomizer,
-        counter,
-        message,
-        digest_bytes,
-    );
+    let digest = fors_digest_bytes(pk_seed, hypertree_root, randomizer, counter, message);
 
     let cursor = index_bits as usize;
     Some(ForsDigest {
@@ -341,32 +341,51 @@ fn fors_digest(
     })
 }
 
+/// FORS message digest, MGF1-style: block `i` is
+/// `H("fors-digest" ‖ pk_seed ‖ root ‖ randomizer ‖ counter ‖ message [‖ i])`,
+/// with the block counter suffix only in the multi-block (>32 byte) regime.
+/// The preimage parts are fed to the hash vectored, byte-identical to the
+/// previously packed `base` buffer.
 fn fors_digest_bytes(
     pk_seed: &[u8],
     hypertree_root: &[u8],
     randomizer: &[u8],
     counter: u32,
     message: &[u8],
-    digest_bytes: usize,
-) -> Vec<u8> {
-    let base = pack(&[
-        b"fors-digest",
-        pk_seed,
-        hypertree_root,
-        randomizer,
-        &counter.to_be_bytes(),
-        message,
-    ]);
-    if digest_bytes <= HASH_LEN {
-        return hash_packed(&[&base])[..digest_bytes].to_vec();
+) -> [u8; FORS_DIGEST_BYTES] {
+    let counter_be = counter.to_be_bytes();
+    let mut out = [0u8; FORS_DIGEST_BYTES];
+    if FORS_DIGEST_BYTES <= HASH_LEN {
+        let word = hash_packed(&[
+            b"fors-digest",
+            pk_seed,
+            hypertree_root,
+            randomizer,
+            &counter_be,
+            message,
+        ]);
+        // `min` keeps the wide-digest profiles (which never reach this
+        // compile-time-dead branch) borrow-checkable and lint-clean.
+        let take = FORS_DIGEST_BYTES.min(HASH_LEN);
+        out[..take].copy_from_slice(&word[..take]);
+        return out;
     }
 
-    let mut out = Vec::with_capacity(digest_bytes);
+    let mut filled = 0usize;
     let mut block_counter = 0u32;
-    while out.len() < digest_bytes {
-        let digest_word = hash_packed(&[&base, &block_counter.to_be_bytes()]);
-        let remaining = digest_bytes - out.len();
-        out.extend_from_slice(&digest_word[..remaining.min(HASH_LEN)]);
+    while filled < FORS_DIGEST_BYTES {
+        let digest_word = hash_packed(&[
+            b"fors-digest",
+            pk_seed,
+            hypertree_root,
+            randomizer,
+            &counter_be,
+            message,
+            &block_counter.to_be_bytes(),
+        ]);
+        let take = (FORS_DIGEST_BYTES - filled).min(HASH_LEN);
+        out[filled..filled + take].copy_from_slice(&digest_word[..take]);
+        filled += take;
         block_counter = block_counter.wrapping_add(1);
     }
     out
@@ -461,16 +480,17 @@ pub(crate) fn sign_fors_c(
     signing_key: &SphincsPlusCSigningKey,
     message: &[u8],
 ) -> Option<SignedForsC> {
-    stateless_trace(&format!(
-        "stateless trace: FORS start message_len={} signed_trees={} max_counter={}",
-        message.len(),
-        NUM_FORS_TREES as usize - 1,
-        FORS_C_MAX_GRIND_COUNTER
-    ));
+    if stateless_trace_enabled() {
+        stateless_trace(&format!(
+            "stateless trace: FORS start message_len={} signed_trees={} max_counter={}",
+            message.len(),
+            SIGNED_TREES,
+            FORS_C_MAX_GRIND_COUNTER
+        ));
+    }
     // FORS-C signs k - 1 trees. The final tree is omitted only when the digest
     // selects leaf zero for that final tree, so the signer grinds the counter
     // until that condition holds.
-    let signed_trees = NUM_FORS_TREES as usize - 1;
 
     // This is the FORS-C local message randomizer. It is deterministic for the
     // same stateless PRF seed and message, matching the SPHINCS-style separation
@@ -481,19 +501,21 @@ pub(crate) fn sign_fors_c(
     if let Some((counter, digest)) =
         winning_fors_counter_and_digest(signing_key, message, &randomizer, FORS_C_MAX_GRIND_COUNTER)
     {
-        stateless_trace(&format!(
-            "stateless trace: FORS winner counter={} tree_index={} leaf_index={}",
-            counter, digest.tree_index, digest.leaf_index
-        ));
+        if stateless_trace_enabled() {
+            stateless_trace(&format!(
+                "stateless trace: FORS winner counter={} tree_index={} leaf_index={}",
+                counter, digest.tree_index, digest.leaf_index
+            ));
+        }
 
-        let mut roots = Vec::with_capacity(signed_trees * HASH_LEN);
-        let mut entries = Vec::with_capacity(signed_trees);
-        for fors_tree in 0..signed_trees {
-            if stateless_trace_enabled() && (fors_tree == 0 || fors_tree + 1 == signed_trees) {
+        let mut roots = [[0u8; HASH_LEN]; SIGNED_TREES];
+        let mut entries = Vec::with_capacity(SIGNED_TREES);
+        for (fors_tree, root_slot) in roots.iter_mut().enumerate() {
+            if stateless_trace_enabled() && (fors_tree == 0 || fors_tree + 1 == SIGNED_TREES) {
                 hashsigs_println!(
                     "stateless trace: FORS materializing tree {}/{}",
                     fors_tree + 1,
-                    signed_trees
+                    SIGNED_TREES
                 );
             }
             // For each selected tree, reveal exactly the chosen secret leaf and
@@ -507,7 +529,7 @@ pub(crate) fn sign_fors_c(
                 fors_tree as u32,
                 leaf,
             );
-            roots.extend_from_slice(&root);
+            *root_slot = root;
             entries.push(ForsEntry {
                 secret_leaf: secret_leaf.to_vec(),
                 auth_path,
@@ -518,7 +540,7 @@ pub(crate) fn sign_fors_c(
         // The public seed is included so roots from a different FORS key cannot
         // be transplanted into this key.
         return Some(SignedForsC {
-            root: hash_node(&[b"fors-pk", &signing_key.pk_seed, &roots]),
+            root: fors_public_key_hash(&signing_key.pk_seed, &roots),
             signature: ForsSignature {
                 randomizer: randomizer.to_vec(),
                 counter,

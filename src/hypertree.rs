@@ -106,7 +106,7 @@ pub(crate) fn stateless_wots_message_digest(
     randomizer: &[u8; HASH_LEN],
     counter: u32,
     message: &[u8; HASH_LEN],
-) -> Vec<u8> {
+) -> [u8; HASH_LEN] {
     hash_packed(&[
         b"wots-c-msg".as_ref(),
         pk_seed.as_ref(),
@@ -115,18 +115,23 @@ pub(crate) fn stateless_wots_message_digest(
         counter.to_be_bytes().as_ref(),
         message.as_ref(),
     ])
-    .to_vec()
 }
 
 pub(crate) fn stateless_wots_public_key_hash(
     pk_seed: &[u8; HASH_LEN],
     endpoints: &[[u8; HASH_LEN]],
 ) -> [u8; HASH_LEN] {
-    let mut packed = Vec::with_capacity(endpoints.len() * HASH_LEN);
-    for endpoint in endpoints {
-        packed.extend_from_slice(endpoint);
+    // Vectored preimage: tag ‖ pk_seed ‖ endpoint_0 ‖ … — byte-identical to
+    // the packed form without materializing a chains-wide buffer.
+    const MAX_PARTS: usize = NUM_WOTS_CHAINS as usize + 2;
+    let mut parts: [&[u8]; MAX_PARTS] = [&[]; MAX_PARTS];
+    parts[0] = b"wots-c-pk";
+    parts[1] = pk_seed.as_ref();
+    let used = 2 + endpoints.len().min(NUM_WOTS_CHAINS as usize);
+    for (part, endpoint) in parts[2..used].iter_mut().zip(endpoints) {
+        *part = endpoint.as_ref();
     }
-    hash_node(&[b"wots-c-pk".as_ref(), pk_seed.as_ref(), packed.as_slice()])
+    hash_node(&parts[..used])
 }
 
 fn verify_wots_c32(
@@ -169,59 +174,76 @@ fn verify_wots_c32(
     // accumulate the digit sum. Must stay sequential so a missing/overflowing
     // chain fails closed before any chain walk runs.
     let mut digit_sum = 0u32;
-    let mut chain_values = Vec::with_capacity(chain_count);
-    let mut digits = Vec::with_capacity(chain_count);
-    for chain_index in 0..chain_count {
-        let Some(chain_value) = signature
+    let mut digits = [0u32; NUM_WOTS_CHAINS as usize];
+    for (chain_index, digit_slot) in digits.iter_mut().enumerate() {
+        if signature
             .chains
             .get(chain_index)
             .and_then(|value| word32(value))
-        else {
+            .is_none()
+        {
             return false;
-        };
+        }
         let digit = base_w_digit(WOTS_CHAIN_LEN, &digest, chain_index);
         let Some(next_sum) = digit_sum.checked_add(digit) else {
             return false;
         };
         digit_sum = next_sum;
-        chain_values.push(chain_value);
-        digits.push(digit);
+        *digit_slot = digit;
     }
     if digit_sum != WOTS_TARGET_SUM_STATELESS {
         return false;
     }
 
-    // Pass 2 (expensive): walk each chain to its endpoint. Chain order must
-    // match the signer's so the pk-hash preimage is byte-identical, which is
-    // why the segments are collected in index order rather than append-on-completion.
-    let segment_at = |chain_index: usize| -> [u8; HASH_LEN] {
-        wots_chain32_no_mask_base(
+    // Pass 2 (expensive): walk each chain to its endpoint, writing into a
+    // fixed-capacity segment buffer (stack by default, Solana heap — see
+    // `buf`). Chain order must match the signer's so the pk-hash preimage is
+    // byte-identical, which is why segments are stored in index order.
+    let mut segments = crate::buf::node_buf::<{ NUM_WOTS_CHAINS as usize }>();
+    let segment_at = |chain_index: usize| -> Option<[u8; HASH_LEN]> {
+        let chain_value = signature
+            .chains
+            .get(chain_index)
+            .and_then(|value| word32(value))?;
+        Some(wots_chain32_no_mask_base(
             WOTS_CHAIN_LEN,
             pk_seed,
             address_base,
             chain_index as u32,
-            chain_values[chain_index],
+            chain_value,
             digits[chain_index],
-        )
+        ))
     };
     #[cfg(feature = "parallel")]
-    let segments: Vec<[u8; HASH_LEN]> = {
+    let filled = {
         use rayon::prelude::*;
-        (0..chain_count).into_par_iter().map(segment_at).collect()
+        segments
+            .par_iter_mut()
+            .enumerate()
+            .all(|(chain_index, segment)| match segment_at(chain_index) {
+                Some(endpoint) => {
+                    *segment = endpoint;
+                    true
+                }
+                None => false,
+            })
     };
     #[cfg(not(feature = "parallel"))]
-    let segments: Vec<[u8; HASH_LEN]> = (0..chain_count).map(segment_at).collect();
-
-    let mut pk_input_segments = Vec::with_capacity(chain_count * HASH_LEN);
-    for segment in &segments {
-        pk_input_segments.extend_from_slice(segment);
+    let filled = segments
+        .iter_mut()
+        .enumerate()
+        .all(|(chain_index, segment)| match segment_at(chain_index) {
+            Some(endpoint) => {
+                *segment = endpoint;
+                true
+            }
+            None => false,
+        });
+    if !filled {
+        return false;
     }
 
-    let computed_pk_hash = hash_node(&[
-        b"wots-c-pk".as_ref(),
-        pk_seed.as_ref(),
-        pk_input_segments.as_slice(),
-    ]);
+    let computed_pk_hash = stateless_wots_public_key_hash(&pk_seed, segments.as_ref());
     computed_pk_hash == expected_pk_hash
 }
 
@@ -464,12 +486,16 @@ pub(crate) fn hypertree_public_root(
     }
 }
 
-fn hypertree_layer_seeds(stateless_sk_seed: &[u8; HASH_LEN]) -> Vec<[u8; HASH_LEN]> {
+fn hypertree_layer_seeds(
+    stateless_sk_seed: &[u8; HASH_LEN],
+) -> [[u8; HASH_LEN]; NUM_HYPERTREE_LAYERS as usize] {
     // One seed per hypertree layer keeps the subtrees domain-separated while
     // still deriving the entire stateless tree from one SK.seed-style seed.
-    (0..NUM_HYPERTREE_LAYERS)
-        .map(|layer| derive32(b"hypertree-layer-seed", stateless_sk_seed, &[layer]))
-        .collect()
+    let mut seeds = [[0u8; HASH_LEN]; NUM_HYPERTREE_LAYERS as usize];
+    for (layer, seed) in seeds.iter_mut().enumerate() {
+        *seed = derive32(b"hypertree-layer-seed", stateless_sk_seed, &[layer as u8]);
+    }
+    seeds
 }
 
 fn hypertree_subtree(

@@ -23,6 +23,6 @@ use crate::types::HASH_SUITE_KECCAK_256;
 
 pub const HASH_SUITE_ID: u32 = HASH_SUITE_KECCAK_256;
 
-pub fn scheme_hash(data: &[u8]) -> [u8; HASH_LEN] {
-    crate::hash_backend::keccak256(data)
+pub fn scheme_hash_parts(parts: &[&[u8]]) -> [u8; HASH_LEN] {
+    crate::hash_backend::keccak256v(parts)
 }

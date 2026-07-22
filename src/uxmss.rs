@@ -108,12 +108,12 @@ fn compact_stateful_wots_public_key_from_signature(
     ]);
 
     let mut digit_sum = 0u32;
-    let mut segments = Vec::with_capacity(WOTS_CHAINS_STATEFUL * HASH_LEN);
-    for chain_index in 0..WOTS_CHAINS_STATEFUL {
+    let mut segments = crate::buf::node_buf::<WOTS_CHAINS_STATEFUL>();
+    for (chain_index, segment) in segments.iter_mut().enumerate() {
         let digit = base_w16_digit(&digest, chain_index);
         digit_sum = digit_sum.checked_add(digit)?;
         let chain_value = *signature.chains.get(chain_index)?;
-        let segment = wotsplusc::stateful_chain_no_mask(
+        *segment = wotsplusc::stateful_chain_no_mask(
             &pk_seed,
             leaf_index,
             chain_index as u32,
@@ -121,18 +121,22 @@ fn compact_stateful_wots_public_key_from_signature(
             digit,
             WOTS_BASE_STATEFUL - 1 - digit,
         );
-        segments.extend_from_slice(&segment);
     }
 
     if digit_sum != WOTS_TARGET_SUM_STATEFUL {
         return None;
     }
-    Some(hash_node(&[
-        b"uxmss-wots-pk".as_ref(),
-        pk_seed.as_ref(),
-        leaf_index.to_be_bytes().as_ref(),
-        segments.as_slice(),
-    ]))
+    // Vectored preimage: tag ‖ pk_seed ‖ leaf_index ‖ segment_0 ‖ … —
+    // byte-identical to the packed form.
+    let leaf_be = leaf_index.to_be_bytes();
+    let mut parts: [&[u8]; WOTS_CHAINS_STATEFUL + 3] = [&[]; WOTS_CHAINS_STATEFUL + 3];
+    parts[0] = b"uxmss-wots-pk";
+    parts[1] = pk_seed.as_ref();
+    parts[2] = leaf_be.as_ref();
+    for (part, segment) in parts[3..].iter_mut().zip(segments.iter()) {
+        *part = segment.as_ref();
+    }
+    Some(hash_node(&parts))
 }
 
 fn root_from_unbalanced_path(
@@ -332,8 +336,8 @@ fn stateful_wots_pk_hash(
 ) -> [u8; HASH_LEN] {
     // This is the public WOTS-C commitment for one stateful leaf. It is computed
     // by advancing every chain to its endpoint and hashing all endpoints together.
-    let mut endpoints = Vec::with_capacity(WOTS_CHAINS_STATEFUL * HASH_LEN);
-    for chain_index in 0..WOTS_CHAINS_STATEFUL {
+    let mut endpoints = crate::buf::node_buf::<WOTS_CHAINS_STATEFUL>();
+    for (chain_index, endpoint) in endpoints.iter_mut().enumerate() {
         // The private chain start is zeroized on drop.
         let secret = Zeroizing::new(stateful_chain_secret(
             sk_seed,
@@ -341,7 +345,7 @@ fn stateful_wots_pk_hash(
             leaf_index,
             chain_index as u32,
         ));
-        let endpoint = wotsplusc::stateful_chain_no_mask(
+        *endpoint = wotsplusc::stateful_chain_no_mask(
             pk_seed,
             leaf_index,
             chain_index as u32,
@@ -349,14 +353,18 @@ fn stateful_wots_pk_hash(
             0,
             WOTS_BASE_STATEFUL - 1,
         );
-        endpoints.extend_from_slice(&endpoint);
     }
-    hash_node(&[
-        b"uxmss-wots-pk",
-        pk_seed,
-        &leaf_index.to_be_bytes(),
-        &endpoints,
-    ])
+    // Vectored preimage, byte-identical to the packed form used by the
+    // signature-side reconstruction above.
+    let leaf_be = leaf_index.to_be_bytes();
+    let mut parts: [&[u8]; WOTS_CHAINS_STATEFUL + 3] = [&[]; WOTS_CHAINS_STATEFUL + 3];
+    parts[0] = b"uxmss-wots-pk";
+    parts[1] = pk_seed.as_ref();
+    parts[2] = leaf_be.as_ref();
+    for (part, endpoint) in parts[3..].iter_mut().zip(endpoints.iter()) {
+        *part = endpoint.as_ref();
+    }
+    hash_node(&parts)
 }
 
 fn stateful_auth_path(

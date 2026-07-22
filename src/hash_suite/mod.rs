@@ -36,6 +36,6 @@ pub use sha2::HASH_SUITE_ID;
 pub use keccak::HASH_SUITE_ID;
 
 #[cfg(shrincs_hash_suite_sha2)]
-pub(crate) use sha2::scheme_hash;
+pub(crate) use sha2::scheme_hash_parts;
 #[cfg(not(shrincs_hash_suite_sha2))]
-pub(crate) use keccak::scheme_hash;
+pub(crate) use keccak::scheme_hash_parts;

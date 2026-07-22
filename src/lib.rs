@@ -63,6 +63,7 @@ mod trace_macros;
 
 #[cfg(feature = "std")]
 pub mod account;
+pub(crate) mod buf;
 pub(crate) mod fors_c;
 pub(crate) mod hash;
 pub(crate) mod hash_backend;
