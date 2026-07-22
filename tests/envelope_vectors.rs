@@ -36,10 +36,6 @@ use hashsigs_rs::shrincs::envelope::{
 };
 use hashsigs_rs::shrincs::{VerifyOutcome, ShrincsVerifier, ShrincsGenericVerifier};
 
-#[cfg_attr(
-    any(shrincs_profile_128s_q18, shrincs_profile_128s_q20),
-    ignore = "no matching Solidity account-wrapper fixture is committed for this profile; generate it in hashsigs-solidity with FOUNDRY_PROFILE=<profile> bash dev/export-account-vectors.sh test/test_vectors/<profile-specific-name>.json, then copy it into hashsigs-rs/tests/test_vectors/"
-)]
 #[test]
 fn stateful_1271_envelope_byte_pins_against_solidity_vector() {
     let vectors = load_vectors();
@@ -114,10 +110,6 @@ fn stateful_1271_envelope_byte_pins_against_solidity_vector() {
     assert_eq!(calldata_signature, signature);
 }
 
-#[cfg_attr(
-    any(shrincs_profile_128s_q18, shrincs_profile_128s_q20),
-    ignore = "no matching Solidity account-wrapper fixture is committed for this profile; generate it in hashsigs-solidity with FOUNDRY_PROFILE=<profile> bash dev/export-account-vectors.sh test/test_vectors/<profile-specific-name>.json, then copy it into hashsigs-rs/tests/test_vectors/"
-)]
 #[test]
 fn stateless_1271_envelope_byte_pins_against_solidity_vector() {
     let vectors = load_vectors();
@@ -177,10 +169,6 @@ fn stateless_1271_envelope_byte_pins_against_solidity_vector() {
     assert_eq!(calldata_signature, signature);
 }
 
-#[cfg_attr(
-    any(shrincs_profile_128s_q18, shrincs_profile_128s_q20),
-    ignore = "no matching Solidity account-wrapper fixture is committed for this profile; generate it in hashsigs-solidity with FOUNDRY_PROFILE=<profile> bash dev/export-account-vectors.sh test/test_vectors/<profile-specific-name>.json, then copy it into hashsigs-rs/tests/test_vectors/"
-)]
 #[test]
 fn stateful_only_rotation_bundle_feeds_prepare_stateless_delegation() {
     let vectors = load_vectors();
@@ -221,10 +209,6 @@ fn stateful_only_rotation_bundle_feeds_prepare_stateless_delegation() {
     assert!(prepare_stateless_delegation(wrong_commitment, &envelope).is_none());
 }
 
-#[cfg_attr(
-    any(shrincs_profile_128s_q18, shrincs_profile_128s_q20),
-    ignore = "no matching Solidity account-wrapper fixture is committed for this profile; generate it in hashsigs-solidity with FOUNDRY_PROFILE=<profile> bash dev/export-account-vectors.sh test/test_vectors/<profile-specific-name>.json, then copy it into hashsigs-rs/tests/test_vectors/"
-)]
 #[test]
 fn stateful_erc7913_adapter_byte_pins_against_solidity_vector() {
     let vectors = load_vectors();
@@ -280,10 +264,6 @@ fn stateful_erc7913_adapter_byte_pins_against_solidity_vector() {
     );
 }
 
-#[cfg_attr(
-    any(shrincs_profile_128s_q18, shrincs_profile_128s_q20),
-    ignore = "no matching Solidity account-wrapper fixture is committed for this profile; generate it in hashsigs-solidity with FOUNDRY_PROFILE=<profile> bash dev/export-account-vectors.sh test/test_vectors/<profile-specific-name>.json, then copy it into hashsigs-rs/tests/test_vectors/"
-)]
 #[test]
 fn stateless_erc7913_adapter_byte_pins_against_solidity_vector() {
     let vectors = load_vectors();
@@ -330,10 +310,6 @@ fn stateless_erc7913_adapter_byte_pins_against_solidity_vector() {
     );
 }
 
-#[cfg_attr(
-    any(shrincs_profile_128s_q18, shrincs_profile_128s_q20),
-    ignore = "no matching Solidity account-wrapper fixture is committed for this profile; generate it in hashsigs-solidity with FOUNDRY_PROFILE=<profile> bash dev/export-account-vectors.sh test/test_vectors/<profile-specific-name>.json, then copy it into hashsigs-rs/tests/test_vectors/"
-)]
 #[test]
 fn full_rotation_bundle_feeds_prepare_stateless_delegation() {
     let vectors = load_vectors();

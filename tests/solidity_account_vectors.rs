@@ -24,10 +24,6 @@ fn bytes32_from_vec(bytes: &[u8]) -> [u8; hashsigs_rs::shrincs::HASH_LEN] {
     bytes.try_into().expect("value must be exactly 32 bytes")
 }
 
-#[cfg_attr(
-    any(shrincs_profile_128s_q18, shrincs_profile_128s_q20),
-    ignore = "no matching Solidity account-wrapper fixture is committed for this profile; generate it in hashsigs-solidity with FOUNDRY_PROFILE=<profile> bash dev/export-account-vectors.sh test/test_vectors/<profile-specific-name>.json, then copy it into hashsigs-rs/tests/test_vectors/"
-)]
 #[test]
 fn solidity_exported_stateful_action_vector_verifies_in_rust() {
     let vectors = load_vectors();
@@ -63,10 +59,6 @@ fn solidity_exported_stateful_action_vector_verifies_in_rust() {
     ));
 }
 
-#[cfg_attr(
-    any(shrincs_profile_128s_q18, shrincs_profile_128s_q20),
-    ignore = "no matching Solidity account-wrapper fixture is committed for this profile; generate it in hashsigs-solidity with FOUNDRY_PROFILE=<profile> bash dev/export-account-vectors.sh test/test_vectors/<profile-specific-name>.json, then copy it into hashsigs-rs/tests/test_vectors/"
-)]
 #[test]
 fn solidity_exported_stateless_action_vector_verifies_in_rust() {
     let vectors = load_vectors();
@@ -102,10 +94,6 @@ fn solidity_exported_stateless_action_vector_verifies_in_rust() {
     ));
 }
 
-#[cfg_attr(
-    any(shrincs_profile_128s_q18, shrincs_profile_128s_q20),
-    ignore = "no matching Solidity account-wrapper fixture is committed for this profile; generate it in hashsigs-solidity with FOUNDRY_PROFILE=<profile> bash dev/export-account-vectors.sh test/test_vectors/<profile-specific-name>.json, then copy it into hashsigs-rs/tests/test_vectors/"
-)]
 #[test]
 fn solidity_exported_stateful_only_rotation_vector_verifies_in_rust() {
     let vectors = load_vectors();
@@ -155,10 +143,6 @@ fn solidity_exported_stateful_only_rotation_vector_verifies_in_rust() {
         .is_none());
 }
 
-#[cfg_attr(
-    any(shrincs_profile_128s_q18, shrincs_profile_128s_q20),
-    ignore = "no matching Solidity account-wrapper fixture is committed for this profile; generate it in hashsigs-solidity with FOUNDRY_PROFILE=<profile> bash dev/export-account-vectors.sh test/test_vectors/<profile-specific-name>.json, then copy it into hashsigs-rs/tests/test_vectors/"
-)]
 #[test]
 fn solidity_exported_full_rotation_vector_verifies_in_rust() {
     let vectors = load_vectors();

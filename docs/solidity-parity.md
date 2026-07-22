@@ -85,7 +85,12 @@ audit.
   commitment equality, tamper rejections). All pass at q18 and q20.
   Gas at 128s: stateful verify 102,574; stateless verify 247,632;
   rotations ~255K. The Solidity-side test lives uncommitted in the
-  hashsigs-solidity worktree pending upstream adoption.
+  hashsigs-solidity worktree pending upstream adoption. Regenerate a
+  fixture with `cargo test --release --features profile-128s-q18 --test
+  generate_shrincs_vectors generate_shrincs_account_wrapper_vectors --
+  --ignored --nocapture` (several minutes per profile); the ten dependent
+  tests in `solidity_account_vectors.rs` and `envelope_vectors.rs` run
+  un-ignored under both 128s profiles.
 
 ## Known gaps
 
