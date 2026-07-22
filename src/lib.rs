@@ -72,6 +72,7 @@ pub(crate) mod profiles;
 pub mod shrincs;
 pub mod sphincs_plus_c;
 pub mod sphincs_plus_c_verifier;
+pub(crate) mod treehash;
 pub(crate) mod types;
 pub(crate) mod uxmss;
 #[cfg(feature = "std")]
