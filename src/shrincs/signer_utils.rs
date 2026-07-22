@@ -27,6 +27,8 @@
 
 // Re-export the byte-identical helpers shared with the verifier. Keeping one copy
 // in `components::hash` prevents the two sides from drifting apart (F-08 / Q2).
+use alloc::vec::Vec;
+
 pub(crate) use crate::hash::hash_packed;
 #[allow(unused_imports)]
 pub(crate) use crate::hash::word32;

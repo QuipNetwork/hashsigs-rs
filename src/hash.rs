@@ -24,6 +24,9 @@
 //! public-key commitments stay on keccak under every suite and are therefore
 //! owned outside this module.
 
+use alloc::vec::Vec;
+
+use crate::hash_backend;
 use crate::hash_suite::scheme_hash;
 use crate::profiles::{HASH_TRUNC_LEN, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN};
 use crate::types::{ADDRESS_TYPE_FORS_TREE, ADDRESS_TYPE_TREE, HASH_LEN};
@@ -35,7 +38,7 @@ pub(crate) fn hash_packed(parts: &[&[u8]]) -> [u8; HASH_LEN] {
 /// EVM-domain keccak over packed preimage parts (action hashes, commitments).
 /// Always keccak regardless of the scheme-hash suite.
 pub(crate) fn keccak_packed(parts: &[&[u8]]) -> [u8; HASH_LEN] {
-    solana_program::keccak::hash(&pack(parts)).to_bytes()
+    hash_backend::keccak256(&pack(parts))
 }
 
 pub(crate) fn pack(parts: &[&[u8]]) -> Vec<u8> {
@@ -205,9 +208,9 @@ mod tests {
     }
 
     #[test]
-    fn solana_keccak256_matches_known_empty_vector() {
+    fn keccak256_matches_known_empty_vector() {
         assert_eq!(
-            solana_program::keccak::hash(&[]).to_bytes(),
+            hash_backend::keccak256(&[]),
             [
                 0xc5, 0xd2, 0x46, 0x01, 0x86, 0xf7, 0x23, 0x3c, 0x92, 0x7e, 0x7d, 0xb2, 0xdc, 0xc7,
                 0x03, 0xc0, 0xe5, 0x00, 0xb6, 0x53, 0xca, 0x82, 0x27, 0x3b, 0x7b, 0xfa, 0xd8, 0x04,

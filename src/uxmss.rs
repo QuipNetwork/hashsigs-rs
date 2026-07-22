@@ -18,6 +18,8 @@
 
 //! UXMSS stateful sign and verify (merged from components + signers).
 
+use alloc::vec::Vec;
+
 use zeroize::Zeroizing;
 use crate::hash::{base_w16_digit, hash_node, hash_packed};
 use crate::profiles::{

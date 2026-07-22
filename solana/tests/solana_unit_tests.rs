@@ -424,3 +424,188 @@ pub mod wotsplus_solana_test {
     }
 
 }
+
+pub mod sphincs_plus_c_solana_test {
+    use borsh::BorshSerialize;
+    use hashsigs_rs::{sphincs_plus_c_keygen, sphincs_plus_c_sign, SphincsPlusCSigningKey};
+    use hashsigs_rs_solana::processor::WOTSPlusInstruction;
+    use hashsigs_rs_solana::sphincs_plus_c::StatelessSignatureDto;
+    use solana_sdk::{instruction::Instruction, msg, pubkey::Pubkey, signer::Signer, transaction::Transaction};
+
+    use super::*;
+
+    async fn setup_test() -> (ProgramTest, Keypair) {
+        let program_id = Keypair::new();
+        let mut program_test = ProgramTest::new(
+            "hashsigs_rs_solana",
+            program_id.pubkey(),
+            processor!(process_instruction),
+        );
+        program_test.set_compute_max_units(1_400_000);
+        (program_test, program_id)
+    }
+
+    async fn execute_transaction(
+        context: &mut ProgramTestContext,
+        program_id: &Pubkey,
+        data: Vec<u8>,
+    ) -> Transaction {
+        let instruction = Instruction {
+            program_id: *program_id,
+            accounts: vec![],
+            data,
+        };
+        Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer],
+            context.last_blockhash,
+        )
+    }
+
+    // Deterministic test-only seed derivation via solana_program's keccak
+    // (an independent oracle already used elsewhere in this crate), not the
+    // library under test.
+    fn derive32(domain: &[u8], seed: &[u8]) -> [u8; 32] {
+        solana_program::keccak::hashv(&[domain, seed]).to_bytes()
+    }
+
+    /// Independent SPHINCS+C keypair (256s default profile) + ERC-7913 key
+    /// bytes (`pk_seed || hypertree_root`), derived through the public
+    /// `hashsigs_rs` API only.
+    fn test_keypair(seed: &[u8]) -> (SphincsPlusCSigningKey, [u8; 64]) {
+        let stateless_sk_seed = derive32(b"sphincs-plus-c-solana-sk-seed", seed);
+        let stateless_prf_seed = derive32(b"sphincs-plus-c-solana-prf-seed", seed);
+        let pk_seed = derive32(b"sphincs-plus-c-solana-pk-seed", seed);
+        let (signing_key, public_key) =
+            sphincs_plus_c_keygen(stateless_sk_seed, stateless_prf_seed, pk_seed);
+        let mut key = [0u8; 64];
+        key[..32].copy_from_slice(&public_key.pk_seed);
+        key[32..].copy_from_slice(&public_key.hypertree_root);
+        (signing_key, key)
+    }
+
+    #[tokio::test]
+    async fn test_sphincs_plus_c_verify_valid_signature() {
+        let (program_test, program_id) = setup_test().await;
+        let mut context = program_test.start_with_context().await;
+
+        let (signing_key, key) = test_keypair(b"sphincs-plus-c solana happy path");
+        let hash = derive32(b"sphincs-plus-c-solana-message", b"happy path");
+        let signature = sphincs_plus_c_sign(&signing_key, &hash).expect("sign");
+
+        let instruction = WOTSPlusInstruction::SphincsPlusCVerify {
+            key,
+            hash,
+            signature: StatelessSignatureDto::from(signature),
+        };
+        let mut instruction_data = Vec::new();
+        instruction.serialize(&mut instruction_data).unwrap();
+
+        let transaction =
+            execute_transaction(&mut context, &program_id.pubkey(), instruction_data).await;
+        let transaction_result = context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap();
+        let metadata = transaction_result.metadata.unwrap();
+        msg!(
+            "SPHINCS+C verify (256s) compute units: {}",
+            metadata.compute_units_consumed
+        );
+
+        let return_data = metadata.return_data.unwrap();
+        assert_eq!(return_data.data, vec![1]);
+    }
+
+    #[tokio::test]
+    async fn test_sphincs_plus_c_verify_rejects_tampered_hash() {
+        let (program_test, program_id) = setup_test().await;
+        let mut context = program_test.start_with_context().await;
+
+        let (signing_key, key) = test_keypair(b"sphincs-plus-c solana tampered");
+        let hash = derive32(b"sphincs-plus-c-solana-message", b"tampered");
+        let signature = sphincs_plus_c_sign(&signing_key, &hash).expect("sign");
+
+        let mut tampered_hash = hash;
+        tampered_hash[0] ^= 0xff;
+
+        let instruction = WOTSPlusInstruction::SphincsPlusCVerify {
+            key,
+            hash: tampered_hash,
+            signature: StatelessSignatureDto::from(signature),
+        };
+        let mut instruction_data = Vec::new();
+        instruction.serialize(&mut instruction_data).unwrap();
+
+        let transaction =
+            execute_transaction(&mut context, &program_id.pubkey(), instruction_data).await;
+        let transaction_result = context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap();
+        let metadata = transaction_result.metadata.unwrap();
+        msg!(
+            "SPHINCS+C verify (tampered hash) compute units: {}",
+            metadata.compute_units_consumed
+        );
+
+        let return_data = metadata.return_data.unwrap();
+        assert_eq!(return_data.data, vec![0]);
+    }
+
+    #[tokio::test]
+    async fn test_shrincs_verify_stateless_valid_signature() {
+        use hashsigs_rs::shrincs::{ActionContext, ShrincsSigner, ShrincsVerifier};
+        use hashsigs_rs_solana::sphincs_plus_c::{ActionContextDto, ShrincsPublicKeyDto};
+
+        let (program_test, program_id) = setup_test().await;
+        let mut context = program_test.start_with_context().await;
+
+        let (signing_key, public_key) =
+            ShrincsSigner::keygen(b"shrincs solana hybrid stateless", 4096).expect("keygen");
+        let commitment: [u8; 32] = public_key
+            .public_key_commitment
+            .clone()
+            .try_into()
+            .expect("commitment is 32 bytes");
+        let action_context = ActionContext {
+            domain_separator: derive32(b"shrincs-solana-domain", b"1"),
+            nonce: derive32(b"shrincs-solana-nonce", b"1"),
+            key_version: [0u8; 32],
+            action_type: derive32(b"shrincs-solana-action", b"1"),
+            payload_hash: derive32(b"shrincs-solana-payload", b"1"),
+        };
+        let verifier = ShrincsVerifier::new();
+        let message = verifier.stateless_action_message_hash(commitment, &action_context);
+        let signature =
+            ShrincsSigner::sign_stateless_raw(&signing_key, &message).expect("sign");
+
+        let instruction = WOTSPlusInstruction::ShrincsVerifyStateless {
+            expected_public_key_commitment: commitment,
+            public_key: ShrincsPublicKeyDto::from(public_key),
+            context: ActionContextDto::from(action_context),
+            signature: StatelessSignatureDto::from(signature),
+        };
+        let mut instruction_data = Vec::new();
+        instruction.serialize(&mut instruction_data).unwrap();
+
+        let transaction =
+            execute_transaction(&mut context, &program_id.pubkey(), instruction_data).await;
+        let transaction_result = context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap();
+        let metadata = transaction_result.metadata.unwrap();
+        msg!(
+            "SHRINCS hybrid stateless verify (256s) compute units: {}",
+            metadata.compute_units_consumed
+        );
+
+        let return_data = metadata.return_data.unwrap();
+        assert_eq!(return_data.data, vec![1]);
+    }
+}

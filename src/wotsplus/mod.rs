@@ -1,4 +1,7 @@
 /// Hash function type for WOTS+
+use alloc::vec;
+use alloc::vec::Vec;
+
 pub type HashFn = fn(&[u8]) -> [u8; 32];
 
 /// Constants from the WOTS+ implementation
@@ -434,7 +437,7 @@ mod tests {
     // Real one-way hash for tests that depend on preimage resistance (e.g. rejecting
     // a forged message). mock_hash is essentially identity and cannot bind messages.
     fn keccak256(data: &[u8]) -> [u8; 32] {
-        solana_program::keccak::hash(data).to_bytes()
+        crate::hash_backend::keccak256(data)
     }
 
     // Mock hash function for testing

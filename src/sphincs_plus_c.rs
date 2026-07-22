@@ -115,11 +115,36 @@ pub fn sign(
     })
 }
 
+/// Derive the SPHINCS+C signing key and public key from raw seed material.
+///
+/// `hypertree_root` is computed here (the SPHINCS+C "keygen" step); this is
+/// the only public entry point that produces a real (non-placeholder) root,
+/// so downstream consumers (tests, on-chain fixtures) do not need crate-
+/// internal access to build a fully independent SPHINCS+C keypair.
+/// `stateless_prf_seed` only affects signing randomness, not the public key.
+pub fn keygen(
+    stateless_sk_seed: [u8; HASH_LEN],
+    stateless_prf_seed: [u8; HASH_LEN],
+    pk_seed: [u8; HASH_LEN],
+) -> (SphincsPlusCSigningKey, SphincsPlusCPublicKey) {
+    let hypertree_root = hypertree::hypertree_public_root(&stateless_sk_seed, &pk_seed);
+    let signing_key = SphincsPlusCSigningKey {
+        stateless_sk_seed,
+        stateless_prf_seed,
+        pk_seed,
+        hypertree_root,
+    };
+    let public_key = SphincsPlusCPublicKey {
+        pk_seed,
+        hypertree_root,
+    };
+    (signing_key, public_key)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::hash::hash_packed;
-    use crate::hypertree::hypertree_public_root;
 
     fn derive32(domain: &[u8], seed: &[u8]) -> [u8; HASH_LEN] {
         hash_packed(&[domain, seed, &[]])
@@ -127,21 +152,11 @@ mod tests {
 
     /// Independent keygen at the SPHINCS+C layer (no SHRINCS hybrid fields).
     fn independent_keygen(seed: &[u8]) -> (SphincsPlusCSigningKey, SphincsPlusCPublicKey) {
-        let stateless_sk_seed = derive32(b"shrincs-stateless-sk-seed", seed);
-        let stateless_prf_seed = derive32(b"shrincs-stateless-prf-seed", seed);
-        let pk_seed = derive32(b"shrincs-pk-seed", seed);
-        let hypertree_root = hypertree_public_root(&stateless_sk_seed, &pk_seed);
-        let sk = SphincsPlusCSigningKey {
-            stateless_sk_seed,
-            stateless_prf_seed,
-            pk_seed,
-            hypertree_root,
-        };
-        let pk = SphincsPlusCPublicKey {
-            pk_seed,
-            hypertree_root,
-        };
-        (sk, pk)
+        keygen(
+            derive32(b"shrincs-stateless-sk-seed", seed),
+            derive32(b"shrincs-stateless-prf-seed", seed),
+            derive32(b"shrincs-pk-seed", seed),
+        )
     }
 
     #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]

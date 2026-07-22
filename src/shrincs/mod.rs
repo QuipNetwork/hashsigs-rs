@@ -78,7 +78,7 @@ pub(crate) use signer_utils::{derive32, public_key_from_components};
 mod profile_tests {
     #[test]
     fn active_profile_id_matches_keccak_of_profile_name() {
-        let expected = solana_program::keccak::hash(crate::profiles::PROFILE_NAME.as_bytes()).to_bytes();
+        let expected = crate::hash_backend::keccak256(crate::profiles::PROFILE_NAME.as_bytes());
         assert_eq!(crate::profiles::PROFILE_ID, expected);
     }
 
