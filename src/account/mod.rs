@@ -28,6 +28,7 @@
 use std::collections::HashMap;
 
 use crate::hash_backend;
+use crate::shrincs::envelope::{self, Erc1271Envelope};
 use crate::shrincs::{
     ActionContext, PublicKey, RotationContext, RotationTarget, ShrincsVerifier,
     StatefulRotationTarget, StatefulSignature, StatelessSignature, HASH_LEN,
@@ -79,6 +80,8 @@ pub enum AccountError {
     StatefulPathDisabled,
     #[error("the stateful leaf is not accepted by the active anti-reuse policy")]
     StatefulLeafRejected,
+    #[error("the ERC-1271 signature envelope could not be decoded")]
+    MalformedSignature,
 }
 
 // Typed mirror of the six Solidity contract events. The Solidity wrapper emits
@@ -414,6 +417,167 @@ impl ShrincsAccountVerifierExample {
             nonce: consumedNonce,
             keyVersion: self.keyVersion,
         });
+        Ok(())
+    }
+
+    // isValidSignature: ERC-1271 compatibility view for canonical SHRINCS
+    // account-action signatures.
+    // 1. Decode the leading envelope mode byte and dispatch the remainder as
+    //    a stateful or stateless action envelope.
+    // 2. Rebuild the current action context from wrapper-owned state.
+    // 3. Require the supplied hash to match the canonical action hash.
+    // 4. Verify the embedded SHRINCS signature without mutating any state
+    //    (no leaf commit, no nonce advance, no stateless-budget consumption).
+    //
+    // Revert-model divergence: Solidity reverts on an empty signature (no
+    // mode byte) or a malformed envelope, and returns 0xffffffff for an
+    // unknown mode byte or a well-formed-but-invalid signature. Rust has no
+    // revert channel, and `envelope::decode_1271_envelope` itself already
+    // collapses "empty", "unknown mode", and "malformed payload" into one
+    // `None` (see its doc comment) rather than duplicating its mode-byte
+    // read here — so all three map to `AccountError::MalformedSignature`.
+    pub fn isValidSignature(
+        &self,
+        hash: [u8; HASH_LEN],
+        signature: &[u8],
+    ) -> Result<(), AccountError> {
+        match envelope::decode_1271_envelope(signature) {
+            Some(Erc1271Envelope::Stateful {
+                public_key,
+                action_type,
+                payload_hash,
+                signature,
+            }) => self.isValidStatefulActionSignatureNow(
+                hash,
+                &public_key,
+                action_type,
+                payload_hash,
+                &signature,
+            ),
+            Some(Erc1271Envelope::Stateless {
+                public_key,
+                action_type,
+                payload_hash,
+                signature,
+            }) => self.isValidStatelessActionSignatureNow(
+                hash,
+                &public_key,
+                action_type,
+                payload_hash,
+                &signature,
+            ),
+            None => Err(AccountError::MalformedSignature),
+        }
+    }
+
+    // isValidStatefulActionSignatureNow: Read-only helper for canonical
+    // stateful action verification.
+    // 1. Recover the leaf index this signature would consume.
+    // 2. Enforce the active stateful leaf policy WITHOUT consuming the leaf.
+    // 3. Rebuild the canonical action context from wrapper-owned state.
+    // 4. Require the supplied hash to match the canonical stateful action
+    //    hash and the context to be well-formed.
+    // 5. Verify the signature over that hash through the raw-hash stateful
+    //    path (mirrors `SHRINCS.verify`), without committing the leaf.
+    fn isValidStatefulActionSignatureNow(
+        &self,
+        hash: [u8; HASH_LEN],
+        publicKey: &PublicKey,
+        actionType: [u8; HASH_LEN],
+        payloadHash: [u8; HASH_LEN],
+        signature: &StatefulSignature,
+    ) -> Result<(), AccountError> {
+        // Defense-in-depth: reject an auth path so long its length would truncate when
+        // narrowed to u32 before it becomes the consumed leaf index.
+        if signature.auth_path.len() > u32::MAX as usize {
+            return Err(AccountError::InvalidSignature);
+        }
+        let leafIndex = signature.auth_path.len() as u32;
+        // Precheck the policy gate without recording any leaf use.
+        self.checkStatefulLeafUse(leafIndex)?;
+
+        let context = ActionContext {
+            domain_separator: self.domainSeparator(),
+            nonce: self.nonce,
+            key_version: self.keyVersion,
+            action_type: actionType,
+            payload_hash: payloadHash,
+        };
+        if ShrincsVerifier::new()
+            .stateful_action_message_hash(self.currentShrincsPublicKey, &context)
+            != hash
+        {
+            return Err(AccountError::InvalidSignature);
+        }
+        if !crate::shrincs::valid_action_context(&context) {
+            return Err(AccountError::InvalidSignature);
+        }
+
+        let ok = crate::shrincs::verify_stateful_unsafe_raw(
+            self.currentShrincsPublicKey,
+            publicKey,
+            &hash,
+            signature,
+        );
+        if !ok {
+            return Err(AccountError::InvalidSignature);
+        }
+        Ok(())
+    }
+
+    // isValidStatelessActionSignatureNow: Read-only helper for canonical
+    // stateless action verification.
+    // 1. Enforce recovery-mode gating and the stateless usage budget WITHOUT
+    //    consuming either.
+    // 2. Rebuild the canonical action context from wrapper-owned state.
+    // 3. Require the supplied hash to match the canonical stateless action
+    //    hash and the context to be well-formed.
+    // 4. Verify the signature over that hash through the raw-hash stateless
+    //    path (mirrors `SHRINCS.verifyStatelessUncheckedMessage`), without
+    //    advancing the nonce or the stateless-signature counter.
+    fn isValidStatelessActionSignatureNow(
+        &self,
+        hash: [u8; HASH_LEN],
+        publicKey: &PublicKey,
+        actionType: [u8; HASH_LEN],
+        payloadHash: [u8; HASH_LEN],
+        signature: &StatelessSignature,
+    ) -> Result<(), AccountError> {
+        // Recovery-only policy forbids stateless actions until recovery mode is explicitly entered.
+        if self.statefulPolicy == StatefulPolicy::RecoveryRotation && !self.recoveryMode {
+            return Err(AccountError::RecoveryNotArmed);
+        }
+        // Enforce the per-key stateless usage budget without consuming it.
+        if self.statelessSignaturesUsed >= STATELESS_SIGNATURE_LIMIT {
+            return Err(AccountError::BudgetExhausted);
+        }
+
+        let context = ActionContext {
+            domain_separator: self.domainSeparator(),
+            nonce: self.nonce,
+            key_version: self.keyVersion,
+            action_type: actionType,
+            payload_hash: payloadHash,
+        };
+        if ShrincsVerifier::new()
+            .stateless_action_message_hash(self.currentShrincsPublicKey, &context)
+            != hash
+        {
+            return Err(AccountError::InvalidSignature);
+        }
+        if !crate::shrincs::valid_action_context(&context) {
+            return Err(AccountError::InvalidSignature);
+        }
+
+        let ok = crate::shrincs::verify_stateless_unsafe_raw(
+            self.currentShrincsPublicKey,
+            publicKey,
+            &hash,
+            signature,
+        );
+        if !ok {
+            return Err(AccountError::InvalidSignature);
+        }
         Ok(())
     }
 
@@ -1649,6 +1813,148 @@ mod tests {
             .expect("valid stateless action verifies");
         assert_eq!(account.nonce()[HASH_LEN - 1], 1);
         assert_eq!(account.statelessSignaturesUsed(), 1);
+    }
+
+    #[test]
+    fn is_valid_signature_accepts_mode_one_stateful_without_mutating_state() {
+        let (mut signing_key, public_key) =
+            cheap_or_fresh_stateful_key("account isValidSignature stateful seed", 4);
+        let public_key = to_public_key(&public_key);
+        let expected = expected_key(&public_key);
+        let account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), expected);
+        let action_type = [3u8; HASH_LEN];
+        let payload_hash = [4u8; HASH_LEN];
+        let context = ActionContext {
+            domain_separator: account.domainSeparator(),
+            nonce: account.nonce(),
+            key_version: account.keyVersion(),
+            action_type,
+            payload_hash,
+        };
+        let hash = ShrincsVerifier::new().stateful_action_message_hash(expected, &context);
+        let signature = ShrincsSigner::sign_stateful_raw(&mut signing_key, &hash).unwrap();
+        let signature = to_stateful_signature(&signature);
+        let envelope_bytes = envelope::encode_stateful_1271_envelope(
+            &public_key,
+            action_type,
+            payload_hash,
+            &signature,
+        );
+
+        let before = account.clone();
+        account
+            .isValidSignature(hash, &envelope_bytes)
+            .expect("valid mode-1 envelope must verify");
+        // Read-only: no leaf commit, no nonce advance, no event emitted, no
+        // other field touched.
+        assert_eq!(account, before);
+    }
+
+    #[test]
+    fn is_valid_signature_accepts_mode_two_stateless_without_mutating_state() {
+        let case = &cached_account_signature_fixtures().stateless_action;
+        let public_key = case.public_key.clone();
+        let expected = expected_key(&public_key);
+        let account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), expected);
+        let context = ActionContext {
+            domain_separator: account.domainSeparator(),
+            nonce: account.nonce(),
+            key_version: account.keyVersion(),
+            action_type: case.action_type,
+            payload_hash: case.payload_hash,
+        };
+        let hash = ShrincsVerifier::new().stateless_action_message_hash(expected, &context);
+        let envelope_bytes = envelope::encode_stateless_1271_envelope(
+            &public_key,
+            case.action_type,
+            case.payload_hash,
+            &case.signature,
+        );
+
+        let before = account.clone();
+        account
+            .isValidSignature(hash, &envelope_bytes)
+            .expect("valid mode-2 envelope must verify");
+        // Read-only: no nonce advance, no stateless-usage consumption, no
+        // event emitted, no other field touched.
+        assert_eq!(account, before);
+    }
+
+    #[test]
+    fn is_valid_signature_rejects_a_hash_that_does_not_match_the_canonical_action_hash() {
+        let (mut signing_key, public_key) =
+            cheap_or_fresh_stateful_key("account isValidSignature wrong hash seed", 4);
+        let public_key = to_public_key(&public_key);
+        let expected = expected_key(&public_key);
+        let account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), expected);
+        let action_type = [5u8; HASH_LEN];
+        let payload_hash = [6u8; HASH_LEN];
+        let context = ActionContext {
+            domain_separator: account.domainSeparator(),
+            nonce: account.nonce(),
+            key_version: account.keyVersion(),
+            action_type,
+            payload_hash,
+        };
+        let hash = ShrincsVerifier::new().stateful_action_message_hash(expected, &context);
+        let signature = ShrincsSigner::sign_stateful_raw(&mut signing_key, &hash).unwrap();
+        let signature = to_stateful_signature(&signature);
+        let envelope_bytes = envelope::encode_stateful_1271_envelope(
+            &public_key,
+            action_type,
+            payload_hash,
+            &signature,
+        );
+
+        let mut wrong_hash = hash;
+        wrong_hash[0] ^= 0x01;
+        assert_eq!(
+            account.isValidSignature(wrong_hash, &envelope_bytes),
+            Err(AccountError::InvalidSignature)
+        );
+    }
+
+    #[test]
+    fn is_valid_signature_rejects_an_unknown_mode_byte() {
+        let (mut signing_key, public_key) =
+            cheap_or_fresh_stateful_key("account isValidSignature unknown mode seed", 4);
+        let public_key = to_public_key(&public_key);
+        let expected = expected_key(&public_key);
+        let account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), expected);
+        let action_type = [7u8; HASH_LEN];
+        let payload_hash = [8u8; HASH_LEN];
+        let context = ActionContext {
+            domain_separator: account.domainSeparator(),
+            nonce: account.nonce(),
+            key_version: account.keyVersion(),
+            action_type,
+            payload_hash,
+        };
+        let hash = ShrincsVerifier::new().stateful_action_message_hash(expected, &context);
+        let signature = ShrincsSigner::sign_stateful_raw(&mut signing_key, &hash).unwrap();
+        let signature = to_stateful_signature(&signature);
+        let mut envelope_bytes = envelope::encode_stateful_1271_envelope(
+            &public_key,
+            action_type,
+            payload_hash,
+            &signature,
+        );
+        envelope_bytes[0] = 0x03;
+
+        assert_eq!(
+            account.isValidSignature(hash, &envelope_bytes),
+            Err(AccountError::MalformedSignature)
+        );
+    }
+
+    #[test]
+    fn is_valid_signature_rejects_an_empty_envelope() {
+        let expected = id(9);
+        let account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), expected);
+        assert_eq!(
+            account.isValidSignature([0u8; HASH_LEN], &[]),
+            Err(AccountError::MalformedSignature)
+        );
     }
 
     #[cfg_attr(

@@ -74,6 +74,10 @@ const ERR_STATEFUL_PATH_DISABLED: &str = "ERR_STATEFUL_PATH_DISABLED";
 #[cfg(feature = "wasm-bindings")]
 const ERR_STATEFUL_LEAF_REJECTED: &str = "ERR_STATEFUL_LEAF_REJECTED";
 #[cfg(feature = "wasm-bindings")]
+const ERR_MALFORMED_SIGNATURE: &str = "ERR_MALFORMED_SIGNATURE";
+#[cfg(any(test, feature = "wasm-bindings"))]
+const ERR_ENVELOPE_MALFORMED: &str = "ERR_ENVELOPE_MALFORMED";
+#[cfg(feature = "wasm-bindings")]
 const ERR_SIGNING_FAILED: &str = "ERR_SIGNING_FAILED";
 #[cfg(feature = "wasm-bindings")]
 const ERR_KEYGEN_FAILED: &str = "ERR_KEYGEN_FAILED";
@@ -128,7 +132,8 @@ export type ShrincsErrorCode =
   | "ERR_LEAF_OUT_OF_RANGE"
   | "ERR_INVALID_SIGNATURE" | "ERR_BUDGET_EXHAUSTED"
   | "ERR_RECOVERY_NOT_ARMED" | "ERR_STATEFUL_PATH_DISABLED"
-  | "ERR_STATEFUL_LEAF_REJECTED";
+  | "ERR_STATEFUL_LEAF_REJECTED" | "ERR_MALFORMED_SIGNATURE"
+  | "ERR_ENVELOPE_MALFORMED";
 "#;
 
 #[cfg(feature = "wasm-bindings")]
@@ -537,6 +542,31 @@ impl WasmShrincsAccount {
             .enterRecoveryMode(caller)
             .map_err(account_error_to_js)
     }
+
+    /// ERC-1271 compatibility view: verify a mode-prefixed action envelope
+    /// against the account's current state WITHOUT mutating it (no leaf
+    /// commit, no nonce advance, no stateless-budget consumption). Resolves
+    /// on success; THROWS a typed `ShrincsErrorCode` on rejection —
+    /// `ERR_MALFORMED_SIGNATURE` for an empty/unrecognized/malformed
+    /// envelope, `ERR_INVALID_SIGNATURE` for a well-formed but invalid or
+    /// mismatched-hash signature, plus the same policy codes as
+    /// `verifyStatefulAction` / `verifyStatelessAction`.
+    ///
+    /// * `hash_hex` - 32-byte hex (bytes32); the hash the signature must authorize.
+    /// * `signature_hex` - the mode-prefixed ERC-1271 envelope, arbitrary-length hex.
+    #[wasm_bindgen(js_name = isValidSignature)]
+    pub fn is_valid_signature(
+        &self,
+        hash_hex: &str,
+        signature_hex: &str,
+    ) -> Result<(), JsValue> {
+        let hash = parse_word32(hash_hex).map_err(js_error)?;
+        let signature =
+            parse_hex_bytes_with_max(signature_hex, MAX_RAW_INPUT_BYTES).map_err(js_error)?;
+        self.inner
+            .isValidSignature(hash, &signature)
+            .map_err(account_error_to_js)
+    }
 }
 
 /// The version of this wasm build, frozen in at compile time from the crate
@@ -909,6 +939,84 @@ fn sphincs_plus_c_verify_inner(
         &hash,
         &signature,
     ))
+}
+
+/// ERC-7913 SHRINCS stateful verify (`ShrincsVerifierErc7913::verify`):
+/// `key` is the 32-byte SHRINCS `publicKeyCommitment` hex, `signature_hex`
+/// is `abi.encode(PublicKey, SHRINCS.Signature)` hex (no mode prefix — this
+/// is NOT the account wrapper's ERC-1271 envelope; see
+/// `WasmShrincsAccount::isValidSignature` for that shape). Returns
+/// `true`/`false` for a well-formed valid/invalid signature (or a
+/// wrong-length key); THROWS `ERR_ENVELOPE_MALFORMED` only when the envelope
+/// framing itself cannot be decoded.
+#[cfg(feature = "wasm-bindings")]
+#[wasm_bindgen(js_name = shrincsErc7913Verify)]
+pub fn shrincs_erc7913_verify(
+    key_hex: &str,
+    hash_hex: &str,
+    signature_hex: &str,
+) -> Result<bool, JsValue> {
+    shrincs_erc7913_verify_inner(key_hex, hash_hex, signature_hex).map_err(js_error)
+}
+
+#[cfg(any(test, feature = "wasm-bindings"))]
+fn shrincs_erc7913_verify_inner(
+    key_hex: &str,
+    hash_hex: &str,
+    signature_hex: &str,
+) -> Result<bool, WasmErr> {
+    let key = parse_hex_bytes_with_max(key_hex, MAX_RAW_INPUT_BYTES)?;
+    let hash = parse_word32(hash_hex)?;
+    let signature_envelope = parse_hex_bytes_with_max(signature_hex, MAX_RAW_INPUT_BYTES)?;
+    match crate::shrincs::ShrincsVerifierErc7913::new().verify(&key, &hash, &signature_envelope) {
+        crate::shrincs::Erc7913Outcome::Valid => Ok(true),
+        crate::shrincs::Erc7913Outcome::Invalid => Ok(false),
+        crate::shrincs::Erc7913Outcome::Malformed => Err(WasmErr {
+            code: ERR_ENVELOPE_MALFORMED,
+            message: "ERC-7913 stateful envelope could not be decoded".into(),
+        }),
+    }
+}
+
+/// ERC-7913 SHRINCS stateless verify (`ShrincsVerifierErc7913::verify_stateless`):
+/// `key` is the 32-byte SHRINCS `publicKeyCommitment` hex, `signature_hex`
+/// is `abi.encode(PublicKey, SPHINCSPlusC.Signature)` hex. Delegates to the
+/// pinned `SphincsPlusCVerifier` internally, mirroring
+/// `SHRINCSVerifier.verifyStateless`. Returns `true`/`false` for a
+/// well-formed valid/invalid signature (or a wrong-length key); THROWS
+/// `ERR_ENVELOPE_MALFORMED` only when the envelope framing itself cannot be
+/// decoded.
+#[cfg(feature = "wasm-bindings")]
+#[wasm_bindgen(js_name = shrincsErc7913VerifyStateless)]
+pub fn shrincs_erc7913_verify_stateless(
+    key_hex: &str,
+    hash_hex: &str,
+    signature_hex: &str,
+) -> Result<bool, JsValue> {
+    shrincs_erc7913_verify_stateless_inner(key_hex, hash_hex, signature_hex).map_err(js_error)
+}
+
+#[cfg(any(test, feature = "wasm-bindings"))]
+fn shrincs_erc7913_verify_stateless_inner(
+    key_hex: &str,
+    hash_hex: &str,
+    signature_hex: &str,
+) -> Result<bool, WasmErr> {
+    let key = parse_hex_bytes_with_max(key_hex, MAX_RAW_INPUT_BYTES)?;
+    let hash = parse_word32(hash_hex)?;
+    let signature_envelope = parse_hex_bytes_with_max(signature_hex, MAX_RAW_INPUT_BYTES)?;
+    match crate::shrincs::ShrincsVerifierErc7913::new().verify_stateless(
+        &key,
+        &hash,
+        &signature_envelope,
+    ) {
+        crate::shrincs::Erc7913Outcome::Valid => Ok(true),
+        crate::shrincs::Erc7913Outcome::Invalid => Ok(false),
+        crate::shrincs::Erc7913Outcome::Malformed => Err(WasmErr {
+            code: ERR_ENVELOPE_MALFORMED,
+            message: "ERC-7913 stateless envelope could not be decoded".into(),
+        }),
+    }
 }
 
 #[cfg(any(test, feature = "wasm-bindings"))]
@@ -1767,6 +1875,10 @@ fn account_error_to_js(error: crate::account::AccountError) -> JsValue {
         AccountError::StatefulLeafRejected => (
             ERR_STATEFUL_LEAF_REJECTED,
             "the stateful leaf is not accepted by the active anti-reuse policy",
+        ),
+        AccountError::MalformedSignature => (
+            ERR_MALFORMED_SIGNATURE,
+            "the ERC-1271 signature envelope could not be decoded",
         ),
     };
     js_error(WasmErr {
