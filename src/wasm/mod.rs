@@ -875,6 +875,43 @@ pub fn shrincs_verify_stateless_action(
     .map_err(js_error)
 }
 
+/// Independent SPHINCS+C verify (ERC-7913 shape): key = pkSeed‖hypertreeRoot
+/// (64 bytes hex), hash = 32-byte hex, signature = stateless envelope.
+/// No SHRINCS commitment or action envelope.
+#[cfg(feature = "wasm-bindings")]
+#[wasm_bindgen(js_name = sphincsPlusCVerify)]
+pub fn sphincs_plus_c_verify(
+    key_hex: &str,
+    hash_hex: &str,
+    #[wasm_bindgen(unchecked_param_type = "StatelessSignature")] signature: JsValue,
+) -> Result<bool, JsValue> {
+    let signature: StatelessSignature =
+        serde_wasm_bindgen::from_value(signature).map_err(js_error_from_serde("signature"))?;
+    sphincs_plus_c_verify_inner(key_hex, hash_hex, &signature).map_err(js_error)
+}
+
+#[cfg(any(test, feature = "wasm-bindings"))]
+fn sphincs_plus_c_verify_inner(
+    key_hex: &str,
+    hash_hex: &str,
+    signature: &StatelessSignature,
+) -> Result<bool, WasmErr> {
+    let key = parse_hex_bytes_with_max(key_hex, 64)?;
+    if key.len() != 64 {
+        return Err(WasmErr {
+            code: ERR_BAD_LENGTH,
+            message: format!("sphincsPlusC key must be 64 bytes, got {}", key.len()),
+        });
+    }
+    let hash = parse_word32(hash_hex)?;
+    let signature = parse_stateless_signature(signature)?;
+    Ok(crate::sphincs_plus_c_verifier::SphincsPlusCVerifier::new().verify(
+        &key,
+        &hash,
+        &signature,
+    ))
+}
+
 #[cfg(any(test, feature = "wasm-bindings"))]
 #[derive(serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "wasm-bindings", derive(tsify::Tsify))]
@@ -1754,10 +1791,6 @@ fn js_value_from_serde<T: serde::Serialize>(value: &T) -> Result<JsValue, JsValu
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::account::INITIAL_STATEFUL_LEAF_INDEX;
-    use crate::shrincs::components::public_key::encode_stateful_public_key;
-    use crate::shrincs::signers::utils::{derive32, public_key_from_components};
-    use crate::shrincs::signers::uxmss::stateful_subtree_root;
     use crate::shrincs::test_fixtures::{
         fixture_entry_opt, fixture_pair, load_fixture_file, stateful_signer_fixture_path,
         TestKeyMode,
@@ -1872,37 +1905,8 @@ mod tests {
         ShrincsSigner::keygen(b"wasm verifier test seed", 4).unwrap()
     }
 
-    fn stateful_only_key(seed: &[u8], max: u32) -> (ShrincsSigningKey, SignerPublicKey) {
-        let stateful_sk_seed = derive32(b"shrincs-stateful-sk-seed", seed, &[]);
-        let stateful_prf_seed = derive32(b"shrincs-stateful-prf-seed", seed, &[]);
-        let stateful_pk_seed = derive32(b"shrincs-stateful-pk-seed", seed, &[]);
-        let stateful_root = stateful_subtree_root(
-            &stateful_sk_seed,
-            &stateful_pk_seed,
-            INITIAL_STATEFUL_LEAF_INDEX,
-            max,
-        );
-        let pk_seed = derive32(b"shrincs-pk-seed", seed, &[]);
-        let hypertree_root = derive32(b"placeholder-hypertree-root", seed, &[]);
-        let signing_key = ShrincsSigningKey {
-            stateful_sk_seed,
-            stateful_prf_seed,
-            stateful_pk_seed,
-            stateful_root,
-            max_stateful_signatures: max,
-            next_stateful_leaf_index: INITIAL_STATEFUL_LEAF_INDEX,
-            stateless_sk_seed: derive32(b"shrincs-stateless-sk-seed", seed, &[]),
-            stateless_prf_seed: derive32(b"shrincs-stateless-prf-seed", seed, &[]),
-            pk_seed,
-            hypertree_root,
-        };
-        let public_key = public_key_from_components(
-            encode_stateful_public_key(stateful_pk_seed, stateful_root, max),
-            pk_seed,
-            hypertree_root,
-        );
-        (signing_key, public_key)
-    }
+    use crate::test_support::stateful_only_key;
+
 
     fn stateful_signing_key_and_public_key() -> (ShrincsSigningKey, SignerPublicKey) {
         match TestKeyMode::from_env() {

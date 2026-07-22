@@ -24,12 +24,18 @@
 //! public-key commitments stay on keccak under every suite and are therefore
 //! owned outside this module.
 
-use crate::shrincs::hash_suite::scheme_hash;
-use crate::shrincs::profiles::{HASH_TRUNC_LEN, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN};
-use crate::shrincs::types::{ADDRESS_TYPE_FORS_TREE, ADDRESS_TYPE_TREE, HASH_LEN};
+use crate::hash_suite::scheme_hash;
+use crate::profiles::{HASH_TRUNC_LEN, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN};
+use crate::types::{ADDRESS_TYPE_FORS_TREE, ADDRESS_TYPE_TREE, HASH_LEN};
 
 pub(crate) fn hash_packed(parts: &[&[u8]]) -> [u8; HASH_LEN] {
     scheme_hash(&pack(parts))
+}
+
+/// EVM-domain keccak over packed preimage parts (action hashes, commitments).
+/// Always keccak regardless of the scheme-hash suite.
+pub(crate) fn keccak_packed(parts: &[&[u8]]) -> [u8; HASH_LEN] {
+    solana_program::keccak::hash(&pack(parts)).to_bytes()
 }
 
 pub(crate) fn pack(parts: &[&[u8]]) -> Vec<u8> {

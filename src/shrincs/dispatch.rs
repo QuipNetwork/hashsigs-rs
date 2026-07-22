@@ -17,21 +17,38 @@
 
 //! Hybrid SHRINCS scheme orchestration.
 
-use crate::shrincs::components::hash::word32;
-use crate::shrincs::components::public_key::{
-    decode_stateful_public_key, public_key_commitment as public_key_commitment_from_parts,
-    stateful_rotation_target_commitment,
-};
-use crate::shrincs::components::uxmss;
-use crate::shrincs::core::messages::{
-    full_rotation_message_hash, stateful_action_message_hash, stateful_rotation_message_hash,
-    stateless_action_message_hash,
-};
-use crate::shrincs::core::sphincs_plus_c;
-use crate::shrincs::types::{
+use crate::hash::word32;
+use crate::sphincs_plus_c;
+use crate::types::{
     ActionContext, PublicKey, RotationContext, RotationTarget, StatefulRotationTarget,
     StatefulSignature, StatelessSignature, HASH_LEN, STATEFUL_PUBLIC_KEY_BYTES,
 };
+use crate::uxmss;
+use super::messages::{
+    full_rotation_message_hash, stateful_action_message_hash, stateful_rotation_message_hash,
+    stateless_action_message_hash,
+};
+use super::public_key::{
+    decode_stateful_public_key, public_key_commitment as public_key_commitment_from_parts,
+};
+
+fn verify_stateless_crypto(
+    public_key: &PublicKey,
+    message: &[u8],
+    signature: &StatelessSignature,
+) -> bool {
+    let Some(pk_seed) = word32(&public_key.pk_seed) else {
+        return false;
+    };
+    let Some(hypertree_root) = word32(&public_key.hypertree_root) else {
+        return false;
+    };
+    let pk = sphincs_plus_c::SphincsPlusCPublicKey {
+        pk_seed,
+        hypertree_root,
+    };
+    sphincs_plus_c::verify(&pk, message, signature)
+}
 
 pub(crate) fn valid_action_context(context: &ActionContext) -> bool {
     context.domain_separator != [0u8; HASH_LEN]
@@ -56,7 +73,7 @@ fn recompute_public_key_commitment(public_key: &PublicKey) -> Option<[u8; HASH_L
 pub(crate) fn rotation_target_commitment(target: &RotationTarget) -> Option<[u8; HASH_LEN]> {
     let pk_seed = word32(&target.pk_seed)?;
     let hypertree_root = word32(&target.hypertree_root)?;
-    Some(stateful_rotation_target_commitment(
+    Some(public_key_commitment_from_parts(
         &target.stateful_public_key,
         &pk_seed,
         &hypertree_root,
@@ -109,7 +126,7 @@ pub(crate) fn verify_stateless(
         return false;
     }
     let message = stateless_action_message_hash(expected_public_key_commitment, context);
-    sphincs_plus_c::verify_stateless_raw(public_key, &message, signature)
+    verify_stateless_crypto(public_key, &message, signature)
 }
 
 pub(crate) fn rotate_stateful_via_stateless(
@@ -141,7 +158,7 @@ pub(crate) fn rotate_stateful_via_stateless(
     }
     let current_pk_seed = word32(&current_public_key.pk_seed)?;
     let current_hypertree_root = word32(&current_public_key.hypertree_root)?;
-    let next_public_key_commitment = stateful_rotation_target_commitment(
+    let next_public_key_commitment = public_key_commitment_from_parts(
         &next_stateful_key.stateful_public_key,
         &current_pk_seed,
         &current_hypertree_root,
@@ -156,11 +173,7 @@ pub(crate) fn rotate_stateful_via_stateless(
         context,
         next_stateful_key,
     );
-    if !sphincs_plus_c::verify_stateless_raw(
-        current_public_key,
-        &recovery_message,
-        recovery_signature,
-    ) {
+    if !verify_stateless_crypto(current_public_key, &recovery_message, recovery_signature) {
         return None;
     }
 
@@ -207,11 +220,7 @@ pub(crate) fn stateless_rotate(
         context,
         next_key,
     );
-    if !sphincs_plus_c::verify_stateless_raw(
-        current_public_key,
-        &recovery_message,
-        recovery_signature,
-    ) {
+    if !verify_stateless_crypto(current_public_key, &recovery_message, recovery_signature) {
         return None;
     }
     Some(next_public_key_commitment)
@@ -248,5 +257,5 @@ pub(crate) fn verify_stateless_unsafe_raw(
     if !valid_public_key(public_key) {
         return false;
     }
-    sphincs_plus_c::verify_stateless_raw(public_key, message, signature)
+    verify_stateless_crypto(public_key, message, signature)
 }

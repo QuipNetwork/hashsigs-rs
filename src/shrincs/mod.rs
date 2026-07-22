@@ -15,15 +15,17 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! SHRINCS signer / verifier primitives and shared types.
 
-pub(crate) mod components;
-pub(crate) mod core;
-pub(crate) mod hash_suite;
-pub(crate) mod profiles;
-pub(crate) mod signers;
-pub(crate) mod verifiers;
-mod types;
+//! SHRINCS hybrid scheme: commitments, action/rotation hashes, dispatch.
+//!
+//! Wraps independent `sphincs_plus_c` (stateless) and `uxmss` (stateful).
+
+mod dispatch;
+mod messages;
+mod public_key;
+mod signer_types;
+mod signer_utils;
+
 pub mod signer;
 pub mod verifier;
 
@@ -33,71 +35,63 @@ mod vector_conformance;
 pub(crate) mod test_fixtures;
 
 pub use signer::{ShrincsSigner, ShrincsSignerResult, ShrincsSigningKey};
-pub use hash_suite::HASH_SUITE_ID;
-pub use profiles::{
+pub use verifier::ShrincsVerifier;
+
+pub use crate::hash_suite::HASH_SUITE_ID;
+pub use crate::profiles::{
     FORS_C_MAX_GRIND_COUNTER, FORS_TREE_HEIGHT, HASH_TRUNC_LEN, HYPERTREE_HEIGHT,
     NUM_FORS_TREES, NUM_HYPERTREE_LAYERS, NUM_WOTS_CHAINS, PROFILE_ID, PROFILE_NAME,
     STATELESS_SIGNATURE_LIMIT, WOTS_BASE_STATEFUL, WOTS_CHAIN_LEN, WOTS_CHAINS_STATEFUL,
     WOTS_TARGET_SUM_STATEFUL, WOTS_TARGET_SUM_STATELESS,
 };
-pub use types::{
+pub use crate::types::{
     ActionContext, ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey, RotationContext,
     RotationTarget, StatefulPublicKey, StatefulRotationTarget, StatefulSignature,
     StatelessSignature, WotsCSignature, ADDRESS_TYPE_FORS_TREE, ADDRESS_TYPE_TREE,
     ADDRESS_TYPE_WOTS_HASH, HASH_LEN, HASH_SUITE_KECCAK_256, HASH_SUITE_SHA2_256,
     STATEFUL_PUBLIC_KEY_BYTES,
 };
-pub use verifier::{ShrincsVerifier, SphincsPlusCVerifier};
+
+// Re-export commitment/message helpers used by account/wasm/tests.
+#[allow(unused_imports)] // used by account/wasm/test modules under cfg
+pub(crate) use dispatch::{
+    matches_expected_public_key_commitment, rotate_stateful_via_stateless, stateless_rotate,
+    valid_action_context, valid_public_key, valid_rotation_context, verify_stateful,
+    verify_stateful_unsafe_raw, verify_stateless,
+};
+#[allow(unused_imports)]
+#[cfg(any(test, feature = "wasm-bindings"))]
+pub(crate) use dispatch::verify_stateless_unsafe_raw;
+#[allow(unused_imports)]
+pub(crate) use messages::{
+    full_rotation_message_hash, stateful_action_message_hash, stateful_rotation_message_hash,
+    stateless_action_message_hash,
+};
+#[allow(unused_imports)]
+pub(crate) use public_key::{
+    decode_stateful_public_key, encode_stateful_public_key, public_key_commitment,
+};
+#[allow(unused_imports)]
+pub(crate) use signer_utils::{derive32, public_key_from_components};
 
 #[cfg(test)]
-mod compatibility_tests {
-    use super::{signer, verifier};
-    use crate::shrincs;
-
-    #[test]
-    fn root_and_module_signer_paths_still_match() {
-        fn assert_result_type(_: signer::ShrincsSignerResult<()>) {}
-
-        let _root_signer = shrincs::ShrincsSigner::keygen;
-        let _module_signer = signer::ShrincsSigner::keygen;
-        let _root_import = shrincs::ShrincsSigner::import_signing_key;
-        let _module_import = signer::ShrincsSigner::import_signing_key;
-        let _root_stateful = shrincs::ShrincsSigner::sign_stateful_raw;
-        let _module_stateful = signer::ShrincsSigner::sign_stateful_raw;
-        let _root_stateless = shrincs::ShrincsSigner::sign_stateless_raw;
-        let _module_stateless = signer::ShrincsSigner::sign_stateless_raw;
-
-        assert_result_type(None::<()>);
-    }
-
-    #[test]
-    fn root_and_module_verifier_paths_still_match() {
-        let _root_verifier = shrincs::ShrincsVerifier::new;
-        let _module_verifier = verifier::ShrincsVerifier::new;
-        let _root_stateless_only = shrincs::SphincsPlusCVerifier::new;
-        let _module_stateless_only = verifier::SphincsPlusCVerifier::new;
-
-        let _root_profile = shrincs::PROFILE_NAME;
-        let _shim_profile = verifier::PROFILE_NAME;
-        let _legacy_profile = signer::verifier::PROFILE_NAME;
-    }
-
+mod profile_tests {
     #[test]
     fn active_profile_id_matches_keccak_of_profile_name() {
-        let expected = solana_program::keccak::hash(shrincs::PROFILE_NAME.as_bytes()).to_bytes();
-        assert_eq!(shrincs::PROFILE_ID, expected);
+        let expected = solana_program::keccak::hash(crate::profiles::PROFILE_NAME.as_bytes()).to_bytes();
+        assert_eq!(crate::profiles::PROFILE_ID, expected);
     }
 
     #[cfg(any(feature = "profile-128s-q18", feature = "profile-128s-q20"))]
     #[test]
     fn active_128_profile_uses_raised_fors_grind_budget() {
-        assert_eq!(shrincs::FORS_TREE_HEIGHT, 24);
-        assert_eq!(shrincs::FORS_C_MAX_GRIND_COUNTER, 1 << 28);
+        assert_eq!(crate::profiles::FORS_TREE_HEIGHT, 24);
+        assert_eq!(crate::profiles::FORS_C_MAX_GRIND_COUNTER, 1 << 28);
     }
 
     #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
     #[test]
     fn active_non_128_profile_keeps_default_fors_grind_budget() {
-        assert_eq!(shrincs::FORS_C_MAX_GRIND_COUNTER, 1 << 24);
+        assert_eq!(crate::profiles::FORS_C_MAX_GRIND_COUNTER, 1 << 24);
     }
 }

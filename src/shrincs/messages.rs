@@ -17,19 +17,11 @@
 
 //! Shared canonical SHRINCS message-hash constructors.
 
-use crate::shrincs::hash_suite::HASH_SUITE_ID;
-use crate::shrincs::types::{
+use crate::hash::keccak_packed;
+use crate::hash_suite::HASH_SUITE_ID;
+use crate::types::{
     ActionContext, PublicKey, RotationContext, RotationTarget, StatefulRotationTarget, HASH_LEN,
 };
-
-fn keccak_packed(parts: &[&[u8]]) -> [u8; HASH_LEN] {
-    let len = parts.iter().map(|part| part.len()).sum();
-    let mut out = Vec::with_capacity(len);
-    for part in parts {
-        out.extend_from_slice(part);
-    }
-    solana_program::keccak::hash(&out).to_bytes()
-}
 
 pub(crate) fn stateful_action_message_hash(
     expected_public_key_commitment: [u8; HASH_LEN],

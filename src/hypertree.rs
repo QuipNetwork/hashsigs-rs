@@ -15,21 +15,285 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Hypertree and stateless WOTS-C signing.
+
+//! Hypertree sign and verify (merged from components + signers).
 
 use zeroize::Zeroizing;
-
-use super::super::components::hash::hypertree_address_word;
-use super::super::components::hypertree;
-use super::types::{ShrincsSignerResult, ShrincsSigningKey};
-use super::utils::{
-    base_w_digit, derive32, hash_node, hash_packed, wots_digest_bytes, WOTS_C_MAX_GRIND_COUNTER,
+use crate::hash::{
+    base_w_digit, hash_node, hash_packed, hypertree_address_word, word32,
+    wots_address_base, wots_digest_bytes,
 };
-use super::super::types::{HypertreeLayerSignature, WotsCSignature, HASH_LEN};
-use super::super::profiles::{
+use crate::profiles::{
     HYPERTREE_HEIGHT, NUM_HYPERTREE_LAYERS, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN,
     WOTS_TARGET_SUM_STATELESS,
 };
+use crate::types::{HypertreeLayerSignature, WotsCSignature, HASH_LEN};
+use crate::sphincs_plus_c::SphincsPlusCSigningKey;
+use crate::wotsplusc;
+use crate::wotsplusc::WOTS_C_MAX_GRIND_COUNTER;
+
+pub(crate) fn verify_hypertree(
+    pk_seed: &[u8; HASH_LEN],
+    expected_hypertree_root: &[u8; HASH_LEN],
+    fors_root: [u8; HASH_LEN],
+    seed_tree_index: u64,
+    seed_leaf_index: u32,
+    layers: &[HypertreeLayerSignature],
+) -> bool {
+    if layers.len() != NUM_HYPERTREE_LAYERS as usize {
+        return false;
+    }
+    let subtree_height = u32::from(HYPERTREE_HEIGHT / NUM_HYPERTREE_LAYERS);
+    if subtree_height == 0 || subtree_height >= u32::BITS {
+        return false;
+    }
+    let leaf_count = 1u32 << subtree_height;
+    let leaf_mask = (1u64 << subtree_height) - 1;
+    let mut current_root = fors_root;
+    let mut expected_tree_index = seed_tree_index;
+    let mut expected_leaf_index = seed_leaf_index;
+
+    for (layer_index, layer_signature) in layers.iter().enumerate() {
+        if expected_leaf_index >= leaf_count
+            || layer_signature.wots_c_pk_hash.len() != HASH_LEN
+            || layer_signature.auth_path.len() != subtree_height as usize
+        {
+            return false;
+        }
+        if !verify_wots_c32(
+            pk_seed,
+            layer_index as u32,
+            expected_tree_index,
+            expected_leaf_index,
+            &layer_signature.wots_c_pk_hash,
+            current_root,
+            &layer_signature.wots_c_signature,
+        ) {
+            return false;
+        }
+        let Some(layer_leaf) = word32(&layer_signature.wots_c_pk_hash) else {
+            return false;
+        };
+        let Some(next_root) = hypertree_root_from_path32(
+            subtree_height,
+            pk_seed,
+            layer_index as u32,
+            expected_tree_index,
+            expected_leaf_index,
+            layer_leaf,
+            &layer_signature.auth_path,
+        ) else {
+            return false;
+        };
+        current_root = next_root;
+        expected_leaf_index = (expected_tree_index & leaf_mask) as u32;
+        expected_tree_index >>= subtree_height;
+    }
+
+    expected_tree_index == 0 && *expected_hypertree_root == current_root
+}
+
+pub(crate) fn stateless_wots_message_digest(
+    pk_seed: &[u8; HASH_LEN],
+    expected_pk_hash: &[u8; HASH_LEN],
+    randomizer: &[u8; HASH_LEN],
+    counter: u32,
+    message: &[u8; HASH_LEN],
+) -> Vec<u8> {
+    hash_packed(&[
+        b"wots-c-msg".as_ref(),
+        pk_seed.as_ref(),
+        expected_pk_hash.as_ref(),
+        randomizer.as_ref(),
+        counter.to_be_bytes().as_ref(),
+        message.as_ref(),
+    ])
+    .to_vec()
+}
+
+pub(crate) struct StatelessWotsChainCtx<'a> {
+    pub(crate) pk_seed: &'a [u8; HASH_LEN],
+    pub(crate) layer: u32,
+    pub(crate) tree: u64,
+    pub(crate) keypair: u32,
+    pub(crate) chain_index: u32,
+}
+
+pub(crate) fn stateless_wots_chain(
+    ctx: &StatelessWotsChainCtx<'_>,
+    value: [u8; HASH_LEN],
+    start: u32,
+    steps: u32,
+) -> [u8; HASH_LEN] {
+    wotsplusc::stateless_wots_chain(
+        &wotsplusc::StatelessWotsChainCtx {
+            pk_seed: ctx.pk_seed,
+            layer: ctx.layer,
+            tree: ctx.tree,
+            keypair: ctx.keypair,
+            chain_index: ctx.chain_index,
+        },
+        value,
+        start,
+        steps,
+    )
+}
+
+pub(crate) fn stateless_wots_chain_from_address_base(
+    pk_seed: &[u8; HASH_LEN],
+    address_base: [u8; HASH_LEN],
+    chain_index: u32,
+    value: [u8; HASH_LEN],
+    start: u32,
+    steps: u32,
+) -> [u8; HASH_LEN] {
+    wotsplusc::stateless_wots_chain_from_address_base(
+        pk_seed,
+        address_base,
+        chain_index,
+        value,
+        start,
+        steps,
+    )
+}
+
+pub(crate) fn stateless_wots_public_key_hash(
+    pk_seed: &[u8; HASH_LEN],
+    endpoints: &[[u8; HASH_LEN]],
+) -> [u8; HASH_LEN] {
+    let mut packed = Vec::with_capacity(endpoints.len() * HASH_LEN);
+    for endpoint in endpoints {
+        packed.extend_from_slice(endpoint);
+    }
+    hash_node(&[b"wots-c-pk".as_ref(), pk_seed.as_ref(), packed.as_slice()])
+}
+
+fn verify_wots_c32(
+    pk_seed_bytes: &[u8],
+    layer: u32,
+    tree: u64,
+    keypair: u32,
+    expected_pk_hash_bytes: &[u8],
+    message: [u8; HASH_LEN],
+    signature: &WotsCSignature,
+) -> bool {
+    let chain_count = NUM_WOTS_CHAINS as usize;
+    if signature.randomizer.len() != HASH_LEN
+        || signature.chains.len() != chain_count
+        || expected_pk_hash_bytes.len() != HASH_LEN
+        || wots_digest_bytes() > HASH_LEN
+    {
+        return false;
+    }
+    let Some(pk_seed) = word32(pk_seed_bytes) else {
+        return false;
+    };
+    let Some(expected_pk_hash) = word32(expected_pk_hash_bytes) else {
+        return false;
+    };
+    let Some(randomizer) = word32(&signature.randomizer) else {
+        return false;
+    };
+    let digest = stateless_wots_message_digest(
+        &pk_seed,
+        &expected_pk_hash,
+        &randomizer,
+        signature.counter,
+        &message,
+    );
+
+    let address_base = wots_address_base(layer, tree, keypair);
+    let mut digit_sum = 0u32;
+    let mut pk_input_segments = Vec::with_capacity(chain_count * HASH_LEN);
+    for chain_index in 0..chain_count {
+        let Some(chain_value) = signature
+            .chains
+            .get(chain_index)
+            .and_then(|value| word32(value))
+        else {
+            return false;
+        };
+        let digit = base_w_digit(WOTS_CHAIN_LEN, &digest, chain_index);
+        let Some(next_sum) = digit_sum.checked_add(digit) else {
+            return false;
+        };
+        digit_sum = next_sum;
+        let segment =
+            wots_chain32_no_mask_base(WOTS_CHAIN_LEN, pk_seed, address_base, chain_index as u32, chain_value, digit);
+        pk_input_segments.extend_from_slice(&segment);
+    }
+    if digit_sum != WOTS_TARGET_SUM_STATELESS {
+        return false;
+    }
+
+    let computed_pk_hash = hash_node(&[
+        b"wots-c-pk".as_ref(),
+        pk_seed.as_ref(),
+        pk_input_segments.as_slice(),
+    ]);
+    computed_pk_hash == expected_pk_hash
+}
+
+fn wots_chain32_no_mask_base(
+    w: u16,
+    pk_seed: [u8; HASH_LEN],
+    address_base: [u8; HASH_LEN],
+    chain_index: u32,
+    value: [u8; HASH_LEN],
+    digit: u32,
+) -> [u8; HASH_LEN] {
+    let steps = u32::from(w - 1) - digit;
+    stateless_wots_chain_from_address_base(
+        &pk_seed,
+        address_base,
+        chain_index,
+        value,
+        digit,
+        steps,
+    )
+}
+
+fn hypertree_root_from_path32(
+    height: u32,
+    pk_seed: &[u8],
+    layer: u32,
+    tree_index: u64,
+    leaf_index: u32,
+    leaf: [u8; HASH_LEN],
+    auth_path: &[Vec<u8>],
+) -> Option<[u8; HASH_LEN]> {
+    if auth_path.len() != height as usize {
+        return None;
+    }
+    let pk_seed = word32(pk_seed)?;
+    let mut node = leaf;
+    let mut index = leaf_index;
+    for level in 0..height {
+        let sibling = word32(auth_path.get(level as usize)?)?;
+        let (left, right) = if index & 1 == 0 {
+            (node, sibling)
+        } else {
+            (sibling, node)
+        };
+        let address_word =
+            hypertree_address_word(layer, tree_index, level + 1, u64::from(index >> 1));
+        node = hash_node(&[
+            b"hypertree-node".as_ref(),
+            pk_seed.as_ref(),
+            address_word.as_ref(),
+            left.as_ref(),
+            right.as_ref(),
+        ]);
+        index >>= 1;
+    }
+    Some(node)
+}
+
+// ---- signing ----
+
+fn derive32(domain: &[u8], seed: &[u8], data: &[u8]) -> [u8; HASH_LEN] {
+    hash_packed(&[domain, seed, data])
+}
 
 fn stateless_trace_enabled() -> bool {
     matches!(
@@ -87,11 +351,11 @@ struct HypertreeSubtree {
 }
 
 pub(crate) fn sign_hypertree(
-    signing_key: &ShrincsSigningKey,
+    signing_key: &SphincsPlusCSigningKey,
     fors_root: [u8; HASH_LEN],
     bottom_tree: u64,
     bottom_leaf: u32,
-) -> ShrincsSignerResult<Vec<HypertreeLayerSignature>> {
+) -> Option<Vec<HypertreeLayerSignature>> {
     if stateless_trace_enabled() {
         println!(
             "stateless trace: hypertree start bottom_tree={} bottom_leaf={} layers={}",
@@ -304,7 +568,7 @@ fn stateless_wots_c_public_key(
         );
         endpoints.push(endpoint);
     }
-    hypertree::stateless_wots_public_key_hash(pk_seed, &endpoints)
+    stateless_wots_public_key_hash(pk_seed, &endpoints)
 }
 
 fn sign_stateless_wots_c(
@@ -312,62 +576,58 @@ fn sign_stateless_wots_c(
     coords: &WotsKeypair,
     pk_hash: &[u8; HASH_LEN],
     message: &[u8; HASH_LEN],
-) -> ShrincsSignerResult<WotsCSignature> {
+) -> Option<WotsCSignature> {
     // The WOTS-C challenge signs the current root for this layer. The expected
     // WOTS public-key hash is included in the digest, binding the challenge to
     // the key whose Merkle path is supplied next.
     let randomizer = hash_packed(&[b"wots-c-randomizer", seeds.prf_seed, message]);
     let digest_bytes = wots_digest_bytes();
 
-    for counter in 0..WOTS_C_MAX_GRIND_COUNTER {
-        // The verifier derives the same digits from this digest. Grinding keeps
-        // only counters whose base-w digits sum to the configured target, which
-        // replaces the usual WOTS+ checksum field in this compact variant.
-        let digest = hypertree::stateless_wots_message_digest(
-            seeds.pk_seed,
-            pk_hash,
-            &randomizer,
-            counter,
-            message,
-        );
-        let digest = &digest[..digest_bytes];
-        let mut digits = [0u32; NUM_WOTS_CHAINS as usize];
-        let mut digit_sum = 0u32;
-        for (index, digit) in digits.iter_mut().enumerate() {
-            let value = base_w_digit(WOTS_CHAIN_LEN, digest, index);
-            *digit = value;
-            digit_sum += value;
-        }
-        if digit_sum != WOTS_TARGET_SUM_STATELESS {
-            continue;
-        }
-
-        let mut chains = Vec::with_capacity(NUM_WOTS_CHAINS as usize);
-        for (chain, digit) in digits.iter().enumerate() {
-            // A signature chain stops at the selected digit. The verifier
-            // continues the chain from that digit to the endpoint and checks
-            // that the reconstructed public-key hash matches `pk_hash`.
-            // The chain start is private WOTS material; zeroize it on drop.
-            let secret = Zeroizing::new(stateless_wots_c_secret(seeds.sk_seed, chain as u32));
-            chains.push(
-                stateless_wots_c_chain(
-                    seeds.pk_seed,
-                    &coords.chain(chain as u32),
-                    *secret,
-                    0,
-                    *digit,
-                )
-                .to_vec(),
+    let result = crate::wotsplusc::grind_digit_sum(
+        WOTS_C_MAX_GRIND_COUNTER,
+        WOTS_TARGET_SUM_STATELESS,
+        |counter| {
+            let digest = stateless_wots_message_digest(
+                seeds.pk_seed,
+                pk_hash,
+                &randomizer,
+                counter,
+                message,
             );
-        }
-        return Some(WotsCSignature {
-            randomizer: randomizer.to_vec(),
-            counter,
-            chains,
-        });
-    }
-
-    None
+            let digest = &digest[..digest_bytes];
+            let mut digits = Vec::with_capacity(NUM_WOTS_CHAINS as usize);
+            let mut digit_sum = 0u32;
+            for index in 0..NUM_WOTS_CHAINS as usize {
+                let value = base_w_digit(WOTS_CHAIN_LEN, digest, index);
+                digit_sum = digit_sum.checked_add(value)?;
+                digits.push(value);
+            }
+            Some((digit_sum, digits))
+        },
+        |digits| {
+            let mut chains = Vec::with_capacity(digits.len());
+            for (chain, digit) in digits.iter().enumerate() {
+                let secret = Zeroizing::new(stateless_wots_c_secret(seeds.sk_seed, chain as u32));
+                chains.push(
+                    stateless_wots_c_chain(
+                        seeds.pk_seed,
+                        &coords.chain(chain as u32),
+                        *secret,
+                        0,
+                        *digit,
+                    )
+                    .to_vec(),
+                );
+            }
+            chains
+        },
+    )?;
+    let (counter, chains) = result;
+    Some(WotsCSignature {
+        randomizer: randomizer.to_vec(),
+        counter,
+        chains,
+    })
 }
 
 fn stateless_wots_c_secret(sk_seed: &[u8; HASH_LEN], chain: u32) -> [u8; HASH_LEN] {
@@ -383,14 +643,14 @@ fn stateless_wots_c_chain(
     start: u32,
     steps: u32,
 ) -> [u8; HASH_LEN] {
-    let ctx = hypertree::StatelessWotsChainCtx {
+    let ctx = StatelessWotsChainCtx {
         pk_seed,
         layer: coords.layer,
         tree: coords.tree,
         keypair: coords.keypair,
         chain_index: coords.chain,
     };
-    hypertree::stateless_wots_chain(
+    stateless_wots_chain(
         &ctx,
         value,
         start,

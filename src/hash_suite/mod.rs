@@ -21,30 +21,21 @@
 //! WOTS-C, and UXMSS computations. Solidity keeps EVM-domain hashes
 //! (canonical action hashes, public-key commitments, profile identity) on
 //! keccak under every suite; Rust mirrors that split.
-
-use crate::shrincs::types::HASH_LEN;
-
-// The suite is selected by the `shrincs_hash_suite_sha2` cfg that build.rs
-// derives from the active profile, not by a Cargo feature directly. build.rs
-// owns the profile -> suite mapping outright, so a future non-keccak profile
-// cannot pick up keccak scheme hashes here while `profiles.rs` selects its
-// real parameters.
-#[cfg(shrincs_hash_suite_sha2)]
-use crate::shrincs::types::HASH_SUITE_SHA2_256;
-#[cfg(not(shrincs_hash_suite_sha2))]
-use crate::shrincs::types::HASH_SUITE_KECCAK_256;
+//!
+//! The suite is selected by the `shrincs_hash_suite_sha2` cfg that build.rs
+//! derives from the active profile, not by a Cargo feature directly.
 
 #[cfg(shrincs_hash_suite_sha2)]
-pub const HASH_SUITE_ID: u32 = HASH_SUITE_SHA2_256;
+mod sha2;
 #[cfg(not(shrincs_hash_suite_sha2))]
-pub const HASH_SUITE_ID: u32 = HASH_SUITE_KECCAK_256;
+mod keccak;
 
 #[cfg(shrincs_hash_suite_sha2)]
-pub(crate) fn scheme_hash(data: &[u8]) -> [u8; HASH_LEN] {
-    solana_program::hash::hash(data).to_bytes()
-}
-
+pub use sha2::HASH_SUITE_ID;
 #[cfg(not(shrincs_hash_suite_sha2))]
-pub(crate) fn scheme_hash(data: &[u8]) -> [u8; HASH_LEN] {
-    solana_program::keccak::hash(data).to_bytes()
-}
+pub use keccak::HASH_SUITE_ID;
+
+#[cfg(shrincs_hash_suite_sha2)]
+pub(crate) use sha2::scheme_hash;
+#[cfg(not(shrincs_hash_suite_sha2))]
+pub(crate) use keccak::scheme_hash;
