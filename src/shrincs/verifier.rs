@@ -16,6 +16,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Public hybrid SHRINCS verifier surface.
+//!
+//! Thin, stateless facade (`ShrincsVerifier`) over `dispatch` and `messages`:
+//! every method forwards directly, giving external callers (`account`,
+//! `wasm`, the `solana` workspace member) one struct-shaped entry point
+//! instead of free functions.
 
 use crate::types::{
     ActionContext, PublicKey, RotationContext, RotationTarget, StatefulRotationTarget,

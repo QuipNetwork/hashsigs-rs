@@ -16,6 +16,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Hybrid SHRINCS scheme orchestration.
+//!
+//! Owns the crypto-level verify/rotate decision logic shared by `verifier` and
+//! `signer`: validates contexts and encoded public keys, dispatches into
+//! `sphincs_plus_c` (stateless) and `uxmss` (stateful), and computes rotation
+//! commitments. `mod.rs` re-exports the pieces `account`/`wasm` need.
 
 use crate::hash::word32;
 use crate::sphincs_plus_c;

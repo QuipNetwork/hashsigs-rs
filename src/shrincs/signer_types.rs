@@ -16,6 +16,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Signer-owned secret-key types.
+//!
+//! Defines `ShrincsSigningKey` (all seed/root/counter material for both the
+//! stateful and stateless paths) and its `ShrincsSignerResult` alias. Kept
+//! separate from `signer.rs` so the type and its redacting `Debug` impl are
+//! reusable by `test_fixtures` and `wasm` without pulling in signing logic.
 
 use core::fmt;
 
