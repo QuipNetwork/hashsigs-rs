@@ -26,6 +26,7 @@ mod public_key;
 mod signer_types;
 mod signer_utils;
 
+pub mod envelope;
 pub mod signer;
 pub mod verifier;
 
