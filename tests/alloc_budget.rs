@@ -18,11 +18,9 @@
 //! Verify-path allocation budget.
 //!
 //! Enforces the crate's allocation policy (see `src/buf.rs`): signature
-//! verification prefers the stack and must not touch the heap on host builds.
-//! The only sanctioned exception is the `solana` feature / SBF target, where
-//! the wide WOTS-C segment buffers move to the heap because SBF stack frames
-//! are capped at 4 KiB — there the budget is a small per-layer constant
-//! instead of zero.
+//! verification never touches the heap, on every target. On Solana this is
+//! load-bearing — the bump allocator never frees, so verify-path heap use
+//! would accumulate against the 32 KiB program heap.
 //!
 //! A counting global allocator wraps the system allocator; signing/keygen run
 //! before the measured window (signing allocates wire types by design).
@@ -70,18 +68,9 @@ fn measured<T>(f: impl FnOnce() -> T) -> (T, u64) {
 }
 
 fn assert_verify_budget(what: &str, allocs: u64) {
-    #[cfg(not(feature = "solana"))]
     assert_eq!(
         allocs, 0,
-        "{what} must be heap-free on host builds, performed {allocs} allocations"
-    );
-    // With the `solana` feature the WOTS-C segment buffer is heap-allocated by
-    // policy: one allocation per WOTS-C verify (one per hypertree layer for
-    // the stateless path, one for the stateful path).
-    #[cfg(feature = "solana")]
-    assert!(
-        allocs <= 16,
-        "{what} exceeded the Solana per-layer segment-buffer budget: {allocs} allocations"
+        "{what} must be heap-free, performed {allocs} allocations"
     );
 }
 

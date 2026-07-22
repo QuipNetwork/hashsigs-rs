@@ -37,7 +37,10 @@ pub mod wotsplus_solana_test {
         // Increase compute units significantly
         let compute_max_units = 1_400_000;  // Increased from 200,000
         program_test.set_compute_max_units(compute_max_units);
-        
+        // With SBF_OUT_DIR set (cargo-build-sbf output), run the compiled .so
+        // under the real SBF VM instead of the native in-process handler, so
+        // compute units and the 32 KiB heap are actually enforced.
+        program_test.prefer_bpf(std::env::var_os("SBF_OUT_DIR").is_some());
 
         (program_test, program_id)
     }
@@ -442,6 +445,8 @@ pub mod sphincs_plus_c_solana_test {
             processor!(process_instruction),
         );
         program_test.set_compute_max_units(1_400_000);
+        // Same SBF opt-in as the legacy suite above.
+        program_test.prefer_bpf(std::env::var_os("SBF_OUT_DIR").is_some());
         (program_test, program_id)
     }
 

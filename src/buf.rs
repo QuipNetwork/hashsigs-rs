@@ -15,34 +15,21 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Fixed-capacity hash-node buffers: stack arrays by default, heap on Solana.
+//! Fixed-capacity hash-node buffers.
 //!
 //! Allocation policy: verify-path buffers whose size is a compile-time
-//! profile constant live on the stack. The exception is Solana, whose SBF
-//! stack frames are capped at 4 KiB — buffers that can reach ≥1 KiB there
-//! (WOTS-C endpoint segments: 2 KiB at 256s) move to the 32 KiB program heap
-//! instead. Buffers that stay under 1 KiB across every profile (FORS roots,
-//! digest buffers) use plain arrays directly and do not come through here.
-
-// `target_os = "solana"` is a real SBF target but not in rustc's default
-// check-cfg allow-list for host builds.
-#![allow(unexpected_cfgs)]
+//! profile constant live on the stack on every target, Solana included.
+//! Solana's bump allocator never frees, so per-layer heap buffers would
+//! accumulate against the 32 KiB program heap (8 × 2 KiB per 256s stateless
+//! verify); the 2 KiB WOTS-C segment buffer fits the 4 KiB SBF stack frame
+//! instead, which `cargo-build-sbf` verifies at compile time (stack-offset
+//! overflows are build warnings treated as findings).
 
 use crate::types::HASH_LEN;
 
-#[cfg(any(target_os = "solana", feature = "solana"))]
-pub(crate) type NodeBuf<const N: usize> = alloc::vec::Vec<[u8; HASH_LEN]>;
-#[cfg(not(any(target_os = "solana", feature = "solana")))]
 pub(crate) type NodeBuf<const N: usize> = [[u8; HASH_LEN]; N];
 
 /// Zero-initialized buffer of `N` hash nodes.
 pub(crate) fn node_buf<const N: usize>() -> NodeBuf<N> {
-    #[cfg(any(target_os = "solana", feature = "solana"))]
-    {
-        alloc::vec![[0u8; HASH_LEN]; N]
-    }
-    #[cfg(not(any(target_os = "solana", feature = "solana")))]
-    {
-        [[0u8; HASH_LEN]; N]
-    }
+    [[0u8; HASH_LEN]; N]
 }
