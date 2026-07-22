@@ -21,6 +21,8 @@
 // hash-valued wire field is a 32-byte slot (Solidity `bytes32`) regardless of
 // the parameter set. A truncated profile emits high-aligned, zero-padded node
 // values inside this slot (see HASH_TRUNC_LEN and `mask_hash`).
+use alloc::vec::Vec;
+
 pub const HASH_LEN: usize = 32;
 pub const HASH_SUITE_KECCAK_256: u32 = 1;
 pub const HASH_SUITE_SHA2_256: u32 = 2;

@@ -22,13 +22,16 @@
 
 use std::collections::HashMap;
 
-use solana_program::keccak::hash as keccak256_hash;
-
+use crate::hash_backend;
 use crate::shrincs::{
     ActionContext, PublicKey, RotationContext, RotationTarget, ShrincsVerifier,
     StatefulRotationTarget, StatefulSignature, StatelessSignature, HASH_LEN,
     STATELESS_SIGNATURE_LIMIT,
 };
+
+fn keccak256_hash(data: &[u8]) -> [u8; 32] {
+    hash_backend::keccak256(data)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StatefulPolicy {
@@ -644,7 +647,7 @@ impl ShrincsAccountVerifierExample {
         contractAddress: [u8; 20],
     ) -> [u8; HASH_LEN] {
         // Solidity uses keccak256("shrincs-account-v1") for DOMAIN_TAG.
-        let DOMAIN_TAG = keccak256_hash(DOMAIN_TAG_MESSAGE).to_bytes();
+        let DOMAIN_TAG = keccak256_hash(DOMAIN_TAG_MESSAGE);
         // Solidity abi.encode(bytes32,uint256,address) writes three 32-byte words.
         let mut encoded = Vec::with_capacity(HASH_LEN * 3);
         encoded.extend_from_slice(&DOMAIN_TAG);
@@ -652,7 +655,7 @@ impl ShrincsAccountVerifierExample {
         // ABI-encoded address values are left-padded to one 32-byte word.
         encoded.extend_from_slice(&[0u8; 12]);
         encoded.extend_from_slice(&contractAddress);
-        keccak256_hash(&encoded).to_bytes()
+        keccak256_hash(&encoded)
     }
 
     // installRotatedKey: Install a rotated key bundle and reset wrapper state for the next epoch.
@@ -746,8 +749,6 @@ mod tests {
         ShrincsSigner, StatefulSignature as SignerStatefulSignature,
         StatelessSignature as SignerStatelessSignature, WotsCSignature,
     };
-    use solana_program::keccak::hash as keccak256_hash;
-
     fn id(byte: u8) -> [u8; HASH_LEN] {
         [byte; HASH_LEN]
     }
@@ -816,7 +817,7 @@ mod tests {
         packed.extend_from_slice(stateful_public_key);
         packed.extend_from_slice(pk_seed);
         packed.extend_from_slice(hypertree_root);
-        keccak256_hash(&packed).to_bytes()
+        super::keccak256_hash(&packed)
     }
 
     fn expected_key(public_key: &PublicKey) -> [u8; HASH_LEN] {

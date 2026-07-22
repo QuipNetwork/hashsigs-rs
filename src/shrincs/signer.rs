@@ -36,10 +36,17 @@ const INITIAL_STATEFUL_LEAF_INDEX: u32 = 1;
 const MAX_STATEFUL_SIGNATURES_LIMIT: u32 = 4096;
 
 fn stateless_trace_enabled() -> bool {
-    matches!(
-        std::env::var("SHRINCS_TRACE_STATELESS").as_deref(),
-        Ok("1") | Ok("true") | Ok("yes") | Ok("on")
-    )
+    #[cfg(feature = "std")]
+    {
+        matches!(
+            std::env::var("SHRINCS_TRACE_STATELESS").as_deref(),
+            Ok("1") | Ok("true") | Ok("yes") | Ok("on")
+        )
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        false
+    }
 }
 
 impl ShrincsSigner {
@@ -176,7 +183,7 @@ impl ShrincsSigner {
         message: &[u8],
     ) -> ShrincsSignerResult<StatelessSignature> {
         if stateless_trace_enabled() {
-            println!(
+            hashsigs_println!(
                 "stateless trace: signer start message_len={}",
                 message.len()
             );
@@ -189,7 +196,7 @@ impl ShrincsSigner {
         };
         let sig = sphincs_plus_c::sign(&spk, message)?;
         if stateless_trace_enabled() {
-            println!("stateless trace: signer done");
+            hashsigs_println!("stateless trace: signer done");
         }
         Some(sig)
     }

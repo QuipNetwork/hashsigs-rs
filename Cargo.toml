@@ -9,7 +9,7 @@ repository = "https://github.com/quipnetwork/hashsigs-rs"
 documentation = "https://docs.rs/hashsigs-rs"
 readme = "README.md"
 keywords = ["cryptography", "wots", "shrincs", "signature", "solana"]
-categories = ["cryptography", "authentication"]
+categories = ["cryptography", "authentication", "no-std"]
 build = "build.rs"
 
 [lib]
@@ -27,7 +27,14 @@ resolver = "2"
 # Keep the default-profile selector internal so downstream additive feature use
 # works as expected: `--features profile-128s-q18` should override the default
 # 256s selection instead of conflicting with it.
-default = ["default-profile-256s"]
+default = ["std", "default-profile-256s"]
+# Host/runtime surface: thiserror Error, serde std, env-based debug traces.
+std = ["alloc", "serde/std", "thiserror/std"]
+# Heap types (Vec/Box/String) used by signature wire types and pack helpers.
+alloc = []
+# Optional Solana program dependency + syscall hash routing (also auto-selected
+# on target_os = "solana" via cfg in hash_backend).
+solana = ["dep:solana-program"]
 # Compile-time SHRINCS parameter-profile selection. These mirror the Solidity
 # contracts/profiles/<profile>/SHRINCSParams.sol libraries selected by the
 # Foundry `shrincs-profile/` remapping: one parameter tuple is chosen at
@@ -44,6 +51,7 @@ profile-128s-q18 = []
 profile-128s-q20 = []
 profile-256s-sha2 = []
 wasm-bindings = [
+    "std",
     "dep:serde-wasm-bindgen",
     "dep:wasm-bindgen",
     "dep:tsify",
@@ -51,12 +59,16 @@ wasm-bindings = [
 ]
 
 [dependencies]
-solana-program = "2.3"
-serde = { version = "1.0.219", features = ["derive"] }
-thiserror = "2.0"
+solana-program = { version = "2.3", optional = true }
+# Portable hash backends (no_std-capable). Used when not on Solana / without
+# the `solana` feature. Keep in lockstep with the build-dep sha3 major line.
+sha3 = { version = "0.10", default-features = false }
+sha2 = { version = "0.10", default-features = false }
+serde = { version = "1.0.219", default-features = false, features = ["derive"] }
+thiserror = { version = "2.0", default-features = false }
 js-sys = { version = "0.3", optional = true }
 serde-wasm-bindgen = { version = "0.6.5", optional = true }
-zeroize = { version = "1.8", features = ["derive"] }
+zeroize = { version = "1.8", default-features = false, features = ["derive"] }
 # =0.5.5: last tsify accepting wasm-bindgen 0.2.100, which the wasm-bindgen CLI
 # pin in bin/build-wasm.sh must match exactly (0.5.6 forces ^0.2.104).
 tsify = { version = "=0.5.5", default-features = false, features = ["js"], optional = true }
@@ -66,6 +78,11 @@ wasm-bindgen = { version = "=0.2.100", optional = true }
 flate2 = "1.1.2"
 serde_json = "1.0.143"
 wasm-bindgen-test = "0.3.50"
+# Independent oracle for the portable sha3/sha2 hash backend: golden-vector
+# generators hash the same inputs via solana-program directly and assert
+# byte-identical output against hash_backend's default (non-`solana`-feature)
+# sha3/sha2 path. Dev-only — never ships in the published library artifact.
+solana-program = "2.3"
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 getrandom = { version = "0.3.3", features = ["wasm_js"] }

@@ -18,6 +18,8 @@
 
 //! Hypertree sign and verify (merged from components + signers).
 
+use alloc::vec::Vec;
+
 use zeroize::Zeroizing;
 use crate::hash::{
     base_w_digit, hash_node, hash_packed, hypertree_address_word, word32,
@@ -296,10 +298,17 @@ fn derive32(domain: &[u8], seed: &[u8], data: &[u8]) -> [u8; HASH_LEN] {
 }
 
 fn stateless_trace_enabled() -> bool {
-    matches!(
-        std::env::var("SHRINCS_TRACE_STATELESS").as_deref(),
-        Ok("1") | Ok("true") | Ok("yes") | Ok("on")
-    )
+    #[cfg(feature = "std")]
+    {
+        matches!(
+            std::env::var("SHRINCS_TRACE_STATELESS").as_deref(),
+            Ok("1") | Ok("true") | Ok("yes") | Ok("on")
+        )
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        false
+    }
 }
 
 /// ADRS coordinates identifying one stateless WOTS-C keypair (its Merkle-leaf
@@ -357,7 +366,7 @@ pub(crate) fn sign_hypertree(
     bottom_leaf: u32,
 ) -> Option<Vec<HypertreeLayerSignature>> {
     if stateless_trace_enabled() {
-        println!(
+        hashsigs_println!(
             "stateless trace: hypertree start bottom_tree={} bottom_leaf={} layers={}",
             bottom_tree,
             bottom_leaf,
@@ -389,7 +398,7 @@ pub(crate) fn sign_hypertree(
 
     for layer in 0..u32::from(NUM_HYPERTREE_LAYERS) {
         if stateless_trace_enabled() {
-            println!(
+            hashsigs_println!(
                 "stateless trace: hypertree layer={} tree={} leaf={}",
                 layer, tree, leaf
             );
@@ -440,7 +449,7 @@ pub(crate) fn sign_hypertree(
         tree >>= subtree_height;
     }
     if stateless_trace_enabled() {
-        println!("stateless trace: hypertree complete");
+        hashsigs_println!("stateless trace: hypertree complete");
     }
     Some(layers)
 }

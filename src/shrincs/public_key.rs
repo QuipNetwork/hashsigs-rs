@@ -17,6 +17,8 @@
 
 //! Shared SHRINCS public-key layout and commitment helpers.
 
+use alloc::vec::Vec;
+
 use crate::hash::{keccak_packed, word32};
 use crate::profiles::PROFILE_NAME;
 use crate::types::{StatefulPublicKey, HASH_LEN, STATEFUL_PUBLIC_KEY_BYTES};

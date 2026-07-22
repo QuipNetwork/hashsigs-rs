@@ -24,6 +24,18 @@
 //! - independent SPHINCS+C layer
 //! - SHRINCS hybrid signer / verifier
 //! - shared types used by higher-level wrappers
+//!
+//! # Features
+//!
+//! - **`std`** (default): host surface, thiserror, env traces, serde std.
+//! - **`alloc`**: `Vec`-based signature wire types (required for crypto APIs).
+//! - **`solana`**: optional `solana-program` + syscall hash routing.
+//! - Profile selectors and `wasm-bindings` as before.
+//!
+//! Pure-core no-alloc (fixed arrays only) is out of scope for this release;
+//! `no_std + alloc` is the embedded baseline.
+
+#![cfg_attr(not(feature = "std"), no_std)]
 
 // Panic-prevention lints (review bead qg4): library code must not panic on
 // untrusted input. Scoped to non-test builds so `#[cfg(test)]` modules may use
@@ -43,9 +55,17 @@
     )
 )]
 
+#[cfg(feature = "alloc")]
+extern crate alloc;
+
+#[macro_use]
+mod trace_macros;
+
+#[cfg(feature = "std")]
 pub mod account;
 pub(crate) mod fors_c;
 pub(crate) mod hash;
+pub(crate) mod hash_backend;
 pub(crate) mod hash_suite;
 pub(crate) mod hypertree;
 pub(crate) mod profiles;
@@ -54,11 +74,12 @@ pub mod sphincs_plus_c;
 pub mod sphincs_plus_c_verifier;
 pub(crate) mod types;
 pub(crate) mod uxmss;
+#[cfg(feature = "std")]
 pub mod wasm;
 pub mod wotsplus;
 pub(crate) mod wotsplusc;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 pub(crate) mod test_support;
 
 pub use sphincs_plus_c::{

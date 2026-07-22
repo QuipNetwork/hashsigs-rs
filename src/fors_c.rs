@@ -18,6 +18,9 @@
 
 //! FORS-C sign and verify (merged from components + signers).
 
+use alloc::format;
+use alloc::vec::Vec;
+
 use zeroize::Zeroizing;
 
 use crate::hash::{fors_address_word, hash_node, hash_packed, pack, read_bits32, read_bits64, word32};
@@ -402,23 +405,42 @@ mod tests {
 // ---- signing ----
 
 fn stateless_trace_enabled() -> bool {
-    matches!(
-        std::env::var("SHRINCS_TRACE_STATELESS").as_deref(),
-        Ok("1") | Ok("true") | Ok("yes") | Ok("on")
-    )
+    #[cfg(feature = "std")]
+    {
+        matches!(
+            std::env::var("SHRINCS_TRACE_STATELESS").as_deref(),
+            Ok("1") | Ok("true") | Ok("yes") | Ok("on")
+        )
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        false
+    }
 }
 
 fn stateless_trace_counter_every() -> u32 {
-    std::env::var("SHRINCS_TRACE_COUNTER_EVERY")
-        .ok()
-        .and_then(|value| value.parse::<u32>().ok())
-        .filter(|value| *value > 0)
-        .unwrap_or(1 << 20)
+    #[cfg(feature = "std")]
+    {
+        std::env::var("SHRINCS_TRACE_COUNTER_EVERY")
+            .ok()
+            .and_then(|value| value.parse::<u32>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(1 << 20)
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        1 << 20
+    }
 }
 
 fn stateless_trace(message: &str) {
+    #[cfg(feature = "std")]
     if stateless_trace_enabled() {
-        println!("{message}");
+        hashsigs_println!("{message}");
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        let _ = message;
     }
 }
 
@@ -468,7 +490,7 @@ pub(crate) fn sign_fors_c(
         let mut entries = Vec::with_capacity(signed_trees);
         for fors_tree in 0..signed_trees {
             if stateless_trace_enabled() && (fors_tree == 0 || fors_tree + 1 == signed_trees) {
-                println!(
+                hashsigs_println!(
                     "stateless trace: FORS materializing tree {}/{}",
                     fors_tree + 1,
                     signed_trees
@@ -520,11 +542,11 @@ fn winning_fors_counter_and_digest(
     let trace_enabled = stateless_trace_enabled();
     let trace_every = stateless_trace_counter_every();
     if trace_enabled {
-        println!("stateless trace: FORS counter search start limit={limit}");
+        hashsigs_println!("stateless trace: FORS counter search start limit={limit}");
     }
     for counter in 0..limit {
         if trace_enabled && counter > 0 && counter % trace_every == 0 {
-            println!("stateless trace: FORS counter search tried={counter}/{limit}");
+            hashsigs_println!("stateless trace: FORS counter search tried={counter}/{limit}");
         }
         // The counter is public and stored in the signature. Its only job is to
         // find a digest whose omitted final FORS tree opens leaf zero.
@@ -539,13 +561,13 @@ fn winning_fors_counter_and_digest(
         };
         if digest.omitted_final_tree_is_zero {
             if trace_enabled {
-                println!("stateless trace: FORS counter search success counter={counter}");
+                hashsigs_println!("stateless trace: FORS counter search success counter={counter}");
             }
             return Some((counter, digest));
         }
     }
     if trace_enabled {
-        println!("stateless trace: FORS counter search exhausted limit={limit}");
+        hashsigs_println!("stateless trace: FORS counter search exhausted limit={limit}");
     }
     None
 }
@@ -559,7 +581,7 @@ mod measurement_tests {
     use crate::types::HASH_LEN;
 
     fn measurement_key(seed: &[u8], _max: u32) -> SphincsPlusCSigningKey {
-        println!(
+        hashsigs_println!(
             "measurement setup: deriving stateless key profile={}",
             crate::profiles::PROFILE_NAME
         );
@@ -572,7 +594,7 @@ mod measurement_tests {
             pk_seed: d(b"shrincs-pk-seed", seed),
             hypertree_root: d(b"placeholder-hypertree-root", seed),
         };
-        println!("measurement setup: key material ready");
+        hashsigs_println!("measurement setup: key material ready");
         key
     }
 
@@ -603,7 +625,7 @@ mod measurement_tests {
     ) -> Option<(u32, SigningForsDigest)> {
         for counter in 0..limit {
             if counter > 0 && counter % counter_progress_every == 0 {
-                println!(
+                hashsigs_println!(
                     "counter progress profile={} sample={}/? tried={counter}/{limit}",
                     crate::profiles::PROFILE_NAME,
                     sample_index + 1
@@ -633,7 +655,7 @@ mod measurement_tests {
             measurement_env_u32("SHRINCS_FORS_MEASURE_LIMIT", FORS_C_MAX_GRIND_COUNTER);
         let progress_every = measurement_progress_interval(samples);
         let counter_progress_every = measurement_counter_progress_interval(limit);
-        println!(
+        hashsigs_println!(
             "starting FORS measurement profile={} samples={samples} limit={limit} progress_every={progress_every} counter_progress_every={counter_progress_every}",
             crate::profiles::PROFILE_NAME,
         );
@@ -673,7 +695,7 @@ mod measurement_tests {
 
             let completed = i + 1;
             if completed % progress_every == 0 || completed == samples {
-                println!(
+                hashsigs_println!(
                     "progress profile={} completed={completed}/{samples} successes={successes} failures={failures}",
                     crate::profiles::PROFILE_NAME
                 );
@@ -696,7 +718,7 @@ mod measurement_tests {
             sum_success_counters as f64 / successes as f64
         };
 
-        println!(
+        hashsigs_println!(
             "profile={} samples={samples} limit={limit} successes={successes} failures={failures} success_pct={success_pct:.2} failure_pct={failure_pct:.2} avg_success_counter={avg_success_counter:.2} max_success_counter={max_success_counter}",
             crate::profiles::PROFILE_NAME
         );

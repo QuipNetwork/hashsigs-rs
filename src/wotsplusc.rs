@@ -23,6 +23,8 @@
 //! (`b"uxmss-wots-chain"`). Tags and address layouts are caller parameters —
 //! they must stay byte-identical to the pre-merge constructions.
 
+use alloc::vec::Vec;
+
 use crate::hash::{hash_node, wots_chain_address_word};
 use crate::types::HASH_LEN;
 
