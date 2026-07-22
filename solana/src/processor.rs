@@ -31,7 +31,10 @@ use solana_program::program::set_return_data;
 use solana_program::system_instruction::create_account;
 use solana_program::account_info::next_account_info;
 
-use crate::sphincs_plus_c::{ActionContextDto, ShrincsPublicKeyDto, StatelessSignatureDto};
+use crate::account::{self, RotationTargetDto, StatefulRotationTargetDto};
+use crate::sphincs_plus_c::{
+    ActionContextDto, ShrincsPublicKeyDto, StatefulSignatureDto, StatelessSignatureDto,
+};
 
 // NOTE: The following is supposed to increase the stack size but it does not work in practice.
 /*
@@ -135,6 +138,52 @@ pub enum WOTSPlusInstruction {
         context: ActionContextDto,
         signature: StatelessSignatureDto,
     },
+    // -- SHRINCS account-example state machine (bead hashsigs-rs-3na). --
+    // Account-owning instructions; the accounts they read/write are passed
+    // via `accounts`, not this Borsh payload. See `solana::account` doc
+    // comments on each `process_*` function for the expected account list.
+    // APPEND ONLY below this point: Borsh discriminants are positional.
+    /// Create the account-state PDA at `["shrincs-account", owner, salt]`
+    /// and install the initial key commitment under the default monotonic
+    /// policy.
+    ShrincsAccountInit {
+        salt: [u8; constants::HASH_LEN],
+        initial_public_key_commitment: [u8; constants::HASH_LEN],
+    },
+    /// Canonical stateful account-action verification path.
+    ShrincsAccountVerifyStatefulAction {
+        action_type: [u8; constants::HASH_LEN],
+        payload_hash: [u8; constants::HASH_LEN],
+        public_key: ShrincsPublicKeyDto,
+        signature: StatefulSignatureDto,
+    },
+    /// Canonical stateless account-action verification path.
+    ShrincsAccountVerifyStatelessAction {
+        action_type: [u8; constants::HASH_LEN],
+        payload_hash: [u8; constants::HASH_LEN],
+        public_key: ShrincsPublicKeyDto,
+        signature: StatelessSignatureDto,
+    },
+    /// Recovery-only path that replaces the installed stateful subkey.
+    ShrincsAccountRotateToFreshKey {
+        public_key: ShrincsPublicKeyDto,
+        recovery_signature: StatelessSignatureDto,
+        next_stateful_key: StatefulRotationTargetDto,
+    },
+    /// Recovery-only path that replaces the full installed SHRINCS key bundle.
+    ShrincsAccountRotateFullKey {
+        public_key: ShrincsPublicKeyDto,
+        recovery_signature: StatelessSignatureDto,
+        next_key: RotationTargetDto,
+    },
+    /// Owner-only: switch to monotonic stateful leaf tracking.
+    ShrincsAccountSetPolicyMonotonic { initial_leaf_index: u32 },
+    /// Owner-only: switch to recovery-only stateless rotation mode.
+    ShrincsAccountSetPolicyRecoveryRotation,
+    /// Owner-only: switch to bitmap-based stateful leaf tracking.
+    ShrincsAccountSetPolicyLeafBitmap,
+    /// Owner-only: arm the account for recovery-only stateless rotations.
+    ShrincsAccountEnterRecoveryMode,
 }
 
 // Split the instruction processing into smaller functions to reduce stack usage
@@ -386,5 +435,69 @@ pub fn process_instruction(
             context,
             signature,
         ),
+        WOTSPlusInstruction::ShrincsAccountInit {
+            salt,
+            initial_public_key_commitment,
+        } => account::process_init(program_id, accounts, salt, initial_public_key_commitment),
+        WOTSPlusInstruction::ShrincsAccountVerifyStatefulAction {
+            action_type,
+            payload_hash,
+            public_key,
+            signature,
+        } => account::process_verify_stateful_action(
+            program_id,
+            accounts,
+            action_type,
+            payload_hash,
+            public_key,
+            signature,
+        ),
+        WOTSPlusInstruction::ShrincsAccountVerifyStatelessAction {
+            action_type,
+            payload_hash,
+            public_key,
+            signature,
+        } => account::process_verify_stateless_action(
+            program_id,
+            accounts,
+            action_type,
+            payload_hash,
+            public_key,
+            signature,
+        ),
+        WOTSPlusInstruction::ShrincsAccountRotateToFreshKey {
+            public_key,
+            recovery_signature,
+            next_stateful_key,
+        } => account::process_rotate_to_fresh_key(
+            program_id,
+            accounts,
+            public_key,
+            recovery_signature,
+            next_stateful_key,
+        ),
+        WOTSPlusInstruction::ShrincsAccountRotateFullKey {
+            public_key,
+            recovery_signature,
+            next_key,
+        } => account::process_rotate_full_key(
+            program_id,
+            accounts,
+            public_key,
+            recovery_signature,
+            next_key,
+        ),
+        WOTSPlusInstruction::ShrincsAccountSetPolicyMonotonic { initial_leaf_index } => {
+            account::process_set_policy_monotonic(program_id, accounts, initial_leaf_index)
+        }
+        WOTSPlusInstruction::ShrincsAccountSetPolicyRecoveryRotation => {
+            account::process_set_policy_recovery_rotation(program_id, accounts)
+        }
+        WOTSPlusInstruction::ShrincsAccountSetPolicyLeafBitmap => {
+            account::process_set_policy_leaf_bitmap(program_id, accounts)
+        }
+        WOTSPlusInstruction::ShrincsAccountEnterRecoveryMode => {
+            account::process_enter_recovery_mode(program_id, accounts)
+        }
     }
 }

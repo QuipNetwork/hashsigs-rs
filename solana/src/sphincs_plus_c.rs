@@ -26,7 +26,7 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 use hashsigs_rs::shrincs::{
     ActionContext, ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey as ShrincsPublicKey,
-    StatelessSignature, WotsCSignature,
+    StatefulSignature, StatelessSignature, WotsCSignature,
 };
 
 #[derive(Debug, Clone, BorshSerialize, BorshDeserialize)]
@@ -155,6 +155,38 @@ impl From<StatelessSignature> for StatelessSignatureDto {
         StatelessSignatureDto {
             fors: sig.fors.into(),
             hypertree: sig.hypertree.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+/// Compact Borsh DTO for `hashsigs_rs::shrincs::StatefulSignature` (UXMSS
+/// fast path): fixed-width hash fields, flat hash lists.
+#[derive(Debug, Clone, BorshSerialize, BorshDeserialize)]
+pub struct StatefulSignatureDto {
+    pub randomizer: [u8; 32],
+    pub counter: u32,
+    pub chains: Vec<[u8; 32]>,
+    pub auth_path: Vec<[u8; 32]>,
+}
+
+impl From<StatefulSignatureDto> for StatefulSignature {
+    fn from(dto: StatefulSignatureDto) -> Self {
+        StatefulSignature {
+            randomizer: dto.randomizer,
+            counter: dto.counter,
+            chains: dto.chains,
+            auth_path: dto.auth_path,
+        }
+    }
+}
+
+impl From<StatefulSignature> for StatefulSignatureDto {
+    fn from(sig: StatefulSignature) -> Self {
+        StatefulSignatureDto {
+            randomizer: sig.randomizer,
+            counter: sig.counter,
+            chains: sig.chains,
+            auth_path: sig.auth_path,
         }
     }
 }
