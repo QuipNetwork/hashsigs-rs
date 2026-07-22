@@ -88,14 +88,10 @@ pub(crate) fn verify_raw(
     )
 }
 
-/// Secret material required to sign at the SPHINCS+C layer alone.
-#[derive(Debug, Clone, Copy)]
-pub struct SphincsPlusCSigningKey {
-    pub stateless_sk_seed: [u8; HASH_LEN],
-    pub stateless_prf_seed: [u8; HASH_LEN],
-    pub pk_seed: [u8; HASH_LEN],
-    pub hypertree_root: [u8; HASH_LEN],
-}
+// Canonical definition lives in `types` (the leaf module) so `fors_c` and
+// `hypertree` accept it without importing upward; re-exported here because
+// this layer is its public home.
+pub use crate::types::SphincsPlusCSigningKey;
 
 /// Sign an arbitrary message at the SPHINCS+C layer.
 pub fn sign(

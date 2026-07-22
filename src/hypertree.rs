@@ -35,7 +35,7 @@ use crate::profiles::{
     WOTS_TARGET_SUM_STATELESS,
 };
 use crate::types::{HypertreeLayerSignature, WotsCSignature, HASH_LEN};
-use crate::sphincs_plus_c::SphincsPlusCSigningKey;
+use crate::types::SphincsPlusCSigningKey;
 use crate::wotsplusc;
 use crate::wotsplusc::WOTS_C_MAX_GRIND_COUNTER;
 

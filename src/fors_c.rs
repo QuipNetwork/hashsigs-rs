@@ -33,7 +33,7 @@ use crate::profiles::{
     FORS_C_MAX_GRIND_COUNTER, FORS_TREE_HEIGHT, HYPERTREE_HEIGHT, NUM_FORS_TREES,
     NUM_HYPERTREE_LAYERS,
 };
-use crate::sphincs_plus_c::SphincsPlusCSigningKey;
+use crate::types::SphincsPlusCSigningKey;
 use crate::types::{ForsEntry, ForsSignature, HASH_LEN};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -618,7 +618,7 @@ mod measurement_tests {
     use super::{signer_fors_digest, SigningForsDigest};
     use crate::hash::hash_packed;
     use crate::profiles::FORS_C_MAX_GRIND_COUNTER;
-    use crate::sphincs_plus_c::SphincsPlusCSigningKey;
+    use crate::types::SphincsPlusCSigningKey;
     use crate::types::HASH_LEN;
 
     fn measurement_key(seed: &[u8], _max: u32) -> SphincsPlusCSigningKey {

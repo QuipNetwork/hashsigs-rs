@@ -22,6 +22,8 @@
 // the parameter set. A truncated profile emits high-aligned, zero-padded node
 // values inside this slot (see HASH_TRUNC_LEN and `mask_hash`).
 use alloc::vec::Vec;
+use core::fmt;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 pub const HASH_LEN: usize = 32;
 pub const HASH_SUITE_KECCAK_256: u32 = 1;
@@ -157,4 +159,32 @@ pub struct ActionContext {
     pub action_type: [u8; HASH_LEN],
     /// Hash of the action payload being authorized.
     pub payload_hash: [u8; HASH_LEN],
+}
+
+/// Secret material required to sign at the SPHINCS+C layer alone.
+///
+/// Lives in `types` (the leaf module) so `fors_c` and `hypertree` can accept
+/// it without importing upward from `sphincs_plus_c`. Treat as private key
+/// material: anyone with these seeds can produce stateless signatures.
+#[derive(Clone, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]
+pub struct SphincsPlusCSigningKey {
+    /// Stateless SK.seed-style material used to derive FORS-C and hypertree WOTS-C secrets.
+    pub stateless_sk_seed: [u8; HASH_LEN],
+    /// Stateless SK.prf-style material used to derive stateless message randomizers.
+    pub stateless_prf_seed: [u8; HASH_LEN],
+    /// Global public seed used in FORS-C, hypertree WOTS-C, and Merkle node hashing.
+    pub pk_seed: [u8; HASH_LEN],
+    /// Top hypertree root committed in the public key.
+    pub hypertree_root: [u8; HASH_LEN],
+}
+
+impl fmt::Debug for SphincsPlusCSigningKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SphincsPlusCSigningKey")
+            .field("stateless_sk_seed", &"<redacted>")
+            .field("stateless_prf_seed", &"<redacted>")
+            .field("pk_seed", &"<redacted>")
+            .field("hypertree_root", &"<redacted>")
+            .finish()
+    }
 }
