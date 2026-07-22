@@ -16,7 +16,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 
-//! Hypertree sign and verify (merged from components + signers).
+//! Stateless hypertree sign and verify.
+//!
+//! Carries a FORS-C root up through `NUM_HYPERTREE_LAYERS` WOTS-C-authenticated
+//! subtrees to the pinned hypertree root, mirroring Solidity's `Hypertree.sol`.
+//! Sits above `wotsplusc` and `treehash` in the DAG and is consumed by
+//! `sphincs_plus_c` to assemble a full stateless signature.
 
 use alloc::vec::Vec;
 
@@ -111,52 +116,6 @@ pub(crate) fn stateless_wots_message_digest(
         message.as_ref(),
     ])
     .to_vec()
-}
-
-pub(crate) struct StatelessWotsChainCtx<'a> {
-    pub(crate) pk_seed: &'a [u8; HASH_LEN],
-    pub(crate) layer: u32,
-    pub(crate) tree: u64,
-    pub(crate) keypair: u32,
-    pub(crate) chain_index: u32,
-}
-
-pub(crate) fn stateless_wots_chain(
-    ctx: &StatelessWotsChainCtx<'_>,
-    value: [u8; HASH_LEN],
-    start: u32,
-    steps: u32,
-) -> [u8; HASH_LEN] {
-    wotsplusc::stateless_wots_chain(
-        &wotsplusc::StatelessWotsChainCtx {
-            pk_seed: ctx.pk_seed,
-            layer: ctx.layer,
-            tree: ctx.tree,
-            keypair: ctx.keypair,
-            chain_index: ctx.chain_index,
-        },
-        value,
-        start,
-        steps,
-    )
-}
-
-pub(crate) fn stateless_wots_chain_from_address_base(
-    pk_seed: &[u8; HASH_LEN],
-    address_base: [u8; HASH_LEN],
-    chain_index: u32,
-    value: [u8; HASH_LEN],
-    start: u32,
-    steps: u32,
-) -> [u8; HASH_LEN] {
-    wotsplusc::stateless_wots_chain_from_address_base(
-        pk_seed,
-        address_base,
-        chain_index,
-        value,
-        start,
-        steps,
-    )
 }
 
 pub(crate) fn stateless_wots_public_key_hash(
@@ -275,7 +234,7 @@ fn wots_chain32_no_mask_base(
     digit: u32,
 ) -> [u8; HASH_LEN] {
     let steps = u32::from(w - 1) - digit;
-    stateless_wots_chain_from_address_base(
+    wotsplusc::stateless_wots_chain_from_address_base(
         &pk_seed,
         address_base,
         chain_index,
@@ -708,17 +667,12 @@ fn stateless_wots_c_chain(
     start: u32,
     steps: u32,
 ) -> [u8; HASH_LEN] {
-    let ctx = StatelessWotsChainCtx {
+    let ctx = wotsplusc::StatelessWotsChainCtx {
         pk_seed,
         layer: coords.layer,
         tree: coords.tree,
         keypair: coords.keypair,
         chain_index: coords.chain,
     };
-    stateless_wots_chain(
-        &ctx,
-        value,
-        start,
-        steps,
-    )
+    wotsplusc::stateless_wots_chain(&ctx, value, start, steps)
 }

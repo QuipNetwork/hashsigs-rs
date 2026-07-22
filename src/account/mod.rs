@@ -15,9 +15,14 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// This module is a line-by-line port of the Solidity account wrapper. Identifiers
-// (methods, fields, locals) intentionally mirror the Solidity camelCase names so the
-// two implementations can be cross-read and audited against each other.
+//! Stateful/stateless SHRINCS account wrapper, mirroring Solidity's account contract.
+//!
+//! Sits above `shrincs` in the DAG: it adds policy (stateful leaf-reuse
+//! handling, recovery/rotation arming) and typed error reporting around the
+//! `ShrincsVerifier` primitives, but owns no cryptography itself. This module
+//! is a line-by-line port of the Solidity account wrapper. Identifiers
+//! (methods, fields, locals) intentionally mirror the Solidity camelCase names
+//! so the two implementations can be cross-read and audited against each other.
 #![allow(non_snake_case)]
 
 use std::collections::HashMap;

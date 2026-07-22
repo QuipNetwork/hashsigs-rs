@@ -22,6 +22,9 @@
 //! sibling of the selected leaf's path at height `h`, it is recorded in the
 //! authentication path. Wire-identical to a full level-by-level materialization.
 
+use alloc::vec;
+use alloc::vec::Vec;
+
 use crate::types::HASH_LEN;
 
 /// Compute the Merkle root and auth path for `selected_leaf` without storing

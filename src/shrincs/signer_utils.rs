@@ -15,23 +15,18 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Signer-specific helpers.
+//! Signer-specific helpers for the SHRINCS hybrid scheme.
 //!
-//! The byte-layout primitives (hashing, packing, address words, base-w digits,
-//! bit-packed digest reads) are shared with the verifier and live in
-//! `components::hash`; they are re-exported here so signer call sites keep the same
-//! import path. The encoded stateful public-key wire helper is owned by
-//! `components::public_key` and re-exported here for compatibility. Only the
-//! helpers that are genuinely signer-specific (seed KDF and public-key
-//! assembly) are defined below.
+//! `hash_packed` is re-exported from the shared `crate::hash` module so signer
+//! call sites keep one import path; keeping a single copy prevents the signer
+//! and verifier from drifting apart. Only the helpers that are genuinely
+//! signer-specific (seed KDF and public-key assembly) are defined below.
 
-// Re-export the byte-identical helpers shared with the verifier. Keeping one copy
-// in `components::hash` prevents the two sides from drifting apart (F-08 / Q2).
+// Re-export the byte-identical helper shared with the verifier. Keeping one copy
+// in `crate::hash` prevents the two sides from drifting apart.
 use alloc::vec::Vec;
 
 pub(crate) use crate::hash::hash_packed;
-#[allow(unused_imports)]
-pub(crate) use crate::hash::word32;
 
 use crate::types::{PublicKey, HASH_LEN};
 use super::public_key::public_key_commitment;

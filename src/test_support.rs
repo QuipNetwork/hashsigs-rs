@@ -18,11 +18,10 @@
 
 //! Consolidated `#[cfg(test)]` helpers shared across modules.
 
-use crate::hash::hash_packed;
 use crate::shrincs::{
     derive32, encode_stateful_public_key, public_key_from_components, ShrincsSigningKey,
 };
-use crate::types::{PublicKey, HASH_LEN};
+use crate::types::PublicKey;
 use crate::uxmss;
 
 const INITIAL_STATEFUL_LEAF_INDEX: u32 = 1;
@@ -60,9 +59,4 @@ pub(crate) fn stateful_only_key(seed: &[u8], max: u32) -> (ShrincsSigningKey, Pu
         hypertree_root,
     );
     (signing_key, public_key)
-}
-
-#[allow(dead_code)]
-pub(crate) fn hash_label(label: &[u8]) -> [u8; HASH_LEN] {
-    hash_packed(&[label])
 }

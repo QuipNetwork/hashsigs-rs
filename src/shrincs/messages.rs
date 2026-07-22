@@ -16,6 +16,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Shared canonical SHRINCS message-hash constructors.
+//!
+//! One EVM-domain keccak constructor per verifier operation (stateful/
+//! stateless action, stateful/full rotation), each binding the operation tag,
+//! active hash-suite ID, and the relevant context/target fields. Used by both
+//! `dispatch` (verification) and `signer` (so the signer signs exactly what
+//! the verifier will recompute).
 
 use crate::hash::keccak_packed;
 use crate::hash_suite::HASH_SUITE_ID;

@@ -16,6 +16,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Public SHRINCS key generation and signing facade.
+//!
+//! `ShrincsSigner` derives seed material into a `ShrincsSigningKey` +
+//! `PublicKey` pair and drives both signing paths: `uxmss` for the stateful
+//! fast path, `sphincs_plus_c` for stateless recovery. Consumed by `account`
+//! and `wasm` as the only place that advances signer-side state
+//! (`next_stateful_leaf_index`).
 
 use crate::hash::word32;
 use crate::hypertree::hypertree_public_root;

@@ -16,6 +16,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Shared SHRINCS public-key layout and commitment helpers.
+//!
+//! Owns the encoded stateful-public-key wire layout (`pk_seed || root ||
+//! max_signatures`) and the keccak commitment binding it, together with the
+//! stateless `pk_seed`/`hypertree_root`, into one `public_key_commitment`.
+//! Used by `dispatch`, `signer_utils`, and `signer` so encoding/decoding and
+//! commitment computation stay in one place.
 
 use alloc::vec::Vec;
 

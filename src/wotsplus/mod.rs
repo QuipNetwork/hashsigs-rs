@@ -1,3 +1,27 @@
+// Copyright (C) 2026 quip.network
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+//! Standalone WOTS+ (RFC 8391-style) primitives.
+//!
+//! Independent of the SHRINCS/SPHINCS+C DAG: this is the original one-time
+//! signature scheme kept as a public primitive for callers (e.g. the `solana`
+//! workspace member) that want plain WOTS+ directly, parameterized by a
+//! caller-supplied hash function rather than the crate's internal hash suite.
+
 /// Hash function type for WOTS+
 use alloc::vec;
 use alloc::vec::Vec;
@@ -118,7 +142,7 @@ impl PublicKey {
         public_seed.copy_from_slice(&bytes[..constants::HASH_LEN]);
         public_key_hash.copy_from_slice(&bytes[constants::HASH_LEN..]);
 
-        Some(PublicKey {
+        Some(Self {
             public_seed,
             public_key_hash,
         })

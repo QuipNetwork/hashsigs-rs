@@ -16,7 +16,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 
-//! UXMSS stateful sign and verify (merged from components + signers).
+//! Stateful UXMSS sign and verify.
+//!
+//! Unbalanced-tree WOTS-C scheme used by the stateful side of SHRINCS,
+//! mirroring Solidity's `UXMSS.sol`. Builds on `wotsplusc`'s shared chain-walk
+//! and grind helpers; `shrincs` drives it directly (no `sphincs_plus_c`
+//! dependency — the stateful and stateless signers are independent).
 
 use alloc::vec::Vec;
 
@@ -87,17 +92,6 @@ pub(crate) fn stateful_empty_tail(
     ])
 }
 
-pub(crate) fn stateful_chain_no_mask(
-    pk_seed: &[u8; HASH_LEN],
-    leaf_index: u32,
-    chain_index: u32,
-    value: [u8; HASH_LEN],
-    start: u32,
-    steps: u32,
-) -> [u8; HASH_LEN] {
-    wotsplusc::stateful_chain_no_mask(pk_seed, leaf_index, chain_index, value, start, steps)
-}
-
 fn compact_stateful_wots_public_key_from_signature(
     pk_seed: [u8; HASH_LEN],
     leaf_index: u32,
@@ -119,7 +113,7 @@ fn compact_stateful_wots_public_key_from_signature(
         let digit = base_w16_digit(&digest, chain_index);
         digit_sum = digit_sum.checked_add(digit)?;
         let chain_value = *signature.chains.get(chain_index)?;
-        let segment = stateful_chain_no_mask(
+        let segment = wotsplusc::stateful_chain_no_mask(
             &pk_seed,
             leaf_index,
             chain_index as u32,
@@ -292,7 +286,7 @@ fn sign_stateful_wots_c(
                         leaf_index,
                         chain_index as u32,
                     ));
-                    stateful_chain_no_mask(
+                    wotsplusc::stateful_chain_no_mask(
                         pk_seed,
                         leaf_index,
                         chain_index as u32,
@@ -347,7 +341,7 @@ fn stateful_wots_pk_hash(
             leaf_index,
             chain_index as u32,
         ));
-        let endpoint = stateful_chain_no_mask(
+        let endpoint = wotsplusc::stateful_chain_no_mask(
             pk_seed,
             leaf_index,
             chain_index as u32,
