@@ -15,7 +15,7 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! BYTE-PIN tests: `hashsigs_rs::shrincs::envelope` against the committed
+//! BYTE-PIN tests: `hashsigs_rs::envelope` against the committed
 //! Solidity-exported vectors (`tests/test_vectors/shrincs_account_wrapper_vectors*`).
 //!
 //! `common::AbiDecoder` (the same independent `abi.decode` oracle
@@ -29,12 +29,14 @@
 mod common;
 
 use common::{hex_to_bytes, load_vectors, AbiDecoder};
-use hashsigs_rs::shrincs::envelope::{
+use hashsigs_rs::envelope::{
     decode_1271_envelope, decode_stateful_action_envelope, decode_stateless_action_envelope,
     encode_stateful_1271_envelope, encode_stateful_envelope, encode_stateless_1271_envelope,
-    encode_stateless_envelope, prepare_stateless_delegation, Erc1271Envelope,
+    encode_stateless_envelope, Erc1271Envelope,
 };
-use hashsigs_rs::shrincs::{VerifyOutcome, ShrincsVerifier, ShrincsGenericVerifier};
+use hashsigs_rs::shrincs::prepare_stateless_delegation;
+use hashsigs_rs::shrincs::{ShrincsVerifier, VerifyOutcome};
+use hashsigs_rs::VerifierInterface as _;
 
 #[test]
 fn stateful_1271_envelope_byte_pins_against_solidity_vector() {
@@ -198,7 +200,7 @@ fn stateful_only_rotation_bundle_feeds_prepare_stateless_delegation() {
     assert_eq!(delegate_key, expected_key);
 
     let decoded_delegate_signature =
-        hashsigs_rs::shrincs::envelope::decode_stateless_signature_envelope(&delegate_signature)
+        hashsigs_rs::envelope::decode_stateless_signature_envelope(&delegate_signature)
             .expect("delegate signature envelope must decode");
     assert_eq!(decoded_delegate_signature, oracle.recovery_signature);
 
@@ -237,7 +239,7 @@ fn stateful_erc7913_adapter_byte_pins_against_solidity_vector() {
         .expect("stateful action message must be exactly 32 bytes");
     let envelope_bytes = encode_stateful_envelope(&oracle.public_key, &oracle.signature);
 
-    let outcome = ShrincsGenericVerifier::new().verify(
+    let outcome = ShrincsVerifier::new().verify_envelope(
         &oracle.current_shrincs_public_key,
         &hash,
         &envelope_bytes,
@@ -249,13 +251,13 @@ fn stateful_erc7913_adapter_byte_pins_against_solidity_vector() {
     let mut short_key = oracle.current_shrincs_public_key.to_vec();
     short_key.pop();
     assert_eq!(
-        ShrincsGenericVerifier::new().verify(&short_key, &hash, &envelope_bytes),
+        ShrincsVerifier::new().verify_envelope(&short_key, &hash, &envelope_bytes),
         VerifyOutcome::Invalid
     );
 
     // A truncated envelope is reported Malformed (Solidity: revert).
     assert_eq!(
-        ShrincsGenericVerifier::new().verify(
+        ShrincsVerifier::new().verify_envelope(
             &oracle.current_shrincs_public_key,
             &hash,
             &envelope_bytes[..envelope_bytes.len() - 1],
@@ -286,7 +288,7 @@ fn stateless_erc7913_adapter_byte_pins_against_solidity_vector() {
         .expect("stateless action message must be exactly 32 bytes");
     let envelope_bytes = encode_stateless_envelope(&oracle.public_key, &oracle.signature);
 
-    let outcome = ShrincsGenericVerifier::new().verify_stateless(
+    let outcome = ShrincsVerifier::new().verify_stateless_envelope(
         &oracle.current_shrincs_public_key,
         &hash,
         &envelope_bytes,
@@ -296,12 +298,12 @@ fn stateless_erc7913_adapter_byte_pins_against_solidity_vector() {
     let mut short_key = oracle.current_shrincs_public_key.to_vec();
     short_key.pop();
     assert_eq!(
-        ShrincsGenericVerifier::new().verify_stateless(&short_key, &hash, &envelope_bytes),
+        ShrincsVerifier::new().verify_stateless_envelope(&short_key, &hash, &envelope_bytes),
         VerifyOutcome::Invalid
     );
 
     assert_eq!(
-        ShrincsGenericVerifier::new().verify_stateless(
+        ShrincsVerifier::new().verify_stateless_envelope(
             &oracle.current_shrincs_public_key,
             &hash,
             &envelope_bytes[..envelope_bytes.len() - 1],
@@ -331,7 +333,7 @@ fn full_rotation_bundle_feeds_prepare_stateless_delegation() {
     assert_eq!(delegate_key, expected_key);
 
     let decoded_delegate_signature =
-        hashsigs_rs::shrincs::envelope::decode_stateless_signature_envelope(&delegate_signature)
+        hashsigs_rs::envelope::decode_stateless_signature_envelope(&delegate_signature)
             .expect("delegate signature envelope must decode");
     assert_eq!(decoded_delegate_signature, oracle.recovery_signature);
 

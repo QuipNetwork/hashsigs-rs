@@ -15,7 +15,6 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-
 //! Shared WOTS-C chain walk and digit-sum grind primitives.
 //!
 //! Mirrors Solidity `WOTSPlusC.sol`: one parameterized chain walk used by both
@@ -25,7 +24,7 @@
 
 use alloc::vec::Vec;
 
-use crate::shrincs::hash::{hash_node, wots_chain_address_word};
+use crate::primitives::hash::{hash_node, wots_chain_address_word};
 use crate::types::HASH_LEN;
 
 /// Maximum grind counter for WOTS-C target-sum searches (stateless + stateful).
@@ -89,7 +88,7 @@ pub(crate) fn stateless_wots_chain(
     start: u32,
     steps: u32,
 ) -> [u8; HASH_LEN] {
-    use crate::shrincs::hash::address_word32;
+    use crate::primitives::hash::address_word32;
     wots_chain_walk(
         b"wots-c-chain",
         ctx.pk_seed,
@@ -109,21 +108,12 @@ pub(crate) fn stateful_chain_no_mask(
     start: u32,
     steps: u32,
 ) -> [u8; HASH_LEN] {
-    use crate::shrincs::hash::address_word32;
+    use crate::primitives::hash::address_word32;
     use crate::types::ADDRESS_TYPE_WOTS_HASH;
     wots_chain_walk(
         b"uxmss-wots-chain",
         pk_seed,
-        |step| {
-            address_word32(
-                0,
-                0,
-                ADDRESS_TYPE_WOTS_HASH,
-                leaf_index,
-                chain_index,
-                step,
-            )
-        },
+        |step| address_word32(0, 0, ADDRESS_TYPE_WOTS_HASH, leaf_index, chain_index, step),
         value,
         start,
         steps,

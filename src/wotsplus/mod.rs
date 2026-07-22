@@ -461,7 +461,7 @@ mod tests {
     // Real one-way hash for tests that depend on preimage resistance (e.g. rejecting
     // a forged message). mock_hash is essentially identity and cannot bind messages.
     fn keccak256(data: &[u8]) -> [u8; 32] {
-        crate::shrincs::hash_backend::keccak256(data)
+        crate::primitives::hash_backend::keccak256(data)
     }
 
     // Mock hash function for testing

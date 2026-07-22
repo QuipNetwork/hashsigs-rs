@@ -42,7 +42,7 @@ impl SphincsPlusCVerifier {
     /// `SPHINCSPlusCVerifier.VERSION_TAG`: names this verifier's key/envelope
     /// format family, not the compiled parameter profile.
     pub fn version_tag() -> [u8; HASH_LEN] {
-        crate::shrincs::hash::keccak_packed(&[b"quip.sphincsplusc-verifier.v1"])
+        crate::primitives::hash::keccak_packed(&[b"quip.sphincsplusc-verifier.v1"])
     }
 
     /// Verify a SPHINCS+C signature over a 32-byte hash.
@@ -84,6 +84,33 @@ impl SphincsPlusCVerifier {
     }
 }
 
+impl crate::verifier::VerifierInterface for SphincsPlusCVerifier {
+    /// `key` is the 64-byte `pkSeed || hypertreeRoot`; `signature` is the
+    /// stateless signature envelope (`abi.encode(SPHINCSPlusC.Signature)`).
+    fn verify_envelope(
+        &self,
+        key: &[u8],
+        hash: &[u8; 32],
+        signature: &[u8],
+    ) -> crate::verifier::VerifyOutcome {
+        use crate::verifier::VerifyOutcome;
+        if key.len() != 64 {
+            return VerifyOutcome::Invalid;
+        }
+        let Some(decoded) = crate::envelope::decode_stateless_signature_envelope(signature)
+        else {
+            return VerifyOutcome::Malformed;
+        };
+        let mut hash32 = [0u8; 32];
+        hash32.copy_from_slice(hash);
+        if self.verify(key, &hash32, &decoded) {
+            VerifyOutcome::Valid
+        } else {
+            VerifyOutcome::Invalid
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -101,3 +128,4 @@ mod tests {
         assert_eq!(SphincsPlusCVerifier::version_tag(), EXPECTED);
     }
 }
+

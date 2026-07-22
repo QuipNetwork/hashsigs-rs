@@ -682,32 +682,6 @@ pub fn decode_public_key_commitment(key: &[u8]) -> Option<[u8; HASH_LEN]> {
     key.try_into().ok()
 }
 
-/// Mirrors `SHRINCS.prepareStatelessDelegation`: decode a stateless envelope,
-/// require it to match the installed commitment and satisfy the fixed
-/// public-key shape, then hand back the pinned-sibling delegate key (the
-/// 64-byte `pkSeed || hypertreeRoot` `SPHINCSPlusCVerifier` key layout) and
-/// delegate signature envelope. Returns `None` on any commitment mismatch,
-/// shape failure, or malformed envelope — this function never panics.
-pub fn prepare_stateless_delegation(
-    expected_public_key_commitment: [u8; HASH_LEN],
-    envelope: &[u8],
-) -> Option<([u8; 64], Vec<u8>)> {
-    let (public_key, signature) = decode_stateless_envelope(envelope)?;
-    if !super::matches_expected_public_key_commitment(&public_key, expected_public_key_commitment)
-    {
-        return None;
-    }
-    if !super::valid_public_key(&public_key) {
-        return None;
-    }
-    // valid_public_key has proven both fields are exactly 32 bytes.
-    let pk_seed: [u8; HASH_LEN] = public_key.pk_seed.try_into().ok()?;
-    let hypertree_root: [u8; HASH_LEN] = public_key.hypertree_root.try_into().ok()?;
-    Some((
-        encode_stateless_key(pk_seed, hypertree_root),
-        encode_stateless_signature_envelope(&signature),
-    ))
-}
 
 #[cfg(test)]
 mod tests {
@@ -946,7 +920,7 @@ mod tests {
         let envelope = encode_stateless_envelope(&public_key, &signature);
 
         let (delegate_key, delegate_signature) =
-            prepare_stateless_delegation(commitment, &envelope)
+            crate::shrincs::prepare_stateless_delegation(commitment, &envelope)
                 .expect("matching commitment must delegate");
         let mut expected_key = [0u8; 64];
         expected_key[..32].copy_from_slice(&public_key.pk_seed);
@@ -957,7 +931,7 @@ mod tests {
         // A wrong expected commitment must fail closed.
         let mut wrong_commitment = commitment;
         wrong_commitment[0] ^= 0x01;
-        assert!(prepare_stateless_delegation(wrong_commitment, &envelope).is_none());
+        assert!(crate::shrincs::prepare_stateless_delegation(wrong_commitment, &envelope).is_none());
     }
 
     // --- (c) malformed-input rejection tests ------------------------------

@@ -373,7 +373,7 @@ fn hex<T: AsRef<[u8]>>(bytes: T) -> String {
 //
 // Only the top-level `StatefulActionVector` / `StatelessActionVector` /
 // `StatefulOnlyRotationVector` / `FullRotationVector` wrapper structs need
-// a dedicated encoder here: `hashsigs_rs::shrincs::envelope` already
+// a dedicated encoder here: `hashsigs_rs::envelope` already
 // covers the `verifyStatefulAction`/`verifyStatelessAction` calldata body
 // and the ERC-1271 mode-prefixed envelopes (`encode_stateful_action_envelope`
 // / `encode_stateless_action_envelope` / `encode_stateful_1271_envelope` /
@@ -387,8 +387,9 @@ fn hex<T: AsRef<[u8]>>(bytes: T) -> String {
 mod account_wrapper_vectors {
     use crate::common::{hex_to_bytes, load_vectors, AbiDecoder};
     use crate::{hash_word, hex, write_gzip_json, ACCOUNT_VECTORS_OUT_PATH};
+    use hashsigs_rs::envelope;
     use hashsigs_rs::shrincs::{
-        envelope, ActionContext, ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey,
+        ActionContext, ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey,
         RotationContext, RotationTarget, ShrincsSigner, ShrincsVerifier, StatefulRotationTarget,
         StatefulSignature, StatelessSignature, WotsCSignature, HASH_LEN,
     };

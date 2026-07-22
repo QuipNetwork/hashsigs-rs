@@ -27,8 +27,8 @@
 
 use std::collections::HashMap;
 
-use crate::shrincs::hash_backend;
-use crate::shrincs::envelope::{self, Erc1271Envelope};
+use crate::primitives::hash_backend;
+use crate::envelope::{self, Erc1271Envelope};
 use crate::shrincs::{
     ActionContext, PublicKey, RotationContext, RotationTarget, ShrincsVerifier,
     StatefulRotationTarget, StatefulSignature, StatelessSignature, HASH_LEN,

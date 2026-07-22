@@ -22,9 +22,7 @@
 //! is arbitrary bytes (or raw 32-byte hash via `to_message` / `verify_hash`).
 //! No SHRINCS public-key-bundle commitment and no action envelope.
 
-use crate::shrincs::fors_c;
-use crate::shrincs::hash::word32;
-use crate::shrincs::hypertree;
+use crate::primitives::hash::word32;
 use crate::types::{StatelessSignature, HASH_LEN};
 
 /// Stateless SPHINCS+C public key: public seed + hypertree root.
@@ -93,7 +91,10 @@ pub(crate) fn verify_raw(
 // this layer is its public home.
 pub use crate::types::SphincsPlusCSigningKey;
 
-/// ERC-7913-shaped verifier facade (generic verifier interface on Solana).
+pub(crate) mod fors_c;
+pub(crate) mod hypertree;
+
+/// Verifier-interface facade (opaque key/signature bytes, tri-state verdict).
 pub mod verifier;
 pub use verifier::SphincsPlusCVerifier;
 
@@ -144,13 +145,16 @@ pub fn keygen(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shrincs::hash::hash_packed;
+    #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
+    use crate::primitives::hash::hash_packed;
 
+    #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
     fn derive32(domain: &[u8], seed: &[u8]) -> [u8; HASH_LEN] {
         hash_packed(&[domain, seed, &[]])
     }
 
     /// Independent keygen at the SPHINCS+C layer (no SHRINCS hybrid fields).
+    #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
     fn independent_keygen(seed: &[u8]) -> (SphincsPlusCSigningKey, SphincsPlusCPublicKey) {
         keygen(
             derive32(b"shrincs-stateless-sk-seed", seed),
@@ -205,8 +209,8 @@ mod tests {
     ))]
     #[test]
     fn stateless_verify_hash_count_matches_model_and_reports_cu_floor() {
-        use crate::shrincs::hash_backend::metrics;
-        use crate::shrincs::profiles::{
+        use crate::primitives::hash_backend::metrics;
+        use crate::primitives::profiles::{
             FORS_TREE_HEIGHT, HYPERTREE_HEIGHT, NUM_FORS_TREES, NUM_HYPERTREE_LAYERS,
             NUM_WOTS_CHAINS, WOTS_CHAIN_LEN, WOTS_TARGET_SUM_STATELESS,
         };
@@ -246,7 +250,7 @@ mod tests {
             "CU estimate profile={}: stateless verify = {calls} hash syscalls, \
              {bytes} bytes hashed, syscall floor ≈ {cu_floor} CU \
              (excludes SBF instruction execution and borsh deserialization)",
-            crate::shrincs::profiles::PROFILE_NAME
+            crate::primitives::profiles::PROFILE_NAME
         );
     }
 }

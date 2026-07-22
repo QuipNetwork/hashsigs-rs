@@ -63,12 +63,15 @@ mod trace_macros;
 
 #[cfg(feature = "std")]
 pub mod account;
-// The SHRINCS implementation home: hash layer, profiles, and the WOTS-C /
-// FORS-C / hypertree / UXMSS primitives live inside `shrincs`. The
-// `sphincs_plus_c` layer stays at the crate root as an independent public
-// scheme; it imports shared primitives from `shrincs::` but does not depend
-// on the SHRINCS dispatch/commitment layers (imports, not module paths,
-// define the dependency graph).
+// Layering: `primitives` and `types` are scheme-neutral; `sphincs_plus_c`
+// is the stateless scheme and is oblivious to `shrincs`; `shrincs` builds
+// its hybrid (stateful UXMSS + stateless recovery) on top of
+// `sphincs_plus_c`. `account` and `wasm` sit above both.
+/// Solidity-ABI codec for the shared wire types (envelopes, keys,
+/// ERC-1271 action envelopes). Scheme-neutral: depends only on `types`.
+pub mod envelope;
+pub mod verifier;
+pub(crate) mod primitives;
 pub mod shrincs;
 pub mod sphincs_plus_c;
 pub(crate) mod types;
@@ -79,6 +82,7 @@ pub mod wotsplus;
 #[cfg(all(test, feature = "std"))]
 pub(crate) mod test_support;
 
+pub use verifier::{VerifierInterface, VerifyOutcome};
 pub use sphincs_plus_c::{
     keygen as sphincs_plus_c_keygen, sign as sphincs_plus_c_sign, to_message as sphincs_plus_c_to_message,
     verify as sphincs_plus_c_verify, verify_hash as sphincs_plus_c_verify_hash, SphincsPlusCPublicKey,

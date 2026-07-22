@@ -170,12 +170,7 @@ pub(crate) fn naive_tree_root_and_auth_path(
         auth_path.push(sibling);
         let mut parents = Vec::with_capacity(level.len() / 2);
         for (parent_index, pair) in level.chunks_exact(2).enumerate() {
-            parents.push(parent(
-                node_height,
-                parent_index as u64,
-                pair[0],
-                pair[1],
-            ));
+            parents.push(parent(node_height, parent_index as u64, pair[0], pair[1]));
         }
         level = parents;
         index >>= 1;
@@ -188,7 +183,7 @@ pub(crate) fn naive_tree_root_and_auth_path(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shrincs::hash::hash_node;
+    use crate::primitives::hash::hash_node;
     use proptest::prelude::*;
 
     fn test_parent(
@@ -253,18 +248,9 @@ mod tests {
 
     #[test]
     fn height_one_auth_is_sibling() {
-        let (root, auth) = treehash_root_and_auth_path(
-            1,
-            0,
-            |i| test_leaf(1, i),
-            test_parent,
-        );
-        let (naive_root, naive_auth) = naive_tree_root_and_auth_path(
-            1,
-            0,
-            |i| test_leaf(1, i),
-            test_parent,
-        );
+        let (root, auth) = treehash_root_and_auth_path(1, 0, |i| test_leaf(1, i), test_parent);
+        let (naive_root, naive_auth) =
+            naive_tree_root_and_auth_path(1, 0, |i| test_leaf(1, i), test_parent);
         assert_eq!(root, naive_root);
         assert_eq!(auth, naive_auth);
         assert_eq!(auth.len(), 1);

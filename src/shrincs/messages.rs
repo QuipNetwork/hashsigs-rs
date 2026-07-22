@@ -23,8 +23,8 @@
 //! `dispatch` (verification) and `signer` (so the signer signs exactly what
 //! the verifier will recompute).
 
-use crate::shrincs::hash::keccak_packed;
-use crate::shrincs::hash_suite::HASH_SUITE_ID;
+use crate::primitives::hash::keccak_packed;
+use crate::primitives::hash_suite::HASH_SUITE_ID;
 use crate::types::{
     ActionContext, PublicKey, RotationContext, RotationTarget, StatefulRotationTarget, HASH_LEN,
 };

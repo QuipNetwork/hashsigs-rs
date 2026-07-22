@@ -15,14 +15,13 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-
-//! SHA-256 scheme-hash suite (HASH_SUITE_ID = 2).
+//! Keccak-256 scheme-hash suite (HASH_SUITE_ID = 1).
 
 use crate::types::HASH_LEN;
-use crate::types::HASH_SUITE_SHA2_256;
+use crate::types::HASH_SUITE_KECCAK_256;
 
-pub const HASH_SUITE_ID: u32 = HASH_SUITE_SHA2_256;
+pub const HASH_SUITE_ID: u32 = HASH_SUITE_KECCAK_256;
 
 pub fn scheme_hash_parts(parts: &[&[u8]]) -> [u8; HASH_LEN] {
-    crate::shrincs::hash_backend::sha256v(parts)
+    crate::primitives::hash_backend::keccak256v(parts)
 }

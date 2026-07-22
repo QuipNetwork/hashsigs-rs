@@ -25,17 +25,17 @@
 //! The suite is selected by the `shrincs_hash_suite_sha2` cfg that build.rs
 //! derives from the active profile, not by a Cargo feature directly.
 
-#[cfg(shrincs_hash_suite_sha2)]
-mod sha2;
 #[cfg(not(shrincs_hash_suite_sha2))]
 mod keccak;
-
 #[cfg(shrincs_hash_suite_sha2)]
-pub use sha2::HASH_SUITE_ID;
+mod sha2;
+
 #[cfg(not(shrincs_hash_suite_sha2))]
 pub use keccak::HASH_SUITE_ID;
-
 #[cfg(shrincs_hash_suite_sha2)]
-pub(crate) use sha2::scheme_hash_parts;
+pub use sha2::HASH_SUITE_ID;
+
 #[cfg(not(shrincs_hash_suite_sha2))]
 pub(crate) use keccak::scheme_hash_parts;
+#[cfg(shrincs_hash_suite_sha2)]
+pub(crate) use sha2::scheme_hash_parts;

@@ -20,7 +20,7 @@
 //! (`tests/test_vectors/shrincs_account_wrapper_vectors*.json{,.gz}`).
 //!
 //! `AbiDecoder` is an independent, from-scratch `abi.decode` reader used as
-//! the differential oracle against `hashsigs_rs::shrincs::envelope`'s
+//! the differential oracle against `hashsigs_rs::envelope`'s
 //! production codec in `envelope_vectors.rs`, and against the crypto-level
 //! verify/rotate paths in `solidity_account_vectors.rs`. Not `#[path]`-shared
 //! at the binary level: `mod common;` recompiles this file per integration

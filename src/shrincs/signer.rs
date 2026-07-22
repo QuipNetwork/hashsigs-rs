@@ -23,8 +23,8 @@
 //! and `wasm` as the only place that advances signer-side state
 //! (`next_stateful_leaf_index`).
 
-use crate::shrincs::hash::word32;
-use crate::shrincs::hypertree::hypertree_public_root;
+use crate::primitives::hash::word32;
+use crate::sphincs_plus_c::hypertree::hypertree_public_root;
 use crate::sphincs_plus_c::{self, SphincsPlusCSigningKey};
 use crate::types::{ActionContext, PublicKey, StatefulSignature, StatelessSignature};
 use crate::shrincs::uxmss::{self, StatefulSecret};
@@ -248,7 +248,7 @@ mod tests {
         fixture_entry_opt, fixture_pair, fixture_path, load_fixture_file,
         stateful_signer_fixture_path, TestKeyMode,
     };
-    use crate::shrincs::hash::hash_packed;
+    use crate::primitives::hash::hash_packed;
     use super::*;
     #[cfg(not(target_arch = "wasm32"))]
     use proptest::prelude::*;
@@ -288,7 +288,7 @@ mod tests {
                     let fixture_file = load_fixture_file(&path);
                     assert_eq!(
                         fixture_file.profile_name,
-                        crate::shrincs::profiles::PROFILE_NAME,
+                        crate::primitives::profiles::PROFILE_NAME,
                         "fixture profile mismatch",
                     );
                     if let Some(entry) = fixture_entry_opt(&fixture_file, seed_label) {
@@ -315,7 +315,7 @@ mod tests {
                     let fixture_file = load_fixture_file(&path);
                     assert_eq!(
                         fixture_file.profile_name,
-                        crate::shrincs::profiles::PROFILE_NAME,
+                        crate::primitives::profiles::PROFILE_NAME,
                         "fixture profile mismatch",
                     );
                     if let Some(entry) = fixture_entry_opt(&fixture_file, seed_label) {
@@ -333,7 +333,7 @@ mod tests {
     #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
     #[test]
     fn signer_constants_match_verifier_constants() {
-        use crate::shrincs::profiles::{
+        use crate::primitives::profiles::{
             HYPERTREE_HEIGHT, NUM_HYPERTREE_LAYERS, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN,
         };
         assert_eq!(HASH_LEN, 32);
@@ -354,7 +354,7 @@ mod tests {
     #[cfg(any(feature = "profile-128s-q18", feature = "profile-128s-q20"))]
     #[test]
     fn stateful_round_trip_verifies_under_128s_truncation() {
-        use crate::shrincs::profiles::HASH_TRUNC_LEN;
+        use crate::primitives::profiles::HASH_TRUNC_LEN;
         let seed = b"128s stateful truncation seed";
         let max = 4u32;
         let stateful_sk_seed = derive32(b"shrincs-stateful-sk-seed", seed, &[]);
@@ -845,7 +845,7 @@ mod tests {
     )]
     #[test]
     fn stateless_empty_message_round_trip_and_fors_boundary() {
-        use crate::shrincs::profiles::NUM_FORS_TREES;
+        use crate::primitives::profiles::NUM_FORS_TREES;
         let (signing_key, public_key) =
             fixture_or_fresh_full_key("stateless empty message seed", 2);
         let expected = expected_key(&public_key);
@@ -873,7 +873,7 @@ mod tests {
         fn stateful_sign_verify_round_trip_and_single_byte_tamper_rejects(
             message in proptest::collection::vec(any::<u8>(), 0..48usize),
             leaf in 1u32..=4,
-            tamper_chain in 0usize..crate::shrincs::profiles::WOTS_CHAINS_STATEFUL,
+            tamper_chain in 0usize..crate::primitives::profiles::WOTS_CHAINS_STATEFUL,
             tamper_byte in 0usize..HASH_LEN,
         ) {
             let (signing_key, public_key) = stateful_only_key(b"proptest stateful seed", 4);

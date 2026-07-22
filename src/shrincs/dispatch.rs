@@ -22,7 +22,8 @@
 //! `sphincs_plus_c` (stateless) and `uxmss` (stateful), and computes rotation
 //! commitments. `mod.rs` re-exports the pieces `account`/`wasm` need.
 
-use crate::shrincs::hash::word32;
+use alloc::vec::Vec;
+use crate::primitives::hash::word32;
 use crate::sphincs_plus_c;
 use crate::types::{
     ActionContext, PublicKey, RotationContext, RotationTarget, StatefulRotationTarget,
@@ -268,4 +269,31 @@ pub(crate) fn verify_stateless_unsafe_raw(
         return false;
     }
     verify_stateless_crypto(public_key, message, signature)
+}
+
+/// Mirrors `SHRINCS.prepareStatelessDelegation`: decode a stateless envelope,
+/// require it to match the installed commitment and satisfy the fixed
+/// public-key shape, then hand back the pinned-sibling delegate key (the
+/// 64-byte `pkSeed || hypertreeRoot` `SPHINCSPlusCVerifier` key layout) and
+/// delegate signature envelope. Returns `None` on any commitment mismatch,
+/// shape failure, or malformed envelope — this function never panics.
+pub fn prepare_stateless_delegation(
+    expected_public_key_commitment: [u8; HASH_LEN],
+    envelope: &[u8],
+) -> Option<([u8; 64], Vec<u8>)> {
+    let (public_key, signature) = crate::envelope::decode_stateless_envelope(envelope)?;
+    if !matches_expected_public_key_commitment(&public_key, expected_public_key_commitment)
+    {
+        return None;
+    }
+    if !valid_public_key(&public_key) {
+        return None;
+    }
+    // valid_public_key has proven both fields are exactly 32 bytes.
+    let pk_seed: [u8; HASH_LEN] = public_key.pk_seed.try_into().ok()?;
+    let hypertree_root: [u8; HASH_LEN] = public_key.hypertree_root.try_into().ok()?;
+    Some((
+        crate::envelope::encode_stateless_key(pk_seed, hypertree_root),
+        crate::envelope::encode_stateless_signature_envelope(&signature),
+    ))
 }
