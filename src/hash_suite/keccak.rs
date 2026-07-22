@@ -15,11 +15,14 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Signer-side module ownership for SHRINCS.
 
-pub(crate) mod fors_c;
-pub(crate) mod hypertree;
-pub(crate) mod shrincs_signer;
-pub(crate) mod types;
-pub(crate) mod uxmss;
-pub(crate) mod utils;
+//! Keccak-256 scheme-hash suite (HASH_SUITE_ID = 1).
+
+use crate::types::HASH_LEN;
+use crate::types::HASH_SUITE_KECCAK_256;
+
+pub const HASH_SUITE_ID: u32 = HASH_SUITE_KECCAK_256;
+
+pub fn scheme_hash(data: &[u8]) -> [u8; HASH_LEN] {
+    solana_program::keccak::hash(data).to_bytes()
+}

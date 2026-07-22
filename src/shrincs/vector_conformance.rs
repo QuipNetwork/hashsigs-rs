@@ -42,8 +42,9 @@ use serde_json::Value;
 use crate::shrincs::test_fixtures::{
     fixture_entry_opt, fixture_pair, fixture_path, load_fixture_file, TestKeyMode,
 };
-use super::verifier::{
-    ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey, ShrincsVerifier,
+use super::ShrincsVerifier;
+use crate::types::{
+    ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey,
     StatefulSignature, StatelessSignature, WotsCSignature, HASH_LEN,
 };
 use super::ShrincsSigner;
@@ -95,7 +96,7 @@ fn load_vectors() -> Value {
 fn fixture_or_fresh_full_key(
     seed_label: &'static str,
     max_stateful_signatures: u32,
-) -> (super::signers::types::ShrincsSigningKey, PublicKey) {
+) -> (super::ShrincsSigningKey, PublicKey) {
     match TestKeyMode::from_env() {
         TestKeyMode::Fresh => ShrincsSigner::keygen(seed_label.as_bytes(), max_stateful_signatures)
             .unwrap_or_else(|| panic!("fresh keygen failed for seed label {seed_label:?}")),
@@ -220,12 +221,28 @@ fn verify_stateless_case(case: &Value) -> bool {
     let expected_commitment = hex_to_hash(&case["publicKey"]["publicKeyCommitment"]);
     let message = hex_to_vec(&case["message"]);
     let signature = parse_stateless_signature(&case["signature"]);
-    ShrincsVerifier::new().verify_stateless_unsafe_raw(
+    let hybrid_ok = ShrincsVerifier::new().verify_stateless_unsafe_raw(
         expected_commitment,
         &public_key,
         &message,
         &signature,
-    )
+    );
+    // Independent SPHINCS+C path (no commitment): must agree whenever the
+    // hybrid path accepts. When hybrid rejects for commitment/shape reasons,
+    // the independent path may still accept pure crypto — only assert when
+    // hybrid accepts.
+    if hybrid_ok {
+        let pk = crate::sphincs_plus_c::SphincsPlusCPublicKey::from_slices(
+            &public_key.pk_seed,
+            &public_key.hypertree_root,
+        )
+        .expect("vector pk_seed/root are 32 bytes");
+        assert!(
+            crate::sphincs_plus_c::verify(&pk, &message, &signature),
+            "stateless vector must verify through independent sphincs_plus_c::verify"
+        );
+    }
+    hybrid_ok
 }
 
 #[test]

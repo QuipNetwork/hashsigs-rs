@@ -733,10 +733,7 @@ mod tests {
     use super::*;
     use std::sync::OnceLock;
 
-    use crate::shrincs::components::public_key::encode_stateful_public_key;
-    use crate::shrincs::signers::types::ShrincsSigningKey;
-    use crate::shrincs::signers::utils::{derive32, public_key_from_components};
-    use crate::shrincs::signers::uxmss::stateful_subtree_root;
+    use crate::shrincs::ShrincsSigningKey;
     use crate::shrincs::test_fixtures::{
         account_cases_fixture_path, fixture_entry_opt, fixture_pair, fixture_path,
         load_account_cases_fixture_file, load_fixture_file, write_account_cases_fixture_file,
@@ -826,37 +823,8 @@ mod tests {
         public_key.public_key_commitment.clone().try_into().unwrap()
     }
 
-    fn stateful_only_key(seed: &[u8], max: u32) -> (ShrincsSigningKey, SignerPublicKey) {
-        let stateful_sk_seed = derive32(b"shrincs-stateful-sk-seed", seed, &[]);
-        let stateful_prf_seed = derive32(b"shrincs-stateful-prf-seed", seed, &[]);
-        let stateful_pk_seed = derive32(b"shrincs-stateful-pk-seed", seed, &[]);
-        let stateful_root = stateful_subtree_root(
-            &stateful_sk_seed,
-            &stateful_pk_seed,
-            INITIAL_STATEFUL_LEAF_INDEX,
-            max,
-        );
-        let pk_seed = derive32(b"shrincs-pk-seed", seed, &[]);
-        let hypertree_root = derive32(b"placeholder-hypertree-root", seed, &[]);
-        let signing_key = ShrincsSigningKey {
-            stateful_sk_seed,
-            stateful_prf_seed,
-            stateful_pk_seed,
-            stateful_root,
-            max_stateful_signatures: max,
-            next_stateful_leaf_index: INITIAL_STATEFUL_LEAF_INDEX,
-            stateless_sk_seed: derive32(b"shrincs-stateless-sk-seed", seed, &[]),
-            stateless_prf_seed: derive32(b"shrincs-stateless-prf-seed", seed, &[]),
-            pk_seed,
-            hypertree_root,
-        };
-        let public_key = public_key_from_components(
-            encode_stateful_public_key(stateful_pk_seed, stateful_root, max),
-            pk_seed,
-            hypertree_root,
-        );
-        (signing_key, public_key)
-    }
+    use crate::test_support::stateful_only_key;
+
 
     fn fixture_or_fresh_key(seed_label: &'static str, max: u32) -> (ShrincsSigningKey, SignerPublicKey) {
         match TestKeyMode::from_env() {

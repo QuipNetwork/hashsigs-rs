@@ -15,13 +15,15 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+
 //! Core hash-based signature library.
 //!
 //! This crate exports:
 //!
 //! - WOTS+ primitives
-//! - SHRINCS signer / verifier primitives
-//! - shared SHRINCS types used by higher-level wrappers
+//! - independent SPHINCS+C layer
+//! - SHRINCS hybrid signer / verifier
+//! - shared types used by higher-level wrappers
 
 // Panic-prevention lints (review bead qg4): library code must not panic on
 // untrusted input. Scoped to non-test builds so `#[cfg(test)]` modules may use
@@ -42,8 +44,26 @@
 )]
 
 pub mod account;
+pub(crate) mod fors_c;
+pub(crate) mod hash;
+pub(crate) mod hash_suite;
+pub(crate) mod hypertree;
+pub(crate) mod profiles;
 pub mod shrincs;
+pub mod sphincs_plus_c;
+pub mod sphincs_plus_c_verifier;
+pub(crate) mod types;
+pub(crate) mod uxmss;
 pub mod wasm;
 pub mod wotsplus;
+pub(crate) mod wotsplusc;
 
+#[cfg(test)]
+pub(crate) mod test_support;
+
+pub use sphincs_plus_c::{
+    sign as sphincs_plus_c_sign, to_message as sphincs_plus_c_to_message, verify as sphincs_plus_c_verify,
+    verify_hash as sphincs_plus_c_verify_hash, SphincsPlusCPublicKey, SphincsPlusCSigningKey,
+};
+pub use sphincs_plus_c_verifier::SphincsPlusCVerifier;
 pub use wotsplus::{constants, HashFn, PublicKey, WOTSPlus};

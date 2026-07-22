@@ -27,14 +27,12 @@
 
 // Re-export the byte-identical helpers shared with the verifier. Keeping one copy
 // in `components::hash` prevents the two sides from drifting apart (F-08 / Q2).
-pub(crate) use super::super::components::hash::{
-    base_w16_digit, base_w_digit, hash_node, hash_packed, word32, wots_digest_bytes,
-};
+pub(crate) use crate::hash::hash_packed;
+#[allow(unused_imports)]
+pub(crate) use crate::hash::word32;
 
-use super::super::components::public_key::public_key_commitment;
-use super::super::types::{PublicKey, HASH_LEN};
-
-pub(crate) const WOTS_C_MAX_GRIND_COUNTER: u32 = 1 << 24;
+use crate::types::{PublicKey, HASH_LEN};
+use super::public_key::public_key_commitment;
 
 pub(crate) fn public_key_from_components(
     stateful_public_key: Vec<u8>,

@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use super::signers::types::ShrincsSigningKey;
+use super::ShrincsSigningKey;
 use super::{
     ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey, RotationTarget,
     StatefulRotationTarget, StatelessSignature, WotsCSignature, HASH_LEN,
@@ -487,11 +487,6 @@ pub(crate) fn fixture_pair(entry: &KeyFixtureEntry) -> (ShrincsSigningKey, Publi
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::account::INITIAL_STATEFUL_LEAF_INDEX;
-    use crate::shrincs::components::public_key::encode_stateful_public_key;
-    use crate::shrincs::signers::types::ShrincsSigningKey;
-    use crate::shrincs::signers::utils::{derive32, public_key_from_components};
-    use crate::shrincs::signers::uxmss::stateful_subtree_root;
     use crate::shrincs::{PROFILE_NAME, ShrincsSigner};
 
     #[cfg(any(shrincs_profile_128s_q18, shrincs_profile_128s_q20))]
@@ -549,37 +544,8 @@ mod tests {
         ]
     }
 
-    fn stateful_only_key(seed: &[u8], max: u32) -> (ShrincsSigningKey, PublicKey) {
-        let stateful_sk_seed = derive32(b"shrincs-stateful-sk-seed", seed, &[]);
-        let stateful_prf_seed = derive32(b"shrincs-stateful-prf-seed", seed, &[]);
-        let stateful_pk_seed = derive32(b"shrincs-stateful-pk-seed", seed, &[]);
-        let stateful_root = stateful_subtree_root(
-            &stateful_sk_seed,
-            &stateful_pk_seed,
-            INITIAL_STATEFUL_LEAF_INDEX,
-            max,
-        );
-        let pk_seed = derive32(b"shrincs-pk-seed", seed, &[]);
-        let hypertree_root = derive32(b"placeholder-hypertree-root", seed, &[]);
-        let signing_key = ShrincsSigningKey {
-            stateful_sk_seed,
-            stateful_prf_seed,
-            stateful_pk_seed,
-            stateful_root,
-            max_stateful_signatures: max,
-            next_stateful_leaf_index: INITIAL_STATEFUL_LEAF_INDEX,
-            stateless_sk_seed: derive32(b"shrincs-stateless-sk-seed", seed, &[]),
-            stateless_prf_seed: derive32(b"shrincs-stateless-prf-seed", seed, &[]),
-            pk_seed,
-            hypertree_root,
-        };
-        let public_key = public_key_from_components(
-            encode_stateful_public_key(stateful_pk_seed, stateful_root, max),
-            pk_seed,
-            hypertree_root,
-        );
-        (signing_key, public_key)
-    }
+    use crate::test_support::stateful_only_key;
+
 
     fn stateful_signer_fixture_specs() -> Vec<(&'static str, u32)> {
         vec![
