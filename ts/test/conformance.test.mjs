@@ -7,6 +7,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { loadShrincsWasm as loadNode } from "../dist/index.js";
 import { loadShrincsWasm as loadWeb } from "../dist/loader.browser.js";
+import * as entryNode from "../dist/index.js";
+import * as entryWeb from "../dist/loader.browser.js";
 
 const SEED = "0x" + "ab".repeat(32);
 const MSG = "0x" + "11".repeat(32);
@@ -17,6 +19,15 @@ const loaders = [
   ["node", loadNode],
   ["web", loadWeb],
 ];
+
+test("entry: runtime surface is exactly { loadShrincsWasm } in BOTH entries", () => {
+  // WasmShrincsKeypair / WasmShrincsAccount are exported TYPE-ONLY from
+  // src/index.ts, and that is load-bearing: the `browser` exports condition
+  // maps the package entry to loader.browser.js, so a VALUE export added to
+  // index.js would exist in Node and silently be missing in browser bundles.
+  assert.deepEqual(Object.keys(entryNode).sort(), ["loadShrincsWasm"]);
+  assert.deepEqual(Object.keys(entryWeb).sort(), ["loadShrincsWasm"]);
+});
 
 for (const [name, load] of loaders) {
   test(`${name}: loader resolves and exposes the shrincs surface`, async () => {

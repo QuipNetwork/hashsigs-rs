@@ -314,6 +314,8 @@ Rust suite as the crypto / DTO gate.
 verifier functions, signer/keypair APIs, and account-wrapper APIs. Byte fields
 are `0x`-prefixed hex strings; structured values are plain camelCase objects.
 `u64` fields cross the boundary as JavaScript `bigint`.
+All DTO shapes and the `WasmShrincsKeypair` / `WasmShrincsAccount` handle
+types are importable (type-only) from the package entry.
 
 ### Verifier exports
 
