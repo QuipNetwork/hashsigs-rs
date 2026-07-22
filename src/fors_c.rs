@@ -66,7 +66,7 @@ pub(crate) fn verify_fors_c_and_return_root(
     signature: &ForsSignature,
 ) -> Option<([u8; HASH_LEN], u64, u32)> {
     let signed_trees = NUM_FORS_TREES as usize - 1;
-    if signature.randomizer.len() != HASH_LEN || signature.entries.len() != signed_trees {
+    if signature.entries.len() != signed_trees {
         return None;
     }
 
@@ -90,7 +90,7 @@ pub(crate) fn verify_fors_c_and_return_root(
     let mut roots = [[0u8; HASH_LEN]; SIGNED_TREES];
     for (fors_tree_index, root_slot) in roots.iter_mut().enumerate() {
         let entry = signature.entries.get(fors_tree_index)?;
-        if entry.secret_leaf.len() != HASH_LEN || entry.auth_path.len() != fors_tree_height {
+        if entry.auth_path.len() != fors_tree_height {
             return None;
         }
         let entry_leaf_index = read_bits32(
@@ -221,7 +221,7 @@ pub(crate) fn fors_tree_root_and_auth_path(
     leaf_index: u32,
     fors_tree: u32,
     leaf: u32,
-) -> ([u8; HASH_LEN], [u8; HASH_LEN], Vec<Vec<u8>>) {
+) -> ([u8; HASH_LEN], [u8; HASH_LEN], Vec<[u8; HASH_LEN]>) {
     let height = u32::from(FORS_TREE_HEIGHT);
     // Compute the selected leaf secret once and reuse it for both the revealed
     // signature field and the leaf-hash step (avoids a second SK derivation).
@@ -531,7 +531,7 @@ pub(crate) fn sign_fors_c(
             );
             *root_slot = root;
             entries.push(ForsEntry {
-                secret_leaf: secret_leaf.to_vec(),
+                secret_leaf,
                 auth_path,
             });
         }
@@ -542,7 +542,7 @@ pub(crate) fn sign_fors_c(
         return Some(SignedForsC {
             root: fors_public_key_hash(&signing_key.pk_seed, &roots),
             signature: ForsSignature {
-                randomizer: randomizer.to_vec(),
+                randomizer,
                 counter,
                 entries,
             },

@@ -74,15 +74,15 @@ pub struct StatefulSignature {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ForsEntry {
     /// Revealed FORS secret leaf for one signed FORS tree.
-    pub secret_leaf: Vec<u8>,
+    pub secret_leaf: [u8; HASH_LEN],
     /// Authentication path from that FORS leaf to that FORS tree root.
-    pub auth_path: Vec<Vec<u8>>,
+    pub auth_path: Vec<[u8; HASH_LEN]>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ForsSignature {
     /// Randomizer mixed into FORS digest derivation.
-    pub randomizer: Vec<u8>,
+    pub randomizer: [u8; HASH_LEN],
     /// Counter mixed into FORS digest derivation.
     pub counter: u32,
     /// FORS-C reveals `num_fors_trees - 1` entries; the omitted final tree must select leaf 0.
@@ -92,21 +92,21 @@ pub struct ForsSignature {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WotsCSignature {
     /// Randomizer mixed into WOTS-C digest derivation.
-    pub randomizer: Vec<u8>,
+    pub randomizer: [u8; HASH_LEN],
     /// Counter mixed into WOTS-C digest derivation.
     pub counter: u32,
     /// One chain value per WOTS-C digit.
-    pub chains: Vec<Vec<u8>>,
+    pub chains: Vec<[u8; HASH_LEN]>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HypertreeLayerSignature {
     /// Expected WOTS-C public-key hash for this layer.
-    pub wots_c_pk_hash: Vec<u8>,
+    pub wots_c_pk_hash: [u8; HASH_LEN],
     /// WOTS-C signature proving `current_root -> wots_c_pk_hash`.
     pub wots_c_signature: WotsCSignature,
     /// Merkle path from `wots_c_pk_hash` to the next layer root.
-    pub auth_path: Vec<Vec<u8>>,
+    pub auth_path: Vec<[u8; HASH_LEN]>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -1319,11 +1319,11 @@ fn parse_stateful_signature(input: &StatefulSignature) -> Result<CoreStatefulSig
 fn parse_fors_entry(entry: &ForsEntry) -> Result<CoreForsEntry, WasmErr> {
     expect_vec_len("FORS auth path", entry.auth_path.len(), FORS_TREE_HEIGHT as usize)?;
     Ok(CoreForsEntry {
-        secret_leaf: parse_word32(&entry.secret_leaf)?.to_vec(),
+        secret_leaf: parse_word32(&entry.secret_leaf)?,
         auth_path: entry
             .auth_path
             .iter()
-            .map(|node| parse_word32(node).map(|word| word.to_vec()))
+            .map(|node| parse_word32(node))
             .collect::<Result<Vec<_>, _>>()?,
     })
 }
@@ -1343,21 +1343,21 @@ fn parse_hypertree_layer(
     )?;
     expect_vec_len("hypertree auth path", layer.auth_path.len(), subtree_height)?;
     Ok(CoreHypertreeLayerSignature {
-        wots_c_pk_hash: parse_word32(&layer.wots_c_pk_hash)?.to_vec(),
+        wots_c_pk_hash: parse_word32(&layer.wots_c_pk_hash)?,
         wots_c_signature: CoreWotsCSignature {
-            randomizer: parse_word32(&layer.wots_c_signature.randomizer)?.to_vec(),
+            randomizer: parse_word32(&layer.wots_c_signature.randomizer)?,
             counter: layer.wots_c_signature.counter,
             chains: layer
                 .wots_c_signature
                 .chains
                 .iter()
-                .map(|chain| parse_word32(chain).map(|word| word.to_vec()))
+                .map(|chain| parse_word32(chain))
                 .collect::<Result<Vec<_>, _>>()?,
         },
         auth_path: layer
             .auth_path
             .iter()
-            .map(|node| parse_word32(node).map(|word| word.to_vec()))
+            .map(|node| parse_word32(node))
             .collect::<Result<Vec<_>, _>>()?,
     })
 }
@@ -1372,7 +1372,7 @@ fn parse_stateless_signature(
     expect_vec_len("hypertree layers", input.hypertree.len(), NUM_HYPERTREE_LAYERS as usize)?;
     Ok(CoreStatelessSignature {
         fors: CoreForsSignature {
-            randomizer: parse_word32(&input.fors.randomizer)?.to_vec(),
+            randomizer: parse_word32(&input.fors.randomizer)?,
             counter: input.fors.counter,
             entries: input
                 .fors

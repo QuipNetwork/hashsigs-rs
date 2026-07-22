@@ -47,14 +47,14 @@ pub(crate) fn treehash_root_and_auth_path<F>(
     selected_leaf: u32,
     leaf_hash: F,
     mut parent: impl FnMut(u32, u64, [u8; HASH_LEN], [u8; HASH_LEN]) -> [u8; HASH_LEN],
-) -> ([u8; HASH_LEN], Vec<Vec<u8>>)
+) -> ([u8; HASH_LEN], Vec<[u8; HASH_LEN]>)
 where
     F: Fn(u32) -> [u8; HASH_LEN] + Sync,
 {
     debug_assert!(height < u32::BITS);
     let leaf_count = 1u32 << height;
     let mut stack: Vec<([u8; HASH_LEN], u32)> = Vec::with_capacity(height as usize + 1);
-    let mut auth_path = vec![Vec::new(); height as usize];
+    let mut auth_path = vec![[0u8; HASH_LEN]; height as usize];
 
     #[cfg(feature = "parallel")]
     {
@@ -110,7 +110,7 @@ fn fold_leaf(
     mut node: [u8; HASH_LEN],
     selected_leaf: u32,
     stack: &mut Vec<([u8; HASH_LEN], u32)>,
-    auth_path: &mut [Vec<u8>],
+    auth_path: &mut [[u8; HASH_LEN]],
     parent: &mut impl FnMut(u32, u64, [u8; HASH_LEN], [u8; HASH_LEN]) -> [u8; HASH_LEN],
 ) {
     let mut node_h = 0u32;
@@ -131,7 +131,7 @@ fn fold_leaf(
 
 #[inline]
 fn record_auth_sibling(
-    auth_path: &mut [Vec<u8>],
+    auth_path: &mut [[u8; HASH_LEN]],
     selected_leaf: u32,
     rightmost_leaf: u32,
     node_h: u32,
@@ -144,7 +144,7 @@ fn record_auth_sibling(
     let node_index = rightmost_leaf >> node_h;
     if path_sibling == node_index {
         if let Some(slot) = auth_path.get_mut(node_h as usize) {
-            *slot = node.to_vec();
+            *slot = *node;
         }
     }
 }
@@ -156,7 +156,7 @@ pub(crate) fn naive_tree_root_and_auth_path(
     selected_leaf: u32,
     mut leaf_hash: impl FnMut(u32) -> [u8; HASH_LEN],
     mut parent: impl FnMut(u32, u64, [u8; HASH_LEN], [u8; HASH_LEN]) -> [u8; HASH_LEN],
-) -> ([u8; HASH_LEN], Vec<Vec<u8>>) {
+) -> ([u8; HASH_LEN], Vec<[u8; HASH_LEN]>) {
     let leaf_count = 1usize << height;
     let mut level = Vec::with_capacity(leaf_count);
     for i in 0..leaf_count as u32 {
@@ -167,7 +167,7 @@ pub(crate) fn naive_tree_root_and_auth_path(
 
     for node_height in 1..=height {
         let sibling = level.get(index ^ 1).copied().unwrap_or([0u8; HASH_LEN]);
-        auth_path.push(sibling.to_vec());
+        auth_path.push(sibling);
         let mut parents = Vec::with_capacity(level.len() / 2);
         for (parent_index, pair) in level.chunks_exact(2).enumerate() {
             parents.push(parent(
@@ -268,6 +268,6 @@ mod tests {
         assert_eq!(root, naive_root);
         assert_eq!(auth, naive_auth);
         assert_eq!(auth.len(), 1);
-        assert_eq!(auth[0], test_leaf(1, 1).to_vec());
+        assert_eq!(auth[0], test_leaf(1, 1));
     }
 }

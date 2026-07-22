@@ -783,14 +783,14 @@ mod tests {
     fn to_stateless_signature(input: &SignerStatelessSignature) -> StatelessSignature {
         StatelessSignature {
             fors: ForsSignature {
-                randomizer: input.fors.randomizer.clone(),
+                randomizer: input.fors.randomizer,
                 counter: input.fors.counter,
                 entries: input
                     .fors
                     .entries
                     .iter()
                     .map(|entry| ForsEntry {
-                        secret_leaf: entry.secret_leaf.clone(),
+                        secret_leaf: entry.secret_leaf,
                         auth_path: entry.auth_path.clone(),
                     })
                     .collect(),
@@ -799,9 +799,9 @@ mod tests {
                 .hypertree
                 .iter()
                 .map(|layer| HypertreeLayerSignature {
-                    wots_c_pk_hash: layer.wots_c_pk_hash.clone(),
+                    wots_c_pk_hash: layer.wots_c_pk_hash,
                     wots_c_signature: WotsCSignature {
-                        randomizer: layer.wots_c_signature.randomizer.clone(),
+                        randomizer: layer.wots_c_signature.randomizer,
                         counter: layer.wots_c_signature.counter,
                         chains: layer.wots_c_signature.chains.clone(),
                     },
@@ -1582,7 +1582,7 @@ mod tests {
     fn empty_stateless_signature() -> StatelessSignature {
         StatelessSignature {
             fors: crate::shrincs::ForsSignature {
-                randomizer: Vec::new(),
+                randomizer: [0u8; 32],
                 counter: 0,
                 entries: Vec::new(),
             },

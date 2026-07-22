@@ -195,7 +195,7 @@ impl<'a> AbiDecoder<'a> {
     fn decode_fors_signature(&self, base: usize, head: usize) -> ForsSignature {
         let start = base + self.read_usize(head);
         ForsSignature {
-            randomizer: self.decode_bytes(start, start),
+            randomizer: bytes32_from_vec(&self.decode_bytes(start, start)),
             counter: self.read_u32(start + 32),
             entries: self.decode_dynamic_array(start, start + 64, |decoder, element_start| {
                 decoder.decode_fors_entry(element_start)
@@ -205,8 +205,8 @@ impl<'a> AbiDecoder<'a> {
 
     fn decode_fors_entry(&self, start: usize) -> ForsEntry {
         ForsEntry {
-            secret_leaf: self.decode_bytes(start, start),
-            auth_path: self.decode_array_bytes(start, start + 32),
+            secret_leaf: bytes32_from_vec(&self.decode_bytes(start, start)),
+            auth_path: nodes_from_vecs(self.decode_array_bytes(start, start + 32)),
         }
     }
 
@@ -215,18 +215,18 @@ impl<'a> AbiDecoder<'a> {
         // leafIndex): the head now begins with the wotsCPkHash offset, so every
         // remaining head slot shifts down by two 32-byte words.
         HypertreeLayerSignature {
-            wots_c_pk_hash: self.decode_bytes(start, start),
+            wots_c_pk_hash: bytes32_from_vec(&self.decode_bytes(start, start)),
             wots_c_signature: self.decode_wots_c_signature(start, start + 32),
-            auth_path: self.decode_array_bytes(start, start + 64),
+            auth_path: nodes_from_vecs(self.decode_array_bytes(start, start + 64)),
         }
     }
 
     fn decode_wots_c_signature(&self, base: usize, head: usize) -> WotsCSignature {
         let start = base + self.read_usize(head);
         WotsCSignature {
-            randomizer: self.decode_bytes(start, start),
+            randomizer: bytes32_from_vec(&self.decode_bytes(start, start)),
             counter: self.read_u32(start + 32),
-            chains: self.decode_array_bytes(start, start + 64),
+            chains: nodes_from_vecs(self.decode_array_bytes(start, start + 64)),
         }
     }
 
@@ -381,6 +381,10 @@ fn hex_to_bytes(hex: &str) -> Vec<u8> {
         .step_by(2)
         .map(|index| u8::from_str_radix(&trimmed[index..index + 2], 16).unwrap())
         .collect()
+}
+
+fn nodes_from_vecs(list: Vec<Vec<u8>>) -> Vec<[u8; HASH_LEN]> {
+    list.iter().map(|bytes| bytes32_from_vec(bytes)).collect()
 }
 
 fn bytes32_from_vec(bytes: &[u8]) -> [u8; HASH_LEN] {

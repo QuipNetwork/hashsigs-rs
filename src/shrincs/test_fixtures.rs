@@ -163,8 +163,8 @@ pub(crate) struct ForsEntryDto {
 impl From<&ForsEntry> for ForsEntryDto {
     fn from(value: &ForsEntry) -> Self {
         Self {
-            secret_leaf: value.secret_leaf.clone(),
-            auth_path: value.auth_path.clone(),
+            secret_leaf: value.secret_leaf.to_vec(),
+            auth_path: nodes_to_vecs(&value.auth_path),
         }
     }
 }
@@ -172,8 +172,8 @@ impl From<&ForsEntry> for ForsEntryDto {
 impl From<ForsEntryDto> for ForsEntry {
     fn from(value: ForsEntryDto) -> Self {
         Self {
-            secret_leaf: value.secret_leaf,
-            auth_path: value.auth_path,
+            secret_leaf: fixture_word(value.secret_leaf),
+            auth_path: vecs_to_nodes(value.auth_path),
         }
     }
 }
@@ -188,7 +188,7 @@ pub(crate) struct ForsSignatureDto {
 impl From<&ForsSignature> for ForsSignatureDto {
     fn from(value: &ForsSignature) -> Self {
         Self {
-            randomizer: value.randomizer.clone(),
+            randomizer: value.randomizer.to_vec(),
             counter: value.counter,
             entries: value.entries.iter().map(ForsEntryDto::from).collect(),
         }
@@ -198,7 +198,7 @@ impl From<&ForsSignature> for ForsSignatureDto {
 impl From<ForsSignatureDto> for ForsSignature {
     fn from(value: ForsSignatureDto) -> Self {
         Self {
-            randomizer: value.randomizer,
+            randomizer: fixture_word(value.randomizer),
             counter: value.counter,
             entries: value.entries.into_iter().map(ForsEntry::from).collect(),
         }
@@ -215,9 +215,9 @@ pub(crate) struct WotsCSignatureDto {
 impl From<&WotsCSignature> for WotsCSignatureDto {
     fn from(value: &WotsCSignature) -> Self {
         Self {
-            randomizer: value.randomizer.clone(),
+            randomizer: value.randomizer.to_vec(),
             counter: value.counter,
-            chains: value.chains.clone(),
+            chains: nodes_to_vecs(&value.chains),
         }
     }
 }
@@ -225,9 +225,9 @@ impl From<&WotsCSignature> for WotsCSignatureDto {
 impl From<WotsCSignatureDto> for WotsCSignature {
     fn from(value: WotsCSignatureDto) -> Self {
         Self {
-            randomizer: value.randomizer,
+            randomizer: fixture_word(value.randomizer),
             counter: value.counter,
-            chains: value.chains,
+            chains: vecs_to_nodes(value.chains),
         }
     }
 }
@@ -242,9 +242,9 @@ pub(crate) struct HypertreeLayerSignatureDto {
 impl From<&HypertreeLayerSignature> for HypertreeLayerSignatureDto {
     fn from(value: &HypertreeLayerSignature) -> Self {
         Self {
-            wots_c_pk_hash: value.wots_c_pk_hash.clone(),
+            wots_c_pk_hash: value.wots_c_pk_hash.to_vec(),
             wots_c_signature: WotsCSignatureDto::from(&value.wots_c_signature),
-            auth_path: value.auth_path.clone(),
+            auth_path: nodes_to_vecs(&value.auth_path),
         }
     }
 }
@@ -252,11 +252,26 @@ impl From<&HypertreeLayerSignature> for HypertreeLayerSignatureDto {
 impl From<HypertreeLayerSignatureDto> for HypertreeLayerSignature {
     fn from(value: HypertreeLayerSignatureDto) -> Self {
         Self {
-            wots_c_pk_hash: value.wots_c_pk_hash,
+            wots_c_pk_hash: fixture_word(value.wots_c_pk_hash),
             wots_c_signature: value.wots_c_signature.into(),
-            auth_path: value.auth_path,
+            auth_path: vecs_to_nodes(value.auth_path),
         }
     }
+}
+
+/// Fixture hash fields are JSON byte lists of exactly `HASH_LEN` bytes.
+fn fixture_word(bytes: Vec<u8>) -> [u8; HASH_LEN] {
+    bytes
+        .try_into()
+        .expect("fixture hash field must be exactly HASH_LEN bytes")
+}
+
+fn vecs_to_nodes(list: Vec<Vec<u8>>) -> Vec<[u8; HASH_LEN]> {
+    list.into_iter().map(fixture_word).collect()
+}
+
+fn nodes_to_vecs(nodes: &[[u8; HASH_LEN]]) -> Vec<Vec<u8>> {
+    nodes.iter().map(|node| node.to_vec()).collect()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

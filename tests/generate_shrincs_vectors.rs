@@ -234,26 +234,26 @@ fn stateless_signature_cast(signature: &StatelessSignature) -> String {
     let fors_entries = signature.fors.entries.iter().map(|entry| {
         format!(
             "({},{})",
-            hex(&entry.secret_leaf),
+            hex(entry.secret_leaf),
             fixed_array(entry.auth_path.iter().map(hex))
         )
     });
     let fors = format!(
         "({},{},{})",
-        hex(&signature.fors.randomizer),
+        hex(signature.fors.randomizer),
         signature.fors.counter,
         fixed_array(fors_entries)
     );
     let layers = signature.hypertree.iter().map(|layer| {
         let wots = format!(
             "({},{},{})",
-            hex(&layer.wots_c_signature.randomizer),
+            hex(layer.wots_c_signature.randomizer),
             layer.wots_c_signature.counter,
             fixed_array(layer.wots_c_signature.chains.iter().map(hex))
         );
         format!(
             "({},{},{})",
-            hex(&layer.wots_c_pk_hash),
+            hex(layer.wots_c_pk_hash),
             wots,
             fixed_array(layer.auth_path.iter().map(hex))
         )
@@ -311,19 +311,19 @@ fn stateful_signature_json(signature: &StatefulSignature) -> Value {
 fn stateless_signature_json(signature: &StatelessSignature) -> Value {
     json!({
         "fors": {
-            "randomizer": hex(&signature.fors.randomizer),
+            "randomizer": hex(signature.fors.randomizer),
             "counter": signature.fors.counter,
             "entries": signature.fors.entries.iter().map(|entry| json!({
-                "secretLeaf": hex(&entry.secret_leaf),
-                "sk": hex(&entry.secret_leaf),
+                "secretLeaf": hex(entry.secret_leaf),
+                "sk": hex(entry.secret_leaf),
                 "authPath": entry.auth_path.iter().map(hex).collect::<Vec<_>>(),
                 "auth": entry.auth_path.iter().map(hex).collect::<Vec<_>>()
             })).collect::<Vec<_>>()
         },
         "hypertree": signature.hypertree.iter().map(|layer| json!({
-            "wotsCPkHash": hex(&layer.wots_c_pk_hash),
+            "wotsCPkHash": hex(layer.wots_c_pk_hash),
             "wotsCSignature": {
-                "randomizer": hex(&layer.wots_c_signature.randomizer),
+                "randomizer": hex(layer.wots_c_signature.randomizer),
                 "counter": layer.wots_c_signature.counter,
                 "chains": layer.wots_c_signature.chains.iter().map(hex).collect::<Vec<_>>()
             },

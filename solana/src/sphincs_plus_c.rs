@@ -31,8 +31,8 @@ use hashsigs_rs::shrincs::{
 
 #[derive(Debug, Clone, BorshSerialize, BorshDeserialize)]
 pub struct ForsEntryDto {
-    pub secret_leaf: Vec<u8>,
-    pub auth_path: Vec<Vec<u8>>,
+    pub secret_leaf: [u8; 32],
+    pub auth_path: Vec<[u8; 32]>,
 }
 
 impl From<ForsEntryDto> for ForsEntry {
@@ -55,7 +55,7 @@ impl From<ForsEntry> for ForsEntryDto {
 
 #[derive(Debug, Clone, BorshSerialize, BorshDeserialize)]
 pub struct ForsSignatureDto {
-    pub randomizer: Vec<u8>,
+    pub randomizer: [u8; 32],
     pub counter: u32,
     pub entries: Vec<ForsEntryDto>,
 }
@@ -82,9 +82,9 @@ impl From<ForsSignature> for ForsSignatureDto {
 
 #[derive(Debug, Clone, BorshSerialize, BorshDeserialize)]
 pub struct WotsCSignatureDto {
-    pub randomizer: Vec<u8>,
+    pub randomizer: [u8; 32],
     pub counter: u32,
-    pub chains: Vec<Vec<u8>>,
+    pub chains: Vec<[u8; 32]>,
 }
 
 impl From<WotsCSignatureDto> for WotsCSignature {
@@ -109,9 +109,9 @@ impl From<WotsCSignature> for WotsCSignatureDto {
 
 #[derive(Debug, Clone, BorshSerialize, BorshDeserialize)]
 pub struct HypertreeLayerSignatureDto {
-    pub wots_c_pk_hash: Vec<u8>,
+    pub wots_c_pk_hash: [u8; 32],
     pub wots_c_signature: WotsCSignatureDto,
-    pub auth_path: Vec<Vec<u8>>,
+    pub auth_path: Vec<[u8; 32]>,
 }
 
 impl From<HypertreeLayerSignatureDto> for HypertreeLayerSignature {

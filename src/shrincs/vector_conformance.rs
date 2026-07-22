@@ -162,6 +162,13 @@ fn hex_list(value: &Value) -> Vec<Vec<u8>> {
         .collect()
 }
 
+fn hex_word_list(value: &Value) -> Vec<[u8; HASH_LEN]> {
+    hex_list(value)
+        .into_iter()
+        .map(|bytes| bytes.try_into().expect("hash list entry must be exactly 32 bytes"))
+        .collect()
+}
+
 fn u64_field(parent: &Value, key: &str) -> u64 {
     parent[key]
         .as_u64()
@@ -184,12 +191,12 @@ fn parse_stateless_signature(value: &Value) -> StatelessSignature {
         .expect("fors.entries must be an array")
         .iter()
         .map(|entry| ForsEntry {
-            secret_leaf: hex_to_vec(&entry["secretLeaf"]),
-            auth_path: hex_list(&entry["authPath"]),
+            secret_leaf: hex_to_hash(&entry["secretLeaf"]),
+            auth_path: hex_word_list(&entry["authPath"]),
         })
         .collect();
     let fors = ForsSignature {
-        randomizer: hex_to_vec(&fors_value["randomizer"]),
+        randomizer: hex_to_hash(&fors_value["randomizer"]),
         counter: u64_field(fors_value, "counter") as u32,
         entries,
     };
@@ -200,13 +207,13 @@ fn parse_stateless_signature(value: &Value) -> StatelessSignature {
         .map(|layer| {
             let wots = &layer["wotsCSignature"];
             HypertreeLayerSignature {
-                wots_c_pk_hash: hex_to_vec(&layer["wotsCPkHash"]),
+                wots_c_pk_hash: hex_to_hash(&layer["wotsCPkHash"]),
                 wots_c_signature: WotsCSignature {
-                    randomizer: hex_to_vec(&wots["randomizer"]),
+                    randomizer: hex_to_hash(&wots["randomizer"]),
                     counter: u64_field(wots, "counter") as u32,
-                    chains: hex_list(&wots["chains"]),
+                    chains: hex_word_list(&wots["chains"]),
                 },
-                auth_path: hex_list(&layer["authPath"]),
+                auth_path: hex_word_list(&layer["authPath"]),
             }
         })
         .collect();
@@ -360,25 +367,10 @@ fn stateless_verifier_reject_branches_do_not_panic() {
     randomizer_mut.fors.randomizer[0] ^= 1;
     assert!(rejects(&randomizer_mut), "mutated FORS randomizer must be rejected");
 
-    // Malformed 31-byte WOTS public-key hash: the length guard must fail closed.
-    let mut short_pk_hash = base.clone();
-    short_pk_hash.hypertree[0].wots_c_pk_hash.truncate(HASH_LEN - 1);
-    assert!(rejects(&short_pk_hash), "31-byte wots_c_pk_hash must be rejected");
-
-    // Malformed 33-byte WOTS public-key hash.
-    let mut long_pk_hash = base.clone();
-    long_pk_hash.hypertree[0].wots_c_pk_hash.push(0);
-    assert!(rejects(&long_pk_hash), "33-byte wots_c_pk_hash must be rejected");
-
-    // Malformed 31-byte FORS secret leaf.
-    let mut short_secret_leaf = base.clone();
-    short_secret_leaf.fors.entries[0].secret_leaf.truncate(HASH_LEN - 1);
-    assert!(rejects(&short_secret_leaf), "31-byte FORS secret leaf must be rejected");
-
-    // Malformed 33-byte WOTS chain value.
-    let mut long_chain = base;
-    long_chain.hypertree[0].wots_c_signature.chains[0].push(0);
-    assert!(rejects(&long_chain), "33-byte WOTS chain value must be rejected");
+    // Wrong-length hash fields (31/33-byte pk hashes, secret leaves, chain
+    // values) are no longer representable: the wire types use [u8; HASH_LEN],
+    // so malformed lengths fail at the decode boundary instead of in verify.
+    let _ = base;
 }
 
 fn encoded_stateful_sub_key(public_key: &Value) -> Vec<u8> {

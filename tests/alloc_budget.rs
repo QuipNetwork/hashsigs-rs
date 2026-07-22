@@ -89,6 +89,10 @@ fn assert_verify_budget(what: &str, allocs: u64) {
     any(shrincs_profile_128s_q18, shrincs_profile_128s_q20),
     ignore = "128s signing grinds ~2^24 counters; the allocation budget is profile-independent and enforced by the 256s lanes"
 )]
+#[cfg_attr(
+    feature = "parallel",
+    ignore = "rayon allocates task/pool state inside the measured window; the budget applies to the sequential verify path"
+)]
 #[test]
 fn stateless_verify_stays_within_allocation_budget() {
     // SPHINCS+C layer: independent keypair, arbitrary 32-byte message.

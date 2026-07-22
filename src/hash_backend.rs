@@ -36,7 +36,12 @@ use crate::types::HASH_LEN;
 /// form (`hashv`), every other target absorbs the parts incrementally.
 #[inline]
 pub(crate) fn keccak256v(parts: &[&[u8]]) -> [u8; HASH_LEN] {
-    #[cfg(all(test, feature = "std"))]
+    #[cfg(all(
+        test,
+        feature = "std",
+        not(feature = "parallel"),
+        not(any(feature = "profile-128s-q18", feature = "profile-128s-q20"))
+    ))]
     metrics::record(parts);
     #[cfg(any(target_os = "solana", feature = "solana"))]
     {
@@ -55,8 +60,10 @@ pub(crate) fn keccak256v(parts: &[&[u8]]) -> [u8; HASH_LEN] {
     }
 }
 
-/// Keccak-256 over a single flat slice.
+/// Keccak-256 over a single flat slice. All non-test callers are gated on
+/// `std` (`account`), so embedded (`no_std + alloc`) builds see it as dead.
 #[inline]
+#[cfg_attr(not(feature = "std"), allow(dead_code))]
 pub(crate) fn keccak256(data: &[u8]) -> [u8; HASH_LEN] {
     keccak256v(&[data])
 }
@@ -66,7 +73,12 @@ pub(crate) fn keccak256(data: &[u8]) -> [u8; HASH_LEN] {
 #[inline]
 #[cfg_attr(not(shrincs_hash_suite_sha2), allow(dead_code))]
 pub(crate) fn sha256v(parts: &[&[u8]]) -> [u8; HASH_LEN] {
-    #[cfg(all(test, feature = "std"))]
+    #[cfg(all(
+        test,
+        feature = "std",
+        not(feature = "parallel"),
+        not(any(feature = "profile-128s-q18", feature = "profile-128s-q20"))
+    ))]
     metrics::record(parts);
     #[cfg(any(target_os = "solana", feature = "solana"))]
     {
@@ -94,7 +106,12 @@ pub(crate) fn sha256v(parts: &[&[u8]]) -> [u8; HASH_LEN] {
 /// Thread-local so concurrent unit tests cannot pollute each other's counts;
 /// consequently the estimator only runs without the `parallel` feature (rayon
 /// worker threads would record into their own counters).
-#[cfg(all(test, feature = "std"))]
+#[cfg(all(
+    test,
+    feature = "std",
+    not(feature = "parallel"),
+    not(any(feature = "profile-128s-q18", feature = "profile-128s-q20"))
+))]
 pub(crate) mod metrics {
     use core::cell::Cell;
 
