@@ -22,3 +22,10 @@ _prompt_planning/
 *.db
 .beads-credential-key
 .beads/proxieddb/
+
+# Agent/tooling workspaces and instructions (local only)
+.beads/
+.agents/
+.claude/
+.codex/
+CLAUDE.md
