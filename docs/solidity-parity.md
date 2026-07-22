@@ -1,0 +1,97 @@
+# Solidity parity
+
+Status of feature and design parity between this crate and hashsigs-solidity
+(`create-x-deployment` branch, commit `dd71249`). Last audited 2026-07-22
+against a two-sided surface inventory plus a line-by-line account-wrapper
+audit.
+
+## At parity
+
+- Crypto core: WOTS-C, FORS-C, hypertree, UXMSS, SPHINCS+C, SHRINCS verify
+  and rotation paths; four profiles; keccak and sha2 hash suites; commitment
+  scheme; the four canonical message hashes. Cross-pinned by Rust-anchored
+  vectors consumed on both sides (256s keccak and sha2).
+- `shrincs::envelope`: byte-exact Solidity ABI encoders and strict decoders
+  for every named envelope shape, including ERC-1271 mode-1/2 action
+  envelopes and `prepare_stateless_delegation`. Byte-pinned against the
+  Solidity-exported vector blobs.
+- `shrincs::erc7913::ShrincsVerifierErc7913` mirrors `SHRINCSVerifier.sol`
+  (32-byte commitment key, stateful envelope, tri-state outcome,
+  `version_tag()` pins); `SphincsPlusCVerifier` mirrors
+  `SPHINCSPlusCVerifier.sol`.
+- Account wrapper (`account::ShrincsAccountVerifierExample`): policy machine,
+  nonce/key-version/budget accounting, both rotations, ERC-1271
+  `isValidSignature`, and a typed `AccountEvent` trail at the exact Solidity
+  emission points. 13 of 15 audit checkpoints byte/behavior-equal; the two
+  exceptions are listed under maintainer decisions.
+- Solana program: verify-only instructions for SPHINCS+C, SHRINCS stateless,
+  and SHRINCS stateful, plus a PDA account program mirroring the account
+  state machine (init, both action verifies, both rotations, policy setters,
+  recovery mode, event logs).
+
+## Intentional divergences (do not port)
+
+- EIP-1153 transient attestation (`verifyAndAttest`/`wasVerified`,
+  `IERC7913TransientAttestation`): EVM transaction-scoped mechanism with no
+  host or Solana analogue.
+- Calldata zero-copy acceptance widening (re-tag reads bounds-checked
+  against `calldatasize`; tail-truncated envelopes verify under masked-hash
+  profiles): documented Solidity malleability. Rust decoders parse strictly
+  and fail closed; never a wrong-accept in either direction.
+- `read_bits` past logical end: Solidity reads adjacent calldata by design;
+  Rust returns `None`.
+- Deployment: CreateX/CREATE3 deterministic addresses on EVM; Solana uses
+  program-id keypairs and verifiable builds.
+- Typed `AccountError` (10 variants) instead of Solidity's boolean/revert
+  model (approved in MR !2 review).
+- Rust `SCREAMING_SNAKE_CASE` constants vs Solidity PascalCase spec names.
+
+## Maintainer decisions pending
+
+1. **Recovery-rotation freeze exemption (audit F1).** Solidity requires an
+   unfrozen policy to enter `RecoveryRotation`, but freezing happens on
+   first stateful use and only rotation unfreezes — a used monotonic/bitmap
+   account is permanently unable to rotate. Rust exempts that one setter
+   from the freeze check. The audit traced the Solidity behavior and
+   confirmed the lockout. Recommendation: keep the Rust behavior and fix
+   `SHRINCSAccountVerifierExample.sol` upstream.
+2. **Stateless budget reset on full rotation (audit F2).** Solidity resets
+   the budget unconditionally; Rust resets only when the stateless key
+   material actually changed, because a fresh budget for a reused few-time
+   key permits over-use. Recommendation: adopt the Rust behavior upstream.
+3. **Solana domain separator.** The account program uses
+   `keccak(keccak("shrincs-account-v1") ‖ program_id ‖ account_pubkey)`,
+   substituting program id for chain id and the PDA for `address(this)`.
+   The recipe is a single function; confirm or replace before deployment.
+4. **Rotation calldata decoders.** The envelope codec does not parse
+   `rotateToFreshKey`/`rotateFullKey` `abi.encodeCall` shapes (no named
+   envelope exists for them in `SHRINCS.sol`); rotation vectors are pinned
+   through oracle-decoded fields instead.
+
+## Known gaps
+
+- 128s-q18/q20 Solidity account-wrapper vectors are not exported or
+  committed; the four cross-implementation tests stay ignored under those
+  profiles. Export requires Foundry:
+  `FOUNDRY_PROFILE=128s-q18 bash dev/export-account-vectors.sh` in
+  hashsigs-solidity, then copy into `tests/test_vectors/`.
+- No test drives the account state machine against Solidity-produced call
+  traces; the exported `*_verify_calldata`/`*_1271_envelope` blobs are
+  byte-pinned through the codec but not replayed against a
+  vector-controlled account instance (the vectors do not export the
+  generating chain id/contract address).
+
+## Measured Solana compute units (SBF VM, real binary)
+
+| Instruction | 256s | 128s-q18 |
+|---|---|---|
+| SPHINCS+C stateless verify | 1,028,136 | 106,555 |
+| SHRINCS stateless verify | 1,029,780 | — |
+| SHRINCS stateful verify | 111,586 | 58,461 |
+
+Payloads carrying a 256s stateless signature (~30 KB) need
+`ComputeBudgetInstruction::request_heap_frame`; the program ships an
+unbounded bump allocator (`custom-heap`, default) because the entrypoint
+default is compile-time capped at 32 KiB and ignores the granted frame.
+A 256s signature also exceeds the 1,232-byte transaction MTU; real
+deployments need account-staged delivery or the 128s profile.
