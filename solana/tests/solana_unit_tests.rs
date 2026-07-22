@@ -516,7 +516,8 @@ pub mod sphincs_plus_c_solana_test {
             .unwrap();
         let metadata = transaction_result.metadata.unwrap();
         msg!(
-            "SPHINCS+C verify (256s) compute units: {}",
+            "SPHINCS+C verify ({}) compute units: {}",
+            hashsigs_rs::shrincs::PROFILE_NAME,
             metadata.compute_units_consumed
         );
 
@@ -606,11 +607,109 @@ pub mod sphincs_plus_c_solana_test {
             .unwrap();
         let metadata = transaction_result.metadata.unwrap();
         msg!(
-            "SHRINCS hybrid stateless verify (256s) compute units: {}",
+            "SHRINCS hybrid stateless verify ({}) compute units: {}",
+            hashsigs_rs::shrincs::PROFILE_NAME,
             metadata.compute_units_consumed
         );
 
         let return_data = metadata.return_data.unwrap();
         assert_eq!(return_data.data, vec![1]);
+    }
+
+    #[tokio::test]
+    async fn test_shrincs_verify_stateful_valid_and_tampered() {
+        use hashsigs_rs::shrincs::{ActionContext, ShrincsSigner, ShrincsVerifier};
+        use hashsigs_rs_solana::sphincs_plus_c::{
+            ActionContextDto, ShrincsPublicKeyDto, StatefulSignatureDto,
+        };
+
+        let (program_test, program_id) = setup_test().await;
+        let mut context = program_test.start_with_context().await;
+
+        let (mut signing_key, public_key) =
+            ShrincsSigner::keygen(b"shrincs solana hybrid stateful", 4).expect("keygen");
+        let commitment: [u8; 32] = public_key
+            .public_key_commitment
+            .clone()
+            .try_into()
+            .expect("commitment is 32 bytes");
+        let action_context = ActionContext {
+            domain_separator: derive32(b"shrincs-solana-domain", b"stateful"),
+            nonce: derive32(b"shrincs-solana-nonce", b"stateful"),
+            key_version: [0u8; 32],
+            action_type: derive32(b"shrincs-solana-action", b"stateful"),
+            payload_hash: derive32(b"shrincs-solana-payload", b"stateful"),
+        };
+        let signature =
+            ShrincsSigner::sign_stateful_action(&mut signing_key, &public_key, &action_context)
+                .expect("sign");
+        // Host-side sanity before the on-chain round trip.
+        assert!(ShrincsVerifier::new().verify_stateful(
+            commitment,
+            &public_key,
+            &action_context,
+            &signature,
+        ));
+
+        let instruction = WOTSPlusInstruction::ShrincsVerifyStateful {
+            expected_public_key_commitment: commitment,
+            public_key: ShrincsPublicKeyDto::from(public_key.clone()),
+            context: ActionContextDto::from(action_context),
+            signature: StatefulSignatureDto::from(signature.clone()),
+        };
+        let mut instruction_data = Vec::new();
+        instruction.serialize(&mut instruction_data).unwrap();
+
+        let transaction =
+            execute_transaction(&mut context, &program_id.pubkey(), instruction_data).await;
+        let transaction_result = context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap();
+        let metadata = transaction_result.metadata.unwrap();
+        msg!(
+            "SHRINCS hybrid stateful verify ({}) compute units: {}",
+            hashsigs_rs::shrincs::PROFILE_NAME,
+            metadata.compute_units_consumed
+        );
+        assert_eq!(metadata.return_data.unwrap().data, vec![1]);
+
+        // Tampered randomizer must be rejected through the same instruction.
+        let mut tampered = signature;
+        tampered.randomizer[0] ^= 0x01;
+        let instruction = WOTSPlusInstruction::ShrincsVerifyStateful {
+            expected_public_key_commitment: commitment,
+            public_key: ShrincsPublicKeyDto::from(public_key),
+            context: ActionContextDto::from(ActionContext {
+                domain_separator: derive32(b"shrincs-solana-domain", b"stateful"),
+                nonce: derive32(b"shrincs-solana-nonce", b"stateful"),
+                key_version: [0u8; 32],
+                action_type: derive32(b"shrincs-solana-action", b"stateful"),
+                payload_hash: derive32(b"shrincs-solana-payload", b"stateful"),
+            }),
+            signature: StatefulSignatureDto::from(tampered),
+        };
+        let mut instruction_data = Vec::new();
+        instruction.serialize(&mut instruction_data).unwrap();
+        context.last_blockhash = context
+            .banks_client
+            .get_latest_blockhash()
+            .await
+            .unwrap();
+        let transaction =
+            execute_transaction(&mut context, &program_id.pubkey(), instruction_data).await;
+        let transaction_result = context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap();
+        let metadata = transaction_result.metadata.unwrap();
+        msg!(
+            "SHRINCS stateful verify tampered ({}) compute units: {}",
+            hashsigs_rs::shrincs::PROFILE_NAME,
+            metadata.compute_units_consumed
+        );
+        assert_eq!(metadata.return_data.unwrap().data, vec![0]);
     }
 }

@@ -31,7 +31,7 @@ use solana_program::program::set_return_data;
 use solana_program::system_instruction::create_account;
 use solana_program::account_info::next_account_info;
 
-use crate::sphincs_plus_c::{ActionContextDto, ShrincsPublicKeyDto, StatelessSignatureDto};
+use crate::sphincs_plus_c::{ActionContextDto, ShrincsPublicKeyDto, StatefulSignatureDto, StatelessSignatureDto};
 
 // NOTE: The following is supposed to increase the stack size but it does not work in practice.
 /*
@@ -134,6 +134,15 @@ pub enum WOTSPlusInstruction {
         public_key: ShrincsPublicKeyDto,
         context: ActionContextDto,
         signature: StatelessSignatureDto,
+    },
+    /// SHRINCS hybrid stateful (UXMSS fast path) verify: commitment + shape
+    /// check, then the unbalanced-tree WOTS-C verification. No account state
+    /// -- every input is passed by value, boolean result via return data.
+    ShrincsVerifyStateful {
+        expected_public_key_commitment: [u8; constants::HASH_LEN],
+        public_key: ShrincsPublicKeyDto,
+        context: ActionContextDto,
+        signature: StatefulSignatureDto,
     },
 }
 
@@ -298,6 +307,25 @@ fn process_sphincs_plus_c_verify(
     Ok(())
 }
 
+fn process_shrincs_verify_stateful(
+    expected_public_key_commitment: [u8; constants::HASH_LEN],
+    public_key: ShrincsPublicKeyDto,
+    context: ActionContextDto,
+    signature: StatefulSignatureDto,
+) -> ProgramResult {
+    let public_key = public_key.into();
+    let context = context.into();
+    let signature = signature.into();
+    let is_valid = ShrincsVerifier::new().verify_stateful(
+        expected_public_key_commitment,
+        &public_key,
+        &context,
+        &signature,
+    );
+    set_return_data(&[is_valid as u8]);
+    Ok(())
+}
+
 fn process_shrincs_verify_stateless(
     expected_public_key_commitment: [u8; constants::HASH_LEN],
     public_key: ShrincsPublicKeyDto,
@@ -381,6 +409,17 @@ pub fn process_instruction(
             context,
             signature,
         } => process_shrincs_verify_stateless(
+            expected_public_key_commitment,
+            public_key,
+            context,
+            signature,
+        ),
+        WOTSPlusInstruction::ShrincsVerifyStateful {
+            expected_public_key_commitment,
+            public_key,
+            context,
+            signature,
+        } => process_shrincs_verify_stateful(
             expected_public_key_commitment,
             public_key,
             context,
