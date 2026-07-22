@@ -207,50 +207,44 @@ pub(crate) fn fors_tree_root_and_auth_path(
     leaf: u32,
 ) -> ([u8; HASH_LEN], [u8; HASH_LEN], Vec<Vec<u8>>) {
     let height = u32::from(FORS_TREE_HEIGHT);
-    let leaf_count = 1usize << height;
+    // Compute the selected leaf secret once and reuse it for both the revealed
+    // signature field and the leaf-hash step (avoids a second SK derivation).
     let selected_secret_leaf =
         fors_leaf_secret(pk_seed, sk_seed, tree_index, leaf_index, fors_tree, leaf);
-    let mut level_nodes = Vec::with_capacity(leaf_count);
-    for index in 0..leaf_count {
-        let index = index as u32;
-        let leaf_hash = if index == leaf {
-            fors_leaf_hash_from_secret(
-                pk_seed,
-                tree_index,
-                leaf_index,
-                fors_tree,
-                leaf,
-                &selected_secret_leaf,
-            )
-        } else {
-            fors_leaf_hash(pk_seed, sk_seed, tree_index, leaf_index, fors_tree, index)
-        };
-        level_nodes.push(leaf_hash);
-    }
-    let mut index = leaf as usize;
-    let mut auth_path = Vec::with_capacity(height as usize);
 
-    for node_height in 1..=height {
-        auth_path.push(level_nodes[index ^ 1].to_vec());
-        let mut parents = Vec::with_capacity(level_nodes.len() / 2);
-        for (parent_index, pair) in level_nodes.chunks_exact(2).enumerate() {
+    let (root, auth_path) = crate::treehash::treehash_root_and_auth_path(
+        height,
+        leaf,
+        |index| {
+            if index == leaf {
+                fors_leaf_hash_from_secret(
+                    pk_seed,
+                    tree_index,
+                    leaf_index,
+                    fors_tree,
+                    leaf,
+                    &selected_secret_leaf,
+                )
+            } else {
+                fors_leaf_hash(pk_seed, sk_seed, tree_index, leaf_index, fors_tree, index)
+            }
+        },
+        |node_height, parent_index, left, right| {
             let shifted_tree = u64::from(fors_tree) << (height - node_height);
-            let parent_low_index = shifted_tree + parent_index as u64;
+            let parent_low_index = shifted_tree + parent_index;
             let address_word =
                 fors_address_word(tree_index, leaf_index, node_height, parent_low_index);
-            parents.push(hash_node(&[
+            hash_node(&[
                 b"fors-node".as_ref(),
                 pk_seed.as_ref(),
                 address_word.as_ref(),
-                pair[0].as_ref(),
-                pair[1].as_ref(),
-            ]));
-        }
-        level_nodes = parents;
-        index >>= 1;
-    }
+                left.as_ref(),
+                right.as_ref(),
+            ])
+        },
+    );
 
-    (level_nodes[0], selected_secret_leaf, auth_path)
+    (root, selected_secret_leaf, auth_path)
 }
 
 fn fors_entry_root32(

@@ -482,38 +482,42 @@ fn hypertree_subtree(
     selected_leaf: u32,
 ) -> Option<HypertreeSubtree> {
     let subtree_height = u32::from(HYPERTREE_HEIGHT / NUM_HYPERTREE_LAYERS);
-    let leaf_count = 1usize << subtree_height;
-    if selected_leaf as usize >= leaf_count {
+    if subtree_height == 0 || subtree_height >= u32::BITS {
         return None;
     }
-    let mut current_level = Vec::with_capacity(leaf_count);
-    for leaf in 0..leaf_count as u32 {
-        current_level.push(hypertree_leaf(pk_seed, layer_seed, layer, tree, leaf));
+    let leaf_count = 1u32 << subtree_height;
+    if selected_leaf >= leaf_count {
+        return None;
     }
 
-    let selected_leaf_hash = current_level[selected_leaf as usize];
-    let mut auth_path = Vec::with_capacity(subtree_height as usize);
-    let mut index = selected_leaf as usize;
+    // Generate the selected leaf once so the returned hash matches the value
+    // folded into the tree (same leaf secret derivation path).
+    let selected_leaf_hash = hypertree_leaf(pk_seed, layer_seed, layer, tree, selected_leaf);
 
-    for node_height in 1..=subtree_height {
-        auth_path.push(current_level[index ^ 1].to_vec());
-        let mut parents = Vec::with_capacity(current_level.len() / 2);
-        for (parent_index, pair) in current_level.chunks_exact(2).enumerate() {
-            let address_word = hypertree_address_word(layer, tree, node_height, parent_index as u64);
-            parents.push(hash_node(&[
+    let (root, auth_path) = crate::treehash::treehash_root_and_auth_path(
+        subtree_height,
+        selected_leaf,
+        |leaf| {
+            if leaf == selected_leaf {
+                selected_leaf_hash
+            } else {
+                hypertree_leaf(pk_seed, layer_seed, layer, tree, leaf)
+            }
+        },
+        |node_height, parent_index, left, right| {
+            let address_word = hypertree_address_word(layer, tree, node_height, parent_index);
+            hash_node(&[
                 b"hypertree-node".as_ref(),
                 pk_seed.as_ref(),
                 address_word.as_ref(),
-                pair[0].as_ref(),
-                pair[1].as_ref(),
-            ]));
-        }
-        current_level = parents;
-        index >>= 1;
-    }
+                left.as_ref(),
+                right.as_ref(),
+            ])
+        },
+    );
 
     Some(HypertreeSubtree {
-        root: current_level[0],
+        root,
         selected_leaf_hash,
         auth_path,
     })
