@@ -16,3 +16,9 @@ ts/src/web
 
 # local prompt/planning scratch - not committed
 _prompt_planning/
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
+.beads/proxieddb/
