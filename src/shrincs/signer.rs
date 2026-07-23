@@ -155,7 +155,8 @@ impl ShrincsSigner {
     }
 
     /// Reconstruct a signing key from previously exported fields (the inverse
-    /// of the wasm `exportSigningKey`). Enforces the same bounds as `keygen`,
+    /// of the wasm `shrincsKeygen`'s `secretKey` output, consumed by
+    /// `shrincsImportSigningKey`). Enforces the same bounds as `keygen`,
     /// accepts the exhausted state (`next == max + 1`, which
     /// `sign_stateful_raw` legitimately produces), and recomputes both roots
     /// from the seeds — returns `None` if the candidate's stored roots don't
@@ -228,8 +229,10 @@ impl ShrincsSigner {
     }
 
     /// Sign raw bytes with a caller-supplied stateful leaf; does NOT advance the
-    /// counter. Exposed to the WASM `signStatefulRawAt` binding and to tests.
-    #[cfg(any(test, feature = "wasm-bindings"))]
+    /// counter. Test-only: the wasm surface dropped its `signStatefulRawAt`
+    /// binding (see the wasm-noble delivery report) in favor of the
+    /// noble-style `shrincsSign`/`shrincsSignStateless` free functions.
+    #[cfg(test)]
     pub(crate) fn sign_stateful_raw_at_leaf(
         signing_key: &ShrincsSigningKey,
         leaf_index: u32,
@@ -283,7 +286,7 @@ fn sign_stateful_via_uxmss(
     Some(sig)
 }
 
-#[cfg(any(test, feature = "wasm-bindings"))]
+#[cfg(test)]
 fn sign_stateful_at_leaf_via_uxmss(
     signing_key: &ShrincsSigningKey,
     leaf_index: u32,
