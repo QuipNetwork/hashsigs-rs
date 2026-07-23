@@ -46,7 +46,15 @@
 //! - `uint32` word fields (WOTS-C/FORS-C counters) and offset/length words
 //!   reject dirty high bits instead of silently truncating them;
 //! - dynamic `bytes` padding (the zero fill up to the next 32-byte word) must
-//!   be all-zero or the decode fails.
+//!   be all-zero or the decode fails;
+//! - each dynamic array's declared element count is capped by the matching
+//!   per-profile structural constant (FORS trees, hypertree layers, WOTS
+//!   chains, auth-path heights) before any element allocation, so aliased
+//!   nested arrays cannot force super-linear work;
+//! - dynamic-array element offsets must be sequential (no aliasing or gaps
+//!   inside a `T[]` / `bytes[]` payload);
+//! - top-level entry points require the high-water mark of every successfully
+//!   read byte range to equal the input length (trailing bytes rejected).
 //!
 //! This is strictly narrower than the Solidity re-tag's acceptance set: a
 //! framing the on-chain re-tag would accept via calldata-slack (offset
@@ -57,11 +65,24 @@
 //! wider acceptance.
 
 use alloc::vec::Vec;
+use core::cell::Cell;
 
+use crate::primitives::profiles::{
+    FORS_TREE_HEIGHT, HYPERTREE_HEIGHT, NUM_FORS_TREES, NUM_HYPERTREE_LAYERS, NUM_WOTS_CHAINS,
+    WOTS_CHAINS_STATEFUL,
+};
 use crate::types::{
     ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey, StatefulSignature,
     StatelessSignature, WotsCSignature, HASH_LEN,
 };
+
+/// Upper bound on a stateful auth-path length (equals the leaf index).
+/// Matches the signer / wasm host cap (`MAX_STATEFUL_SIGNATURES_LIMIT`).
+const MAX_STATEFUL_AUTH_PATH_LEN: usize = 4096;
+
+/// Hypertree subtree height: one auth-path node per level per layer.
+const HYPERTREE_SUBTREE_HEIGHT: usize =
+    (HYPERTREE_HEIGHT as usize) / (NUM_HYPERTREE_LAYERS as usize);
 
 /// Envelope mode selecting canonical stateful account-action validation.
 /// Mirrors `SHRINCSAccountVerifierExample.ERC1271_MODE_STATEFUL_ACTION`.
@@ -238,18 +259,42 @@ fn encode_stateless_signature_body(signature: &StatelessSignature) -> Vec<u8> {
 /// Bounds-checked, fail-closed ABI cursor over a byte slice. Every read
 /// returns `None` on truncation, an out-of-range offset/length, or a dirty
 /// high-bit/padding pattern instead of panicking or reading adjacent memory.
+/// Tracks a high-water mark of successfully read ranges so top-level entry
+/// points can reject trailing bytes.
 struct AbiReader<'a> {
     data: &'a [u8],
+    /// Exclusive end of the farthest byte range successfully read.
+    high_water: Cell<usize>,
 }
 
 impl<'a> AbiReader<'a> {
     fn new(data: &'a [u8]) -> Self {
-        Self { data }
+        Self {
+            data,
+            high_water: Cell::new(0),
+        }
+    }
+
+    fn mark(&self, end: usize) {
+        if end > self.high_water.get() {
+            self.high_water.set(end);
+        }
+    }
+
+    /// Accept only when every input byte was covered by a successful read.
+    fn finish(&self) -> Option<()> {
+        if self.high_water.get() == self.data.len() {
+            Some(())
+        } else {
+            None
+        }
     }
 
     fn slice(&self, pos: usize, len: usize) -> Option<&'a [u8]> {
         let end = pos.checked_add(len)?;
-        self.data.get(pos..end)
+        let out = self.data.get(pos..end)?;
+        self.mark(end);
+        Some(out)
     }
 
     fn read_bytes32(&self, pos: usize) -> Option<[u8; HASH_LEN]> {
@@ -309,42 +354,75 @@ impl<'a> AbiReader<'a> {
         self.decode_bytes(base, head)?.try_into().ok()
     }
 
-    fn decode_array_bytes32(&self, base: usize, head: usize) -> Option<Vec<[u8; HASH_LEN]>> {
+    /// Decode a static `bytes32[]`, rejecting lengths above `max_len`.
+    fn decode_array_bytes32(
+        &self,
+        base: usize,
+        head: usize,
+        max_len: usize,
+    ) -> Option<Vec<[u8; HASH_LEN]>> {
         let start = self.decode_offset(base, head)?;
         let len = self.read_usize(start)?;
+        if len > max_len {
+            return None;
+        }
         let elements_base = start.checked_add(HASH_LEN)?;
-        (0..len)
-            .map(|index| {
-                let pos = elements_base.checked_add(index.checked_mul(HASH_LEN)?)?;
-                self.read_bytes32(pos)
-            })
-            .collect()
+        let mut out = Vec::with_capacity(len);
+        for index in 0..len {
+            let pos = elements_base.checked_add(index.checked_mul(HASH_LEN)?)?;
+            out.push(self.read_bytes32(pos)?);
+        }
+        Some(out)
     }
 
+    /// Decode a dynamic `T[]` / `bytes[]`: length capped by `max_len`, then
+    /// element offsets required to be sequential (matches `encode_dynamic_array`,
+    /// rejects aliased or gapped element payloads).
     fn decode_dynamic_array<T>(
         &self,
         base: usize,
         head: usize,
+        max_len: usize,
         mut decode_element: impl FnMut(&Self, usize) -> Option<T>,
     ) -> Option<Vec<T>> {
         let start = self.decode_offset(base, head)?;
         let len = self.read_usize(start)?;
+        if len > max_len {
+            return None;
+        }
         let elements_base = start.checked_add(HASH_LEN)?;
-        (0..len)
-            .map(|index| {
-                let element_head = elements_base.checked_add(index.checked_mul(HASH_LEN)?)?;
-                let element_start = self.decode_offset(elements_base, element_head)?;
-                decode_element(self, element_start)
-            })
-            .collect()
+        let offset_table_end = elements_base.checked_add(len.checked_mul(HASH_LEN)?)?;
+        let mut starts = Vec::with_capacity(len);
+        for index in 0..len {
+            let element_head = elements_base.checked_add(index.checked_mul(HASH_LEN)?)?;
+            starts.push(self.decode_offset(elements_base, element_head)?);
+        }
+        let mut out = Vec::with_capacity(len);
+        for (index, element_start) in starts.into_iter().enumerate() {
+            let expected = if index == 0 {
+                offset_table_end
+            } else {
+                self.high_water.get()
+            };
+            if element_start != expected {
+                return None;
+            }
+            out.push(decode_element(self, element_start)?);
+        }
+        Some(out)
     }
 
     /// Decode a `bytes[]` array: each element is a `bytes` value read
     /// directly at its resolved position (no further offset indirection —
     /// unlike an array of dynamic *structs*, the element type here is
     /// itself the dynamic content).
-    fn decode_array_bytes(&self, base: usize, head: usize) -> Option<Vec<Vec<u8>>> {
-        self.decode_dynamic_array(base, head, |reader, element_start| {
+    fn decode_array_bytes(
+        &self,
+        base: usize,
+        head: usize,
+        max_len: usize,
+    ) -> Option<Vec<Vec<u8>>> {
+        self.decode_dynamic_array(base, head, max_len, |reader, element_start| {
             reader.read_bytes_at(element_start)
         })
     }
@@ -367,15 +445,23 @@ fn decode_stateful_signature(reader: &AbiReader, base: usize) -> Option<Stateful
     Some(StatefulSignature {
         randomizer: reader.read_bytes32(base)?,
         counter: reader.read_u32(base.checked_add(32)?)?,
-        chains: reader.decode_array_bytes32(base, base.checked_add(64)?)?,
-        auth_path: reader.decode_array_bytes32(base, base.checked_add(96)?)?,
+        chains: reader.decode_array_bytes32(base, base.checked_add(64)?, WOTS_CHAINS_STATEFUL)?,
+        auth_path: reader.decode_array_bytes32(
+            base,
+            base.checked_add(96)?,
+            MAX_STATEFUL_AUTH_PATH_LEN,
+        )?,
     })
 }
 
 fn decode_fors_entry(reader: &AbiReader, base: usize) -> Option<ForsEntry> {
     Some(ForsEntry {
         secret_leaf: reader.decode_bytes32_field(base, base)?,
-        auth_path: collect_hash_words(reader.decode_array_bytes(base, base.checked_add(32)?)?)?,
+        auth_path: collect_hash_words(reader.decode_array_bytes(
+            base,
+            base.checked_add(32)?,
+            FORS_TREE_HEIGHT as usize,
+        )?)?,
     })
 }
 
@@ -383,7 +469,12 @@ fn decode_fors_signature(reader: &AbiReader, base: usize) -> Option<ForsSignatur
     Some(ForsSignature {
         randomizer: reader.decode_bytes32_field(base, base)?,
         counter: reader.read_u32(base.checked_add(32)?)?,
-        entries: reader.decode_dynamic_array(base, base.checked_add(64)?, decode_fors_entry)?,
+        entries: reader.decode_dynamic_array(
+            base,
+            base.checked_add(64)?,
+            NUM_FORS_TREES as usize,
+            decode_fors_entry,
+        )?,
     })
 }
 
@@ -391,7 +482,11 @@ fn decode_wots_c_signature(reader: &AbiReader, base: usize) -> Option<WotsCSigna
     Some(WotsCSignature {
         randomizer: reader.decode_bytes32_field(base, base)?,
         counter: reader.read_u32(base.checked_add(32)?)?,
-        chains: collect_hash_words(reader.decode_array_bytes(base, base.checked_add(64)?)?)?,
+        chains: collect_hash_words(reader.decode_array_bytes(
+            base,
+            base.checked_add(64)?,
+            NUM_WOTS_CHAINS as usize,
+        )?)?,
     })
 }
 
@@ -404,7 +499,11 @@ fn decode_hypertree_layer_signature(
     Some(HypertreeLayerSignature {
         wots_c_pk_hash: reader.decode_bytes32_field(base, base)?,
         wots_c_signature: decode_wots_c_signature(reader, wots_start)?,
-        auth_path: collect_hash_words(reader.decode_array_bytes(base, base.checked_add(64)?)?)?,
+        auth_path: collect_hash_words(reader.decode_array_bytes(
+            base,
+            base.checked_add(64)?,
+            HYPERTREE_SUBTREE_HEIGHT,
+        )?)?,
     })
 }
 
@@ -415,6 +514,7 @@ fn decode_stateless_signature(reader: &AbiReader, base: usize) -> Option<Statele
         hypertree: reader.decode_dynamic_array(
             base,
             base.checked_add(32)?,
+            NUM_HYPERTREE_LAYERS as usize,
             decode_hypertree_layer_signature,
         )?,
     })
@@ -440,10 +540,12 @@ pub fn decode_stateful_envelope(data: &[u8]) -> Option<(PublicKey, StatefulSigna
     let reader = AbiReader::new(data);
     let public_key_start = reader.decode_offset(0, 0)?;
     let signature_start = reader.decode_offset(0, 32)?;
-    Some((
+    let decoded = (
         decode_public_key(&reader, public_key_start)?,
         decode_stateful_signature(&reader, signature_start)?,
-    ))
+    );
+    reader.finish()?;
+    Some(decoded)
 }
 
 /// Inverse of `SHRINCS.statelessEnvelope` / mirrors `encodeStatelessEnvelope`.
@@ -463,10 +565,12 @@ pub fn decode_stateless_envelope(data: &[u8]) -> Option<(PublicKey, StatelessSig
     let reader = AbiReader::new(data);
     let public_key_start = reader.decode_offset(0, 0)?;
     let signature_start = reader.decode_offset(0, 32)?;
-    Some((
+    let decoded = (
         decode_public_key(&reader, public_key_start)?,
         decode_stateless_signature(&reader, signature_start)?,
-    ))
+    );
+    reader.finish()?;
+    Some(decoded)
 }
 
 /// Mirrors `SHRINCS.encodeStatelessKey`. Layout:
@@ -506,7 +610,9 @@ pub fn encode_stateless_signature_envelope(signature: &StatelessSignature) -> Ve
 pub fn decode_stateless_signature_envelope(data: &[u8]) -> Option<StatelessSignature> {
     let reader = AbiReader::new(data);
     let signature_start = reader.decode_offset(0, 0)?;
-    decode_stateless_signature(&reader, signature_start)
+    let decoded = decode_stateless_signature(&reader, signature_start)?;
+    reader.finish()?;
+    Some(decoded)
 }
 
 /// Mirrors `SHRINCS.statefulActionEnvelope`. Layout:
@@ -535,12 +641,14 @@ pub fn decode_stateful_action_envelope(
     let action_type = reader.read_bytes32(32)?;
     let payload_hash = reader.read_bytes32(64)?;
     let signature_start = reader.decode_offset(0, 96)?;
-    Some((
+    let decoded = (
         decode_public_key(&reader, public_key_start)?,
         action_type,
         payload_hash,
         decode_stateful_signature(&reader, signature_start)?,
-    ))
+    );
+    reader.finish()?;
+    Some(decoded)
 }
 
 /// Mirrors `SHRINCS.statelessActionEnvelope`. Layout:
@@ -570,12 +678,14 @@ pub fn decode_stateless_action_envelope(
     let action_type = reader.read_bytes32(32)?;
     let payload_hash = reader.read_bytes32(64)?;
     let signature_start = reader.decode_offset(0, 96)?;
-    Some((
+    let decoded = (
         decode_public_key(&reader, public_key_start)?,
         action_type,
         payload_hash,
         decode_stateless_signature(&reader, signature_start)?,
-    ))
+    );
+    reader.finish()?;
+    Some(decoded)
 }
 
 /// Mirrors `SHRINCSAccountSigningFacade.encodeStateful1271Envelope`. Layout:
@@ -1053,6 +1163,101 @@ mod tests {
         assert_eq!(
             decode_stateless_signature_envelope(&encoded),
             Some(signature)
+        );
+    }
+
+    /// Read a clean ABI length/offset word at `pos` (big-endian u64 in the
+    /// low 8 bytes of a 32-byte word).
+    fn read_abi_usize(buf: &[u8], pos: usize) -> usize {
+        usize::try_from(u64::from_be_bytes(
+            buf[pos + 24..pos + 32].try_into().unwrap(),
+        ))
+        .unwrap()
+    }
+
+    fn write_abi_usize(buf: &mut [u8], pos: usize, value: usize) {
+        buf[pos..pos + 24].fill(0);
+        buf[pos + 24..pos + 32].copy_from_slice(&(value as u64).to_be_bytes());
+    }
+
+    #[test]
+    fn trailing_bytes_are_rejected() {
+        let mut encoded =
+            encode_stateful_envelope(&sample_public_key(), &sample_stateful_signature());
+        encoded.push(0x00);
+        assert!(
+            decode_stateful_envelope(&encoded).is_none(),
+            "single trailing byte must be rejected"
+        );
+
+        let mut stateless =
+            encode_stateless_signature_envelope(&sample_stateless_signature());
+        stateless.extend_from_slice(&[0xAA, 0xBB]);
+        assert!(
+            decode_stateless_signature_envelope(&stateless).is_none(),
+            "trailing junk on stateless signature envelope must be rejected"
+        );
+    }
+
+    #[test]
+    fn oversized_array_length_is_rejected() {
+        // Stateful chains are `bytes32[]` capped at WOTS_CHAINS_STATEFUL.
+        // Overwrite the chains length word to max+1 without growing the buffer
+        // so a naive decoder would either OOM-prep or walk off the end; with
+        // the cap it must fail closed before element allocation.
+        let public_key = sample_public_key();
+        let signature = sample_stateful_signature();
+        let mut encoded = encode_stateful_envelope(&public_key, &signature);
+
+        // Top head: pk_off@0, sig_off@32.
+        let signature_start = read_abi_usize(&encoded, 32);
+        // Signature body head: randomizer@0, counter@32, chains_off@64, auth_off@96.
+        let chains_start = signature_start + read_abi_usize(&encoded, signature_start + 64);
+        write_abi_usize(&mut encoded, chains_start, WOTS_CHAINS_STATEFUL + 1);
+        assert!(
+            decode_stateful_envelope(&encoded).is_none(),
+            "chains length WOTS_CHAINS_STATEFUL+1 must be rejected"
+        );
+
+        // FORS entries are a dynamic struct array capped at NUM_FORS_TREES.
+        let mut encoded = encode_stateless_signature_envelope(&sample_stateless_signature());
+        // Outer head: one offset to the signature body.
+        let sig_start = read_abi_usize(&encoded, 0);
+        // Signature body head: fors_off@0, hypertree_off@32.
+        let fors_start = sig_start + read_abi_usize(&encoded, sig_start);
+        // ForsSignature head: randomizer_off@0, counter@32, entries_off@64.
+        let entries_start = fors_start + read_abi_usize(&encoded, fors_start + 64);
+        write_abi_usize(&mut encoded, entries_start, NUM_FORS_TREES as usize + 1);
+        assert!(
+            decode_stateless_signature_envelope(&encoded).is_none(),
+            "FORS entries length NUM_FORS_TREES+1 must be rejected"
+        );
+    }
+
+    #[test]
+    fn aliased_dynamic_array_offsets_are_rejected() {
+        // Build a valid `bytes[]` auth_path of two elements inside a FORS
+        // entry, then rewrite both element offsets to the first payload so a
+        // lenient decoder would double-read one blob (alias). Sequential
+        // offset checks must reject.
+        let mut encoded =
+            encode_stateless_signature_envelope(&sample_stateless_signature());
+        let sig_start = read_abi_usize(&encoded, 0);
+        let fors_start = sig_start + read_abi_usize(&encoded, sig_start);
+        let entries_start = fors_start + read_abi_usize(&encoded, fors_start + 64);
+        // entries: length word, then one offset per entry (sample has 2).
+        // Offsets are relative to the start of the offset table (entries_start+32).
+        let entry0_start =
+            entries_start + 32 + read_abi_usize(&encoded, entries_start + 32);
+        // ForsEntry head: secret_leaf_off@0, auth_path_off@32.
+        let auth_start = entry0_start + read_abi_usize(&encoded, entry0_start + 32);
+        // auth_path is bytes[] with length 2; force the second element offset
+        // equal to the first (relative to the offset table at auth_start+32).
+        let first_elem_rel = read_abi_usize(&encoded, auth_start + 32);
+        write_abi_usize(&mut encoded, auth_start + 64, first_elem_rel);
+        assert!(
+            decode_stateless_signature_envelope(&encoded).is_none(),
+            "aliased bytes[] element offsets must be rejected"
         );
     }
 }
