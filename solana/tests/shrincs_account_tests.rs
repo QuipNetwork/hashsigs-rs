@@ -1020,3 +1020,180 @@ async fn prefunded_bitmap_word_pda_is_adopted() {
     assert_eq!(bitmap.owner, fixture.program_id.pubkey());
     assert_eq!(bitmap.data.len(), 32);
 }
+
+
+#[tokio::test]
+async fn leaf_bitmap_policy_rejects_wrong_bitmap_word_pda() {
+    // Under LeafBitmap, the word PDA seeds include `word_index = leaf >> 8`.
+    // Passing a PDA derived for a different word_index must fail closed so a
+    // caller cannot skip the usage bit that would prevent leaf reuse.
+    let (mut signing_key, public_key) =
+        ShrincsSigner::keygen(b"account wrong bitmap word seed", 4).expect("keygen");
+    let commitment = commitment32(&public_key);
+    let fixture = setup_account_fixture(b"account wrong bitmap word fixture").await;
+    let mut context = fixture.program_test.start_with_context().await;
+    init_account(
+        &mut context,
+        &fixture.program_id.pubkey(),
+        &fixture.owner,
+        fixture.salt,
+        fixture.account_pda,
+        commitment,
+    )
+    .await;
+
+    send(
+        &mut context,
+        &fixture.program_id.pubkey(),
+        WOTSPlusInstruction::ShrincsAccountSetPolicyLeafBitmap,
+        vec![
+            AccountMeta::new(fixture.account_pda, false),
+            AccountMeta::new_readonly(fixture.owner.pubkey(), true),
+        ],
+        &[&fixture.owner],
+    )
+    .await
+    .expect("owner can select leaf-bitmap policy");
+
+    let domain_separator =
+        account::domain_separator(&fixture.program_id.pubkey(), &fixture.account_pda);
+    let action_type = [13u8; 32];
+    let payload_hash = [14u8; 32];
+    let context_msg = ActionContext {
+        domain_separator,
+        nonce: [0u8; 32],
+        key_version: [0u8; 32],
+        action_type,
+        payload_hash,
+    };
+    let signature =
+        ShrincsSigner::sign_stateful_action(&mut signing_key, &public_key, &context_msg)
+            .expect("sign");
+    // Leaf 1 lives in word 0; deliberately seed word_index = 1.
+    let wrong_bitmap_pda = account::bitmap_word_pda(
+        &fixture.program_id.pubkey(),
+        &fixture.account_pda,
+        &[0u8; 32],
+        1,
+    )
+    .0;
+    let accounts = vec![
+        AccountMeta::new(fixture.account_pda, false),
+        AccountMeta::new(wrong_bitmap_pda, false),
+        AccountMeta::new(context.payer.pubkey(), true),
+        AccountMeta::new_readonly(solana_program::system_program::id(), false),
+    ];
+
+    let result = send(
+        &mut context,
+        &fixture.program_id.pubkey(),
+        WOTSPlusInstruction::ShrincsAccountVerifyStatefulAction {
+            action_type,
+            payload_hash,
+            public_key: ShrincsPublicKeyDto::from(public_key),
+            signature: StatefulSignatureDto::from(signature),
+        },
+        accounts,
+        &[],
+    )
+    .await;
+    assert!(
+        result.is_err(),
+        "wrong bitmap-word PDA (mismatched word_index seed) must be rejected"
+    );
+
+    let state = load_state(&mut context, &fixture.account_pda).await;
+    assert_eq!(state.nonce, [0u8; 32], "failed verify must not advance nonce");
+    assert!(!state.stateful_policy_frozen);
+}
+
+#[tokio::test]
+async fn reinit_of_initialized_account_pda_fails() {
+    let (_signing_key, public_key) =
+        ShrincsSigner::keygen(b"account reinit seed", 4).expect("keygen");
+    let commitment = commitment32(&public_key);
+    let fixture = setup_account_fixture(b"account reinit fixture").await;
+    let mut context = fixture.program_test.start_with_context().await;
+    init_account(
+        &mut context,
+        &fixture.program_id.pubkey(),
+        &fixture.owner,
+        fixture.salt,
+        fixture.account_pda,
+        commitment,
+    )
+    .await;
+
+    let state_before = load_state(&mut context, &fixture.account_pda).await;
+    assert_eq!(state_before.current_public_key_commitment, commitment);
+
+    let payer = context.payer.pubkey();
+    let result = send(
+        &mut context,
+        &fixture.program_id.pubkey(),
+        WOTSPlusInstruction::ShrincsAccountInit {
+            salt: fixture.salt,
+            initial_public_key_commitment: [0xee; 32],
+        },
+        vec![
+            AccountMeta::new(payer, true),
+            AccountMeta::new_readonly(fixture.owner.pubkey(), true),
+            AccountMeta::new(fixture.account_pda, false),
+            AccountMeta::new_readonly(solana_program::system_program::id(), false),
+        ],
+        &[&fixture.owner],
+    )
+    .await;
+    assert!(
+        result.is_err(),
+        "re-init of an already-initialized account PDA must fail"
+    );
+
+    let state_after = load_state(&mut context, &fixture.account_pda).await;
+    assert_eq!(
+        state_after.current_public_key_commitment, commitment,
+        "failed re-init must leave the original commitment installed"
+    );
+}
+
+#[tokio::test]
+async fn non_owner_signer_rejected_on_leaf_bitmap_policy_setter() {
+    // Complements `owner_gating_rejects_non_owner_policy_change` (recovery
+    // policy) with the leaf-bitmap setter so every policy path enforces
+    // owner-is-signer.
+    let (_signing_key, public_key) =
+        ShrincsSigner::keygen(b"account non-owner leaf bitmap seed", 4).expect("keygen");
+    let commitment = commitment32(&public_key);
+    let fixture = setup_account_fixture(b"account non-owner leaf bitmap fixture").await;
+    let mut context = fixture.program_test.start_with_context().await;
+    init_account(
+        &mut context,
+        &fixture.program_id.pubkey(),
+        &fixture.owner,
+        fixture.salt,
+        fixture.account_pda,
+        commitment,
+    )
+    .await;
+
+    let not_owner = Keypair::new();
+    let result = send(
+        &mut context,
+        &fixture.program_id.pubkey(),
+        WOTSPlusInstruction::ShrincsAccountSetPolicyLeafBitmap,
+        vec![
+            AccountMeta::new(fixture.account_pda, false),
+            AccountMeta::new_readonly(not_owner.pubkey(), true),
+        ],
+        &[&not_owner],
+    )
+    .await;
+    assert!(result.is_err(), "a non-owner signer must be rejected");
+
+    let state = load_state(&mut context, &fixture.account_pda).await;
+    assert_eq!(
+        state.stateful_policy,
+        StatefulPolicy::MonotonicIndex as u8,
+        "policy must remain the default after a rejected non-owner setter"
+    );
+}

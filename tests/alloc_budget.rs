@@ -121,3 +121,41 @@ fn stateless_verify_stays_within_allocation_budget() {
     assert!(valid);
     assert_verify_budget("SHRINCS stateless dispatch verify", allocs);
 }
+
+#[cfg_attr(
+    any(shrincs_profile_128s_q18, shrincs_profile_128s_q20),
+    ignore = "128s signing grinds ~2^24 counters; the allocation budget is profile-independent and enforced by the 256s lanes"
+)]
+#[cfg_attr(
+    feature = "parallel",
+    ignore = "rayon allocates task/pool state inside the measured window; the budget applies to the sequential verify path"
+)]
+#[test]
+fn stateful_verify_stays_within_allocation_budget() {
+    // Solana's account program runs stateful verify per action; the same
+    // zero-alloc budget applies as for the stateless path.
+    use hashsigs_rs::shrincs::{ActionContext, ShrincsSigner, ShrincsVerifier};
+
+    let (mut signing_key, public_key) =
+        ShrincsSigner::keygen(b"alloc-budget shrincs stateful key", 4).expect("keygen");
+    let verifier = ShrincsVerifier::new();
+    let commitment: [u8; 32] = public_key
+        .public_key_commitment
+        .as_slice()
+        .try_into()
+        .expect("32-byte commitment");
+    let context = ActionContext {
+        domain_separator: [0x61; 32],
+        nonce: [0x62; 32],
+        key_version: [0x63; 32],
+        action_type: [0x64; 32],
+        payload_hash: [0x65; 32],
+    };
+    let action_sig =
+        ShrincsSigner::sign_stateful_action(&mut signing_key, &public_key, &context).expect("sign");
+
+    let (valid, allocs) =
+        measured(|| verifier.verify_stateful(commitment, &public_key, &context, &action_sig));
+    assert!(valid);
+    assert_verify_budget("SHRINCS stateful dispatch verify", allocs);
+}
