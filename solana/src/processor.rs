@@ -352,7 +352,13 @@ fn process_sphincs_plus_c_verify(
 ) -> ProgramResult {
     let signature = signature.into();
     let is_valid = SphincsPlusCVerifier::new().verify(&key, &hash, &signature);
+    // Fail closed: a CPI caller that checks only instruction success must not
+    // treat an invalid signature as accepted. Write the boolean first for
+    // callers that inspect return data, then abort the transaction on invalid.
     set_return_data(&[is_valid as u8]);
+    if !is_valid {
+        return Err(ProgramError::InvalidArgument);
+    }
     Ok(())
 }
 
@@ -371,7 +377,11 @@ fn process_shrincs_verify_stateful(
         &context,
         &signature,
     );
+    // Fail closed: see `process_sphincs_plus_c_verify`.
     set_return_data(&[is_valid as u8]);
+    if !is_valid {
+        return Err(ProgramError::InvalidArgument);
+    }
     Ok(())
 }
 
@@ -390,7 +400,11 @@ fn process_shrincs_verify_stateless(
         &context,
         &signature,
     );
+    // Fail closed: see `process_sphincs_plus_c_verify`.
     set_return_data(&[is_valid as u8]);
+    if !is_valid {
+        return Err(ProgramError::InvalidArgument);
+    }
     Ok(())
 }
 
@@ -401,13 +415,6 @@ pub fn process_instruction(
 ) -> ProgramResult {
     if instruction_data.is_empty() {
         return Err(ProgramError::InvalidInstructionData);
-    }
-
-    // Only verify signatures for accounts that are marked as signers
-    for account_info in accounts.iter() {
-        if account_info.is_signer && account_info.signer_key().is_none() {
-            return Err(ProgramError::MissingRequiredSignature);
-        }
     }
 
     // Initialize WOTS+ instance

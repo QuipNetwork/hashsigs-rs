@@ -552,14 +552,10 @@ pub mod sphincs_plus_c_solana_test {
             .process_transaction_with_metadata(transaction)
             .await
             .unwrap();
-        let metadata = transaction_result.metadata.unwrap();
-        msg!(
-            "SPHINCS+C verify (tampered hash) compute units: {}",
-            metadata.compute_units_consumed
-        );
 
-        let return_data = metadata.return_data.unwrap();
-        assert_eq!(return_data.data, vec![0]);
+        // Fail closed: an invalid signature must abort the instruction so a CPI
+        // caller checking only success does not treat it as accepted.
+        assert!(transaction_result.result.is_err());
     }
 
     #[tokio::test]
@@ -704,12 +700,7 @@ pub mod sphincs_plus_c_solana_test {
             .process_transaction_with_metadata(transaction)
             .await
             .unwrap();
-        let metadata = transaction_result.metadata.unwrap();
-        msg!(
-            "SHRINCS stateful verify tampered ({}) compute units: {}",
-            hashsigs_rs::shrincs::PROFILE_NAME,
-            metadata.compute_units_consumed
-        );
-        assert_eq!(metadata.return_data.unwrap().data, vec![0]);
+        // Fail closed: the tampered signature must abort the instruction.
+        assert!(transaction_result.result.is_err());
     }
 }
