@@ -20,7 +20,6 @@ import { createHash } from "node:crypto";
 // in for whatever digest a real caller computes.
 const hash32 = (label) => new Uint8Array(createHash("sha256").update(label).digest());
 const MSG = hash32("hashsigs-noble-conformance-message");
-const HEX32 = (byte) => "0x" + byte.repeat(32);
 const HEX_RE = /^0x[0-9a-f]*$/;
 
 async function loadHashSigsFor(load) {
@@ -44,7 +43,11 @@ async function loadHashSigsFor(load) {
     verifyStateless: (signature, message, publicKeyCommitment) =>
       wasm.shrincsVerifyStateless(signature, message, publicKeyCommitment),
   };
-  return { wasm, sphincsPlusC, shrincs };
+  const shrincsImportSigningKey = (secretKey) => {
+    const keys = wasm.shrincsImportSigningKey(secretKey);
+    return { secretKey: keys.secretKey, publicKey: keys.publicKey, publicKeyCommitment: keys.publicKeyCommitment };
+  };
+  return { wasm, sphincsPlusC, shrincs, shrincsImportSigningKey };
 }
 
 const loaders = [
@@ -63,7 +66,7 @@ test("entry: runtime surface is exactly { loadShrincsWasm, loadHashSigs } in BOT
 });
 
 for (const [name, load] of loaders) {
-  test(`${name}: loader resolves and exposes the noble + verifier-interface surface`, async () => {
+  test(`${name}: loader resolves and exposes the noble-style surface`, async () => {
     const w = await load();
     for (const fn of [
       "sphincsPlusCKeygen",
@@ -75,10 +78,6 @@ for (const [name, load] of loaders) {
       "shrincsVerify",
       "shrincsVerifyStateless",
       "shrincsImportSigningKey",
-      "shrincsVerifyStatefulRaw",
-      "shrincsVerifyStatelessRaw",
-      "shrincsVerifyEnvelope",
-      "shrincsVerifyStatelessEnvelope",
       "version",
     ]) {
       assert.equal(typeof w[fn], "function", `missing ${fn}`);
@@ -217,22 +216,22 @@ for (const [name, load] of loaders) {
   });
 
   test(`${name}: shrincsImportSigningKey round-trips a persisted secretKey`, async () => {
-    const { shrincs, wasm } = await loadHashSigsFor(load);
+    const { shrincs, shrincsImportSigningKey } = await loadHashSigsFor(load);
     const keys = shrincs.keygen(SEED, 4);
     shrincs.sign(MSG, keys); // advance past leaf 1 so the import exercises a non-fresh counter
 
-    const imported = wasm.shrincsImportSigningKey(keys.secretKey);
+    const imported = shrincsImportSigningKey(keys.secretKey);
     assert.deepEqual(imported.secretKey, keys.secretKey);
     assert.deepEqual(imported.publicKeyCommitment, keys.publicKeyCommitment);
   });
 
   test(`${name}: shrincsImportSigningKey rejects a tampered secretKey`, async () => {
-    const { shrincs, wasm } = await loadHashSigsFor(load);
+    const { shrincs, shrincsImportSigningKey } = await loadHashSigsFor(load);
     const keys = shrincs.keygen(SEED, 4);
     const tampered = keys.secretKey.slice();
     tampered[0] ^= 1; // corrupts statefulSkSeed, invalidating the committed statefulRoot
     assert.throws(
-      () => wasm.shrincsImportSigningKey(tampered),
+      () => shrincsImportSigningKey(tampered),
       (e) => e instanceof Error && e.code === "ERR_IMPORT_INVALID",
     );
   });
@@ -256,14 +255,14 @@ test("cross-build: node and web agree on noble keys and signatures", async () =>
   assert.equal(shrincsWeb.verify(shrincsSigNode, MSG, shrincsKeysWeb.publicKeyCommitment), true);
 });
 
-// ── migrated byte surface: WasmShrincsAccount + message hashes + raw verify ──
-// Top-level scalar params are `Uint8Array`. The account action/rotation methods
-// take the envelope bytes the noble signer produces; the message-hash helpers
-// and the raw/action verify functions still accept the hex `ActionContext` /
-// `ShrincsPublicKey` / `Signature` DTOs.
+// ── WasmShrincsAccount: byte params, policy state, and message-hash methods ──
+// Every account param is a `Uint8Array`. Action/rotation methods take the
+// signature bytes the noble signer produces; the account's own
+// `*MessageHash` methods build the exact message a caller must sign from the
+// account's own state, so callers never assemble that context by hand.
 
 for (const [name, load] of loaders) {
-  test(`${name}: WasmShrincsAccount takes byte params and tracks policy/action state`, async () => {
+  test(`${name}: WasmShrincsAccount takes byte params and tracks policy state`, async () => {
     const { wasm, shrincs } = await loadHashSigsFor(load);
     const keys = shrincs.keygen(SEED, 8);
 
@@ -277,19 +276,6 @@ for (const [name, load] of loaders) {
     assert.equal(snapshot.statefulPolicy, "monotonic-index");
     assert.equal(typeof snapshot.statelessSignaturesUsed, "bigint");
 
-    // Verify-only helpers (bytes-ified `expectedPublicKeyCommitment`/`message`)
-    // still operate on the hex `ShrincsPublicKey`/`Signature` DTOs — decode the
-    // wasm keygen's flat `publicKey` bundle into that shape by hand for the
-    // account/verify-raw calls below.
-    const toHex = (bytes) => "0x" + Buffer.from(bytes).toString("hex");
-    const publicKeyDto = {
-      statefulPublicKey: toHex(keys.publicKey.slice(0, 68)),
-      publicKeyCommitment: toHex(keys.publicKey.slice(68, 100)),
-      pkSeed: toHex(keys.publicKey.slice(100, 132)),
-      hypertreeRoot: toHex(keys.publicKey.slice(132, 164)),
-    };
-    assert.equal(publicKeyDto.publicKeyCommitment, toHex(keys.publicKeyCommitment));
-
     account.setStatefulPolicyRecoveryRotation(new Uint8Array(32).fill(1));
     account.enterRecoveryMode(new Uint8Array(32).fill(1));
     const afterPolicy = account.snapshot();
@@ -297,8 +283,9 @@ for (const [name, load] of loaders) {
     assert.equal(afterPolicy.recoveryMode, true);
   });
 
-  test(`${name}: account verifyStatefulAction accepts a noble-signed envelope`, async () => {
-    // Proves the bridge: the noble signer's envelope bytes feed the account's
+  test(`${name}: account verifyStatefulAction accepts the signature shrincs.sign() returns`, async () => {
+    // Proves the bridge: account.statefulActionMessageHash() builds the exact
+    // message shrincs.sign() must cover, and its output feeds the account's
     // action verifier directly (no DTO assembly). Default monotonic policy
     // accepts the leaf-1 signature the first shrincs.sign produces.
     const { wasm, shrincs } = await loadHashSigsFor(load);
@@ -312,58 +299,59 @@ for (const [name, load] of loaders) {
     const snap = account.snapshot();
     const actionType = new Uint8Array(32).fill(0x44);
     const payloadHash = new Uint8Array(32).fill(0x55);
-    const toHex = (b) => "0x" + Buffer.from(b).toString("hex");
-    const message = wasm.shrincsStatefulActionMessageHash(keys.publicKeyCommitment, {
-      domainSeparator: snap.domainSeparator,
-      nonce: snap.nonce,
-      keyVersion: snap.keyVersion,
-      actionType: toHex(actionType),
-      payloadHash: toHex(payloadHash),
-    });
-    const envelope = shrincs.sign(message, keys); // stateful, consumes leaf 1
+    const message = account.statefulActionMessageHash(actionType, payloadHash);
+    assert.ok(message instanceof Uint8Array);
+    assert.equal(message.length, 32);
+
+    const signature = shrincs.sign(message, keys); // stateful, consumes leaf 1
     // Resolves (no throw) and advances the account nonce.
-    account.verifyStatefulAction(actionType, payloadHash, envelope);
+    account.verifyStatefulAction(actionType, payloadHash, signature);
     const after = account.snapshot();
     assert.notEqual(after.nonce, snap.nonce, "a verified action advances the nonce");
   });
 
-  test(`${name}: shrincsVerifyEnvelope / shrincsVerifyStatelessEnvelope take byte params`, async () => {
-    // shrincsSign/SignStateless and shrincsVerifyEnvelope/StatelessEnvelope all
-    // operate on the 32-byte message directly (no internal hashing), so this is
-    // a full round-trip: a signature over `hash` verifies against `hash`.
+  test(`${name}: account verifyStatelessAction accepts the signature shrincs.signStateless() returns`, async () => {
     const { wasm, shrincs } = await loadHashSigsFor(load);
-    const keys = shrincs.keygen(SEED, 4);
-    const hash = new Uint8Array(32).fill(9);
-
-    const statefulEnvelope = wasm.shrincsSign(hash, keys.secretKey);
-    assert.equal(wasm.shrincsVerifyEnvelope(keys.publicKeyCommitment, hash, statefulEnvelope), true);
-
-    const statelessEnvelope = wasm.shrincsSignStateless(hash, keys.secretKey);
-    assert.equal(
-      wasm.shrincsVerifyStatelessEnvelope(keys.publicKeyCommitment, hash, statelessEnvelope),
-      true,
+    const keys = shrincs.keygen(SEED, 8);
+    const account = new wasm.WasmShrincsAccount(
+      new Uint8Array(32).fill(1),
+      new Uint8Array(32).fill(2),
+      new Uint8Array(20).fill(3),
+      keys.publicKeyCommitment,
     );
+    const actionType = new Uint8Array(32).fill(0x66);
+    const payloadHash = new Uint8Array(32).fill(0x77);
+    const message = account.statelessActionMessageHash(actionType, payloadHash);
+    const signature = shrincs.signStateless(message, keys);
 
-    const badKey = new Uint8Array(31);
-    assert.throws(
-      () => wasm.shrincsVerifyEnvelope(keys.publicKeyCommitment, badKey, statefulEnvelope),
-      (e) => e instanceof Error && e.code === "ERR_BAD_LENGTH",
-    );
+    account.verifyStatelessAction(actionType, payloadHash, signature);
+    const after = account.snapshot();
+    assert.equal(after.statelessSignaturesUsed, 1n);
   });
 
-  test(`${name}: shrincsStatefulActionMessageHash returns bytes`, async () => {
+  test(`${name}: account rotateFullKey accepts a fullRotationMessageHash signature`, async () => {
+    // Proves the rotation bridge end-to-end: sign
+    // account.fullRotationMessageHash(nextPublicKey) with the CURRENT key's
+    // stateless path, then rotate to that next key.
     const { wasm, shrincs } = await loadHashSigsFor(load);
-    const keys = shrincs.keygen(SEED, 4);
-    const context = {
-      domainSeparator: HEX32("01"),
-      nonce: HEX32("02"),
-      keyVersion: HEX32("03"),
-      actionType: HEX32("04"),
-      payloadHash: HEX32("05"),
-    };
-    const message = wasm.shrincsStatefulActionMessageHash(keys.publicKeyCommitment, context);
-    assert.ok(message instanceof Uint8Array);
-    assert.equal(message.length, 32);
+    const currentKeys = shrincs.keygen(SEED, 8);
+    const nextKeys = shrincs.keygen(hash32("hashsigs-rotation-next-key"), 8);
+    const account = new wasm.WasmShrincsAccount(
+      new Uint8Array(32).fill(1),
+      new Uint8Array(32).fill(2),
+      new Uint8Array(20).fill(3),
+      currentKeys.publicKeyCommitment,
+    );
+    account.setStatefulPolicyRecoveryRotation(new Uint8Array(32).fill(1));
+    account.enterRecoveryMode(new Uint8Array(32).fill(1));
+
+    const recoveryMessage = account.fullRotationMessageHash(nextKeys.publicKey);
+    const recoverySignature = shrincs.signStateless(recoveryMessage, currentKeys);
+
+    account.rotateFullKey(recoverySignature, nextKeys.publicKey);
+    const after = account.snapshot();
+    const toHex = (b) => "0x" + Buffer.from(b).toString("hex");
+    assert.equal(after.currentShrincsPublicKey, toHex(nextKeys.publicKeyCommitment));
   });
 }
 

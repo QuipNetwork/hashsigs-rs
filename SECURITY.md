@@ -198,20 +198,27 @@ Guidance:
 
 ### WASM exports include low-level and high-level surfaces
 
-The WASM layer exposes both primitive and wrapper-oriented APIs.
+The WASM layer exposes both a low-level noble-style signing/verification
+primitive (`sphincsPlusC`/`shrincs`) and a high-level, policy-enforcing
+`WasmShrincsAccount` wrapper.
 
 Security implication:
 
-- JS/TS callers can reach low-level raw signing/verification functionality
-- misuse is possible if integrations ignore canonical message construction or
-  freshness state
+- `sphincsPlusC.sign()`/`verify()` and `shrincs.sign()`/`verify()` perform no
+  freshness, replay, or policy checks; they sign and verify exactly the
+  32-byte message they're given
+- misuse is possible if integrations build authorization logic on the raw
+  noble-style functions and skip canonical message construction or freshness
+  state
 
 Guidance:
 
-- prefer the canonical action / rotation message-hash helpers when using the
-  account wrapper from JS/TS
-- prefer wrapper-driven flows over ad hoc raw-message signing for production
-  authorization use cases
+- prefer `WasmShrincsAccount`'s `statefulActionMessageHash` /
+  `statelessActionMessageHash` / `statefulRotationMessageHash` /
+  `fullRotationMessageHash` methods, which build the canonical message from
+  the account's own state, over hand-rolled message construction
+- prefer the account wrapper's action and rotation flows over ad hoc
+  raw-message signing for production authorization use cases
 
 ### Verifier timing / constant-time threat model
 

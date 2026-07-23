@@ -70,8 +70,13 @@ pub mod account;
 // is the stateless scheme and is oblivious to `shrincs`; `shrincs` builds
 // its hybrid (stateful UXMSS + stateless recovery) on top of
 // `sphincs_plus_c`. `account` and `wasm` sit above both.
-/// Solidity-ABI codec for the shared wire types (envelopes, keys,
-/// ERC-1271 action envelopes). Scheme-neutral: depends only on `types`.
+/// Internal ABI codec for Solidity/on-chain interop and the cross-repo
+/// vector tests (`tests/envelope_vectors.rs`,
+/// `tests/generate_shrincs_vectors.rs`). Not part of the stable public API —
+/// subject to change without notice. JS/TS consumers never see this module;
+/// they get opaque signature bytes from `shrincs.sign()` /
+/// `shrincs.signStateless()` via the `wasm` module.
+#[doc(hidden)]
 pub mod envelope;
 pub mod signer;
 pub mod verifier;

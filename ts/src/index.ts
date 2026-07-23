@@ -3,17 +3,16 @@
 // `loadShrincsWasm()` returns the raw wasm module with a uniform,
 // env-agnostic interface: the `"browser"` field in package.json swaps the
 // Node loader for the browser loader at bundle time, so consumers write the
-// same code either way. It stays the low-level escape hatch (used by
-// `WasmShrincsAccount` and the verifier-interface / message-hash free
-// functions below).
+// same code either way. It stays the low-level escape hatch used by
+// `WasmShrincsAccount`.
 //
 // `loadHashSigs()` is the noble-style entry point: it awaits the same wasm
-// module once and returns `{ sphincsPlusC, shrincs }`, two plain namespace
-// objects whose methods take/return `Uint8Array` directly — mirroring
-// `@noble/post-quantum`'s call shape (`sign(message, ...)`,
-// `verify(signature, message, publicKey)`). The async boundary is
-// unavoidable (a `.wasm` module has to be instantiated before any of this
-// runs), so unlike noble's fully synchronous API, callers await
+// module once and returns `{ sphincsPlusC, shrincs, shrincsImportSigningKey }`
+// — two plain namespace objects plus one standalone function, all working
+// directly with `Uint8Array` — mirroring `@noble/post-quantum`'s call shape
+// (`sign(message, ...)`, `verify(signature, message, publicKey)`). The async
+// boundary is unavoidable (a `.wasm` module has to be instantiated before any
+// of this runs), so unlike noble's fully synchronous API, callers await
 // `loadHashSigs()` once and then call every method synchronously.
 import { loadShrincsWasm } from "./loader.node.js";
 export { loadShrincsWasm };
@@ -24,27 +23,9 @@ export { loadShrincsWasm };
 export type ShrincsWasmModule = typeof import("./nodejs/hashsigs_rs.js");
 
 // The serde DTO interfaces generated from the Rust structs (via Tsify), so
-// consumers can name the object shapes the verifier-interface / message-hash
-// free functions and `WasmShrincsAccount` still accept and return (these
-// stay hex-string based — see the wasm-noble delivery report on scope).
-export type {
-  ShrincsPublicKey,
-  StatefulSignature,
-  StatelessSignature,
-  ForsSignature,
-  ForsEntry,
-  // Rust renamed the wasm DTO structs to Wasm*-prefixed names (to disambiguate
-  // them from the core crypto types); alias back to the stable public names so
-  // consumers' imports keep working.
-  WasmWotsCSignature as WotsCSignature,
-  WasmHypertreeLayerSignature as HypertreeLayerSignature,
-  ActionContext,
-  RotationContext,
-  StatefulRotationTarget,
-  RotationTarget,
-  ShrincsAccountSnapshot,
-  ShrincsErrorCode,
-} from "./nodejs/hashsigs_rs.js";
+// consumers can name the object shapes `WasmShrincsAccount.snapshot()`
+// returns and the error codes it (and every other function here) throws.
+export type { ShrincsAccountSnapshot, ShrincsErrorCode } from "./nodejs/hashsigs_rs.js";
 
 // The live handle classes, exported TYPE-ONLY. Consumers never construct
 // these directly (private constructors — instances come from
@@ -145,6 +126,23 @@ function makeShrincs(wasm: ShrincsWasmModule) {
   };
 }
 
+/**
+ * Rebuild a `ShrincsKeys` object from a previously persisted 264-byte
+ * `secretKey` (e.g. `keys.secretKey` after several `shrincs.sign()` calls).
+ * Recomputes both roots and the commitment from the seeds and rejects any
+ * mismatch with `ERR_IMPORT_INVALID`. Accepts an already-exhausted key:
+ * stateful signing then throws `ERR_STATEFUL_LEAVES_EXHAUSTED`, but
+ * stateless signing still works.
+ */
+function importShrincsSigningKey(wasm: ShrincsWasmModule, secretKey: Uint8Array): ShrincsKeys {
+  const keys = wasm.shrincsImportSigningKey(secretKey);
+  return {
+    secretKey: keys.secretKey,
+    publicKey: keys.publicKey,
+    publicKeyCommitment: keys.publicKeyCommitment,
+  };
+}
+
 /** The `sphincsPlusC` namespace object `loadHashSigs()` resolves to. */
 export type SphincsPlusC = ReturnType<typeof makeSphincsPlusC>;
 /** The `shrincs` namespace object `loadHashSigs()` resolves to. */
@@ -152,7 +150,8 @@ export type Shrincs = ReturnType<typeof makeShrincs>;
 
 /**
  * Load the wasm module once and assemble the noble-style `sphincsPlusC` and
- * `shrincs` namespace objects on top of it.
+ * `shrincs` namespace objects, plus the standalone `shrincsImportSigningKey`
+ * helper, on top of it.
  *
  * ```ts
  * const { sphincsPlusC, shrincs } = await loadHashSigs();
@@ -161,9 +160,17 @@ export type Shrincs = ReturnType<typeof makeShrincs>;
  * sphincsPlusC.verify(sig, message, keys.publicKey); // true
  * ```
  */
-export async function loadHashSigs(): Promise<{ sphincsPlusC: SphincsPlusC; shrincs: Shrincs }> {
+export async function loadHashSigs(): Promise<{
+  sphincsPlusC: SphincsPlusC;
+  shrincs: Shrincs;
+  shrincsImportSigningKey: (secretKey: Uint8Array) => ShrincsKeys;
+}> {
   const wasm = await loadShrincsWasm();
-  return { sphincsPlusC: makeSphincsPlusC(wasm), shrincs: makeShrincs(wasm) };
+  return {
+    sphincsPlusC: makeSphincsPlusC(wasm),
+    shrincs: makeShrincs(wasm),
+    shrincsImportSigningKey: (secretKey: Uint8Array) => importShrincsSigningKey(wasm, secretKey),
+  };
 }
 
 // ── compile-time conformance (zero emit, zero runtime) ─────────────────────
