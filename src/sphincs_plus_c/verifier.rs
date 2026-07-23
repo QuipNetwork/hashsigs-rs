@@ -114,7 +114,9 @@ impl crate::verifier::VerifierInterface for SphincsPlusCVerifier {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
     use crate::envelope;
+    #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
     use crate::verifier::{VerifierInterface, VerifyOutcome};
 
     #[test]
