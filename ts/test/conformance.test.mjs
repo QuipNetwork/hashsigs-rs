@@ -256,10 +256,11 @@ test("cross-build: node and web agree on noble keys and signatures", async () =>
   assert.equal(shrincsWeb.verify(shrincsSigNode, MSG, shrincsKeysWeb.publicKeyCommitment), true);
 });
 
-// ── migrated hex-DTO surface: WasmShrincsAccount + message hashes + raw verify ──
-// These functions moved their top-level scalar params from hex `&str` to
-// `Uint8Array`; the nested signature/context/public-key DTOs stay hex-string
-// based (see the wasm-noble delivery report on scope).
+// ── migrated byte surface: WasmShrincsAccount + message hashes + raw verify ──
+// Top-level scalar params are `Uint8Array`. The account action/rotation methods
+// take the envelope bytes the noble signer produces; the message-hash helpers
+// and the raw/action verify functions still accept the hex `ActionContext` /
+// `ShrincsPublicKey` / `Signature` DTOs.
 
 for (const [name, load] of loaders) {
   test(`${name}: WasmShrincsAccount takes byte params and tracks policy/action state`, async () => {
@@ -296,30 +297,51 @@ for (const [name, load] of loaders) {
     assert.equal(afterPolicy.recoveryMode, true);
   });
 
+  test(`${name}: account verifyStatefulAction accepts a noble-signed envelope`, async () => {
+    // Proves the bridge: the noble signer's envelope bytes feed the account's
+    // action verifier directly (no DTO assembly). Default monotonic policy
+    // accepts the leaf-1 signature the first shrincs.sign produces.
+    const { wasm, shrincs } = await loadHashSigsFor(load);
+    const keys = shrincs.keygen(SEED, 8);
+    const account = new wasm.WasmShrincsAccount(
+      new Uint8Array(32).fill(1),
+      new Uint8Array(32).fill(2),
+      new Uint8Array(20).fill(3),
+      keys.publicKeyCommitment,
+    );
+    const snap = account.snapshot();
+    const actionType = new Uint8Array(32).fill(0x44);
+    const payloadHash = new Uint8Array(32).fill(0x55);
+    const toHex = (b) => "0x" + Buffer.from(b).toString("hex");
+    const message = wasm.shrincsStatefulActionMessageHash(keys.publicKeyCommitment, {
+      domainSeparator: snap.domainSeparator,
+      nonce: snap.nonce,
+      keyVersion: snap.keyVersion,
+      actionType: toHex(actionType),
+      payloadHash: toHex(payloadHash),
+    });
+    const envelope = shrincs.sign(message, keys); // stateful, consumes leaf 1
+    // Resolves (no throw) and advances the account nonce.
+    account.verifyStatefulAction(actionType, payloadHash, envelope);
+    const after = account.snapshot();
+    assert.notEqual(after.nonce, snap.nonce, "a verified action advances the nonce");
+  });
+
   test(`${name}: shrincsVerifyEnvelope / shrincsVerifyStatelessEnvelope take byte params`, async () => {
-    // `shrincsVerifyEnvelope`/`shrincsVerifyStatelessEnvelope` pin an
-    // ALREADY-32-byte digest and do not hash it again (unlike the noble
-    // `shrincs.verify`/`verifyStateless`, which keccak256-hash their
-    // `message` argument first) — see the JSDoc on both. `wasm.shrincsSign`
-    // always signs `keccak256(message)`, so recovering the exact digest it
-    // signed would need a JS keccak256 implementation, which this package
-    // has no dependency on. The crypto round-trip through this same
-    // `verify_envelope`/`verify_stateless_envelope` Rust code path is
-    // already covered end-to-end by the `shrincs.verify`/`verifyStateless`
-    // tests above; this test only proves the byte-typed parameter plumbing
-    // (accepts `Uint8Array`, still throws `ERR_BAD_LENGTH` on a malformed
-    // fixed-width field).
+    // shrincsSign/SignStateless and shrincsVerifyEnvelope/StatelessEnvelope all
+    // operate on the 32-byte message directly (no internal hashing), so this is
+    // a full round-trip: a signature over `hash` verifies against `hash`.
     const { wasm, shrincs } = await loadHashSigsFor(load);
     const keys = shrincs.keygen(SEED, 4);
     const hash = new Uint8Array(32).fill(9);
 
     const statefulEnvelope = wasm.shrincsSign(hash, keys.secretKey);
-    assert.equal(typeof wasm.shrincsVerifyEnvelope(keys.publicKeyCommitment, hash, statefulEnvelope), "boolean");
+    assert.equal(wasm.shrincsVerifyEnvelope(keys.publicKeyCommitment, hash, statefulEnvelope), true);
 
     const statelessEnvelope = wasm.shrincsSignStateless(hash, keys.secretKey);
     assert.equal(
-      typeof wasm.shrincsVerifyStatelessEnvelope(keys.publicKeyCommitment, hash, statelessEnvelope),
-      "boolean",
+      wasm.shrincsVerifyStatelessEnvelope(keys.publicKeyCommitment, hash, statelessEnvelope),
+      true,
     );
 
     const badKey = new Uint8Array(31);

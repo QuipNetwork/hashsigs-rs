@@ -456,40 +456,6 @@ import { loadShrincsWasm, loadHashSigs } from "@quip.network/hashsigs-wasm";
 const wasm = await loadShrincsWasm();
 const { shrincs } = await loadHashSigs();
 
-const keys = shrincs.keygen(seed, 4);
-const envelope = wasm.shrincsSign(message32, keys.secretKey);
-const ok = wasm.shrincsVerifyEnvelope(keys.publicKeyCommitment, message32, envelope);
-```
-
-### Account exports
-
-- `new WasmShrincsAccount(owner, chainId, contractAddress, publicKeyCommitment)`
-  — `owner` and `chainId` are 32-byte `Uint8Array`, `contractAddress` is a
-  20-byte `Uint8Array`, `publicKeyCommitment` is a 32-byte `Uint8Array`
-- `snapshot()`
-- `verifyStatefulAction(...)`
-- `verifyStatelessAction(...)`
-- `rotateToFreshKey(...)`
-- `rotateFullKey(...)`
-- `setStatefulPolicyMonotonicIndex(...)`
-- `setStatefulPolicyRecoveryRotation(...)`
-- `setStatefulPolicyLeafBitmap(...)`
-- `enterRecoveryMode(...)`
-- `isValidSignature(...)`
-
-Canonical message-hash helpers, all returning `Uint8Array`:
-
-- `shrincsStatefulActionMessageHash(...)`
-- `shrincsStatelessActionMessageHash(...)`
-- `shrincsStatefulRotationMessageHash(...)`
-- `shrincsFullRotationMessageHash(...)`
-
-```ts
-import { loadShrincsWasm, loadHashSigs } from "@quip.network/hashsigs-wasm";
-
-const wasm = await loadShrincsWasm();
-const { shrincs } = await loadHashSigs();
-
 const owner = new Uint8Array(32).fill(0x11);
 const chainId = new Uint8Array(32).fill(0x22);
 const contractAddress = new Uint8Array(20).fill(0x33);
@@ -502,26 +468,44 @@ const account = new wasm.WasmShrincsAccount(
   keys.publicKeyCommitment,
 );
 
-account.setStatefulPolicyRecoveryRotation(owner);
-account.enterRecoveryMode(owner);
-
-console.log(account.snapshot());
-```
-
-`verifyStatefulAction`, `verifyStatelessAction`, `rotateToFreshKey`, and
-`rotateFullKey` take the structured `ShrincsPublicKey` / `StatefulSignature`
-/ `StatelessSignature` / rotation-target DTOs (see Object shapes below) —
-that part of the surface hasn't moved to bytes. `shrincs.keygen()`'s
-`publicKey` is a flat `Uint8Array(164)` bundle
-(`statefulPublicKey(68) ‖ publicKeyCommitment(32) ‖ pkSeed(32) ‖
-hypertreeRoot(32)`), not the hex DTO these methods expect, so decode it by
-hand when you need one:
-
-```ts
-const toHex = (bytes: Uint8Array) =>
+const actionType = new Uint8Array(32).fill(0x44);
+const payloadHash = new Uint8Array(32).fill(0x55);
+const toHex = (bytes) =>
   "0x" + Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 
-function publicKeyDto(keys: { publicKey: Uint8Array }) {
+// Read the account's current context and build the message it will re-derive
+// and verify against.
+const snap = account.snapshot();
+const message = wasm.shrincsStatefulActionMessageHash(keys.publicKeyCommitment, {
+  domainSeparator: snap.domainSeparator,
+  nonce: snap.nonce,
+  keyVersion: snap.keyVersion,
+  actionType: toHex(actionType),
+  payloadHash: toHex(payloadHash),
+});
+
+const envelope = shrincs.sign(message, keys); // stateful: consumes the next leaf
+account.verifyStatefulAction(actionType, payloadHash, envelope); // throws on rejection
+console.log(account.snapshot()); // nonce advanced
+```
+
+The account action and rotation methods take the envelope bytes the noble
+signer produces. Rotation is the same shape: sign the rotation message with
+`shrincs.signStateless()` and pass that envelope plus the replacement keypair's
+164-byte `publicKey` to `rotateToFreshKey` / `rotateFullKey`.
+
+The lower-level standalone verify functions
+(`shrincsVerifyStatefulRaw` / `shrincsVerifyStatefulAction`,
+`shrincsVerifyStatelessRaw` / `shrincsVerifyStatelessAction`) and the
+message-hash helpers still take the hex `ShrincsPublicKey` / `Signature` /
+`ActionContext` DTOs. `shrincs.keygen()`'s `publicKey` is a flat
+`Uint8Array(164)` bundle
+(`statefulPublicKey(68) ‖ publicKeyCommitment(32) ‖ pkSeed(32) ‖
+hypertreeRoot(32)`), so decode it when one of those functions needs a
+`ShrincsPublicKey`:
+
+```ts
+function publicKeyDto(keys) {
   return {
     statefulPublicKey: toHex(keys.publicKey.slice(0, 68)),
     publicKeyCommitment: toHex(keys.publicKey.slice(68, 100)),
@@ -530,24 +514,6 @@ function publicKeyDto(keys: { publicKey: Uint8Array }) {
   };
 }
 ```
-
-`shrincs.sign()` / `shrincs.signStateless()` don't produce the structured
-`StatefulSignature` / `StatelessSignature` DTO these account methods expect.
-They return an ABI-encoded envelope instead (see `shrincsVerifyEnvelope` /
-`shrincsVerifyStatelessEnvelope` earlier for verifying those directly against
-a `publicKeyCommitment`). Calling `verifyStatefulAction`, `rotateToFreshKey`,
-or `rotateFullKey` needs a signature already in the structured DTO shape,
-typically produced by the same off-chain tooling that produces the
-Solidity-side test vectors this account layer mirrors.
-
-Canonical end-to-end pattern for the DTO-based calls:
-
-- read `domainSeparator`, `nonce`, and `keyVersion` from `account.snapshot()`
-- hash with the matching message helper (`shrincsStatefulActionMessageHash`
-  and friends, all returning `Uint8Array`)
-- sign with a signer that returns the structured `StatefulSignature` /
-  `StatelessSignature` DTO
-- submit through the matching account verify or rotate method
 
 ### Object shapes
 

@@ -181,19 +181,17 @@ impl WasmShrincsAccount {
     #[wasm_bindgen(js_name = verifyStatefulAction)]
     pub fn verify_stateful_action(
         &mut self,
-        #[wasm_bindgen(unchecked_param_type = "ShrincsPublicKey")] public_key: JsValue,
         action_type: &[u8],
         payload_hash: &[u8],
-        #[wasm_bindgen(unchecked_param_type = "StatefulSignature")] signature: JsValue,
+        envelope: &[u8],
     ) -> Result<(), JsValue> {
-        let public_key: ShrincsPublicKey =
-            serde_wasm_bindgen::from_value(public_key).map_err(js_error_from_serde("publicKey"))?;
-        let signature: StatefulSignature =
-            serde_wasm_bindgen::from_value(signature).map_err(js_error_from_serde("signature"))?;
-        let public_key = parse_public_key(&public_key).map_err(js_error)?;
+        // `envelope` is the stateful signature envelope `shrincs.sign` produces
+        // (ABI-encoded PublicKey + StatefulSignature); decode it directly into
+        // the core types the account verifier consumes.
+        let (public_key, signature) =
+            crate::envelope::decode_stateful_envelope(envelope).ok_or_else(malformed_envelope)?;
         let action_type = bytes_word32(action_type).map_err(js_error)?;
         let payload_hash = bytes_word32(payload_hash).map_err(js_error)?;
-        let signature = parse_stateful_signature(&signature).map_err(js_error)?;
         self.inner
             .verifyStatefulAction(&public_key, action_type, payload_hash, &signature)
             .map_err(account_error_to_js)
@@ -210,19 +208,16 @@ impl WasmShrincsAccount {
     #[wasm_bindgen(js_name = verifyStatelessAction)]
     pub fn verify_stateless_action(
         &mut self,
-        #[wasm_bindgen(unchecked_param_type = "ShrincsPublicKey")] public_key: JsValue,
         action_type: &[u8],
         payload_hash: &[u8],
-        #[wasm_bindgen(unchecked_param_type = "StatelessSignature")] signature: JsValue,
+        envelope: &[u8],
     ) -> Result<(), JsValue> {
-        let public_key: ShrincsPublicKey =
-            serde_wasm_bindgen::from_value(public_key).map_err(js_error_from_serde("publicKey"))?;
-        let signature: StatelessSignature =
-            serde_wasm_bindgen::from_value(signature).map_err(js_error_from_serde("signature"))?;
-        let public_key = parse_public_key(&public_key).map_err(js_error)?;
+        // `envelope` is the stateless signature envelope `shrincs.signStateless`
+        // produces (ABI-encoded PublicKey + StatelessSignature).
+        let (public_key, signature) =
+            crate::envelope::decode_stateless_envelope(envelope).ok_or_else(malformed_envelope)?;
         let action_type = bytes_word32(action_type).map_err(js_error)?;
         let payload_hash = bytes_word32(payload_hash).map_err(js_error)?;
-        let signature = parse_stateless_signature(&signature).map_err(js_error)?;
         self.inner
             .verifyStatelessAction(&public_key, action_type, payload_hash, &signature)
             .map_err(account_error_to_js)
@@ -236,22 +231,18 @@ impl WasmShrincsAccount {
     #[wasm_bindgen(js_name = rotateToFreshKey)]
     pub fn rotate_to_fresh_key(
         &mut self,
-        #[wasm_bindgen(unchecked_param_type = "ShrincsPublicKey")] current_public_key: JsValue,
-        #[wasm_bindgen(unchecked_param_type = "StatelessSignature")] recovery_signature: JsValue,
-        #[wasm_bindgen(unchecked_param_type = "StatefulRotationTarget")] next_key: JsValue,
+        recovery_envelope: &[u8],
+        next_public_key: &[u8],
     ) -> Result<(), JsValue> {
-        let current_public_key: ShrincsPublicKey =
-            serde_wasm_bindgen::from_value(current_public_key)
-                .map_err(js_error_from_serde("currentPublicKey"))?;
-        let recovery_signature: StatelessSignature =
-            serde_wasm_bindgen::from_value(recovery_signature)
-                .map_err(js_error_from_serde("recoverySignature"))?;
-        let next_key: StatefulRotationTarget =
-            serde_wasm_bindgen::from_value(next_key).map_err(js_error_from_serde("nextKey"))?;
-        let current_public_key = parse_public_key(&current_public_key).map_err(js_error)?;
-        let recovery_signature =
-            parse_stateless_signature(&recovery_signature).map_err(js_error)?;
-        let next_key = parse_stateful_rotation_target(&next_key).map_err(js_error)?;
+        // The recovery envelope (from `shrincs.signStateless`) carries the
+        // current public key that authorizes the rotation plus the stateless
+        // signature. `next_public_key` is the replacement keypair's 164-byte
+        // flat publicKey; the stateful rotation target is its leading
+        // statefulPublicKey(68) and commitment(32).
+        let (current_public_key, recovery_signature) =
+            crate::envelope::decode_stateless_envelope(recovery_envelope)
+                .ok_or_else(malformed_envelope)?;
+        let next_key = stateful_rotation_target_from_public_key(next_public_key).map_err(js_error)?;
         self.inner
             .rotateToFreshKey(&current_public_key, &recovery_signature, &next_key)
             .map_err(account_error_to_js)
@@ -265,22 +256,17 @@ impl WasmShrincsAccount {
     #[wasm_bindgen(js_name = rotateFullKey)]
     pub fn rotate_full_key(
         &mut self,
-        #[wasm_bindgen(unchecked_param_type = "ShrincsPublicKey")] current_public_key: JsValue,
-        #[wasm_bindgen(unchecked_param_type = "StatelessSignature")] recovery_signature: JsValue,
-        #[wasm_bindgen(unchecked_param_type = "RotationTarget")] next_key: JsValue,
+        recovery_envelope: &[u8],
+        next_public_key: &[u8],
     ) -> Result<(), JsValue> {
-        let current_public_key: ShrincsPublicKey =
-            serde_wasm_bindgen::from_value(current_public_key)
-                .map_err(js_error_from_serde("currentPublicKey"))?;
-        let recovery_signature: StatelessSignature =
-            serde_wasm_bindgen::from_value(recovery_signature)
-                .map_err(js_error_from_serde("recoverySignature"))?;
-        let next_key: RotationTarget =
-            serde_wasm_bindgen::from_value(next_key).map_err(js_error_from_serde("nextKey"))?;
-        let current_public_key = parse_public_key(&current_public_key).map_err(js_error)?;
-        let recovery_signature =
-            parse_stateless_signature(&recovery_signature).map_err(js_error)?;
-        let next_key = parse_rotation_target(&next_key).map_err(js_error)?;
+        // Full rotation replaces the whole bundle: `next_public_key` is the
+        // replacement keypair's 164-byte flat publicKey, which is exactly a
+        // RotationTarget (statefulPublicKey(68)‖commitment(32)‖pkSeed(32)‖
+        // hypertreeRoot(32)).
+        let (current_public_key, recovery_signature) =
+            crate::envelope::decode_stateless_envelope(recovery_envelope)
+                .ok_or_else(malformed_envelope)?;
+        let next_key = rotation_target_from_public_key(next_public_key).map_err(js_error)?;
         self.inner
             .rotateFullKey(&current_public_key, &recovery_signature, &next_key)
             .map_err(account_error_to_js)
@@ -617,6 +603,59 @@ fn encode_public_key_flat(public_key: &PublicKey) -> alloc::vec::Vec<u8> {
     out.extend_from_slice(&public_key.pk_seed);
     out.extend_from_slice(&public_key.hypertree_root);
     out
+}
+
+
+/// Build the `malformed envelope` error the account envelope-decode paths
+/// raise when ABI framing cannot be decoded.
+#[cfg(feature = "wasm-bindings")]
+fn malformed_envelope() -> JsValue {
+    js_error(WasmErr {
+        code: ERR_ENVELOPE_MALFORMED,
+        message: "signature envelope could not be decoded".into(),
+    })
+}
+
+/// Slice a 164-byte flat publicKey into a `StatefulRotationTarget`
+/// (statefulPublicKey(68) then commitment(32); the trailing stateless seed and
+/// root are unused for a stateful-only rotation). Mirrors `encode_public_key_flat`.
+#[cfg(feature = "wasm-bindings")]
+fn stateful_rotation_target_from_public_key(
+    bytes: &[u8],
+) -> Result<crate::types::StatefulRotationTarget, WasmErr> {
+    require_public_key_len(bytes)?;
+    Ok(crate::types::StatefulRotationTarget {
+        stateful_public_key: bytes[0..STATEFUL_PUBLIC_KEY_BYTES].to_vec(),
+        public_key_commitment: bytes[STATEFUL_PUBLIC_KEY_BYTES..STATEFUL_PUBLIC_KEY_BYTES + 32]
+            .to_vec(),
+    })
+}
+
+/// Slice a 164-byte flat publicKey into a full `RotationTarget`
+/// (statefulPublicKey(68)‖commitment(32)‖pkSeed(32)‖hypertreeRoot(32)) — the
+/// exact `encode_public_key_flat` layout.
+#[cfg(feature = "wasm-bindings")]
+fn rotation_target_from_public_key(bytes: &[u8]) -> Result<crate::types::RotationTarget, WasmErr> {
+    require_public_key_len(bytes)?;
+    let c = STATEFUL_PUBLIC_KEY_BYTES;
+    Ok(crate::types::RotationTarget {
+        stateful_public_key: bytes[0..c].to_vec(),
+        public_key_commitment: bytes[c..c + 32].to_vec(),
+        pk_seed: bytes[c + 32..c + 64].to_vec(),
+        hypertree_root: bytes[c + 64..c + 96].to_vec(),
+    })
+}
+
+#[cfg(feature = "wasm-bindings")]
+fn require_public_key_len(bytes: &[u8]) -> Result<(), WasmErr> {
+    let want = STATEFUL_PUBLIC_KEY_BYTES + 96;
+    if bytes.len() != want {
+        return Err(WasmErr {
+            code: ERR_BAD_LENGTH,
+            message: format!("publicKey must be {want} bytes, got {}", bytes.len()),
+        });
+    }
+    Ok(())
 }
 
 /// A generated or imported SHRINCS keypair: `secretKey` is the 264-byte flat
