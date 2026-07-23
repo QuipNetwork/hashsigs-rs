@@ -81,10 +81,10 @@ Published consumers load one async entry point. The package `"browser"` field
 swaps the Node loader for the browser loader at bundle time:
 
 ```ts
-import { loadShrincsWasm } from "@quip.network/hashsigs-wasm";
+import { loadHashSigs } from "@quip.network/hashsigs-wasm";
 
-const wasm = await loadShrincsWasm();
-const keypair = wasm.shrincsKeygen("0x" + "ab".repeat(32), 16);
+const { shrincs } = await loadHashSigs();
+const keys = shrincs.keygen(new Uint8Array(32).fill(0xab), 16);
 ```
 
 CI builds and tests this package on merge requests and the default branch
@@ -94,10 +94,10 @@ suffix) run the same build and publish to npm.
 Current WASM scope:
 
 - supported:
-  - SHRINCS verifier bindings
-  - SHRINCS key generation, raw signing, and signing-key import/export
-  - account-layer wrapper bindings
-  - hex / plain-object JS entry points via `loadShrincsWasm()`
+  - noble-style Uint8Array signer/verifier entry point (`loadHashSigs()`) for
+    SPHINCS+C and SHRINCS keygen, sign, and verify
+  - SHRINCS verifier, account-wrapper, and canonical message-hash bindings via
+    the low-level `loadShrincsWasm()` loader
   - Node and browser packaging under `@quip.network/hashsigs-wasm`
 - not implemented:
   - WOTS-specific wasm bindings
@@ -291,11 +291,12 @@ on each other for canonical message construction.
 Two layers cover the wasm surface:
 
 1. **Rust host tests** (`cargo test --features wasm-bindings`): DTO parsing,
-   hex helpers, and feature-gated conversion logic on the host. They do not
-   run the exported bindings inside a wasm runtime.
+   byte-length validation, and feature-gated conversion logic on the host.
+   They don't run the exported bindings inside a wasm runtime.
 2. **TS packaging conformance** (`cd ts && npm test`, after `npm run build`):
    loads the built `dist/` package through both Node and browser loaders and
-   exercises keygen, sign, verify, import/export, and typed errors.
+   exercises `loadHashSigs()` (keygen, sign, verify, stateful-leaf advance,
+   import) and the low-level `loadShrincsWasm()` account/verifier surface.
 
 For Rust-only wasm target unit tests (optional), install a matching
 `wasm-bindgen-test-runner` and run:
@@ -304,30 +305,128 @@ For Rust-only wasm target unit tests (optional), install a matching
 cargo test --features wasm-bindings --target wasm32-unknown-unknown
 ```
 
-When changing `WasmShrincsKeypair`, `WasmShrincsAccount`, or verifier exports
-in `src/wasm/`, treat the TS conformance suite as the packaging gate and the
-Rust suite as the crypto / DTO gate.
+When changing `WasmShrincsKeys`, `WasmSphincsPlusCKeys`, `WasmShrincsAccount`,
+or verifier exports in `src/wasm/`, treat the TS conformance suite as the
+packaging gate and the Rust suite as the crypto / DTO gate.
 
 ## WASM API
 
-`loadShrincsWasm()` resolves to the generated wasm module. That module exposes
-verifier functions, signer/keypair APIs, and account-wrapper APIs. Byte fields
-are `0x`-prefixed hex strings; structured values are plain camelCase objects.
-`u64` fields cross the boundary as JavaScript `bigint`.
-All DTO shapes and the `WasmShrincsKeypair` / `WasmShrincsAccount` handle
-types are importable (type-only) from the package entry.
+`loadHashSigs()` is the noble-style entry point. It awaits the wasm module
+once and resolves to `{ sphincsPlusC, shrincs }` — two namespace objects
+whose methods take and return `Uint8Array` only; no hex strings appear on
+this surface. After the initial `await`, every call is synchronous.
+
+Messages are exactly 32 bytes. Callers pre-hash arbitrary data and pass the
+32-byte digest, matching how the on-chain and envelope verifiers treat their
+hash argument as the signed message. A wrong-length message throws on sign
+and returns `false` on verify; verify never throws.
+
+### SPHINCS+C (stateless, standalone)
+
+```ts
+import { loadHashSigs } from "@quip.network/hashsigs-wasm";
+
+const { sphincsPlusC } = await loadHashSigs();
+
+const keys = sphincsPlusC.keygen(seed); // seed: 32-byte Uint8Array
+// keys.secretKey: Uint8Array(128)
+// keys.publicKey: Uint8Array(64) = pkSeed ‖ hypertreeRoot
+
+const sig = sphincsPlusC.sign(message32, keys);
+const ok = sphincsPlusC.verify(sig, message32, keys.publicKey); // boolean
+```
+
+`sign` is stateless: it never mutates `keys.secretKey`. `verify` never
+throws — a malformed signature or wrong-length input is simply `false`.
+
+### SHRINCS (hybrid, stateful with stateless recovery)
+
+```ts
+import { loadHashSigs } from "@quip.network/hashsigs-wasm";
+
+const { shrincs } = await loadHashSigs();
+
+const keys = shrincs.keygen(seed, maxSignatures); // maxSignatures defaults to 1024
+// keys.secretKey: Uint8Array(264)
+// keys.publicKey: Uint8Array(164)
+// keys.publicKeyCommitment: Uint8Array(32)
+
+const sig = shrincs.sign(message32, keys);               // STATEFUL: advances keys.secretKey in place
+const recovery = shrincs.signStateless(message32, keys); // stateless recovery path, no mutation
+
+const ok = shrincs.verify(sig, message32, keys.publicKeyCommitment);
+const okRecovery = shrincs.verifyStateless(recovery, message32, keys.publicKeyCommitment);
+```
+
+`shrincs.sign` is stateful:
+
+- each call consumes one one-time UXMSS leaf and advances `keys.secretKey`
+  (a 264-byte `Uint8Array`) **in place** — the same buffer the caller holds
+  gets mutated, so the next `sign` call automatically uses the next leaf. No
+  new key object comes back.
+- once the stateful budget is spent, it throws an `Error` with
+  `error.code === "ERR_STATEFUL_LEAVES_EXHAUSTED"`.
+
+Footgun: cloning `keys.secretKey` and signing from the copy reuses a leaf,
+which breaks the one-time-signature security the scheme depends on. Persist
+and reuse the same advancing buffer. Never sign again from a snapshot taken
+before an earlier `sign` call.
+
+### Persisting and importing a SHRINCS key
+
+`keys.secretKey` is plain bytes. Save and restore it directly: write the
+`Uint8Array` to disk or a database after every stateful `sign()` call. To
+rebuild a keypair object from a persisted 264-byte `secretKey`, use the
+low-level `shrincsImportSigningKey`, reached through `loadShrincsWasm()`:
+
+```ts
+import { loadShrincsWasm } from "@quip.network/hashsigs-wasm";
+
+const wasm = await loadShrincsWasm();
+const keys = wasm.shrincsImportSigningKey(persistedSecretKey);
+```
+
+`shrincsImportSigningKey` recomputes both roots and the commitment from the
+seeds and rejects a mismatch with `ERR_IMPORT_INVALID`. It accepts an
+already-exhausted key: stateful signing then throws
+`ERR_STATEFUL_LEAVES_EXHAUSTED`, but stateless signing still works.
+
+See [SECURITY.md](SECURITY.md) for the operational rules around holding and
+persisting this key material.
+
+### Low-level loader (account and verifier-interface surface)
+
+`loadShrincsWasm()` is the loader the account machine and the
+envelope/action verifier surface use. It resolves to the generated wasm
+module directly, not the `sphincsPlusC`/`shrincs` namespaces described
+earlier. Scalar byte fields — keys, commitments, addresses, message digests —
+are `Uint8Array`. The structured DTOs below (`ShrincsPublicKey`,
+`ActionContext`, `StatefulSignature`, and related shapes) still carry their
+fields as `0x`-prefixed hex strings; that part of the surface hasn't changed.
+`u64` fields cross the boundary as JavaScript `bigint`. All DTO shapes and
+the `WasmShrincsAccount` type are importable (type-only) from the package
+entry.
+
+`loadShrincsWasm()` also exposes the free functions `loadHashSigs()` wraps:
+`shrincsKeygen`, `shrincsImportSigningKey`, `shrincsSign`,
+`shrincsSignStateless`, `shrincsVerify`, `shrincsVerifyStateless`,
+`sphincsPlusCKeygen`, `sphincsPlusCSign`, `sphincsPlusCVerify`, and
+`version()`.
 
 ### Verifier exports
 
+- `shrincsVerifyEnvelope(key, hash, signature)`
+- `shrincsVerifyStatelessEnvelope(key, hash, signature)`
 - `shrincsVerifyStatefulRaw(...)`
 - `shrincsVerifyStatefulAction(...)`
 - `shrincsVerifyStatelessRaw(...)`
 - `shrincsVerifyStatelessAction(...)`
+- `sphincsPlusCVerify(signature, message32, publicKey)` — noble argument order
 
 Malformed hex or wrong-length fields throw an `Error` with a typed
 `error.code` (`ERR_HEX_INVALID`, `ERR_BAD_LENGTH`, or `ERR_INVALID_INPUT` for
 serde shape errors). Cryptographic verification failure returns `false` and
-does not throw.
+doesn't throw.
 
 ```ts
 import { loadShrincsWasm } from "@quip.network/hashsigs-wasm";
@@ -347,89 +446,26 @@ const ok = wasm.shrincsVerifyStatelessAction(
 );
 ```
 
-### Signer exports
-
-- `shrincsKeygen(seedHex, maxStatefulSignatures)`
-- `shrincsImportSigningKey(exportedKey)`
-- `WasmShrincsKeypair.publicKey()`
-- `WasmShrincsKeypair.signStatefulRaw(...)` — returns
-  `{ signature, nextStatefulLeafIndex }`
-- `WasmShrincsKeypair.signStatefulRawAt(messageHex, leaf)`
-- `WasmShrincsKeypair.signStatelessRaw(...)`
-- `WasmShrincsKeypair.exportSigningKeyUnsafe()`
-- `WasmShrincsKeypair.exportSigningKey()` — legacy alias of the `Unsafe` form
-- `WasmShrincsKeypair.destroy()`
-- getters: `nextStatefulLeafIndex`, `maxStatefulSignatures`,
-  `remainingStatefulSignatures`
-- `version()`
+`shrincsVerifyEnvelope` and `shrincsVerifyStatelessEnvelope` verify the
+ABI-encoded envelope bytes `shrincs.sign()` / `shrincs.signStateless()`
+return, directly against a `publicKeyCommitment`, with no DTO involved:
 
 ```ts
-import { loadShrincsWasm } from "@quip.network/hashsigs-wasm";
+import { loadShrincsWasm, loadHashSigs } from "@quip.network/hashsigs-wasm";
 
 const wasm = await loadShrincsWasm();
-// Seed must be at least 32 bytes of hex.
-const keypair = wasm.shrincsKeygen("0x" + "11".repeat(32), 16);
+const { shrincs } = await loadHashSigs();
 
-const publicKey = keypair.publicKey();
-const { signature: statefulSignature, nextStatefulLeafIndex } =
-  keypair.signStatefulRaw("0xdeadbeef");
-const statelessSignature = keypair.signStatelessRaw("0xdeadbeef");
-const signingKeySnapshot = keypair.exportSigningKeyUnsafe();
-// signingKeySnapshot.formatVersion === 1 (required on import)
+const keys = shrincs.keygen(seed, 4);
+const envelope = wasm.shrincsSign(message32, keys.secretKey);
+const ok = wasm.shrincsVerifyEnvelope(keys.publicKeyCommitment, message32, envelope);
 ```
-
-### Keypair lifecycle: `destroy()` and `free()`
-
-`destroy()` is the supported explicit lifecycle method:
-
-- clears in-memory signing and public-key state on the handle (best-effort wipe)
-- permanently invalidates the handle
-- later method or getter calls throw an `Error` with
-  `error.code === "ERR_HANDLE_DESTROYED"`
-
-`free()` is the `wasm-bindgen`-generated finalizer that drops the underlying
-wasm object when the JS wrapper is garbage-collected. Prefer `destroy()` when
-you still hold a reference and want secrets cleared early. After `destroy()`,
-do not call other keypair methods; you may still call `free()` if your
-embedding requires an explicit drop, but the handle is already empty.
-
-### WASM Secret Handling
-
-The WASM signer surface is for environments where the surrounding JS context
-is trusted.
-
-- `WasmShrincsKeypair` holds live signing-key material in wasm memory while the
-  handle exists
-- `exportSigningKeyUnsafe()` materializes the full private signing state into JS
-- XSS, same-origin script, compromised dependencies, or hostile extensions that
-  run in the page can exfiltrate that material
-
-Operational guidance:
-
-- do not use the browser signer in pages that execute untrusted third-party JS
-- avoid `exportSigningKeyUnsafe()` except for explicit backup or migration
-- call `destroy()` as soon as the keypair is no longer needed
-- treat browser memory as a soft boundary, not a hardware-backed secret store
-
-Safe defaults:
-
-- keep the keypair in wasm and use `signStatefulRaw` / `signStatelessRaw` for
-  routine operation
-- export secret state only at explicit persistence boundaries
-- treat `exportSigningKey()` the same as `exportSigningKeyUnsafe()`
-
-`shrincsKeygen(seedHex, maxStatefulSignatures)` rejects seeds shorter than 32
-bytes (`ERR_SEED_TOO_SHORT`) and `maxStatefulSignatures` outside `1..=4096`
-(`ERR_INVALID_INPUT`). Stateful signing consumes one leaf per signature;
-`signStatefulRaw` throws `ERR_STATEFUL_LEAVES_EXHAUSTED` when the budget is
-spent. The returned `PublicKey` is assembled from the encoded stateful key,
-global `pk_seed`, and `hypertree_root`, then committed with the same
-`components/public_key.rs` logic used by verifier-side commitment and rotation
-checks.
 
 ### Account exports
 
 - `new WasmShrincsAccount(owner, chainId, contractAddress, publicKeyCommitment)`
+  — `owner` and `chainId` are 32-byte `Uint8Array`, `contractAddress` is a
+  20-byte `Uint8Array`, `publicKeyCommitment` is a 32-byte `Uint8Array`
 - `snapshot()`
 - `verifyStatefulAction(...)`
 - `verifyStatelessAction(...)`
@@ -439,8 +475,9 @@ checks.
 - `setStatefulPolicyRecoveryRotation(...)`
 - `setStatefulPolicyLeafBitmap(...)`
 - `enterRecoveryMode(...)`
+- `isValidSignature(...)`
 
-Canonical message helpers:
+Canonical message-hash helpers, all returning `Uint8Array`:
 
 - `shrincsStatefulActionMessageHash(...)`
 - `shrincsStatelessActionMessageHash(...)`
@@ -448,21 +485,21 @@ Canonical message helpers:
 - `shrincsFullRotationMessageHash(...)`
 
 ```ts
-import { loadShrincsWasm } from "@quip.network/hashsigs-wasm";
+import { loadShrincsWasm, loadHashSigs } from "@quip.network/hashsigs-wasm";
 
 const wasm = await loadShrincsWasm();
-const owner = "0x" + "11".repeat(32);
-const chainId = "0x" + "22".repeat(32);
-const contractAddress = "0x" + "33".repeat(20);
+const { shrincs } = await loadHashSigs();
 
-const keypair = wasm.shrincsKeygen("0x" + "12".repeat(32), 8);
-const publicKey = keypair.publicKey();
+const owner = new Uint8Array(32).fill(0x11);
+const chainId = new Uint8Array(32).fill(0x22);
+const contractAddress = new Uint8Array(20).fill(0x33);
 
+const keys = shrincs.keygen(seed, 8);
 const account = new wasm.WasmShrincsAccount(
   owner,
   chainId,
   contractAddress,
-  publicKey.publicKeyCommitment,
+  keys.publicKeyCommitment,
 );
 
 account.setStatefulPolicyRecoveryRotation(owner);
@@ -471,225 +508,53 @@ account.enterRecoveryMode(owner);
 console.log(account.snapshot());
 ```
 
-Stateful action verification:
+`verifyStatefulAction`, `verifyStatelessAction`, `rotateToFreshKey`, and
+`rotateFullKey` take the structured `ShrincsPublicKey` / `StatefulSignature`
+/ `StatelessSignature` / rotation-target DTOs (see Object shapes below) —
+that part of the surface hasn't moved to bytes. `shrincs.keygen()`'s
+`publicKey` is a flat `Uint8Array(164)` bundle
+(`statefulPublicKey(68) ‖ publicKeyCommitment(32) ‖ pkSeed(32) ‖
+hypertreeRoot(32)`), not the hex DTO these methods expect, so decode it by
+hand when you need one:
 
 ```ts
-import { loadShrincsWasm } from "@quip.network/hashsigs-wasm";
+const toHex = (bytes: Uint8Array) =>
+  "0x" + Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 
-const wasm = await loadShrincsWasm();
-const owner = "0x" + "11".repeat(32);
-const chainId = "0x" + "22".repeat(32);
-const contractAddress = "0x" + "33".repeat(20);
-const actionType = "0x" + "44".repeat(32);
-const payloadHash = "0x" + "55".repeat(32);
-
-const keypair = wasm.shrincsKeygen("0x" + "00".repeat(32), 8);
-const publicKey = keypair.publicKey();
-const account = new wasm.WasmShrincsAccount(
-  owner,
-  chainId,
-  contractAddress,
-  publicKey.publicKeyCommitment,
-);
-
-const snapshot = account.snapshot();
-const message = wasm.shrincsStatefulActionMessageHash(
-  publicKey.publicKeyCommitment,
-  {
-    domainSeparator: snapshot.domainSeparator,
-    nonce: snapshot.nonce,
-    keyVersion: snapshot.keyVersion,
-    actionType,
-    payloadHash,
-  },
-);
-const { signature } = keypair.signStatefulRaw(message);
-const ok = account.verifyStatefulAction(
-  publicKey,
-  actionType,
-  payloadHash,
-  signature,
-);
-
-console.log({ ok, snapshot: account.snapshot() });
-```
-
-Stateless action verification:
-
-```ts
-import { loadShrincsWasm } from "@quip.network/hashsigs-wasm";
-
-const wasm = await loadShrincsWasm();
-const owner = "0x" + "11".repeat(32);
-const chainId = "0x" + "22".repeat(32);
-const contractAddress = "0x" + "33".repeat(20);
-const actionType = "0x" + "66".repeat(32);
-const payloadHash = "0x" + "77".repeat(32);
-
-const keypair = wasm.shrincsKeygen("0x" + "ab".repeat(32), 8);
-const publicKey = keypair.publicKey();
-const account = new wasm.WasmShrincsAccount(
-  owner,
-  chainId,
-  contractAddress,
-  publicKey.publicKeyCommitment,
-);
-
-const snapshot = account.snapshot();
-const message = wasm.shrincsStatelessActionMessageHash(
-  publicKey.publicKeyCommitment,
-  {
-    domainSeparator: snapshot.domainSeparator,
-    nonce: snapshot.nonce,
-    keyVersion: snapshot.keyVersion,
-    actionType,
-    payloadHash,
-  },
-);
-const signature = keypair.signStatelessRaw(message);
-const ok = account.verifyStatelessAction(
-  publicKey,
-  actionType,
-  payloadHash,
-  signature,
-);
-
-console.log({ ok, snapshot: account.snapshot() });
-```
-
-Stateful-only rotation:
-
-```ts
-import { loadShrincsWasm } from "@quip.network/hashsigs-wasm";
-import { concat, getBytes, keccak256, toUtf8Bytes } from "ethers";
-
-function statefulOnlyTargetCommitment(
-  nextStatefulPublicKey: string,
-  currentPublicKey: { pkSeed: string; hypertreeRoot: string },
-) {
-  return keccak256(
-    concat([
-      toUtf8Bytes("shrincs-public-key"),
-      getBytes(nextStatefulPublicKey),
-      getBytes(currentPublicKey.pkSeed),
-      getBytes(currentPublicKey.hypertreeRoot),
-    ]),
-  );
+function publicKeyDto(keys: { publicKey: Uint8Array }) {
+  return {
+    statefulPublicKey: toHex(keys.publicKey.slice(0, 68)),
+    publicKeyCommitment: toHex(keys.publicKey.slice(68, 100)),
+    pkSeed: toHex(keys.publicKey.slice(100, 132)),
+    hypertreeRoot: toHex(keys.publicKey.slice(132, 164)),
+  };
 }
-
-const wasm = await loadShrincsWasm();
-const owner = "0x" + "11".repeat(32);
-const chainId = "0x" + "22".repeat(32);
-const contractAddress = "0x" + "33".repeat(20);
-
-const currentKeypair = wasm.shrincsKeygen("0x" + "11".repeat(32), 8);
-const nextKeypair = wasm.shrincsKeygen("0x" + "22".repeat(32), 16);
-
-const currentPublicKey = currentKeypair.publicKey();
-const nextPublicKey = nextKeypair.publicKey();
-const account = new wasm.WasmShrincsAccount(
-  owner,
-  chainId,
-  contractAddress,
-  currentPublicKey.publicKeyCommitment,
-);
-
-account.setStatefulPolicyRecoveryRotation(owner);
-account.enterRecoveryMode(owner);
-
-const snapshot = account.snapshot();
-const nextStatefulTarget = {
-  statefulPublicKey: nextPublicKey.statefulPublicKey,
-  publicKeyCommitment: statefulOnlyTargetCommitment(
-    nextPublicKey.statefulPublicKey,
-    currentPublicKey,
-  ),
-};
-
-const recoveryMessage = wasm.shrincsStatefulRotationMessageHash(
-  currentPublicKey.publicKeyCommitment,
-  currentPublicKey,
-  {
-    domainSeparator: snapshot.domainSeparator,
-    nonce: snapshot.nonce,
-    keyVersion: snapshot.keyVersion,
-  },
-  nextStatefulTarget,
-);
-const recoverySignature = currentKeypair.signStatelessRaw(recoveryMessage);
-const rotated = account.rotateToFreshKey(
-  currentPublicKey,
-  recoverySignature,
-  nextStatefulTarget,
-);
-
-console.log({ rotated, snapshot: account.snapshot() });
 ```
 
-Full rotation:
+`shrincs.sign()` / `shrincs.signStateless()` don't produce the structured
+`StatefulSignature` / `StatelessSignature` DTO these account methods expect.
+They return an ABI-encoded envelope instead (see `shrincsVerifyEnvelope` /
+`shrincsVerifyStatelessEnvelope` earlier for verifying those directly against
+a `publicKeyCommitment`). Calling `verifyStatefulAction`, `rotateToFreshKey`,
+or `rotateFullKey` needs a signature already in the structured DTO shape,
+typically produced by the same off-chain tooling that produces the
+Solidity-side test vectors this account layer mirrors.
 
-```ts
-import { loadShrincsWasm } from "@quip.network/hashsigs-wasm";
-
-const wasm = await loadShrincsWasm();
-const owner = "0x" + "11".repeat(32);
-const chainId = "0x" + "22".repeat(32);
-const contractAddress = "0x" + "33".repeat(20);
-
-const currentKeypair = wasm.shrincsKeygen("0x" + "aa".repeat(32), 8);
-const nextKeypair = wasm.shrincsKeygen("0x" + "bb".repeat(32), 16);
-
-const currentPublicKey = currentKeypair.publicKey();
-const nextPublicKey = nextKeypair.publicKey();
-const account = new wasm.WasmShrincsAccount(
-  owner,
-  chainId,
-  contractAddress,
-  currentPublicKey.publicKeyCommitment,
-);
-
-account.setStatefulPolicyRecoveryRotation(owner);
-account.enterRecoveryMode(owner);
-
-const snapshot = account.snapshot();
-const nextFullTarget = {
-  statefulPublicKey: nextPublicKey.statefulPublicKey,
-  publicKeyCommitment: nextPublicKey.publicKeyCommitment,
-  pkSeed: nextPublicKey.pkSeed,
-  hypertreeRoot: nextPublicKey.hypertreeRoot,
-};
-
-const recoveryMessage = wasm.shrincsFullRotationMessageHash(
-  currentPublicKey.publicKeyCommitment,
-  currentPublicKey,
-  {
-    domainSeparator: snapshot.domainSeparator,
-    nonce: snapshot.nonce,
-    keyVersion: snapshot.keyVersion,
-  },
-  nextFullTarget,
-);
-const recoverySignature = currentKeypair.signStatelessRaw(recoveryMessage);
-const rotated = account.rotateFullKey(
-  currentPublicKey,
-  recoverySignature,
-  nextFullTarget,
-);
-
-console.log({ rotated, snapshot: account.snapshot() });
-```
-
-Canonical end-to-end pattern:
+Canonical end-to-end pattern for the DTO-based calls:
 
 - read `domainSeparator`, `nonce`, and `keyVersion` from `account.snapshot()`
-- hash with the matching message helper
-- sign with `signStatefulRaw` or `signStatelessRaw`
+- hash with the matching message helper (`shrincsStatefulActionMessageHash`
+  and friends, all returning `Uint8Array`)
+- sign with a signer that returns the structured `StatefulSignature` /
+  `StatelessSignature` DTO
 - submit through the matching account verify or rotate method
 
 ### Object shapes
 
 Names match the generated Tsify types re-exported from
 `@quip.network/hashsigs-wasm` (see `ts/src/index.ts`). Fields are camelCase.
+These DTOs belong to the low-level `loadShrincsWasm()` account/verifier
+surface. The noble-style `sphincsPlusC`/`shrincs` namespaces never see them.
 
 Public key (`ShrincsPublicKey`):
 
@@ -804,25 +669,6 @@ type HypertreeLayerSignature = {
 type StatelessSignature = {
   fors: ForsSignature;
   hypertree: HypertreeLayerSignature[];
-};
-```
-
-Signing key snapshot from `exportSigningKeyUnsafe()` /
-`exportSigningKey()` (`ShrincsExportedSigningKey`):
-
-```ts
-type ShrincsExportedSigningKey = {
-  formatVersion: 1; // required; import rejects other versions
-  statefulSkSeed: string;
-  statefulPrfSeed: string;
-  statefulPkSeed: string;
-  statefulRoot: string;
-  maxStatefulSignatures: number;
-  nextStatefulLeafIndex: number;
-  statelessSkSeed: string;
-  statelessPrfSeed: string;
-  pkSeed: string;
-  hypertreeRoot: string;
 };
 ```
 
