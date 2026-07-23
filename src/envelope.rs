@@ -836,26 +836,20 @@ mod tests {
                     },
                 ],
             },
-            hypertree: vec![
-                HypertreeLayerSignature {
-                    wots_c_pk_hash: [0xB1; HASH_LEN],
+            // One layer per profile layer: 8 at 256s, 1 at 128s. A fixed count
+            // would exceed the decoder's `<= NUM_HYPERTREE_LAYERS` cap on the
+            // single-layer 128s profiles.
+            hypertree: (0..NUM_HYPERTREE_LAYERS)
+                .map(|layer| HypertreeLayerSignature {
+                    wots_c_pk_hash: [0xB1 ^ layer; HASH_LEN],
                     wots_c_signature: WotsCSignature {
-                        randomizer: [0xB2; HASH_LEN],
-                        counter: 9,
-                        chains: vec![[0xB3; HASH_LEN], [0xB4; HASH_LEN]],
+                        randomizer: [0xB2 ^ layer; HASH_LEN],
+                        counter: 9 + layer as u32,
+                        chains: vec![[0xB3 ^ layer; HASH_LEN], [0xB4 ^ layer; HASH_LEN]],
                     },
-                    auth_path: vec![[0xB5; HASH_LEN]],
-                },
-                HypertreeLayerSignature {
-                    wots_c_pk_hash: [0xC1; HASH_LEN],
-                    wots_c_signature: WotsCSignature {
-                        randomizer: [0xC2; HASH_LEN],
-                        counter: 11,
-                        chains: vec![[0xC3; HASH_LEN]],
-                    },
-                    auth_path: vec![[0xC4; HASH_LEN], [0xC5; HASH_LEN]],
-                },
-            ],
+                    auth_path: vec![[0xB5 ^ layer; HASH_LEN]],
+                })
+                .collect(),
         }
     }
 
