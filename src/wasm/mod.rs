@@ -2120,10 +2120,10 @@ mod tests {
         assert_eq!(secret_key.len(), 128);
         assert_eq!(public_key.len(), 64);
 
-        let message = b"sphincs-plus-c noble round trip".to_vec();
+        let message = [0x01u8; 32].to_vec();
         let signature = sphincs_plus_c_sign(&message, &secret_key).unwrap();
         assert!(sphincs_plus_c_verify(&signature, &message, &public_key));
-        assert!(!sphincs_plus_c_verify(&signature, b"different message", &public_key));
+        assert!(!sphincs_plus_c_verify(&signature, &[0xEEu8; 32], &public_key));
 
         let mut tampered = signature.clone();
         tampered[0] ^= 1;
@@ -2170,10 +2170,10 @@ mod tests {
         assert_eq!(secret_key.len(), 264);
         assert_eq!(public_key_commitment.len(), 32);
 
-        let message = b"shrincs noble stateful round trip".to_vec();
+        let message = [0x03u8; 32].to_vec();
         let signature = shrincs_sign(&message, &mut secret_key).unwrap();
         assert!(shrincs_verify(&signature, &message, &public_key_commitment));
-        assert!(!shrincs_verify(&signature, b"different message", &public_key_commitment));
+        assert!(!shrincs_verify(&signature, &[0xEEu8; 32], &public_key_commitment));
 
         let mut tampered = signature.clone();
         tampered[0] ^= 1;
@@ -2189,7 +2189,7 @@ mod tests {
         let public_key_commitment = keys.public_key_commitment();
         let before = secret_key.clone();
 
-        let message = b"shrincs noble stateful advance".to_vec();
+        let message = [0x04u8; 32].to_vec();
         let first = shrincs_sign(&message, &mut secret_key).unwrap();
         assert_ne!(secret_key, before, "secretKey must mutate in place after sign");
         assert!(shrincs_verify(&first, &message, &public_key_commitment));
@@ -2207,7 +2207,7 @@ mod tests {
         let seed = [0x55u8; 32];
         let keys = shrincs_keygen(&seed, 1).unwrap();
         let mut secret_key = keys.secret_key();
-        let message = b"shrincs noble exhaustion".to_vec();
+        let message = [0x06u8; 32].to_vec();
 
         shrincs_sign(&message, &mut secret_key).unwrap(); // consumes the only leaf
         let err = expect_err(shrincs_sign(&message, &mut secret_key));
@@ -2229,13 +2229,13 @@ mod tests {
         let public_key_commitment = keys.public_key_commitment();
         let before = secret_key.clone();
 
-        let message = b"shrincs noble stateless round trip".to_vec();
+        let message = [0x05u8; 32].to_vec();
         let signature = shrincs_sign_stateless(&message, &secret_key).unwrap();
         assert_eq!(secret_key, before, "stateless sign must not mutate secretKey");
         assert!(shrincs_verify_stateless(&signature, &message, &public_key_commitment));
         assert!(!shrincs_verify_stateless(
             &signature,
-            b"different message",
+            &[0xEEu8; 32],
             &public_key_commitment,
         ));
     }
