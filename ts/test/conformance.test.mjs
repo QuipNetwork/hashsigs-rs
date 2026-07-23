@@ -5,294 +5,367 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { loadShrincsWasm as loadNode } from "../dist/index.js";
+import { loadShrincsWasm as loadNode, loadHashSigs as loadHashSigsNode } from "../dist/index.js";
 import { loadShrincsWasm as loadWeb } from "../dist/loader.browser.js";
 import * as entryNode from "../dist/index.js";
 import * as entryWeb from "../dist/loader.browser.js";
+// loadHashSigs is assembled in index.ts itself (not re-exported per-loader),
+// so the web-loader variant is built by hand below with `makeHashSigs`-shaped
+// wiring: `loadHashSigsFor(loadWeb)`.
 
-const SEED = "0x" + "ab".repeat(32);
-const MSG = "0x" + "11".repeat(32);
+const SEED = new Uint8Array(32).fill(0xab);
+const MSG = new TextEncoder().encode("hashsigs-noble-conformance-message");
 const HEX32 = (byte) => "0x" + byte.repeat(32);
 const HEX_RE = /^0x[0-9a-f]*$/;
+
+async function loadHashSigsFor(load) {
+  const wasm = await load();
+  const sphincsPlusC = {
+    keygen: (seed) => {
+      const keys = wasm.sphincsPlusCKeygen(seed);
+      return { secretKey: keys.secretKey, publicKey: keys.publicKey };
+    },
+    sign: (message, keys) => wasm.sphincsPlusCSign(message, keys.secretKey),
+    verify: (signature, message, publicKey) => wasm.sphincsPlusCVerify(signature, message, publicKey),
+  };
+  const shrincs = {
+    keygen: (seed, maxSignatures = 1024) => {
+      const keys = wasm.shrincsKeygen(seed, maxSignatures);
+      return { secretKey: keys.secretKey, publicKey: keys.publicKey, publicKeyCommitment: keys.publicKeyCommitment };
+    },
+    sign: (message, keys) => wasm.shrincsSign(message, keys.secretKey),
+    signStateless: (message, keys) => wasm.shrincsSignStateless(message, keys.secretKey),
+    verify: (signature, message, publicKeyCommitment) => wasm.shrincsVerify(signature, message, publicKeyCommitment),
+    verifyStateless: (signature, message, publicKeyCommitment) =>
+      wasm.shrincsVerifyStateless(signature, message, publicKeyCommitment),
+  };
+  return { wasm, sphincsPlusC, shrincs };
+}
 
 const loaders = [
   ["node", loadNode],
   ["web", loadWeb],
 ];
 
-test("entry: runtime surface is exactly { loadShrincsWasm } in BOTH entries", () => {
-  // WasmShrincsKeypair / WasmShrincsAccount are exported TYPE-ONLY from
-  // src/index.ts, and that is load-bearing: the `browser` exports condition
-  // maps the package entry to loader.browser.js, so a VALUE export added to
-  // index.js would exist in Node and silently be missing in browser bundles.
-  assert.deepEqual(Object.keys(entryNode).sort(), ["loadShrincsWasm"]);
+test("entry: runtime surface is exactly { loadShrincsWasm, loadHashSigs } in BOTH entries", () => {
+  // WasmShrincsKeys / WasmSphincsPlusCKeys / WasmShrincsAccount are exported
+  // TYPE-ONLY from src/index.ts, and that is load-bearing: the `browser`
+  // exports condition maps the package entry to loader.browser.js, so a
+  // VALUE export added to index.js would exist in Node and silently be
+  // missing in browser bundles.
+  assert.deepEqual(Object.keys(entryNode).sort(), ["loadHashSigs", "loadShrincsWasm"]);
   assert.deepEqual(Object.keys(entryWeb).sort(), ["loadShrincsWasm"]);
 });
 
 for (const [name, load] of loaders) {
-  test(`${name}: loader resolves and exposes the shrincs surface`, async () => {
+  test(`${name}: loader resolves and exposes the noble + verifier-interface surface`, async () => {
     const w = await load();
     for (const fn of [
+      "sphincsPlusCKeygen",
+      "sphincsPlusCSign",
+      "sphincsPlusCVerify",
       "shrincsKeygen",
+      "shrincsSign",
+      "shrincsSignStateless",
+      "shrincsVerify",
+      "shrincsVerifyStateless",
+      "shrincsImportSigningKey",
       "shrincsVerifyStatefulRaw",
       "shrincsVerifyStatelessRaw",
+      "shrincsVerifyEnvelope",
+      "shrincsVerifyStatelessEnvelope",
       "version",
     ]) {
       assert.equal(typeof w[fn], "function", `missing ${fn}`);
     }
     assert.equal(typeof w.WasmShrincsAccount, "function");
+    // The old hex-based, live-handle surface is gone: no more free-standing
+    // keypair class or hex-string keygen.
+    assert.equal(w.WasmShrincsKeypair, undefined);
+  });
+}
+
+// ── noble-style API: sphincsPlusC ───────────────────────────────────────
+
+for (const [name, load] of loaders) {
+  test(`${name}: sphincsPlusC keygen -> sign -> verify round-trips`, async () => {
+    const { sphincsPlusC } = await loadHashSigsFor(load);
+    const keys = sphincsPlusC.keygen(SEED);
+    assert.equal(keys.secretKey.length, 128);
+    assert.equal(keys.publicKey.length, 64);
+
+    const sig = sphincsPlusC.sign(MSG, keys);
+    assert.equal(sphincsPlusC.verify(sig, MSG, keys.publicKey), true);
   });
 
-  test(`${name}: keygen → signStatefulRawAt → verify, tamper → false`, async () => {
-    const w = await load();
-    const kp = w.shrincsKeygen(SEED, 4);
-    const pk = kp.publicKey();
-    const sig = kp.signStatefulRawAt(MSG, 1);
-    assert.equal(
-      w.shrincsVerifyStatefulRaw(pk.publicKeyCommitment, pk, MSG, sig),
-      true,
+  test(`${name}: sphincsPlusC verify rejects a tampered signature and a different message`, async () => {
+    const { sphincsPlusC } = await loadHashSigsFor(load);
+    const keys = sphincsPlusC.keygen(SEED);
+    const sig = sphincsPlusC.sign(MSG, keys);
+
+    const tampered = sig.slice();
+    tampered[0] ^= 1;
+    assert.equal(sphincsPlusC.verify(tampered, MSG, keys.publicKey), false);
+    assert.equal(sphincsPlusC.verify(sig, new TextEncoder().encode("different"), keys.publicKey), false);
+  });
+
+  test(`${name}: sphincsPlusC keygen is deterministic for the same seed`, async () => {
+    const { sphincsPlusC } = await loadHashSigsFor(load);
+    const a = sphincsPlusC.keygen(SEED);
+    const b = sphincsPlusC.keygen(SEED);
+    assert.deepEqual(a.secretKey, b.secretKey);
+    assert.deepEqual(a.publicKey, b.publicKey);
+  });
+
+  test(`${name}: sphincsPlusC keygen requires an exactly-32-byte seed`, async () => {
+    const { wasm } = await loadHashSigsFor(load);
+    assert.throws(
+      () => wasm.sphincsPlusCKeygen(new Uint8Array(31)),
+      (e) => e instanceof Error && e.code === "ERR_BAD_LENGTH",
     );
-    const bad = structuredClone(sig);
-    bad.randomizer = "0x" + "00".repeat(32);
+    assert.throws(
+      () => wasm.sphincsPlusCKeygen(new Uint8Array(33)),
+      (e) => e instanceof Error && e.code === "ERR_BAD_LENGTH",
+    );
+  });
+}
+
+// ── noble-style API: shrincs ─────────────────────────────────────────────
+
+for (const [name, load] of loaders) {
+  test(`${name}: shrincs keygen -> sign -> verify round-trips`, async () => {
+    const { shrincs } = await loadHashSigsFor(load);
+    const keys = shrincs.keygen(SEED, 4);
+    assert.equal(keys.secretKey.length, 264);
+    assert.equal(keys.publicKey.length, 164);
+    assert.equal(keys.publicKeyCommitment.length, 32);
+
+    const sig = shrincs.sign(MSG, keys);
+    assert.equal(shrincs.verify(sig, MSG, keys.publicKeyCommitment), true);
+  });
+
+  test(`${name}: shrincs verify rejects a tampered signature and a different message`, async () => {
+    const { shrincs } = await loadHashSigsFor(load);
+    const keys = shrincs.keygen(SEED, 4);
+    const sig = shrincs.sign(MSG, keys);
+
+    const tampered = sig.slice();
+    tampered[0] ^= 1;
+    assert.equal(shrincs.verify(tampered, MSG, keys.publicKeyCommitment), false);
+    assert.equal(shrincs.verify(sig, new TextEncoder().encode("different"), keys.publicKeyCommitment), false);
+  });
+
+  test(`${name}: shrincs.sign advances keys.secretKey in place across two signatures`, async () => {
+    const { shrincs } = await loadHashSigsFor(load);
+    const keys = shrincs.keygen(SEED, 4);
+    const before = keys.secretKey.slice();
+
+    const first = shrincs.sign(MSG, keys);
+    assert.notDeepEqual(keys.secretKey, before, "secretKey must mutate in place after sign()");
+    assert.equal(shrincs.verify(first, MSG, keys.publicKeyCommitment), true);
+
+    const afterFirst = keys.secretKey.slice();
+    const second = shrincs.sign(MSG, keys);
+    assert.notDeepEqual(keys.secretKey, afterFirst, "secretKey must advance again on the next sign()");
+    assert.notDeepEqual(first, second, "two leaves must yield distinct signatures");
+    assert.equal(shrincs.verify(second, MSG, keys.publicKeyCommitment), true);
+  });
+
+  test(`${name}: shrincs stateful signing exhaustion throws ERR_STATEFUL_LEAVES_EXHAUSTED`, async () => {
+    const { shrincs } = await loadHashSigsFor(load);
+    const keys = shrincs.keygen(SEED, 1); // budget of exactly one leaf
+    shrincs.sign(MSG, keys); // consumes the only leaf
+    assert.throws(
+      () => shrincs.sign(MSG, keys),
+      (e) => e instanceof Error && e.code === "ERR_STATEFUL_LEAVES_EXHAUSTED",
+    );
+  });
+
+  test(`${name}: shrincs.signStateless never mutates keys.secretKey and verifies`, async () => {
+    const { shrincs } = await loadHashSigsFor(load);
+    const keys = shrincs.keygen(SEED, 4);
+    const before = keys.secretKey.slice();
+
+    const sig = shrincs.signStateless(MSG, keys);
+    assert.deepEqual(keys.secretKey, before, "signStateless must not mutate secretKey");
+    assert.equal(shrincs.verifyStateless(sig, MSG, keys.publicKeyCommitment), true);
     assert.equal(
-      w.shrincsVerifyStatefulRaw(pk.publicKeyCommitment, pk, MSG, bad),
+      shrincs.verifyStateless(sig, new TextEncoder().encode("different"), keys.publicKeyCommitment),
       false,
     );
   });
 
-  test(`${name}: verify with a second keypair commitment returns false`, async () => {
-    const w = await load();
-    const kp = w.shrincsKeygen(SEED, 4);
-    const pk = kp.publicKey();
-    const sig = kp.signStatefulRawAt(MSG, 1);
-    const otherPk = w.shrincsKeygen("0x" + "cd".repeat(32), 4).publicKey();
-    assert.equal(
-      w.shrincsVerifyStatefulRaw(otherPk.publicKeyCommitment, pk, MSG, sig),
-      false,
+  test(`${name}: shrincs keygen requires an exactly-32-byte seed and a valid maxSignatures range`, async () => {
+    const { wasm } = await loadHashSigsFor(load);
+    assert.throws(
+      () => wasm.shrincsKeygen(new Uint8Array(31), 4),
+      (e) => e instanceof Error && e.code === "ERR_BAD_LENGTH",
+    );
+    assert.throws(
+      () => wasm.shrincsKeygen(SEED, 0),
+      (e) => e instanceof Error && e.code === "ERR_INVALID_INPUT",
+    );
+    assert.throws(
+      () => wasm.shrincsKeygen(SEED, 4097),
+      (e) => e instanceof Error && e.code === "ERR_INVALID_INPUT",
     );
   });
 
-  test(`${name}: verify throws typed errors on malformed hex`, async () => {
-    const w = await load();
-    const kp = w.shrincsKeygen(SEED, 4);
-    const pk = kp.publicKey();
-    const sig = kp.signStatefulRawAt(MSG, 1);
-    // Invalid hex digits at the correct 32-byte width → ERR_HEX_INVALID
-    // (the fixed-width parser checks length before content, so a too-short
-    // "0xzz" would surface as ERR_BAD_LENGTH; use a full-width bad-hex body).
+  test(`${name}: shrincsImportSigningKey round-trips a persisted secretKey`, async () => {
+    const { shrincs, wasm } = await loadHashSigsFor(load);
+    const keys = shrincs.keygen(SEED, 4);
+    shrincs.sign(MSG, keys); // advance past leaf 1 so the import exercises a non-fresh counter
+
+    const imported = wasm.shrincsImportSigningKey(keys.secretKey);
+    assert.deepEqual(imported.secretKey, keys.secretKey);
+    assert.deepEqual(imported.publicKeyCommitment, keys.publicKeyCommitment);
+  });
+
+  test(`${name}: shrincsImportSigningKey rejects a tampered secretKey`, async () => {
+    const { shrincs, wasm } = await loadHashSigsFor(load);
+    const keys = shrincs.keygen(SEED, 4);
+    const tampered = keys.secretKey.slice();
+    tampered[0] ^= 1; // corrupts statefulSkSeed, invalidating the committed statefulRoot
     assert.throws(
-      () => w.shrincsVerifyStatefulRaw("0x" + "zz".repeat(32), pk, MSG, sig),
-      (e) => e instanceof Error && e.code === "ERR_HEX_INVALID",
+      () => wasm.shrincsImportSigningKey(tampered),
+      (e) => e instanceof Error && e.code === "ERR_IMPORT_INVALID",
     );
-    // Odd-length hex body → ERR_BAD_LENGTH.
+  });
+}
+
+test("cross-build: node and web agree on noble keys and signatures", async () => {
+  const { sphincsPlusC: spcNode, shrincs: shrincsNode } = await loadHashSigsFor(loadNode);
+  const { sphincsPlusC: spcWeb, shrincs: shrincsWeb } = await loadHashSigsFor(loadWeb);
+
+  const spcKeysNode = spcNode.keygen(SEED);
+  const spcKeysWeb = spcWeb.keygen(SEED);
+  assert.deepEqual(spcKeysNode.secretKey, spcKeysWeb.secretKey);
+  assert.deepEqual(spcKeysNode.publicKey, spcKeysWeb.publicKey);
+  const spcSigNode = spcNode.sign(MSG, spcKeysNode);
+  assert.equal(spcWeb.verify(spcSigNode, MSG, spcKeysWeb.publicKey), true);
+
+  const shrincsKeysNode = shrincsNode.keygen(SEED, 4);
+  const shrincsKeysWeb = shrincsWeb.keygen(SEED, 4);
+  assert.deepEqual(shrincsKeysNode.publicKeyCommitment, shrincsKeysWeb.publicKeyCommitment);
+  const shrincsSigNode = shrincsNode.sign(MSG, shrincsKeysNode);
+  assert.equal(shrincsWeb.verify(shrincsSigNode, MSG, shrincsKeysWeb.publicKeyCommitment), true);
+});
+
+// ── migrated hex-DTO surface: WasmShrincsAccount + message hashes + raw verify ──
+// These functions moved their top-level scalar params from hex `&str` to
+// `Uint8Array`; the nested signature/context/public-key DTOs stay hex-string
+// based (see the wasm-noble delivery report on scope).
+
+for (const [name, load] of loaders) {
+  test(`${name}: WasmShrincsAccount takes byte params and tracks policy/action state`, async () => {
+    const { wasm, shrincs } = await loadHashSigsFor(load);
+    const keys = shrincs.keygen(SEED, 8);
+
+    const account = new wasm.WasmShrincsAccount(
+      new Uint8Array(32).fill(1),
+      new Uint8Array(32).fill(2),
+      new Uint8Array(20).fill(3),
+      keys.publicKeyCommitment,
+    );
+    const snapshot = account.snapshot();
+    assert.equal(snapshot.statefulPolicy, "monotonic-index");
+    assert.equal(typeof snapshot.statelessSignaturesUsed, "bigint");
+
+    // Verify-only helpers (bytes-ified `expectedPublicKeyCommitment`/`message`)
+    // still operate on the hex `ShrincsPublicKey`/`Signature` DTOs — decode the
+    // wasm keygen's flat `publicKey` bundle into that shape by hand for the
+    // account/verify-raw calls below.
+    const toHex = (bytes) => "0x" + Buffer.from(bytes).toString("hex");
+    const publicKeyDto = {
+      statefulPublicKey: toHex(keys.publicKey.slice(0, 68)),
+      publicKeyCommitment: toHex(keys.publicKey.slice(68, 100)),
+      pkSeed: toHex(keys.publicKey.slice(100, 132)),
+      hypertreeRoot: toHex(keys.publicKey.slice(132, 164)),
+    };
+    assert.equal(publicKeyDto.publicKeyCommitment, toHex(keys.publicKeyCommitment));
+
+    account.setStatefulPolicyRecoveryRotation(new Uint8Array(32).fill(1));
+    account.enterRecoveryMode(new Uint8Array(32).fill(1));
+    const afterPolicy = account.snapshot();
+    assert.equal(afterPolicy.statefulPolicy, "recovery-rotation");
+    assert.equal(afterPolicy.recoveryMode, true);
+  });
+
+  test(`${name}: shrincsVerifyEnvelope / shrincsVerifyStatelessEnvelope take byte params`, async () => {
+    // `shrincsVerifyEnvelope`/`shrincsVerifyStatelessEnvelope` pin an
+    // ALREADY-32-byte digest and do not hash it again (unlike the noble
+    // `shrincs.verify`/`verifyStateless`, which keccak256-hash their
+    // `message` argument first) — see the JSDoc on both. `wasm.shrincsSign`
+    // always signs `keccak256(message)`, so recovering the exact digest it
+    // signed would need a JS keccak256 implementation, which this package
+    // has no dependency on. The crypto round-trip through this same
+    // `verify_envelope`/`verify_stateless_envelope` Rust code path is
+    // already covered end-to-end by the `shrincs.verify`/`verifyStateless`
+    // tests above; this test only proves the byte-typed parameter plumbing
+    // (accepts `Uint8Array`, still throws `ERR_BAD_LENGTH` on a malformed
+    // fixed-width field).
+    const { wasm, shrincs } = await loadHashSigsFor(load);
+    const keys = shrincs.keygen(SEED, 4);
+    const hash = new Uint8Array(32).fill(9);
+
+    const statefulEnvelope = wasm.shrincsSign(hash, keys.secretKey);
+    assert.equal(typeof wasm.shrincsVerifyEnvelope(keys.publicKeyCommitment, hash, statefulEnvelope), "boolean");
+
+    const statelessEnvelope = wasm.shrincsSignStateless(hash, keys.secretKey);
+    assert.equal(
+      typeof wasm.shrincsVerifyStatelessEnvelope(keys.publicKeyCommitment, hash, statelessEnvelope),
+      "boolean",
+    );
+
+    const badKey = new Uint8Array(31);
     assert.throws(
-      () => w.shrincsVerifyStatefulRaw("0x" + "ab".repeat(31) + "a", pk, MSG, sig),
+      () => wasm.shrincsVerifyEnvelope(keys.publicKeyCommitment, badKey, statefulEnvelope),
       (e) => e instanceof Error && e.code === "ERR_BAD_LENGTH",
     );
   });
 
-  test(`${name}: destroy() invalidates the handle with ERR_HANDLE_DESTROYED`, async () => {
-    const w = await load();
-    const kp = w.shrincsKeygen(SEED, 4);
-    kp.destroy();
-    assert.throws(
-      () => kp.publicKey(),
-      (e) => e instanceof Error && e.code === "ERR_HANDLE_DESTROYED",
-    );
-    assert.throws(
-      () => kp.signStatelessRaw(MSG),
-      (e) => e instanceof Error && e.code === "ERR_HANDLE_DESTROYED",
-    );
-  });
-
-  test(`${name}: stateless sign → verify`, async () => {
-    const w = await load();
-    const kp = w.shrincsKeygen(SEED, 4);
-    const pk = kp.publicKey();
-    const ssig = kp.signStatelessRaw(MSG);
-    assert.equal(
-      w.shrincsVerifyStatelessRaw(pk.publicKeyCommitment, pk, MSG, ssig),
-      true,
-    );
-  });
-
-  test(`${name}: keygen enforces the 32-byte seed floor`, async () => {
-    const w = await load();
-    for (const seed of ["0x", "0x" + "ab".repeat(31)]) {
-      assert.throws(
-        () => w.shrincsKeygen(seed, 4),
-        (e) => e instanceof Error && e.code === "ERR_SEED_TOO_SHORT",
-        `seed of ${(seed.length - 2) / 2} bytes must be rejected`,
-      );
-    }
-    // Exactly 32 bytes passes (SEED is 32 bytes).
-    assert.ok(w.shrincsKeygen(SEED, 4));
-  });
-
-  test(`${name}: runtime types match the declarations`, async () => {
-    const w = await load();
-    const kp = w.shrincsKeygen(SEED, 4);
-    const pk = kp.publicKey();
-    const sig = kp.signStatefulRawAt(MSG, 1);
-
-    // The bigint drift guard: u64 fields must cross the boundary as BigInt,
-    // not number (the default serializer breaks on values past 2^53). Post-T6
-    // the hypertree wire carries no u64 coordinates, so the account snapshot's
-    // statelessSignaturesUsed (asserted below) is the surviving u64 boundary.
-    assert.equal(typeof sig.counter, "number");
-
-    const account = new w.WasmShrincsAccount(
-      HEX32("11"),
-      HEX32("22"),
-      "0x" + "33".repeat(20),
-      pk.publicKeyCommitment,
-    );
-    const snap = account.snapshot();
-    assert.equal(typeof snap.statelessSignaturesUsed, "bigint");
-
-    // Hex fields are 0x-prefixed lowercase strings.
-    for (const [label, value] of [
-      ["publicKeyCommitment", pk.publicKeyCommitment],
-      ["statefulPublicKey", pk.statefulPublicKey],
-      ["pkSeed", pk.pkSeed],
-      ["hypertreeRoot", pk.hypertreeRoot],
-      ["sig.randomizer", sig.randomizer],
-      ["sig.authPath[0]", sig.authPath[0]],
-    ]) {
-      assert.match(value, HEX_RE, `${label} is not 0x-lowercase hex: ${value}`);
-    }
+  test(`${name}: shrincsStatefulActionMessageHash returns bytes`, async () => {
+    const { wasm, shrincs } = await loadHashSigsFor(load);
+    const keys = shrincs.keygen(SEED, 4);
+    const context = {
+      domainSeparator: HEX32("01"),
+      nonce: HEX32("02"),
+      keyVersion: HEX32("03"),
+      actionType: HEX32("04"),
+      payloadHash: HEX32("05"),
+    };
+    const message = wasm.shrincsStatefulActionMessageHash(keys.publicKeyCommitment, context);
+    assert.ok(message instanceof Uint8Array);
+    assert.equal(message.length, 32);
   });
 }
 
-test("cross-build: node and web agree on keys and signatures", async () => {
-  const wNode = await loadNode();
-  const wWeb = await loadWeb();
+test("determinism: shrincs keygen from the same seed re-derives the identical key", async () => {
+  const { shrincs } = await loadHashSigsFor(loadNode);
+  const first = shrincs.keygen(SEED, 4);
+  const second = shrincs.keygen(SEED, 4);
+  assert.deepEqual(first.secretKey, second.secretKey);
+  assert.deepEqual(first.publicKeyCommitment, second.publicKeyCommitment);
+});
 
-  const kpNode = wNode.shrincsKeygen(SEED, 4);
-  const kpWeb = wWeb.shrincsKeygen(SEED, 4);
-  const pkNode = kpNode.publicKey();
-  const pkWeb = kpWeb.publicKey();
-  assert.deepEqual(pkNode, pkWeb);
-
-  // Signatures are plain DTOs, so each build can verify the other's output.
-  const sigNode = kpNode.signStatefulRawAt(MSG, 1);
-  assert.equal(
-    wWeb.shrincsVerifyStatefulRaw(pkWeb.publicKeyCommitment, pkWeb, MSG, sigNode),
-    true,
+test("runtime types match the declarations", async () => {
+  const { wasm, shrincs } = await loadHashSigsFor(loadNode);
+  const keys = shrincs.keygen(SEED, 4);
+  const account = new wasm.WasmShrincsAccount(
+    new Uint8Array(32).fill(0x11),
+    new Uint8Array(32).fill(0x22),
+    new Uint8Array(20).fill(0x33),
+    keys.publicKeyCommitment,
   );
-  const sigWeb = kpWeb.signStatefulRawAt(MSG, 2);
-  assert.equal(
-    wNode.shrincsVerifyStatefulRaw(pkNode.publicKeyCommitment, pkNode, MSG, sigWeb),
-    true,
-  );
-});
+  const snap = account.snapshot();
+  // The bigint drift guard: u64 fields must cross the boundary as BigInt, not
+  // number (the default serializer breaks on values past 2^53).
+  assert.equal(typeof snap.statelessSignaturesUsed, "bigint");
 
-test("determinism: keygen from the same seed re-derives the identical key", async () => {
-  // The SDK's restart story is re-derivation from the stored seed, so two
-  // keygens from one seed must produce byte-identical signing keys.
-  const w = await loadNode();
-  const first = w.shrincsKeygen(SEED, 4).exportSigningKey();
-  const second = w.shrincsKeygen(SEED, 4).exportSigningKey();
-  assert.deepEqual(first, second);
-});
-
-test("import: exported key round-trips and resumes at the persisted counter", async () => {
-  const w = await loadNode();
-  const kp = w.shrincsKeygen(SEED, 4);
-  kp.signStatefulRaw(MSG); // burn leaf 1 → counter 2
-  const blob = kp.exportSigningKey();
-  assert.equal(blob.formatVersion, 1);
-  assert.equal(blob.nextStatefulLeafIndex, 2);
-
-  const restored = w.shrincsImportSigningKey(blob);
-  assert.deepEqual(restored.publicKey(), kp.publicKey());
-  assert.deepEqual(restored.exportSigningKey(), blob);
-  const { signature: sig, nextStatefulLeafIndex } = restored.signStatefulRaw(MSG); // must consume leaf 2, not 1
-  assert.equal(sig.authPath.length, 2);
-  assert.equal(nextStatefulLeafIndex, 3); // returned counter matches getter
-  assert.equal(restored.nextStatefulLeafIndex, 3);
-  const pk = kp.publicKey();
-  assert.equal(w.shrincsVerifyStatefulRaw(pk.publicKeyCommitment, pk, MSG, sig), true);
-});
-
-test("import: rejects unknown formatVersion with a typed error", async () => {
-  const w = await loadNode();
-  const blob = w.shrincsKeygen(SEED, 4).exportSigningKey();
-  assert.throws(
-    () => w.shrincsImportSigningKey({ ...blob, formatVersion: 2 }),
-    (e) => e.code === "ERR_FORMAT_VERSION_UNSUPPORTED",
-  );
-  // Missing version field entirely → serde rejects (ERR_INVALID_INPUT).
-  const { formatVersion, ...unversioned } = blob;
-  assert.throws(
-    () => w.shrincsImportSigningKey(unversioned),
-    (e) => e.code === "ERR_INVALID_INPUT",
-  );
-});
-
-test("import: rejects corrupted and spliced blobs", async () => {
-  const w = await loadNode();
-  const blob = w.shrincsKeygen(SEED, 4).exportSigningKey();
-  assert.throws(
-    () => w.shrincsImportSigningKey({ ...blob, nextStatefulLeafIndex: 0 }),
-    (e) => e.code === "ERR_IMPORT_INVALID",
-  );
-  assert.throws(
-    () => w.shrincsImportSigningKey({ ...blob, nextStatefulLeafIndex: 6 }),
-    (e) => e.code === "ERR_IMPORT_INVALID",
-  );
-  assert.throws(
-    () => w.shrincsImportSigningKey({ ...blob, statefulRoot: blob.hypertreeRoot }),
-    (e) => e.code === "ERR_IMPORT_INVALID",
-  );
-});
-
-test("import: exhausted key (counter = max + 1) imports; stateless still signs", async () => {
-  const w = await loadNode();
-  const blob = w.shrincsKeygen(SEED, 4).exportSigningKey();
-  const kp = w.shrincsImportSigningKey({ ...blob, nextStatefulLeafIndex: 5 });
-  assert.throws(() => kp.signStatefulRaw(MSG), (e) => e.code === "ERR_STATEFUL_LEAVES_EXHAUSTED");
-  const pk = kp.publicKey();
-  const sig = kp.signStatelessRaw(MSG);
-  assert.equal(w.shrincsVerifyStatelessRaw(pk.publicKeyCommitment, pk, MSG, sig), true);
-});
-
-test("import: also works through the web loader", async () => {
-  const w = await loadWeb();
-  const blob = w.shrincsKeygen(SEED, 4).exportSigningKey();
-  const { signature: sig } = w
-    .shrincsImportSigningKey({ ...blob, nextStatefulLeafIndex: 3 })
-    .signStatefulRaw(MSG);
-  assert.equal(sig.authPath.length, 3);
-});
-
-test("observability: getters track the counter without touching secrets", async () => {
-  const w = await loadNode();
-  const kp = w.shrincsKeygen(SEED, 4);
-  assert.equal(kp.nextStatefulLeafIndex, 1);
-  assert.equal(kp.maxStatefulSignatures, 4);
-  assert.equal(kp.remainingStatefulSignatures, 4);
-
-  const r1 = kp.signStatefulRaw(MSG);
-  assert.equal(r1.nextStatefulLeafIndex, 2);
-  assert.equal(kp.nextStatefulLeafIndex, 2);
-  assert.equal(kp.remainingStatefulSignatures, 3);
-});
-
-test("observability: exhausted key reports zero remaining and pre-checks", async () => {
-  const w = await loadNode();
-  const blob = w.shrincsKeygen(SEED, 4).exportSigningKey();
-  const kp = w.shrincsImportSigningKey({ ...blob, nextStatefulLeafIndex: 5 });
-  assert.equal(kp.remainingStatefulSignatures, 0);
-  assert.throws(() => kp.signStatefulRaw(MSG), (e) => e.code === "ERR_STATEFUL_LEAVES_EXHAUSTED");
-  assert.equal(kp.nextStatefulLeafIndex, 5); // pre-check mutated nothing
-});
-
-test("observability: signStatefulRawAt rejects out-of-range leaves with a typed code", async () => {
-  const w = await loadNode();
-  const kp = w.shrincsKeygen(SEED, 4);
-  assert.throws(() => kp.signStatefulRawAt(MSG, 0), (e) => e.code === "ERR_LEAF_OUT_OF_RANGE");
-  assert.throws(() => kp.signStatefulRawAt(MSG, 5), (e) => e.code === "ERR_LEAF_OUT_OF_RANGE");
+  // Hex-DTO fields (still hex on the nested-object surface) are 0x-prefixed
+  // lowercase strings.
+  assert.match(snap.domainSeparator, HEX_RE);
+  assert.match(snap.owner, HEX_RE);
 });
 
 test("version: wasm reports the package version through both loaders", async () => {
@@ -301,4 +374,15 @@ test("version: wasm reports the package version through both loaders", async () 
   );
   assert.equal((await loadNode()).version(), pkg.version);
   assert.equal((await loadWeb()).version(), pkg.version);
+});
+
+test("loadHashSigs: the exported entry point resolves through the node loader", async () => {
+  const { sphincsPlusC, shrincs } = await loadHashSigsNode();
+  const spcKeys = sphincsPlusC.keygen(SEED);
+  assert.equal(sphincsPlusC.verify(sphincsPlusC.sign(MSG, spcKeys), MSG, spcKeys.publicKey), true);
+  const shrincsKeys = shrincs.keygen(SEED, 4);
+  assert.equal(
+    shrincs.verify(shrincs.sign(MSG, shrincsKeys), MSG, shrincsKeys.publicKeyCommitment),
+    true,
+  );
 });
