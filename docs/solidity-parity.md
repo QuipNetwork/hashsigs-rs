@@ -19,9 +19,10 @@ audit.
   for every named envelope shape, including ERC-1271 mode-1/2 action
   envelopes and `prepare_stateless_delegation`. Byte-pinned against the
   Solidity-exported vector blobs.
-- `shrincs::erc7913::ShrincsVerifierErc7913` mirrors `SHRINCSVerifier.sol`
-  (32-byte commitment key, stateful envelope, tri-state outcome,
-  `version_tag()` pins); `SphincsPlusCVerifier` mirrors
+- `shrincs::ShrincsVerifier` implementing `verifier::VerifierInterface`
+  (`verify_envelope`) mirrors `SHRINCSVerifier.sol` (32-byte commitment key,
+  stateful envelope, tri-state outcome, `version_tag()` pins);
+  `SphincsPlusCVerifier` (also `VerifierInterface`) mirrors
   `SPHINCSPlusCVerifier.sol`.
 - Account wrapper (`account::ShrincsAccountVerifierExample`): policy machine,
   nonce/key-version/budget accounting, both rotations, ERC-1271

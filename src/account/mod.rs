@@ -2382,6 +2382,85 @@ mod tests {
         ignore = "128s stateless keygen/signing is compute-infeasible in-process"
     )]
     #[test]
+    fn rotate_to_fresh_key_rejects_mismatched_claimed_next_commitment() {
+        // The next-key target carries a claimed `public_key_commitment` that
+        // must equal the recomputed commitment over (stateful_pk, current
+        // pk_seed, current hypertree_root). A mismatch must fail closed before
+        // any key install.
+        let case = &cached_account_signature_fixtures().rotate_stateful;
+        let public_key = case.public_key.clone();
+        let expected = expected_key(&public_key);
+        let mut account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), expected);
+        account
+            .setStatefulPolicyRecoveryRotation(id(1))
+            .expect("owner can select recovery policy");
+        account
+            .enterRecoveryMode(id(1))
+            .expect("owner can arm recovery mode");
+        account.statelessSignaturesUsed = 7;
+
+        let mut next_target = case.next_target.clone();
+        assert!(
+            !next_target.public_key_commitment.is_empty(),
+            "fixture next target must carry a commitment"
+        );
+        next_target.public_key_commitment[0] ^= 0xff;
+
+        assert_eq!(
+            account.rotateToFreshKey(&public_key, &case.signature, &next_target),
+            Err(AccountError::InvalidSignature)
+        );
+        assert_eq!(account.currentShrincsPublicKey(), expected);
+        assert_eq!(account.keyVersion(), [0u8; HASH_LEN]);
+        assert_eq!(account.nonce(), [0u8; HASH_LEN]);
+        assert_eq!(account.statelessSignaturesUsed(), 7);
+        assert!(account.recoveryMode());
+    }
+
+    #[cfg_attr(
+        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
+    )]
+    #[test]
+    fn rotate_full_key_rejects_mismatched_claimed_next_commitment() {
+        // Full rotation recomputes the next commitment from the supplied
+        // (stateful_pk, pk_seed, hypertree_root) and rejects when the claimed
+        // commitment does not match.
+        let case = &cached_account_signature_fixtures().rotate_full;
+        let public_key = case.public_key.clone();
+        let expected = expected_key(&public_key);
+        let mut account = ShrincsAccountVerifierExample::new(id(1), id(2), address(7), expected);
+        account
+            .setStatefulPolicyRecoveryRotation(id(1))
+            .expect("owner can select recovery policy");
+        account
+            .enterRecoveryMode(id(1))
+            .expect("owner can arm recovery mode");
+        account.statelessSignaturesUsed = 7;
+
+        let mut next_target = case.next_target.clone();
+        assert!(
+            !next_target.public_key_commitment.is_empty(),
+            "fixture next target must carry a commitment"
+        );
+        next_target.public_key_commitment[0] ^= 0xff;
+
+        assert_eq!(
+            account.rotateFullKey(&public_key, &case.signature, &next_target),
+            Err(AccountError::InvalidSignature)
+        );
+        assert_eq!(account.currentShrincsPublicKey(), expected);
+        assert_eq!(account.keyVersion(), [0u8; HASH_LEN]);
+        assert_eq!(account.nonce(), [0u8; HASH_LEN]);
+        assert_eq!(account.statelessSignaturesUsed(), 7);
+        assert!(account.recoveryMode());
+    }
+
+    #[cfg_attr(
+        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
+    )]
+    #[test]
     fn verify_stateless_action_rejects_tampered_signature() {
         // A stateless action with a corrupted signature must fail with a distinct
         // InvalidSignature and leave the nonce and stateless-usage counter untouched.
