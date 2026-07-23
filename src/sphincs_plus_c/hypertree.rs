@@ -39,12 +39,18 @@ use crate::types::SphincsPlusCSigningKey;
 use crate::primitives::wotsplusc;
 use crate::primitives::wotsplusc::WOTS_C_MAX_GRIND_COUNTER;
 
+/// Layer-0 seed coordinates selected by the FORS message digest.
+#[derive(Clone, Copy)]
+pub(crate) struct HypertreeSeed {
+    pub tree_index: u64,
+    pub leaf_index: u32,
+}
+
 pub(crate) fn verify_hypertree(
     pk_seed: &[u8; HASH_LEN],
     expected_hypertree_root: &[u8; HASH_LEN],
     fors_root: [u8; HASH_LEN],
-    seed_tree_index: u64,
-    seed_leaf_index: u32,
+    seed: HypertreeSeed,
     layers: &[HypertreeLayerSignature],
 ) -> bool {
     if layers.len() != NUM_HYPERTREE_LAYERS as usize {
@@ -57,8 +63,8 @@ pub(crate) fn verify_hypertree(
     let leaf_count = 1u32 << subtree_height;
     let leaf_mask = (1u64 << subtree_height) - 1;
     let mut current_root = fors_root;
-    let mut expected_tree_index = seed_tree_index;
-    let mut expected_leaf_index = seed_leaf_index;
+    let mut expected_tree_index = seed.tree_index;
+    let mut expected_leaf_index = seed.leaf_index;
 
     for (layer_index, layer_signature) in layers.iter().enumerate() {
         if expected_leaf_index >= leaf_count
@@ -66,11 +72,14 @@ pub(crate) fn verify_hypertree(
         {
             return false;
         }
+        let coords = WotsKeypair {
+            layer: layer_index as u32,
+            tree: expected_tree_index,
+            keypair: expected_leaf_index,
+        };
         if !verify_wots_c32(
             pk_seed,
-            layer_index as u32,
-            expected_tree_index,
-            expected_leaf_index,
+            coords,
             &layer_signature.wots_c_pk_hash,
             current_root,
             &layer_signature.wots_c_signature,
@@ -80,9 +89,11 @@ pub(crate) fn verify_hypertree(
         let Some(next_root) = hypertree_root_from_path32(
             subtree_height,
             pk_seed,
-            layer_index as u32,
-            expected_tree_index,
-            expected_leaf_index,
+            HypertreePath {
+                layer: layer_index as u32,
+                tree_index: expected_tree_index,
+                leaf_index: expected_leaf_index,
+            },
             layer_signature.wots_c_pk_hash,
             &layer_signature.auth_path,
         ) else {
@@ -132,9 +143,7 @@ pub(crate) fn stateless_wots_public_key_hash(
 
 fn verify_wots_c32(
     pk_seed: &[u8; HASH_LEN],
-    layer: u32,
-    tree: u64,
-    keypair: u32,
+    coords: WotsKeypair,
     expected_pk_hash: &[u8; HASH_LEN],
     message: [u8; HASH_LEN],
     signature: &WotsCSignature,
@@ -151,7 +160,7 @@ fn verify_wots_c32(
         &message,
     );
 
-    let address_base = wots_address_base(layer, tree, keypair);
+    let address_base = wots_address_base(coords.layer, coords.tree, coords.keypair);
 
     // Pass 1 (cheap, sequential): validate every chain value is present and
     // accumulate the digit sum. Must stay sequential so a missing/overflowing
@@ -180,8 +189,10 @@ fn verify_wots_c32(
         Some(wots_chain32_no_mask_base(
             WOTS_CHAIN_LEN,
             *pk_seed,
-            address_base,
-            chain_index as u32,
+            wotsplusc::AddressBaseChain {
+                address_base,
+                chain_index: chain_index as u32,
+            },
             chain_value,
             digits[chain_index],
         ))
@@ -222,28 +233,34 @@ fn verify_wots_c32(
 fn wots_chain32_no_mask_base(
     w: u16,
     pk_seed: [u8; HASH_LEN],
-    address_base: [u8; HASH_LEN],
-    chain_index: u32,
+    addr: wotsplusc::AddressBaseChain,
     value: [u8; HASH_LEN],
     digit: u32,
 ) -> [u8; HASH_LEN] {
     let steps = u32::from(w - 1) - digit;
     wotsplusc::stateless_wots_chain_from_address_base(
         &pk_seed,
-        address_base,
-        chain_index,
-        value,
-        digit,
-        steps,
+        addr,
+        wotsplusc::ChainWalk {
+            value,
+            start: digit,
+            steps,
+        },
     )
+}
+
+/// Layer / tree / leaf coordinates for a hypertree auth-path climb.
+#[derive(Clone, Copy)]
+struct HypertreePath {
+    layer: u32,
+    tree_index: u64,
+    leaf_index: u32,
 }
 
 fn hypertree_root_from_path32(
     height: u32,
     pk_seed: &[u8],
-    layer: u32,
-    tree_index: u64,
-    leaf_index: u32,
+    path: HypertreePath,
     leaf: [u8; HASH_LEN],
     auth_path: &[[u8; HASH_LEN]],
 ) -> Option<[u8; HASH_LEN]> {
@@ -252,7 +269,7 @@ fn hypertree_root_from_path32(
     }
     let pk_seed = word32(pk_seed)?;
     let mut node = leaf;
-    let mut index = leaf_index;
+    let mut index = path.leaf_index;
     for level in 0..height {
         let sibling = word32(auth_path.get(level as usize)?)?;
         let (left, right) = if index & 1 == 0 {
@@ -261,7 +278,7 @@ fn hypertree_root_from_path32(
             (sibling, node)
         };
         let address_word =
-            hypertree_address_word(layer, tree_index, level + 1, u64::from(index >> 1));
+            hypertree_address_word(path.layer, path.tree_index, level + 1, u64::from(index >> 1));
         node = hash_node(&[
             b"hypertree-node".as_ref(),
             pk_seed.as_ref(),
@@ -671,5 +688,12 @@ fn stateless_wots_c_chain(
         keypair: coords.keypair,
         chain_index: coords.chain,
     };
-    wotsplusc::stateless_wots_chain(&ctx, value, start, steps)
+    wotsplusc::stateless_wots_chain(
+        &ctx,
+        wotsplusc::ChainWalk {
+            value,
+            start,
+            steps,
+        },
+    )
 }

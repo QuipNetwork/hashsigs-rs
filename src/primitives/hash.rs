@@ -117,21 +117,26 @@ fn read_bits(input: &[u8], start_bit: usize, bit_len: u32) -> Option<u64> {
     Some(out)
 }
 
-pub(crate) fn address_word32(
-    layer: u32,
-    tree: u64,
-    address_type: u32,
-    keypair: u32,
-    chain: u32,
-    step: u32,
-) -> [u8; HASH_LEN] {
+/// Full ADRS word fields for `address_word32` (layer / tree / type / keypair /
+/// chain / step). Bundled so the helper stays within the positional-arg limit.
+#[derive(Clone, Copy)]
+pub(crate) struct AddressWord32 {
+    pub layer: u32,
+    pub tree: u64,
+    pub address_type: u32,
+    pub keypair: u32,
+    pub chain: u32,
+    pub step: u32,
+}
+
+pub(crate) fn address_word32(addr: AddressWord32) -> [u8; HASH_LEN] {
     let mut out = [0u8; HASH_LEN];
-    out[0..4].copy_from_slice(&layer.to_be_bytes());
-    out[8..16].copy_from_slice(&tree.to_be_bytes());
-    out[16..20].copy_from_slice(&address_type.to_be_bytes());
-    out[20..24].copy_from_slice(&keypair.to_be_bytes());
-    out[24..28].copy_from_slice(&chain.to_be_bytes());
-    out[28..32].copy_from_slice(&step.to_be_bytes());
+    out[0..4].copy_from_slice(&addr.layer.to_be_bytes());
+    out[8..16].copy_from_slice(&addr.tree.to_be_bytes());
+    out[16..20].copy_from_slice(&addr.address_type.to_be_bytes());
+    out[20..24].copy_from_slice(&addr.keypair.to_be_bytes());
+    out[24..28].copy_from_slice(&addr.chain.to_be_bytes());
+    out[28..32].copy_from_slice(&addr.step.to_be_bytes());
     out
 }
 
@@ -189,7 +194,14 @@ mod tests {
 
     #[test]
     fn address_word_matches_solidity_layout() {
-        let word = address_word32(1, 2, 3, 4, 5, 6);
+        let word = address_word32(AddressWord32 {
+            layer: 1,
+            tree: 2,
+            address_type: 3,
+            keypair: 4,
+            chain: 5,
+            step: 6,
+        });
         assert_eq!(&word[0..4], &1u32.to_be_bytes());
         assert_eq!(&word[8..16], &2u64.to_be_bytes());
         assert_eq!(&word[16..20], &3u32.to_be_bytes());

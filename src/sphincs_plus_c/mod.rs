@@ -80,8 +80,10 @@ pub(crate) fn verify_raw(
         pk_seed,
         hypertree_root,
         fors_root,
-        seed_tree_index,
-        seed_leaf_index,
+        hypertree::HypertreeSeed {
+            tree_index: seed_tree_index,
+            leaf_index: seed_leaf_index,
+        },
         &signature.hypertree,
     )
 }

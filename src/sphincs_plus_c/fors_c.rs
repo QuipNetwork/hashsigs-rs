@@ -101,10 +101,12 @@ pub(crate) fn verify_fors_c_and_return_root(
         *root_slot = fors_entry_root32(
             fors_tree_height as u32,
             pk_seed,
-            digest.tree_index,
-            digest.leaf_index,
-            fors_tree_index as u32,
-            entry_leaf_index,
+            ForsLeafCoords {
+                tree_index: digest.tree_index,
+                leaf_index: digest.leaf_index,
+                fors_tree: fors_tree_index as u32,
+                leaf: entry_leaf_index,
+            },
             entry,
         )?;
     }
@@ -164,16 +166,22 @@ pub(crate) fn signer_fors_digest(
     })
 }
 
+/// ADRS coordinates for one FORS leaf (hypertree position + FORS tree/leaf).
+#[derive(Clone, Copy)]
+pub(crate) struct ForsLeafCoords {
+    pub tree_index: u64,
+    pub leaf_index: u32,
+    pub fors_tree: u32,
+    pub leaf: u32,
+}
+
 pub(crate) fn fors_leaf_secret(
     pk_seed: &[u8; HASH_LEN],
     sk_seed: &[u8; HASH_LEN],
-    tree_index: u64,
-    leaf_index: u32,
-    fors_tree: u32,
-    leaf: u32,
+    coords: ForsLeafCoords,
 ) -> [u8; HASH_LEN] {
-    let tree_leaf = (u64::from(fors_tree) << FORS_TREE_HEIGHT) + u64::from(leaf);
-    let address_word = fors_address_word(tree_index, leaf_index, 0, tree_leaf);
+    let tree_leaf = (u64::from(coords.fors_tree) << FORS_TREE_HEIGHT) + u64::from(coords.leaf);
+    let address_word = fors_address_word(coords.tree_index, coords.leaf_index, 0, tree_leaf);
     hash_packed(&[
         b"fors-sk".as_ref(),
         sk_seed.as_ref(),
@@ -185,27 +193,19 @@ pub(crate) fn fors_leaf_secret(
 pub(crate) fn fors_leaf_hash(
     pk_seed: &[u8; HASH_LEN],
     sk_seed: &[u8; HASH_LEN],
-    tree_index: u64,
-    leaf_index: u32,
-    fors_tree: u32,
-    leaf: u32,
+    coords: ForsLeafCoords,
 ) -> [u8; HASH_LEN] {
-    let secret = Zeroizing::new(fors_leaf_secret(
-        pk_seed, sk_seed, tree_index, leaf_index, fors_tree, leaf,
-    ));
-    fors_leaf_hash_from_secret(pk_seed, tree_index, leaf_index, fors_tree, leaf, &secret)
+    let secret = Zeroizing::new(fors_leaf_secret(pk_seed, sk_seed, coords));
+    fors_leaf_hash_from_secret(pk_seed, coords, &secret)
 }
 
 fn fors_leaf_hash_from_secret(
     pk_seed: &[u8; HASH_LEN],
-    tree_index: u64,
-    leaf_index: u32,
-    fors_tree: u32,
-    leaf: u32,
+    coords: ForsLeafCoords,
     secret: &[u8; HASH_LEN],
 ) -> [u8; HASH_LEN] {
-    let tree_leaf = (u64::from(fors_tree) << FORS_TREE_HEIGHT) + u64::from(leaf);
-    let address_word = fors_address_word(tree_index, leaf_index, 0, tree_leaf);
+    let tree_leaf = (u64::from(coords.fors_tree) << FORS_TREE_HEIGHT) + u64::from(coords.leaf);
+    let address_word = fors_address_word(coords.tree_index, coords.leaf_index, 0, tree_leaf);
     hash_node(&[
         b"fors-leaf".as_ref(),
         pk_seed.as_ref(),
@@ -217,39 +217,39 @@ fn fors_leaf_hash_from_secret(
 pub(crate) fn fors_tree_root_and_auth_path(
     pk_seed: &[u8; HASH_LEN],
     sk_seed: &[u8; HASH_LEN],
-    tree_index: u64,
-    leaf_index: u32,
-    fors_tree: u32,
-    leaf: u32,
+    coords: ForsLeafCoords,
 ) -> ([u8; HASH_LEN], [u8; HASH_LEN], Vec<[u8; HASH_LEN]>) {
     let height = u32::from(FORS_TREE_HEIGHT);
     // Compute the selected leaf secret once and reuse it for both the revealed
     // signature field and the leaf-hash step (avoids a second SK derivation).
-    let selected_secret_leaf =
-        fors_leaf_secret(pk_seed, sk_seed, tree_index, leaf_index, fors_tree, leaf);
+    let selected_secret_leaf = fors_leaf_secret(pk_seed, sk_seed, coords);
 
     let (root, auth_path) = crate::primitives::treehash::treehash_root_and_auth_path(
         height,
-        leaf,
+        coords.leaf,
         |index| {
-            if index == leaf {
-                fors_leaf_hash_from_secret(
-                    pk_seed,
-                    tree_index,
-                    leaf_index,
-                    fors_tree,
-                    leaf,
-                    &selected_secret_leaf,
-                )
+            if index == coords.leaf {
+                fors_leaf_hash_from_secret(pk_seed, coords, &selected_secret_leaf)
             } else {
-                fors_leaf_hash(pk_seed, sk_seed, tree_index, leaf_index, fors_tree, index)
+                fors_leaf_hash(
+                    pk_seed,
+                    sk_seed,
+                    ForsLeafCoords {
+                        leaf: index,
+                        ..coords
+                    },
+                )
             }
         },
         |node_height, parent_index, left, right| {
-            let shifted_tree = u64::from(fors_tree) << (height - node_height);
+            let shifted_tree = u64::from(coords.fors_tree) << (height - node_height);
             let parent_low_index = shifted_tree + parent_index;
-            let address_word =
-                fors_address_word(tree_index, leaf_index, node_height, parent_low_index);
+            let address_word = fors_address_word(
+                coords.tree_index,
+                coords.leaf_index,
+                node_height,
+                parent_low_index,
+            );
             hash_node(&[
                 b"fors-node".as_ref(),
                 pk_seed.as_ref(),
@@ -266,20 +266,17 @@ pub(crate) fn fors_tree_root_and_auth_path(
 fn fors_entry_root32(
     height: u32,
     pk_seed: &[u8],
-    tree_index: u64,
-    leaf_index: u32,
-    fors_tree_index: u32,
-    entry_leaf_index: u32,
+    coords: ForsLeafCoords,
     entry: &ForsEntry,
 ) -> Option<[u8; HASH_LEN]> {
-    let shifted_fors_tree = u64::from(fors_tree_index) << height;
-    let leaf_low_index = shifted_fors_tree + u64::from(entry_leaf_index);
+    let shifted_fors_tree = u64::from(coords.fors_tree) << height;
+    let leaf_low_index = shifted_fors_tree + u64::from(coords.leaf);
     let mut node = hash_fors_leaf32(
         pk_seed,
-        fors_address_word(tree_index, leaf_index, 0, leaf_low_index),
+        fors_address_word(coords.tree_index, coords.leaf_index, 0, leaf_low_index),
         &entry.secret_leaf,
     )?;
-    let mut index = entry_leaf_index;
+    let mut index = coords.leaf;
     for level in 0..height {
         let sibling = word32(entry.auth_path.get(level as usize)?)?;
         let (left, right) = if index & 1 == 0 {
@@ -288,10 +285,15 @@ fn fors_entry_root32(
             (sibling, node)
         };
         let node_height = level + 1;
-        let shifted_tree = u64::from(fors_tree_index) << (height - node_height);
+        let shifted_tree = u64::from(coords.fors_tree) << (height - node_height);
         let parent_index = u64::from(index >> 1);
         let parent_low_index = shifted_tree + parent_index;
-        let address_word = fors_address_word(tree_index, leaf_index, node_height, parent_low_index);
+        let address_word = fors_address_word(
+            coords.tree_index,
+            coords.leaf_index,
+            node_height,
+            parent_low_index,
+        );
         node = hash_fors_node32(pk_seed, address_word, left, right)?;
         index >>= 1;
     }
@@ -404,17 +406,15 @@ mod tests {
         let fors_tree = 5u32;
         let leaf = 9u32;
 
-        let secret =
-            fors_leaf_secret(&pk_seed, &sk_seed, tree_index, leaf_index, fors_tree, leaf);
-        let reused = fors_leaf_hash_from_secret(
-            &pk_seed,
+        let coords = ForsLeafCoords {
             tree_index,
             leaf_index,
             fors_tree,
             leaf,
-            &secret,
-        );
-        let direct = fors_leaf_hash(&pk_seed, &sk_seed, tree_index, leaf_index, fors_tree, leaf);
+        };
+        let secret = fors_leaf_secret(&pk_seed, &sk_seed, coords);
+        let reused = fors_leaf_hash_from_secret(&pk_seed, coords, &secret);
+        let direct = fors_leaf_hash(&pk_seed, &sk_seed, coords);
 
         assert_eq!(reused, direct);
     }
@@ -524,10 +524,12 @@ pub(crate) fn sign_fors_c(
             let (root, secret_leaf, auth_path) = fors_tree_root_and_auth_path(
                 &signing_key.pk_seed,
                 &signing_key.stateless_sk_seed,
-                digest.tree_index,
-                digest.leaf_index,
-                fors_tree as u32,
-                leaf,
+                ForsLeafCoords {
+                    tree_index: digest.tree_index,
+                    leaf_index: digest.leaf_index,
+                    fors_tree: fors_tree as u32,
+                    leaf,
+                },
             );
             *root_slot = root;
             entries.push(ForsEntry {
@@ -678,20 +680,25 @@ mod measurement_tests {
         measurement_env_u32("SHRINCS_FORS_MEASURE_COUNTER_PROGRESS_EVERY", default).max(1)
     }
 
+    /// Progress reporting knobs for the ignored measurement harness.
+    struct MeasurementProgress {
+        sample_index: u32,
+        counter_progress_every: u32,
+    }
+
     fn measured_winning_fors_counter_and_digest(
         signing_key: &SphincsPlusCSigningKey,
         message: &[u8],
         randomizer: &[u8; HASH_LEN],
         limit: u32,
-        sample_index: u32,
-        counter_progress_every: u32,
+        progress: MeasurementProgress,
     ) -> Option<(u32, SigningForsDigest)> {
         for counter in 0..limit {
-            if counter > 0 && counter % counter_progress_every == 0 {
+            if counter > 0 && counter % progress.counter_progress_every == 0 {
                 hashsigs_println!(
                     "counter progress profile={} sample={}/? tried={counter}/{limit}",
                     crate::primitives::profiles::PROFILE_NAME,
-                    sample_index + 1
+                    progress.sample_index + 1
                 );
             }
             let Some(digest) = signer_fors_digest(
@@ -745,8 +752,10 @@ mod measurement_tests {
                 &message,
                 &randomizer,
                 limit,
-                i,
-                counter_progress_every,
+                MeasurementProgress {
+                    sample_index: i,
+                    counter_progress_every,
+                },
             ) {
                 Some((counter, _)) => {
                     successes += 1;
