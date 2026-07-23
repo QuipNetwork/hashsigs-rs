@@ -54,15 +54,15 @@ import type {
   WasmShrincsKeypair as _WasmShrincsKeypair,
 } from "./nodejs/hashsigs_rs.js";
 
-// type _Expect<T extends true> = T;
-// type _Equal<A, B> =
-//   (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2)
-//     ? true
-//     : false;
+type _Expect<T extends true> = T;
+type _equal<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2)
+    ? true
+    : false;
 
-// type _KeygenMintsExportedKeypair = _Expect<
-//   _Equal<ReturnType<ShrincsWasmModule["shrincsKeygen"]>, _WasmShrincsKeypair>
-// >;
-// type _SignStatefulRawReturnsSignResult = _Expect<
-//   _Equal<ReturnType<_WasmShrincsKeypair["signStatefulRaw"]>, _StatefulSignResult>
-// >;
+type _KeygenMintsExportedKeypair = _Expect<
+  _equal<ReturnType<ShrincsWasmModule["shrincsKeygen"]>, _WasmShrincsKeypair>
+>;
+type _SignStatefulRawReturnsSignResult = _Expect<
+  _equal<ReturnType<_WasmShrincsKeypair["signStatefulRaw"]>, _StatefulSignResult>
+>;

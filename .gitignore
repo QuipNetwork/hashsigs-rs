@@ -19,7 +19,7 @@ _prompt_planning/
 
 # Beads / Dolt files (added by bd init)
 .dolt/
-*.db
+.beads/**/*.db
 .beads-credential-key
 .beads/proxieddb/
 
@@ -29,3 +29,6 @@ _prompt_planning/
 .claude/
 .codex/
 CLAUDE.md
+
+# Writable cargo home used by CI (must not collide with committed .cargo/)
+.cargo-home/
