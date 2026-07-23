@@ -61,6 +61,13 @@ fn allocations() -> u64 {
 }
 
 /// Measure `f` and return (result, allocations performed while it ran).
+/// The counting allocator is process-global: it counts allocations from every
+/// thread, so any allocation on another test thread (setup or a measured
+/// window) contaminates a measurement. cargo runs tests in parallel, so each
+/// test in this binary holds this lock for its WHOLE body — setup included —
+/// to guarantee only one alloc-sensitive test runs at a time.
+static MEASURE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn measured<T>(f: impl FnOnce() -> T) -> (T, u64) {
     let before = allocations();
     let result = f();
@@ -84,6 +91,7 @@ fn assert_verify_budget(what: &str, allocs: u64) {
 )]
 #[test]
 fn stateless_verify_stays_within_allocation_budget() {
+    let _guard = MEASURE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     // SPHINCS+C layer: independent keypair, arbitrary 32-byte message.
     let (sk, pk) = hashsigs_rs::sphincs_plus_c::keygen([0x11; 32], [0x22; 32], [0x33; 32]);
     let message = [0x44u8; 32];
@@ -132,6 +140,7 @@ fn stateless_verify_stays_within_allocation_budget() {
 )]
 #[test]
 fn stateful_verify_stays_within_allocation_budget() {
+    let _guard = MEASURE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     // Solana's account program runs stateful verify per action; the same
     // zero-alloc budget applies as for the stateless path.
     use hashsigs_rs::shrincs::{ActionContext, ShrincsSigner, ShrincsVerifier};
