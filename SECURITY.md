@@ -238,25 +238,24 @@ same-origin trust boundary, not inside a hardened enclave.
 
 Security implication:
 
-- `WasmShrincsKeypair` keeps live signing-key material in wasm memory while the
-  handle exists
-- `exportSigningKeyUnsafe()` copies full secret signing state into JS-visible
-  values
+- secret key material is a plain `Uint8Array` the caller holds directly: the
+  128-byte SPHINCS+C `secretKey` and the 264-byte SHRINCS `secretKey`, both
+  returned by `sphincsPlusC.keygen()` / `shrincs.keygen()` (or reconstructed by
+  `shrincsImportSigningKey`)
 - any XSS, malicious same-origin script, compromised front-end dependency, or
-  hostile extension able to run in the page context can exfiltrate that key
+  hostile extension able to run in the page context can read that buffer
+  directly from JS
 
 Guidance:
 
-- do not expose the browser signer in pages that execute untrusted third-party
-  JS
-- do not treat browser local storage, IndexedDB, or ordinary JS heap state as a
-  strong secret boundary
-- use `destroy()` on `WasmShrincsKeypair` once a handle is no longer needed;
-  this performs a best-effort early wipe and invalidates the handle
-- treat `exportSigningKeyUnsafe()` as a backup / migration primitive, not a
-  routine operational call
-- `exportSigningKey()` remains only as a legacy alias; it carries the same
-  risk and should not be preferred in new integrations
+- don't run the browser signer in pages that execute untrusted third-party JS
+- treat browser local storage, IndexedDB, and ordinary JS heap state as a soft
+  boundary, not a strong secret store
+- for SHRINCS stateful signing, persist and reuse the same advancing
+  `secretKey` buffer. `shrincs.sign()` mutates it in place on every call; never
+  sign from a clone or a snapshot taken before an earlier `sign()` call, or you
+  reuse a one-time leaf and break the signature's security
+- zero the `secretKey` buffer (`secretKey.fill(0)`) once it's no longer needed
 
 ### WOTS+ robustness note
 
