@@ -55,7 +55,10 @@
     )
 )]
 
-#[cfg(feature = "alloc")]
+// Always available: the crate has no pure-core no-alloc build path.
+// `no_std + alloc` is the embedded baseline (see module docs above). The
+// `alloc` cargo feature remains as a no-op marker so existing
+// `--features alloc,...` invocations and `std = ["alloc", ...]` keep working.
 extern crate alloc;
 
 #[macro_use]

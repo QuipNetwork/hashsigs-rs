@@ -46,7 +46,10 @@ fi
 # wasm whose baked-in version() doesn't match Cargo.toml.
 cargo clean -p hashsigs-rs --release --target wasm32-unknown-unknown
 
-cargo build --release --target wasm32-unknown-unknown --features wasm-bindings
+# Cargo.toml ships crate-type = ["rlib"] so host no_std builds work; request
+# cdylib here so wasm-bindgen gets a .wasm artifact.
+cargo rustc --release --target wasm32-unknown-unknown --features wasm-bindings \
+  --crate-type cdylib --crate-type rlib
 
 for target in nodejs web; do
   wasm-bindgen "$WASM" --out-dir "$OUT/$target" --target "$target"
