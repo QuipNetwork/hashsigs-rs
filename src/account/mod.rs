@@ -157,7 +157,11 @@ pub struct ShrincsAccountVerifierExample {
 
     // Ordered log of emitted contract events, mirroring Solidity's `emit`
     // trail. Not part of the Solidity storage layout; it is observability the
-    // EVM provides through the transaction receipt.
+    // EVM provides through the transaction receipt. This vector grows on every
+    // emitting operation and is never pruned automatically (unlike
+    // `usedLeafBitmap`, a rotation does not clear it): callers that keep an
+    // instance alive across many operations must call `drain_events()`
+    // periodically to bound the log's memory.
     events: Vec<AccountEvent>,
 }
 
@@ -246,6 +250,9 @@ impl ShrincsAccountVerifierExample {
 
     // drain_events: Take and clear the accumulated event trail. Mirrors reading
     // and consuming the events a Solidity transaction would have emitted.
+    // Bounding the event log is the caller's responsibility: nothing else
+    // clears `events`, so a long-lived instance must drain periodically to keep
+    // the trail from growing without bound.
     pub fn drain_events(&mut self) -> Vec<AccountEvent> {
         std::mem::take(&mut self.events)
     }
@@ -968,6 +975,15 @@ impl ShrincsAccountVerifierExample {
         // Advance nonce and key epoch so old authorizations cannot be replayed.
         increment_u256_be(&mut self.nonce);
         increment_u256_be(&mut self.keyVersion);
+        // Bound bitmap growth across rotations: leaf-use memory is scoped to a
+        // key epoch, so drop every entry that does not belong to the new
+        // keyVersion. Without this the map would accumulate one dead word per
+        // touched leaf-word for every past epoch, growing without bound across
+        // repeated rotations. Copy keyVersion first so the retain closure does
+        // not borrow `self` while `usedLeafBitmap` is mutably borrowed.
+        let currentKeyVersion = self.keyVersion;
+        self.usedLeafBitmap
+            .retain(|(entryKeyVersion, _), _| *entryKeyVersion == currentKeyVersion);
         // Reset per-key stateless usage accounting only when the caller rotates the
         // stateless key too.
         if resetStatelessUsage {
@@ -2654,5 +2670,35 @@ mod tests {
         );
         // The install reset the stateless budget after the event captured the pre-reset count.
         assert_eq!(account.statelessSignaturesUsed(), 0);
+    }
+
+    #[test]
+    fn rotation_prunes_previous_epoch_bitmap_entries() {
+        // Bitmap leaf-use memory is scoped to a key epoch; a rotation must drop
+        // every entry belonging to the old keyVersion so the map cannot grow
+        // without bound across repeated rotations.
+        let mut account = ShrincsAccountVerifierExample::new(id(1), id(2), address(3), id(4));
+        account
+            .setStatefulPolicyLeafBitmap(id(1))
+            .expect("owner selects bitmap policy");
+
+        // Record two leaves in distinct 256-leaf words under the epoch-0 key.
+        account.commitStatefulLeafUse(5);
+        account.commitStatefulLeafUse(300);
+        assert!(account.isLeafUsed(5));
+        assert!(account.isLeafUsed(300));
+        assert_eq!(account.usedLeafBitmap.len(), 2);
+        let epoch_zero_key_version = account.keyVersion;
+
+        // A rotation advances the key epoch and must clear the old entries.
+        account.installRotatedKey(id(9), true);
+        assert_ne!(account.keyVersion, epoch_zero_key_version);
+        assert!(
+            account.usedLeafBitmap.is_empty(),
+            "old-epoch bitmap entries must be pruned on rotation",
+        );
+        // The freshly rotated epoch sees those leaves as unused again.
+        assert!(!account.isLeafUsed(5));
+        assert!(!account.isLeafUsed(300));
     }
 }

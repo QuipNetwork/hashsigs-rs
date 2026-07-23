@@ -36,6 +36,7 @@ use hashsigs_rs::shrincs::{
 };
 use solana_program_test::*;
 use solana_sdk::{
+    account::Account,
     compute_budget::ComputeBudgetInstruction,
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
@@ -43,6 +44,18 @@ use solana_sdk::{
     signer::Signer,
     transaction::Transaction,
 };
+
+/// A system-owned, data-empty account holding a single lamport, standing in for
+/// an attacker parking dust on a predictable, not-yet-created PDA.
+fn prefunded_system_account() -> Account {
+    Account {
+        lamports: 1,
+        data: Vec::new(),
+        owner: solana_program::system_program::id(),
+        executable: false,
+        rent_epoch: 0,
+    }
+}
 
 async fn setup_test() -> (ProgramTest, Keypair) {
     let program_id = Keypair::new();
@@ -878,4 +891,132 @@ async fn leaf_bitmap_policy_rejects_leaf_reuse() {
     )
     .await;
     assert!(reuse.is_err(), "reusing a marked-used leaf must be rejected");
+}
+
+#[tokio::test]
+async fn prefunded_account_pda_is_adopted_on_init() {
+    // Pre-funding the account PDA with 1 lamport used to make init fail with
+    // AccountAlreadyInUse (create_account rejects a funded destination),
+    // permanently blocking the account. Init must now adopt the pre-funded PDA.
+    let (_signing_key, public_key) =
+        ShrincsSigner::keygen(b"account prefunded init seed", 4).expect("keygen");
+    let commitment = commitment32(&public_key);
+    let mut fixture = setup_account_fixture(b"account prefunded init fixture").await;
+    fixture
+        .program_test
+        .add_account(fixture.account_pda, prefunded_system_account());
+
+    let mut context = fixture.program_test.start_with_context().await;
+    init_account(
+        &mut context,
+        &fixture.program_id.pubkey(),
+        &fixture.owner,
+        fixture.salt,
+        fixture.account_pda,
+        commitment,
+    )
+    .await;
+
+    // The pre-funded PDA was adopted: program-owned with correctly written state.
+    let account = context
+        .banks_client
+        .get_account(fixture.account_pda)
+        .await
+        .unwrap()
+        .expect("account exists");
+    assert_eq!(account.owner, fixture.program_id.pubkey());
+    let state = load_state(&mut context, &fixture.account_pda).await;
+    assert_eq!(state.current_public_key_commitment, commitment);
+    assert_eq!(state.owner, fixture.owner.pubkey());
+}
+
+#[tokio::test]
+async fn prefunded_bitmap_word_pda_is_adopted() {
+    // Pre-funding the bitmap-word PDA with 1 lamport used to make the first
+    // bitmap leaf use fail with AccountAlreadyInUse, denying that leaf. The
+    // first use must now adopt the pre-funded word PDA instead.
+    let (mut signing_key, public_key) =
+        ShrincsSigner::keygen(b"account prefunded bitmap seed", 4).expect("keygen");
+    let commitment = commitment32(&public_key);
+    let mut fixture = setup_account_fixture(b"account prefunded bitmap fixture").await;
+    let bitmap_pda = account::bitmap_word_pda(
+        &fixture.program_id.pubkey(),
+        &fixture.account_pda,
+        &[0u8; 32],
+        0,
+    )
+    .0;
+    fixture
+        .program_test
+        .add_account(bitmap_pda, prefunded_system_account());
+
+    let mut context = fixture.program_test.start_with_context().await;
+    init_account(
+        &mut context,
+        &fixture.program_id.pubkey(),
+        &fixture.owner,
+        fixture.salt,
+        fixture.account_pda,
+        commitment,
+    )
+    .await;
+
+    send(
+        &mut context,
+        &fixture.program_id.pubkey(),
+        WOTSPlusInstruction::ShrincsAccountSetPolicyLeafBitmap,
+        vec![
+            AccountMeta::new(fixture.account_pda, false),
+            AccountMeta::new_readonly(fixture.owner.pubkey(), true),
+        ],
+        &[&fixture.owner],
+    )
+    .await
+    .expect("owner can select leaf-bitmap policy");
+
+    let domain_separator =
+        account::domain_separator(&fixture.program_id.pubkey(), &fixture.account_pda);
+    let action_type = [21u8; 32];
+    let payload_hash = [22u8; 32];
+    let context_msg = ActionContext {
+        domain_separator,
+        nonce: [0u8; 32],
+        key_version: [0u8; 32],
+        action_type,
+        payload_hash,
+    };
+    let signature =
+        ShrincsSigner::sign_stateful_action(&mut signing_key, &public_key, &context_msg)
+            .expect("sign");
+    let accounts = vec![
+        AccountMeta::new(fixture.account_pda, false),
+        AccountMeta::new(bitmap_pda, false),
+        AccountMeta::new(context.payer.pubkey(), true),
+        AccountMeta::new_readonly(solana_program::system_program::id(), false),
+    ];
+
+    send(
+        &mut context,
+        &fixture.program_id.pubkey(),
+        WOTSPlusInstruction::ShrincsAccountVerifyStatefulAction {
+            action_type,
+            payload_hash,
+            public_key: ShrincsPublicKeyDto::from(public_key),
+            signature: StatefulSignatureDto::from(signature),
+        },
+        accounts,
+        &[],
+    )
+    .await
+    .expect("first bitmap leaf use adopts the pre-funded word PDA");
+
+    // The adopted word is now program-owned with a full 32-byte data buffer.
+    let bitmap = context
+        .banks_client
+        .get_account(bitmap_pda)
+        .await
+        .unwrap()
+        .expect("bitmap word exists");
+    assert_eq!(bitmap.owner, fixture.program_id.pubkey());
+    assert_eq!(bitmap.data.len(), 32);
 }

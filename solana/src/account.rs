@@ -55,10 +55,10 @@ use solana_program::{
     account_info::{next_account_info, AccountInfo},
     entrypoint::ProgramResult,
     msg,
-    program::invoke_signed,
+    program::{invoke, invoke_signed},
     program_error::ProgramError,
     pubkey::Pubkey,
-    system_instruction::create_account,
+    system_instruction::{allocate, assign, create_account, transfer},
     sysvar::{rent::Rent, Sysvar},
 };
 
@@ -278,6 +278,91 @@ fn is_leaf_used(
     Ok(byte & (1 << (bit_index % 8)) != 0)
 }
 
+/// Inputs for creating (or adopting) a program-owned PDA of fixed size.
+///
+/// Bundled to keep [`create_or_adopt_pda`] within the positional-argument
+/// budget. `payer`/`target`/`system_program` share the instruction's account
+/// lifetime `'info`; the struct borrows them for the call's lifetime `'a`.
+struct PdaInit<'a, 'info> {
+    /// Signer funding any rent shortfall on `target`.
+    payer: &'a AccountInfo<'info>,
+    /// Destination PDA to bring under `program_id` ownership.
+    target: &'a AccountInfo<'info>,
+    /// System program, required by the allocate/assign/transfer/create CPIs.
+    system_program: &'a AccountInfo<'info>,
+    /// Program that should own `target` once created.
+    program_id: &'a Pubkey,
+    /// Fixed data length to allocate for `target`.
+    space: usize,
+}
+
+/// Create `target` as a `program_id`-owned PDA of `init.space` bytes,
+/// tolerating a pre-funded destination.
+///
+/// `create_account` fails with `AccountAlreadyInUse` when the destination
+/// already holds lamports, which lets anyone permanently block a not-yet-used
+/// PDA by sending it a single lamport. When the (still system-owned,
+/// data-empty) destination already holds lamports, this instead tops up any
+/// rent shortfall via `transfer`, then `allocate`s and `assign`s it -- the
+/// standard Solana create-or-adopt pattern -- so a griefing pre-fund cannot
+/// deny the leaf or the account. Callers must confirm `target.data_is_empty()`
+/// before calling. `signer_seeds` are the PDA seeds (including bump)
+/// authorizing the CPIs.
+fn create_or_adopt_pda(init: &PdaInit, signer_seeds: &[&[u8]]) -> ProgramResult {
+    let rent = Rent::get()?;
+    let required_lamports = rent.minimum_balance(init.space);
+    let current_lamports = init.target.lamports();
+    let space = init.space as u64;
+
+    if current_lamports == 0 {
+        // Empty and unfunded: create_account funds, allocates, and assigns atomically.
+        invoke_signed(
+            &create_account(
+                init.payer.key,
+                init.target.key,
+                required_lamports,
+                space,
+                init.program_id,
+            ),
+            &[
+                init.payer.clone(),
+                init.target.clone(),
+                init.system_program.clone(),
+            ],
+            &[signer_seeds],
+        )?;
+        return Ok(());
+    }
+
+    // Pre-funded system-owned destination: create_account would fail with
+    // AccountAlreadyInUse, so top up any rent shortfall, then allocate + assign.
+    if required_lamports > current_lamports {
+        invoke(
+            &transfer(
+                init.payer.key,
+                init.target.key,
+                required_lamports - current_lamports,
+            ),
+            &[
+                init.payer.clone(),
+                init.target.clone(),
+                init.system_program.clone(),
+            ],
+        )?;
+    }
+    invoke_signed(
+        &allocate(init.target.key, space),
+        &[init.target.clone(), init.system_program.clone()],
+        &[signer_seeds],
+    )?;
+    invoke_signed(
+        &assign(init.target.key, init.program_id),
+        &[init.target.clone(), init.system_program.clone()],
+        &[signer_seeds],
+    )?;
+    Ok(())
+}
+
 /// Mark a stateful leaf used under bitmap tracking, creating the 32-byte word
 /// PDA on first use in that word. Rent for that account is paid by `payer`.
 #[allow(clippy::too_many_arguments)]
@@ -297,28 +382,29 @@ fn mark_leaf_used<'a>(
         return Err(ProgramError::InvalidSeeds);
     }
     if bitmap_account.data_is_empty() {
-        let rent = Rent::get()?;
-        let lamports = rent.minimum_balance(HASH_LEN);
         let word_index_le = word_index.to_le_bytes();
-        invoke_signed(
-            &create_account(
-                payer.key,
-                bitmap_account.key,
-                lamports,
-                HASH_LEN as u64,
+        create_or_adopt_pda(
+            &PdaInit {
+                payer,
+                target: bitmap_account,
+                system_program,
                 program_id,
-            ),
-            &[payer.clone(), bitmap_account.clone(), system_program.clone()],
-            &[&[
+                space: HASH_LEN,
+            },
+            &[
                 BITMAP_SEED_PREFIX,
                 account_key.as_ref(),
                 key_version,
                 &word_index_le,
                 &[bump],
-            ]],
+            ],
         )?;
     }
     let mut data = bitmap_account.try_borrow_mut_data()?;
+    // Mirror is_leaf_used's length check: never index a short account.
+    if data.len() != HASH_LEN {
+        return Err(ProgramError::InvalidAccountData);
+    }
     data[(bit_index / 8) as usize] |= 1 << (bit_index % 8);
     Ok(())
 }
@@ -469,18 +555,15 @@ pub fn process_init(
         .serialize(&mut data)
         .map_err(|_| ProgramError::InvalidAccountData)?;
 
-    let rent = Rent::get()?;
-    let lamports = rent.minimum_balance(data.len());
-    invoke_signed(
-        &create_account(
-            payer.key,
-            account_info.key,
-            lamports,
-            data.len() as u64,
+    create_or_adopt_pda(
+        &PdaInit {
+            payer,
+            target: account_info,
+            system_program,
             program_id,
-        ),
-        &[payer.clone(), account_info.clone(), system_program.clone()],
-        &[&[ACCOUNT_SEED_PREFIX, owner_info.key.as_ref(), &salt, &[bump]]],
+            space: data.len(),
+        },
+        &[ACCOUNT_SEED_PREFIX, owner_info.key.as_ref(), &salt, &[bump]],
     )?;
 
     account_info.try_borrow_mut_data()?[..data.len()].copy_from_slice(&data);
@@ -834,4 +917,76 @@ pub fn process_enter_recovery_mode(
         state.key_version
     );
     store_state(account_info, &state)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A present-but-short bitmap-word account must be rejected with
+    /// `InvalidAccountData` (matching `is_leaf_used`'s length guard) rather than
+    /// panicking on the byte index. A non-empty account skips the
+    /// create-or-adopt branch, so `mark_leaf_used` reaches the write path with a
+    /// wrong-length buffer.
+    #[test]
+    fn mark_leaf_used_rejects_short_bitmap_account() {
+        let program_id = Pubkey::new_unique();
+        let account_key = Pubkey::new_unique();
+        let key_version = [3u8; HASH_LEN];
+        let leaf_index = 5u32; // word_index 0, bit_index 5.
+        let (bitmap_key, _bump) = bitmap_word_pda(&program_id, &account_key, &key_version, 0);
+
+        // 16 bytes: non-empty (skips create) but shorter than a full word.
+        let mut short_data = vec![0u8; 16];
+        let mut bitmap_lamports = 1_000_000u64;
+        let bitmap_account = AccountInfo::new(
+            &bitmap_key,
+            false,
+            true,
+            &mut bitmap_lamports,
+            &mut short_data,
+            &program_id,
+            false,
+            u64::default(),
+        );
+
+        // Payer / system-program placeholders: unused on the guarded path.
+        let system_id = solana_program::system_program::id();
+        let payer_key = Pubkey::new_unique();
+        let mut payer_lamports = 0u64;
+        let mut payer_data: Vec<u8> = Vec::new();
+        let payer = AccountInfo::new(
+            &payer_key,
+            true,
+            true,
+            &mut payer_lamports,
+            &mut payer_data,
+            &system_id,
+            false,
+            u64::default(),
+        );
+        let mut sys_lamports = 0u64;
+        let mut sys_data: Vec<u8> = Vec::new();
+        let system_program = AccountInfo::new(
+            &system_id,
+            false,
+            false,
+            &mut sys_lamports,
+            &mut sys_data,
+            &system_id,
+            true,
+            u64::default(),
+        );
+
+        let result = mark_leaf_used(
+            &program_id,
+            &account_key,
+            &key_version,
+            leaf_index,
+            &bitmap_account,
+            &payer,
+            &system_program,
+        );
+        assert_eq!(result, Err(ProgramError::InvalidAccountData));
+    }
 }
