@@ -4,7 +4,7 @@ version = "0.0.1"
 edition = "2021"
 authors = ["Richard T. Carback III <rick.carback@gmail.com>"]
 description = "Solana program for WOTS+"
-license = "AGPL-3.0"
+license = "AGPL-3.0-or-later"
 
 [lib]
 crate-type = ["cdylib", "lib"]
