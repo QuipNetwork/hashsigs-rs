@@ -320,14 +320,18 @@ impl WasmShrincsAccount {
     #[wasm_bindgen(js_name = verifyStatelessAction)]
     pub fn verify_stateless_action(
         &mut self,
+        public_key: &[u8],
         action_type: &[u8],
         payload_hash: &[u8],
         signature: &[u8],
     ) -> Result<(), JsValue> {
-        // Decode `shrincs.signStateless()`'s output directly into the core
-        // types the account verifier consumes.
-        let (public_key, signature) =
-            crate::envelope::decode_stateless_envelope(signature).ok_or_else(malformed_envelope)?;
+        // A stateless action signature is a SPHINCS+C signature. Take the
+        // signer's 164-byte publicKey (bound to the account's commitment by the
+        // core verifier) and the plain signature `shrincs.signStateless()`
+        // returns; verification bottoms out in the SPHINCS+C verify.
+        let public_key = public_key_from_flat(public_key).map_err(js_error)?;
+        let signature = crate::envelope::decode_stateless_signature_envelope(signature)
+            .ok_or_else(malformed_envelope)?;
         let action_type = bytes_word32(action_type).map_err(js_error)?;
         let payload_hash = bytes_word32(payload_hash).map_err(js_error)?;
         self.inner
@@ -350,11 +354,13 @@ impl WasmShrincsAccount {
     #[wasm_bindgen(js_name = rotateToFreshKey)]
     pub fn rotate_to_fresh_key(
         &mut self,
+        current_public_key: &[u8],
         recovery_signature: &[u8],
         next_public_key: &[u8],
     ) -> Result<(), JsValue> {
-        let (current_public_key, recovery_signature) =
-            crate::envelope::decode_stateless_envelope(recovery_signature)
+        let current_public_key = public_key_from_flat(current_public_key).map_err(js_error)?;
+        let recovery_signature =
+            crate::envelope::decode_stateless_signature_envelope(recovery_signature)
                 .ok_or_else(malformed_envelope)?;
         let next_key = stateful_rotation_target_from_public_key(next_public_key).map_err(js_error)?;
         self.inner
@@ -377,11 +383,13 @@ impl WasmShrincsAccount {
     #[wasm_bindgen(js_name = rotateFullKey)]
     pub fn rotate_full_key(
         &mut self,
+        current_public_key: &[u8],
         recovery_signature: &[u8],
         next_public_key: &[u8],
     ) -> Result<(), JsValue> {
-        let (current_public_key, recovery_signature) =
-            crate::envelope::decode_stateless_envelope(recovery_signature)
+        let current_public_key = public_key_from_flat(current_public_key).map_err(js_error)?;
+        let recovery_signature =
+            crate::envelope::decode_stateless_signature_envelope(recovery_signature)
                 .ok_or_else(malformed_envelope)?;
         let next_key = rotation_target_from_public_key(next_public_key).map_err(js_error)?;
         self.inner
@@ -768,6 +776,20 @@ fn stateful_rotation_target_from_public_key(
 /// Slice a 164-byte flat publicKey into a full `RotationTarget`
 /// (statefulPublicKey(68)‖commitment(32)‖pkSeed(32)‖hypertreeRoot(32)) — the
 /// exact `encode_public_key_flat` layout.
+/// Decode a 164-byte flat publicKey into the core `PublicKey`
+/// (statefulPublicKey(68)‖commitment(32)‖pkSeed(32)‖hypertreeRoot(32)).
+#[cfg(feature = "wasm-bindings")]
+fn public_key_from_flat(bytes: &[u8]) -> Result<PublicKey, WasmErr> {
+    require_public_key_len(bytes)?;
+    let c = STATEFUL_PUBLIC_KEY_BYTES;
+    Ok(PublicKey {
+        stateful_public_key: bytes[0..c].to_vec(),
+        public_key_commitment: bytes[c..c + 32].to_vec(),
+        pk_seed: bytes[c + 32..c + 64].to_vec(),
+        hypertree_root: bytes[c + 64..c + 96].to_vec(),
+    })
+}
+
 #[cfg(feature = "wasm-bindings")]
 fn rotation_target_from_public_key(bytes: &[u8]) -> Result<crate::types::RotationTarget, WasmErr> {
     require_public_key_len(bytes)?;
@@ -819,6 +841,17 @@ impl WasmShrincsKeys {
     #[wasm_bindgen(getter, js_name = publicKeyCommitment)]
     pub fn public_key_commitment(&self) -> alloc::vec::Vec<u8> {
         self.public_key.public_key_commitment.clone()
+    }
+
+    /// The 64-byte stateless public key (`pkSeed‖hypertreeRoot`) — the SPHINCS+C
+    /// key `shrincsVerifyStateless` / `sphincsPlusCVerify` take. The stateless
+    /// half of the hybrid key.
+    #[wasm_bindgen(getter, js_name = statelessPublicKey)]
+    pub fn stateless_public_key(&self) -> alloc::vec::Vec<u8> {
+        let mut out = alloc::vec::Vec::with_capacity(64);
+        out.extend_from_slice(&self.public_key.pk_seed);
+        out.extend_from_slice(&self.public_key.hypertree_root);
+        out
     }
 }
 
@@ -925,7 +958,7 @@ pub fn shrincs_sign_stateless(
     secret_key: &[u8],
 ) -> Result<alloc::vec::Vec<u8>, JsValue> {
     let candidate = deserialize_shrincs_signing_key(secret_key).map_err(js_error)?;
-    let (signing_key, public_key) =
+    let (signing_key, _public_key) =
         ShrincsSigner::import_signing_key(candidate).ok_or_else(|| {
             js_error(WasmErr {
                 code: ERR_IMPORT_INVALID,
@@ -941,12 +974,11 @@ pub fn shrincs_sign_stateless(
             message: "stateless signing failed for the supplied key/message".into(),
         })
     })?;
-    // `ShrincsVerifier::verify_stateless_envelope` decodes a full `(PublicKey,
-    // SPHINCSPlusC.Signature)` envelope — it re-derives and checks the
-    // commitment before delegating to `SphincsPlusCVerifier` — NOT the
-    // signature-only envelope `sphincsPlusCSign` produces. Using the wrong
-    // encoder here made `shrincsVerifyStateless` reject every signature.
-    Ok(crate::envelope::encode_stateless_envelope(&public_key, &signature))
+    // A SHRINCS stateless signature IS a SPHINCS+C signature over the message,
+    // signed under the keypair's embedded stateless key. Return exactly what
+    // `sphincsPlusCSign` returns (the signature-only encoding) so
+    // `shrincsVerifyStateless` is a direct `sphincsPlusCVerify`.
+    Ok(crate::envelope::encode_stateless_signature_envelope(&signature))
 }
 
 /// Verify a SHRINCS stateful signature envelope (`shrincsSign`'s output)
@@ -963,21 +995,19 @@ pub fn shrincs_verify(signature: &[u8], message: &[u8], public_key_commitment: &
         == crate::verifier::VerifyOutcome::Valid
 }
 
-/// Verify a SHRINCS stateless signature envelope (`shrincsSignStateless`'s
-/// output) over the 32-byte `message` against a 32-byte
-/// `publicKeyCommitment`. Never throws.
+/// Verify a SHRINCS stateless signature (`shrincsSignStateless`'s output) over
+/// the 32-byte `message` against the 64-byte stateless public key
+/// (`pkSeed‖hypertreeRoot`, the `statelessPublicKey` a SHRINCS keypair
+/// exposes). A stateless SHRINCS signature is a SPHINCS+C signature, so this
+/// IS `sphincsPlusCVerify`. Never throws.
 #[cfg(feature = "wasm-bindings")]
 #[wasm_bindgen(js_name = shrincsVerifyStateless)]
 pub fn shrincs_verify_stateless(
     signature: &[u8],
     message: &[u8],
-    public_key_commitment: &[u8],
+    stateless_public_key: &[u8],
 ) -> bool {
-    let Ok(hash) = message_hash(message) else {
-        return false;
-    };
-    ShrincsVerifier::new().verify_stateless_envelope(public_key_commitment, &hash, signature)
-        == crate::verifier::VerifyOutcome::Valid
+    sphincs_plus_c_verify(signature, message, stateless_public_key)
 }
 
 #[cfg(any(test, feature = "wasm-bindings"))]
@@ -1339,18 +1369,22 @@ mod tests {
         let seed = [0x66u8; 32];
         let keys = shrincs_keygen(&seed, 4).unwrap();
         let secret_key = keys.secret_key();
-        let public_key_commitment = keys.public_key_commitment();
+        // Stateless verify takes the 64-byte SPHINCS+C key (pkSeed‖hypertreeRoot),
+        // not the commitment — a stateless signature is a SPHINCS+C signature.
+        let stateless_public_key = keys.stateless_public_key();
         let before = secret_key.clone();
 
         let message = [0x05u8; 32].to_vec();
         let signature = shrincs_sign_stateless(&message, &secret_key).unwrap();
         assert_eq!(secret_key, before, "stateless sign must not mutate secretKey");
-        assert!(shrincs_verify_stateless(&signature, &message, &public_key_commitment));
+        assert!(shrincs_verify_stateless(&signature, &message, &stateless_public_key));
         assert!(!shrincs_verify_stateless(
             &signature,
             &[0xEEu8; 32],
-            &public_key_commitment,
+            &stateless_public_key,
         ));
+        // And it is literally the SPHINCS+C verify with that key.
+        assert!(sphincs_plus_c_verify(&signature, &message, &stateless_public_key));
     }
 
     #[cfg(feature = "wasm-bindings")]

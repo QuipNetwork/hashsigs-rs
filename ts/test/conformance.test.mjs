@@ -35,17 +35,17 @@ async function loadHashSigsFor(load) {
   const shrincs = {
     keygen: (seed, maxSignatures = 1024) => {
       const keys = wasm.shrincsKeygen(seed, maxSignatures);
-      return { secretKey: keys.secretKey, publicKey: keys.publicKey, publicKeyCommitment: keys.publicKeyCommitment };
+      return { secretKey: keys.secretKey, publicKey: keys.publicKey, publicKeyCommitment: keys.publicKeyCommitment, statelessPublicKey: keys.statelessPublicKey };
     },
     sign: (message, keys) => wasm.shrincsSign(message, keys.secretKey),
     signStateless: (message, keys) => wasm.shrincsSignStateless(message, keys.secretKey),
     verify: (signature, message, publicKeyCommitment) => wasm.shrincsVerify(signature, message, publicKeyCommitment),
-    verifyStateless: (signature, message, publicKeyCommitment) =>
-      wasm.shrincsVerifyStateless(signature, message, publicKeyCommitment),
+    verifyStateless: (signature, message, statelessPublicKey) =>
+      wasm.shrincsVerifyStateless(signature, message, statelessPublicKey),
   };
   const shrincsImportSigningKey = (secretKey) => {
     const keys = wasm.shrincsImportSigningKey(secretKey);
-    return { secretKey: keys.secretKey, publicKey: keys.publicKey, publicKeyCommitment: keys.publicKeyCommitment };
+    return { secretKey: keys.secretKey, publicKey: keys.publicKey, publicKeyCommitment: keys.publicKeyCommitment, statelessPublicKey: keys.statelessPublicKey };
   };
   return { wasm, sphincsPlusC, shrincs, shrincsImportSigningKey };
 }
@@ -192,9 +192,9 @@ for (const [name, load] of loaders) {
 
     const sig = shrincs.signStateless(MSG, keys);
     assert.deepEqual(keys.secretKey, before, "signStateless must not mutate secretKey");
-    assert.equal(shrincs.verifyStateless(sig, MSG, keys.publicKeyCommitment), true);
+    assert.equal(shrincs.verifyStateless(sig, MSG, keys.statelessPublicKey), true);
     assert.equal(
-      shrincs.verifyStateless(sig, hash32("different"), keys.publicKeyCommitment),
+      shrincs.verifyStateless(sig, hash32("different"), keys.statelessPublicKey),
       false,
     );
   });
@@ -324,7 +324,7 @@ for (const [name, load] of loaders) {
     const message = account.statelessActionMessageHash(actionType, payloadHash);
     const signature = shrincs.signStateless(message, keys);
 
-    account.verifyStatelessAction(actionType, payloadHash, signature);
+    account.verifyStatelessAction(keys.publicKey, actionType, payloadHash, signature);
     const after = account.snapshot();
     assert.equal(after.statelessSignaturesUsed, 1n);
   });
@@ -348,7 +348,7 @@ for (const [name, load] of loaders) {
     const recoveryMessage = account.fullRotationMessageHash(nextKeys.publicKey);
     const recoverySignature = shrincs.signStateless(recoveryMessage, currentKeys);
 
-    account.rotateFullKey(recoverySignature, nextKeys.publicKey);
+    account.rotateFullKey(currentKeys.publicKey, recoverySignature, nextKeys.publicKey);
     const after = account.snapshot();
     const toHex = (b) => "0x" + Buffer.from(b).toString("hex");
     assert.equal(after.currentShrincsPublicKey, toHex(nextKeys.publicKeyCommitment));

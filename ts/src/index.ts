@@ -63,8 +63,10 @@ export interface ShrincsKeys {
   secretKey: Uint8Array;
   /** 164 bytes: `statefulPublicKey ‖ publicKeyCommitment ‖ pkSeed ‖ hypertreeRoot`. */
   publicKey: Uint8Array;
-  /** 32 bytes; the value `shrincs.verify()`/`shrincs.verifyStateless()` pin. */
+  /** 32 bytes; the value `shrincs.verify()` pins. */
   publicKeyCommitment: Uint8Array;
+  /** 64 bytes (`pkSeed ‖ hypertreeRoot`); the value `shrincs.verifyStateless()` pins. */
+  statelessPublicKey: Uint8Array;
 }
 
 function makeSphincsPlusC(wasm: ShrincsWasmModule) {
@@ -101,6 +103,7 @@ function makeShrincs(wasm: ShrincsWasmModule) {
         secretKey: keys.secretKey,
         publicKey: keys.publicKey,
         publicKeyCommitment: keys.publicKeyCommitment,
+        statelessPublicKey: keys.statelessPublicKey,
       };
     },
     /**
@@ -120,8 +123,13 @@ function makeShrincs(wasm: ShrincsWasmModule) {
     verify(signature: Uint8Array, message: Uint8Array, publicKeyCommitment: Uint8Array): boolean {
       return wasm.shrincsVerify(signature, message, publicKeyCommitment);
     },
-    verifyStateless(signature: Uint8Array, message: Uint8Array, publicKeyCommitment: Uint8Array): boolean {
-      return wasm.shrincsVerifyStateless(signature, message, publicKeyCommitment);
+    /**
+     * A stateless SHRINCS signature is a SPHINCS+C signature, so this is a
+     * direct SPHINCS+C verify. Pass `keys.statelessPublicKey` (the 64-byte
+     * `pkSeed ‖ hypertreeRoot`), not the commitment.
+     */
+    verifyStateless(signature: Uint8Array, message: Uint8Array, statelessPublicKey: Uint8Array): boolean {
+      return wasm.shrincsVerifyStateless(signature, message, statelessPublicKey);
     },
   };
 }
@@ -140,6 +148,7 @@ function importShrincsSigningKey(wasm: ShrincsWasmModule, secretKey: Uint8Array)
     secretKey: keys.secretKey,
     publicKey: keys.publicKey,
     publicKeyCommitment: keys.publicKeyCommitment,
+    statelessPublicKey: keys.statelessPublicKey,
   };
 }
 

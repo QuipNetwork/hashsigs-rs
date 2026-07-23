@@ -354,13 +354,20 @@ const keys = shrincs.keygen(seed, maxSignatures); // maxSignatures defaults to 1
 // keys.secretKey: Uint8Array(264)
 // keys.publicKey: Uint8Array(164)
 // keys.publicKeyCommitment: Uint8Array(32)
+// keys.statelessPublicKey: Uint8Array(64)  — pkSeed ‖ hypertreeRoot
 
 const sig = shrincs.sign(message32, keys);               // STATEFUL: advances keys.secretKey in place
 const recovery = shrincs.signStateless(message32, keys); // stateless recovery path, no mutation
 
 const ok = shrincs.verify(sig, message32, keys.publicKeyCommitment);
-const okRecovery = shrincs.verifyStateless(recovery, message32, keys.publicKeyCommitment);
+// A stateless SHRINCS signature is a SPHINCS+C signature, so verifyStateless is
+// a SPHINCS+C verify: pass keys.statelessPublicKey, not the commitment.
+const okRecovery = shrincs.verifyStateless(recovery, message32, keys.statelessPublicKey);
 ```
+
+`shrincs.signStateless` produces the same bytes as `sphincsPlusC.sign` under the
+keypair's stateless key, and `shrincs.verifyStateless(sig, msg, keys.statelessPublicKey)`
+is exactly `sphincsPlusC.verify(sig, msg, keys.statelessPublicKey)`.
 
 `shrincs.sign` is stateful:
 
@@ -451,12 +458,17 @@ account.verifyStatefulAction(actionType, payloadHash, signature); // throws on r
 console.log(account.snapshot()); // nonce advanced
 ```
 
+A stateless action uses `account.verifyStatelessAction(publicKey, actionType,
+payloadHash, signature)` — the signer's 164-byte `publicKey` (the account binds
+it to its stored commitment) plus the signature `shrincs.signStateless()`
+returns. The stateless verify path is a SPHINCS+C verify.
+
 Rotation is the same shape: sign `account.statefulRotationMessageHash(nextPublicKey)`
 or `account.fullRotationMessageHash(nextPublicKey)` with `shrincs.signStateless()`,
-then pass the resulting signature and the same `nextPublicKey` to
-`rotateToFreshKey` / `rotateFullKey`. `nextPublicKey` is the replacement
-keypair's 164-byte flat `publicKey`, exactly as `shrincs.keygen()` returns
-it.
+then pass the current key's `publicKey`, the resulting signature, and
+`nextPublicKey` to `rotateToFreshKey` / `rotateFullKey`. `nextPublicKey` is the
+replacement keypair's 164-byte flat `publicKey`, exactly as `shrincs.keygen()`
+returns it.
 
 `WasmShrincsAccount` also exposes `snapshot`, `setStatefulPolicy*`,
 `enterRecoveryMode`, and `isValidSignature` (an ERC-1271 compatibility
