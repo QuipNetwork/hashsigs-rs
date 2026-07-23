@@ -116,7 +116,7 @@ impl ShrincsVerifier {
         )
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "wasm-bindings"))]
     pub(crate) fn verify_stateful_unsafe_raw(
         &self,
         expected_public_key_commitment: [u8; HASH_LEN],

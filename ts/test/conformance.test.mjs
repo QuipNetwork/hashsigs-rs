@@ -39,7 +39,7 @@ async function loadHashSigsFor(load) {
     },
     sign: (message, keys) => wasm.shrincsSign(message, keys.secretKey),
     signStateless: (message, keys) => wasm.shrincsSignStateless(message, keys.secretKey),
-    verify: (signature, message, publicKeyCommitment) => wasm.shrincsVerify(signature, message, publicKeyCommitment),
+    verify: (signature, message, publicKey) => wasm.shrincsVerify(signature, message, publicKey),
     verifyStateless: (signature, message, statelessPublicKey) =>
       wasm.shrincsVerifyStateless(signature, message, statelessPublicKey),
   };
@@ -145,7 +145,7 @@ for (const [name, load] of loaders) {
     assert.equal(keys.publicKeyCommitment.length, 32);
 
     const sig = shrincs.sign(MSG, keys);
-    assert.equal(shrincs.verify(sig, MSG, keys.publicKeyCommitment), true);
+    assert.equal(shrincs.verify(sig, MSG, keys.publicKey), true);
   });
 
   test(`${name}: shrincs verify rejects a tampered signature and a different message`, async () => {
@@ -155,8 +155,8 @@ for (const [name, load] of loaders) {
 
     const tampered = sig.slice();
     tampered[0] ^= 1;
-    assert.equal(shrincs.verify(tampered, MSG, keys.publicKeyCommitment), false);
-    assert.equal(shrincs.verify(sig, hash32("different"), keys.publicKeyCommitment), false);
+    assert.equal(shrincs.verify(tampered, MSG, keys.publicKey), false);
+    assert.equal(shrincs.verify(sig, hash32("different"), keys.publicKey), false);
   });
 
   test(`${name}: shrincs.sign advances keys.secretKey in place across two signatures`, async () => {
@@ -166,13 +166,13 @@ for (const [name, load] of loaders) {
 
     const first = shrincs.sign(MSG, keys);
     assert.notDeepEqual(keys.secretKey, before, "secretKey must mutate in place after sign()");
-    assert.equal(shrincs.verify(first, MSG, keys.publicKeyCommitment), true);
+    assert.equal(shrincs.verify(first, MSG, keys.publicKey), true);
 
     const afterFirst = keys.secretKey.slice();
     const second = shrincs.sign(MSG, keys);
     assert.notDeepEqual(keys.secretKey, afterFirst, "secretKey must advance again on the next sign()");
     assert.notDeepEqual(first, second, "two leaves must yield distinct signatures");
-    assert.equal(shrincs.verify(second, MSG, keys.publicKeyCommitment), true);
+    assert.equal(shrincs.verify(second, MSG, keys.publicKey), true);
   });
 
   test(`${name}: shrincs stateful signing exhaustion throws ERR_STATEFUL_LEAVES_EXHAUSTED`, async () => {
@@ -252,7 +252,7 @@ test("cross-build: node and web agree on noble keys and signatures", async () =>
   const shrincsKeysWeb = shrincsWeb.keygen(SEED, 4);
   assert.deepEqual(shrincsKeysNode.publicKeyCommitment, shrincsKeysWeb.publicKeyCommitment);
   const shrincsSigNode = shrincsNode.sign(MSG, shrincsKeysNode);
-  assert.equal(shrincsWeb.verify(shrincsSigNode, MSG, shrincsKeysWeb.publicKeyCommitment), true);
+  assert.equal(shrincsWeb.verify(shrincsSigNode, MSG, shrincsKeysWeb.publicKey), true);
 });
 
 // ── WasmShrincsAccount: byte params, policy state, and message-hash methods ──
@@ -305,7 +305,7 @@ for (const [name, load] of loaders) {
 
     const signature = shrincs.sign(message, keys); // stateful, consumes leaf 1
     // Resolves (no throw) and advances the account nonce.
-    account.verifyStatefulAction(actionType, payloadHash, signature);
+    account.verifyStatefulAction(keys.publicKey, actionType, payloadHash, signature);
     const after = account.snapshot();
     assert.notEqual(after.nonce, snap.nonce, "a verified action advances the nonce");
   });
@@ -397,7 +397,7 @@ test("loadHashSigs: the exported entry point resolves through the node loader", 
   assert.equal(sphincsPlusC.verify(sphincsPlusC.sign(MSG, spcKeys), MSG, spcKeys.publicKey), true);
   const shrincsKeys = shrincs.keygen(SEED, 4);
   assert.equal(
-    shrincs.verify(shrincs.sign(MSG, shrincsKeys), MSG, shrincsKeys.publicKeyCommitment),
+    shrincs.verify(shrincs.sign(MSG, shrincsKeys), MSG, shrincsKeys.publicKey),
     true,
   );
 });

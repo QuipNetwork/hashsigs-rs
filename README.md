@@ -359,9 +359,9 @@ const keys = shrincs.keygen(seed, maxSignatures); // maxSignatures defaults to 1
 const sig = shrincs.sign(message32, keys);               // STATEFUL: advances keys.secretKey in place
 const recovery = shrincs.signStateless(message32, keys); // stateless recovery path, no mutation
 
-const ok = shrincs.verify(sig, message32, keys.publicKeyCommitment);
+const ok = shrincs.verify(sig, message32, keys.publicKey);
 // A stateless SHRINCS signature is a SPHINCS+C signature, so verifyStateless is
-// a SPHINCS+C verify: pass keys.statelessPublicKey, not the commitment.
+// a SPHINCS+C verify: pass keys.statelessPublicKey, the 64-byte stateless key.
 const okRecovery = shrincs.verifyStateless(recovery, message32, keys.statelessPublicKey);
 ```
 
@@ -454,14 +454,15 @@ const payloadHash = new Uint8Array(32).fill(0x55);
 const message = account.statefulActionMessageHash(actionType, payloadHash);
 
 const signature = shrincs.sign(message, keys); // stateful: consumes the next leaf
-account.verifyStatefulAction(actionType, payloadHash, signature); // throws on rejection
+account.verifyStatefulAction(keys.publicKey, actionType, payloadHash, signature); // throws on rejection
 console.log(account.snapshot()); // nonce advanced
 ```
 
-A stateless action uses `account.verifyStatelessAction(publicKey, actionType,
-payloadHash, signature)` — the signer's 164-byte `publicKey` (the account binds
-it to its stored commitment) plus the signature `shrincs.signStateless()`
-returns. The stateless verify path is a SPHINCS+C verify.
+Both action methods take the signer's 164-byte `publicKey` first — the account
+binds it to its stored commitment — then the signature. `verifyStatefulAction`
+takes the `shrincs.sign()` signature. `account.verifyStatelessAction(publicKey,
+actionType, payloadHash, signature)` takes the `shrincs.signStateless()`
+signature, and its verify path is a SPHINCS+C verify.
 
 Rotation is the same shape: sign `account.statefulRotationMessageHash(nextPublicKey)`
 or `account.fullRotationMessageHash(nextPublicKey)` with `shrincs.signStateless()`,

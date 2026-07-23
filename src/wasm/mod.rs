@@ -285,6 +285,8 @@ impl WasmShrincsAccount {
     /// signature, `ERR_STATEFUL_LEAF_REJECTED` / `ERR_STATEFUL_PATH_DISABLED`
     /// for a policy-blocked leaf.
     ///
+    /// * `public_key` - the signer's 164-byte flat `publicKey`; the account
+    ///   binds it to its stored commitment.
     /// * `action_type` - 32 bytes (bytes32).
     /// * `payload_hash` - 32 bytes (bytes32).
     /// * `signature` - the signature `shrincs.sign()` returns, over
@@ -292,14 +294,16 @@ impl WasmShrincsAccount {
     #[wasm_bindgen(js_name = verifyStatefulAction)]
     pub fn verify_stateful_action(
         &mut self,
+        public_key: &[u8],
         action_type: &[u8],
         payload_hash: &[u8],
         signature: &[u8],
     ) -> Result<(), JsValue> {
-        // Decode `shrincs.sign()`'s output directly into the core types the
-        // account verifier consumes.
-        let (public_key, signature) =
-            crate::envelope::decode_stateful_envelope(signature).ok_or_else(malformed_envelope)?;
+        // Take the signer's publicKey (bound to the account's commitment by the
+        // core verifier) and the plain signature `shrincs.sign()` returns.
+        let public_key = public_key_from_flat(public_key).map_err(js_error)?;
+        let signature = crate::envelope::decode_stateful_signature_envelope(signature)
+            .ok_or_else(malformed_envelope)?;
         let action_type = bytes_word32(action_type).map_err(js_error)?;
         let payload_hash = bytes_word32(payload_hash).map_err(js_error)?;
         self.inner
@@ -918,7 +922,7 @@ pub fn shrincs_sign(
     secret_key: &mut [u8],
 ) -> Result<alloc::vec::Vec<u8>, JsValue> {
     let candidate = deserialize_shrincs_signing_key(secret_key).map_err(js_error)?;
-    let (mut signing_key, public_key) =
+    let (mut signing_key, _public_key) =
         ShrincsSigner::import_signing_key(candidate).ok_or_else(|| {
             js_error(WasmErr {
                 code: ERR_IMPORT_INVALID,
@@ -943,9 +947,10 @@ pub fn shrincs_sign(
             message: "stateful signing failed for the supplied key/message".into(),
         })
     })?;
-    let envelope = crate::envelope::encode_stateful_envelope(&public_key, &signature);
     secret_key.copy_from_slice(&serialize_shrincs_signing_key(&signing_key));
-    Ok(envelope)
+    // Return the stateful signature alone; `shrincsVerify` checks it against
+    // the signer's publicKey, mirroring the stateless path.
+    Ok(crate::envelope::encode_stateful_signature_envelope(&signature))
 }
 
 /// Sign a 32-byte `message` (typically a pre-computed hash) via the
@@ -981,18 +986,28 @@ pub fn shrincs_sign_stateless(
     Ok(crate::envelope::encode_stateless_signature_envelope(&signature))
 }
 
-/// Verify a SHRINCS stateful signature envelope (`shrincsSign`'s output)
-/// over the 32-byte `message` against a 32-byte
-/// `publicKeyCommitment`. Never throws — a malformed envelope or
+/// Verify a SHRINCS stateful signature (`shrincsSign`'s output) over the
+/// 32-byte `message` against the 164-byte flat `publicKey` a SHRINCS keypair
+/// exposes. Verifies the signature against the supplied key, the same call
+/// shape as `shrincsVerifyStateless`. Never throws — a malformed signature or
 /// wrong-length key is simply `false`.
 #[cfg(feature = "wasm-bindings")]
 #[wasm_bindgen(js_name = shrincsVerify)]
-pub fn shrincs_verify(signature: &[u8], message: &[u8], public_key_commitment: &[u8]) -> bool {
+pub fn shrincs_verify(signature: &[u8], message: &[u8], public_key: &[u8]) -> bool {
     let Ok(hash) = message_hash(message) else {
         return false;
     };
-    ShrincsVerifier::new().verify_envelope(public_key_commitment, &hash, signature)
-        == crate::verifier::VerifyOutcome::Valid
+    let Ok(public_key) = public_key_from_flat(public_key) else {
+        return false;
+    };
+    let Some(signature) = crate::envelope::decode_stateful_signature_envelope(signature) else {
+        return false;
+    };
+    let Ok(commitment) = <[u8; HASH_LEN]>::try_from(public_key.public_key_commitment.as_slice())
+    else {
+        return false;
+    };
+    ShrincsVerifier::new().verify_stateful_unsafe_raw(commitment, &public_key, &hash, &signature)
 }
 
 /// Verify a SHRINCS stateless signature (`shrincsSignStateless`'s output) over
@@ -1309,18 +1324,18 @@ mod tests {
         let seed = [0x33u8; 32];
         let keys = shrincs_keygen(&seed, 4).unwrap();
         let mut secret_key = keys.secret_key();
-        let public_key_commitment = keys.public_key_commitment();
+        let public_key = keys.public_key();
         assert_eq!(secret_key.len(), 264);
-        assert_eq!(public_key_commitment.len(), 32);
+        assert_eq!(public_key.len(), 164);
 
         let message = [0x03u8; 32].to_vec();
         let signature = shrincs_sign(&message, &mut secret_key).unwrap();
-        assert!(shrincs_verify(&signature, &message, &public_key_commitment));
-        assert!(!shrincs_verify(&signature, &[0xEEu8; 32], &public_key_commitment));
+        assert!(shrincs_verify(&signature, &message, &public_key));
+        assert!(!shrincs_verify(&signature, &[0xEEu8; 32], &public_key));
 
         let mut tampered = signature.clone();
         tampered[0] ^= 1;
-        assert!(!shrincs_verify(&tampered, &message, &public_key_commitment));
+        assert!(!shrincs_verify(&tampered, &message, &public_key));
     }
 
     #[cfg(feature = "wasm-bindings")]
@@ -1329,19 +1344,19 @@ mod tests {
         let seed = [0x44u8; 32];
         let keys = shrincs_keygen(&seed, 4).unwrap();
         let mut secret_key = keys.secret_key();
-        let public_key_commitment = keys.public_key_commitment();
+        let public_key = keys.public_key();
         let before = secret_key.clone();
 
         let message = [0x04u8; 32].to_vec();
         let first = shrincs_sign(&message, &mut secret_key).unwrap();
         assert_ne!(secret_key, before, "secretKey must mutate in place after sign");
-        assert!(shrincs_verify(&first, &message, &public_key_commitment));
+        assert!(shrincs_verify(&first, &message, &public_key));
 
         let after_first = secret_key.clone();
         let second = shrincs_sign(&message, &mut secret_key).unwrap();
         assert_ne!(secret_key, after_first, "secretKey must advance again on the next sign");
         assert_ne!(first, second, "two leaves must yield distinct signatures");
-        assert!(shrincs_verify(&second, &message, &public_key_commitment));
+        assert!(shrincs_verify(&second, &message, &public_key));
     }
 
     #[cfg(all(feature = "wasm-bindings", target_arch = "wasm32"))]
@@ -1518,10 +1533,11 @@ mod tests {
             .stateful_action_message_hash(&action_type, &payload_hash)
             .unwrap();
         let core_signature = ShrincsSigner::sign_stateful_raw(&mut signing_key, &message).unwrap();
-        let signature = crate::envelope::encode_stateful_envelope(&public_key, &core_signature);
+        let signature = crate::envelope::encode_stateful_signature_envelope(&core_signature);
+        let public_key_flat = encode_public_key_flat(&public_key);
 
         account
-            .verify_stateful_action(&action_type, &payload_hash, &signature)
+            .verify_stateful_action(&public_key_flat, &action_type, &payload_hash, &signature)
             .expect("valid stateful action verifies");
 
         let snapshot: ShrincsAccountSnapshot =

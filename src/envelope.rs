@@ -548,6 +548,27 @@ pub fn decode_stateful_envelope(data: &[u8]) -> Option<(PublicKey, StatefulSigna
     Some(decoded)
 }
 
+/// The stateful signature alone (`abi.encode(SHRINCS.Signature)`), without the
+/// `PublicKey` that `encode_stateful_envelope` carries. Mirrors the stateless
+/// `encode_stateless_signature_envelope`; the wasm `shrincsSign` primitive
+/// returns this so a stateful signature verifies against a supplied public key,
+/// the same call shape as the stateless path.
+pub fn encode_stateful_signature_envelope(signature: &StatefulSignature) -> Vec<u8> {
+    encode_tuple(alloc::vec![Field::Dynamic(encode_stateful_signature_body(
+        signature
+    ))])
+}
+
+/// Strict decoder for the layout `encode_stateful_signature_envelope`
+/// produces.
+pub fn decode_stateful_signature_envelope(data: &[u8]) -> Option<StatefulSignature> {
+    let reader = AbiReader::new(data);
+    let signature_start = reader.decode_offset(0, 0)?;
+    let decoded = decode_stateful_signature(&reader, signature_start)?;
+    reader.finish()?;
+    Some(decoded)
+}
+
 /// Inverse of `SHRINCS.statelessEnvelope` / mirrors `encodeStatelessEnvelope`.
 /// Layout: `abi.encode(PublicKey, SPHINCSPlusC.Signature)`.
 pub fn encode_stateless_envelope(
@@ -900,6 +921,16 @@ mod tests {
             decode_stateless_signature_envelope(&encoded).expect("valid envelope must decode");
         assert_eq!(decoded, signature);
         assert_eq!(encode_stateless_signature_envelope(&decoded), encoded);
+    }
+
+    #[test]
+    fn stateful_signature_envelope_round_trips() {
+        let signature = sample_stateful_signature();
+        let encoded = encode_stateful_signature_envelope(&signature);
+        let decoded =
+            decode_stateful_signature_envelope(&encoded).expect("valid envelope must decode");
+        assert_eq!(decoded, signature);
+        assert_eq!(encode_stateful_signature_envelope(&decoded), encoded);
     }
 
     #[test]

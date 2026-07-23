@@ -61,9 +61,9 @@ export interface SphincsPlusCKeys {
 export interface ShrincsKeys {
   /** 264 bytes; see `ShrincsSigningKey`'s field order in the Rust source. */
   secretKey: Uint8Array;
-  /** 164 bytes: `statefulPublicKey ‖ publicKeyCommitment ‖ pkSeed ‖ hypertreeRoot`. */
+  /** 164 bytes: `statefulPublicKey ‖ publicKeyCommitment ‖ pkSeed ‖ hypertreeRoot`; the value `shrincs.verify()` checks against. */
   publicKey: Uint8Array;
-  /** 32 bytes; the value `shrincs.verify()` pins. */
+  /** 32 bytes; the account's installed-key identity (bound on account actions). */
   publicKeyCommitment: Uint8Array;
   /** 64 bytes (`pkSeed ‖ hypertreeRoot`); the value `shrincs.verifyStateless()` pins. */
   statelessPublicKey: Uint8Array;
@@ -120,8 +120,12 @@ function makeShrincs(wasm: ShrincsWasmModule) {
     signStateless(message: Uint8Array, keys: ShrincsKeys): Uint8Array {
       return wasm.shrincsSignStateless(message, keys.secretKey);
     },
-    verify(signature: Uint8Array, message: Uint8Array, publicKeyCommitment: Uint8Array): boolean {
-      return wasm.shrincsVerify(signature, message, publicKeyCommitment);
+    /**
+     * Verify a stateful signature against the signer's 164-byte `publicKey`,
+     * the same call shape as `verifyStateless`. Pass `keys.publicKey`.
+     */
+    verify(signature: Uint8Array, message: Uint8Array, publicKey: Uint8Array): boolean {
+      return wasm.shrincsVerify(signature, message, publicKey);
     },
     /**
      * A stateless SHRINCS signature is a SPHINCS+C signature, so this is a
