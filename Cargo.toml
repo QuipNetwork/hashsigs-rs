@@ -15,7 +15,10 @@ build = "build.rs"
 [lib]
 name = "hashsigs_rs"
 path = "src/lib.rs"
-crate-type = ["rlib", "cdylib"]
+# rlib only: a host `no_std` build cannot link a cdylib (needs panic_handler +
+# global allocator). Wasm packaging requests cdylib via `cargo rustc
+# --crate-type cdylib` in bin/build-wasm.sh.
+crate-type = ["rlib"]
 
 [workspace]
 members = [

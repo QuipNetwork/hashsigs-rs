@@ -26,9 +26,21 @@ use crate::envelope;
 use crate::primitives::hash::keccak_packed;
 use crate::sphincs_plus_c::verifier::SphincsPlusCVerifier;
 use crate::verifier::VerifyOutcome;
-use crate::types::{
-    ActionContext, PublicKey, RotationContext, RotationTarget, StatefulRotationTarget,
-    StatefulSignature, StatelessSignature, HASH_LEN,
+// Wire types/constants live in `crate::types` after the restructure. Re-export
+// them here so the historical path `hashsigs_rs::shrincs::verifier::*` still
+// resolves (main used `pub use self::shrincs_verifier_types::*`).
+pub use crate::types::{
+    ActionContext, ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey, RotationContext,
+    RotationTarget, StatefulPublicKey, StatefulRotationTarget, StatefulSignature,
+    StatelessSignature, WotsCSignature, ADDRESS_TYPE_FORS_TREE, ADDRESS_TYPE_TREE,
+    ADDRESS_TYPE_WOTS_HASH, HASH_LEN, HASH_SUITE_KECCAK_256, STATEFUL_PUBLIC_KEY_BYTES,
+};
+// Profile parameter tuple also lived in main's shrincs_verifier_types (via
+// `pub use profile::*`); re-export from the current profiles module.
+pub use crate::primitives::profiles::{
+    FORS_TREE_HEIGHT, HASH_TRUNC_LEN, HYPERTREE_HEIGHT, NUM_FORS_TREES, NUM_HYPERTREE_LAYERS,
+    NUM_WOTS_CHAINS, PROFILE_NAME, STATELESS_SIGNATURE_LIMIT, WOTS_BASE_STATEFUL, WOTS_CHAIN_LEN,
+    WOTS_CHAINS_STATEFUL, WOTS_TARGET_SUM_STATEFUL,
 };
 use super::dispatch as core_shrincs;
 use super::messages::{
