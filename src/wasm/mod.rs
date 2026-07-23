@@ -44,7 +44,6 @@ use crate::shrincs::{
 // the shared scheme-hash, rather than going through the hex DTO plumbing
 // above.
 #[cfg(any(test, feature = "wasm-bindings"))]
-use crate::primitives::hash::keccak_packed;
 #[cfg(any(test, feature = "wasm-bindings"))]
 use crate::sphincs_plus_c::SphincsPlusCSigningKey;
 #[cfg(any(test, feature = "wasm-bindings"))]
@@ -390,7 +389,7 @@ pub fn version() -> String {
 // directly — mirroring the @noble/post-quantum surface shape.
 //
 // Every sign/verify pair below hashes the caller's arbitrary-length
-// `message` with keccak256 before signing/verifying the 32-byte digest —
+// the 32-byte `message` directly (the message IS the hash) —
 // the ONE message-hashing choice shared across this whole section, so
 // `verify(sign(m, keys), m, pk)` round-trips regardless of which function
 // produced the signature.
@@ -428,13 +427,17 @@ fn require_max_len(input: &[u8], max_bytes: usize) -> Result<(), WasmErr> {
     Ok(())
 }
 
-/// Hash an arbitrary-length message down to the 32-byte digest every
-/// noble-style sign/verify free function signs. Always keccak256, regardless
-/// of the compiled scheme-hash suite, so callers get one stable hash across
-/// profile builds.
+/// The 32-byte message every noble-style sign/verify free function operates
+/// on. The message IS the hash: callers pre-hash arbitrary-length data and
+/// pass the 32-byte digest, matching the on-chain / envelope verifier, which
+/// treats its `hash` argument as the signed message. A wrong length is an
+/// error (for signing) or a rejected verify.
 #[cfg(any(test, feature = "wasm-bindings"))]
-fn message_digest(message: &[u8]) -> [u8; HASH_LEN] {
-    keccak_packed(&[message])
+fn message_hash(message: &[u8]) -> Result<[u8; HASH_LEN], WasmErr> {
+    bytes_word32(message).map_err(|_| WasmErr {
+        code: ERR_BAD_LENGTH,
+        message: format!("message must be exactly 32 bytes, got {}", message.len()),
+    })
 }
 
 /// SPHINCS+C secret key: `statelessSkSeed(32) ‖ statelessPrfSeed(32) ‖
@@ -517,7 +520,7 @@ pub fn sphincs_plus_c_keygen(seed: &[u8]) -> Result<WasmSphincsPlusCKeys, JsValu
     Ok(WasmSphincsPlusCKeys { signing_key })
 }
 
-/// Sign `message` (arbitrary bytes, hashed with keccak256 first) with a
+/// Sign a 32-byte `message` (typically a pre-computed hash) with a
 /// 128-byte SPHINCS+C `secretKey`. Stateless: never mutates `secretKey` and
 /// never fails except on malformed input. Returns the stateless signature
 /// envelope `sphincsPlusCVerify` accepts.
@@ -527,9 +530,8 @@ pub fn sphincs_plus_c_sign(
     message: &[u8],
     secret_key: &[u8],
 ) -> Result<alloc::vec::Vec<u8>, JsValue> {
-    require_max_len(message, MAX_RAW_INPUT_BYTES).map_err(js_error)?;
     let signing_key = deserialize_sphincs_plus_c_signing_key(secret_key).map_err(js_error)?;
-    let hash = message_digest(message);
+    let hash = message_hash(message).map_err(js_error)?;
     let signature = crate::sphincs_plus_c::sign(&signing_key, &hash).ok_or_else(|| {
         js_error(WasmErr {
             code: ERR_SIGNING_FAILED,
@@ -547,10 +549,9 @@ pub fn sphincs_plus_c_sign(
 #[cfg(feature = "wasm-bindings")]
 #[wasm_bindgen(js_name = sphincsPlusCVerify)]
 pub fn sphincs_plus_c_verify(signature: &[u8], message: &[u8], public_key: &[u8]) -> bool {
-    if message.len() > MAX_RAW_INPUT_BYTES {
+    let Ok(hash) = message_hash(message) else {
         return false;
-    }
-    let hash = message_digest(message);
+    };
     crate::sphincs_plus_c::verifier::SphincsPlusCVerifier::new()
         .verify_envelope(public_key, &hash, signature)
         == crate::verifier::VerifyOutcome::Valid
@@ -698,7 +699,7 @@ pub fn shrincs_import_signing_key(secret_key: &[u8]) -> Result<WasmShrincsKeys, 
     Ok(WasmShrincsKeys { signing_key, public_key })
 }
 
-/// Sign `message` (arbitrary bytes, hashed with keccak256 first) with the
+/// Sign a 32-byte `message` (typically a pre-computed hash) with the
 /// next unused stateful leaf. STATEFUL: `secretKey` is re-validated via
 /// `ShrincsSigner::import_signing_key` and then MUTATED IN PLACE with the
 /// advanced leaf counter — the caller's `keys.secretKey` Uint8Array changes
@@ -710,7 +711,6 @@ pub fn shrincs_sign(
     message: &[u8],
     secret_key: &mut [u8],
 ) -> Result<alloc::vec::Vec<u8>, JsValue> {
-    require_max_len(message, MAX_RAW_INPUT_BYTES).map_err(js_error)?;
     let candidate = deserialize_shrincs_signing_key(secret_key).map_err(js_error)?;
     let (mut signing_key, public_key) =
         ShrincsSigner::import_signing_key(candidate).ok_or_else(|| {
@@ -730,7 +730,7 @@ pub fn shrincs_sign(
             message: "no unused stateful leaf available for this key".into(),
         }));
     }
-    let hash = message_digest(message);
+    let hash = message_hash(message).map_err(js_error)?;
     let signature = ShrincsSigner::sign_stateful_raw(&mut signing_key, &hash).ok_or_else(|| {
         js_error(WasmErr {
             code: ERR_SIGNING_FAILED,
@@ -742,7 +742,7 @@ pub fn shrincs_sign(
     Ok(envelope)
 }
 
-/// Sign `message` (arbitrary bytes, hashed with keccak256 first) via the
+/// Sign a 32-byte `message` (typically a pre-computed hash) via the
 /// stateless recovery path: consumes no leaf and never mutates `secretKey`,
 /// safe to repeat indefinitely.
 #[cfg(feature = "wasm-bindings")]
@@ -751,7 +751,6 @@ pub fn shrincs_sign_stateless(
     message: &[u8],
     secret_key: &[u8],
 ) -> Result<alloc::vec::Vec<u8>, JsValue> {
-    require_max_len(message, MAX_RAW_INPUT_BYTES).map_err(js_error)?;
     let candidate = deserialize_shrincs_signing_key(secret_key).map_err(js_error)?;
     let (signing_key, public_key) =
         ShrincsSigner::import_signing_key(candidate).ok_or_else(|| {
@@ -762,7 +761,7 @@ pub fn shrincs_sign_stateless(
                     .into(),
             })
         })?;
-    let hash = message_digest(message);
+    let hash = message_hash(message).map_err(js_error)?;
     let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &hash).ok_or_else(|| {
         js_error(WasmErr {
             code: ERR_SIGNING_FAILED,
@@ -778,22 +777,21 @@ pub fn shrincs_sign_stateless(
 }
 
 /// Verify a SHRINCS stateful signature envelope (`shrincsSign`'s output)
-/// over `message` (hashed with keccak256) against a 32-byte
+/// over the 32-byte `message` against a 32-byte
 /// `publicKeyCommitment`. Never throws — a malformed envelope or
 /// wrong-length key is simply `false`.
 #[cfg(feature = "wasm-bindings")]
 #[wasm_bindgen(js_name = shrincsVerify)]
 pub fn shrincs_verify(signature: &[u8], message: &[u8], public_key_commitment: &[u8]) -> bool {
-    if message.len() > MAX_RAW_INPUT_BYTES {
+    let Ok(hash) = message_hash(message) else {
         return false;
-    }
-    let hash = message_digest(message);
+    };
     ShrincsVerifier::new().verify_envelope(public_key_commitment, &hash, signature)
         == crate::verifier::VerifyOutcome::Valid
 }
 
 /// Verify a SHRINCS stateless signature envelope (`shrincsSignStateless`'s
-/// output) over `message` (hashed with keccak256) against a 32-byte
+/// output) over the 32-byte `message` against a 32-byte
 /// `publicKeyCommitment`. Never throws.
 #[cfg(feature = "wasm-bindings")]
 #[wasm_bindgen(js_name = shrincsVerifyStateless)]
@@ -802,10 +800,9 @@ pub fn shrincs_verify_stateless(
     message: &[u8],
     public_key_commitment: &[u8],
 ) -> bool {
-    if message.len() > MAX_RAW_INPUT_BYTES {
+    let Ok(hash) = message_hash(message) else {
         return false;
-    }
-    let hash = message_digest(message);
+    };
     ShrincsVerifier::new().verify_stateless_envelope(public_key_commitment, &hash, signature)
         == crate::verifier::VerifyOutcome::Valid
 }

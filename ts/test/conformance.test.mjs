@@ -14,7 +14,12 @@ import * as entryWeb from "../dist/loader.browser.js";
 // wiring: `loadHashSigsFor(loadWeb)`.
 
 const SEED = new Uint8Array(32).fill(0xab);
-const MSG = new TextEncoder().encode("hashsigs-noble-conformance-message");
+import { createHash } from "node:crypto";
+// The noble sign/verify functions take a 32-byte message (the caller
+// pre-hashes arbitrary data, matching the on-chain verifier). sha256 stands
+// in for whatever digest a real caller computes.
+const hash32 = (label) => new Uint8Array(createHash("sha256").update(label).digest());
+const MSG = hash32("hashsigs-noble-conformance-message");
 const HEX32 = (byte) => "0x" + byte.repeat(32);
 const HEX_RE = /^0x[0-9a-f]*$/;
 
@@ -106,7 +111,7 @@ for (const [name, load] of loaders) {
     const tampered = sig.slice();
     tampered[0] ^= 1;
     assert.equal(sphincsPlusC.verify(tampered, MSG, keys.publicKey), false);
-    assert.equal(sphincsPlusC.verify(sig, new TextEncoder().encode("different"), keys.publicKey), false);
+    assert.equal(sphincsPlusC.verify(sig, hash32("different"), keys.publicKey), false);
   });
 
   test(`${name}: sphincsPlusC keygen is deterministic for the same seed`, async () => {
@@ -152,7 +157,7 @@ for (const [name, load] of loaders) {
     const tampered = sig.slice();
     tampered[0] ^= 1;
     assert.equal(shrincs.verify(tampered, MSG, keys.publicKeyCommitment), false);
-    assert.equal(shrincs.verify(sig, new TextEncoder().encode("different"), keys.publicKeyCommitment), false);
+    assert.equal(shrincs.verify(sig, hash32("different"), keys.publicKeyCommitment), false);
   });
 
   test(`${name}: shrincs.sign advances keys.secretKey in place across two signatures`, async () => {
@@ -190,7 +195,7 @@ for (const [name, load] of loaders) {
     assert.deepEqual(keys.secretKey, before, "signStateless must not mutate secretKey");
     assert.equal(shrincs.verifyStateless(sig, MSG, keys.publicKeyCommitment), true);
     assert.equal(
-      shrincs.verifyStateless(sig, new TextEncoder().encode("different"), keys.publicKeyCommitment),
+      shrincs.verifyStateless(sig, hash32("different"), keys.publicKeyCommitment),
       false,
     );
   });
