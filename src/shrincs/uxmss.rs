@@ -115,11 +115,15 @@ fn compact_stateful_wots_public_key_from_signature(
         let chain_value = *signature.chains.get(chain_index)?;
         *segment = wotsplusc::stateful_chain_no_mask(
             &pk_seed,
-            leaf_index,
-            chain_index as u32,
-            chain_value,
-            digit,
-            WOTS_BASE_STATEFUL - 1 - digit,
+            wotsplusc::StatefulChainCtx {
+                leaf_index,
+                chain_index: chain_index as u32,
+            },
+            wotsplusc::ChainWalk {
+                value: chain_value,
+                start: digit,
+                steps: WOTS_BASE_STATEFUL - 1 - digit,
+            },
         );
     }
 
@@ -292,11 +296,15 @@ fn sign_stateful_wots_c(
                     ));
                     wotsplusc::stateful_chain_no_mask(
                         pk_seed,
-                        leaf_index,
-                        chain_index as u32,
-                        *secret,
-                        0,
-                        *digit,
+                        wotsplusc::StatefulChainCtx {
+                            leaf_index,
+                            chain_index: chain_index as u32,
+                        },
+                        wotsplusc::ChainWalk {
+                            value: *secret,
+                            start: 0,
+                            steps: *digit,
+                        },
                     )
                 })
                 .collect::<Vec<_>>()
@@ -347,11 +355,15 @@ fn stateful_wots_pk_hash(
         ));
         *endpoint = wotsplusc::stateful_chain_no_mask(
             pk_seed,
-            leaf_index,
-            chain_index as u32,
-            *secret,
-            0,
-            WOTS_BASE_STATEFUL - 1,
+            wotsplusc::StatefulChainCtx {
+                leaf_index,
+                chain_index: chain_index as u32,
+            },
+            wotsplusc::ChainWalk {
+                value: *secret,
+                start: 0,
+                steps: WOTS_BASE_STATEFUL - 1,
+            },
         );
     }
     // Vectored preimage, byte-identical to the packed form used by the

@@ -31,7 +31,29 @@ use crate::types::HASH_LEN;
 /// Distinct from `profiles::FORS_C_MAX_GRIND_COUNTER` (FORS-only).
 pub(crate) const WOTS_C_MAX_GRIND_COUNTER: u32 = 1 << 24;
 
-/// Advance one WOTS-C chain from a revealed value by `steps` hashes.
+/// Value and step range for one WOTS-C chain walk.
+#[derive(Clone, Copy)]
+pub(crate) struct ChainWalk {
+    pub value: [u8; HASH_LEN],
+    pub start: u32,
+    pub steps: u32,
+}
+
+/// Precomputed address base plus chain index for a stateless chain walk.
+#[derive(Clone, Copy)]
+pub(crate) struct AddressBaseChain {
+    pub address_base: [u8; HASH_LEN],
+    pub chain_index: u32,
+}
+
+/// Leaf/chain coordinates for a stateful UXMSS WOTS-C chain walk.
+#[derive(Clone, Copy)]
+pub(crate) struct StatefulChainCtx {
+    pub leaf_index: u32,
+    pub chain_index: u32,
+}
+
+/// Advance one WOTS-C chain from a revealed value by `walk.steps` hashes.
 ///
 /// `tag` is the domain-separation string (`b"wots-c-chain"` or
 /// `b"uxmss-wots-chain"`). `address_word` builds the per-step address from
@@ -40,13 +62,11 @@ pub(crate) fn wots_chain_walk(
     tag: &[u8],
     pk_seed: &[u8; HASH_LEN],
     address_word: impl Fn(u32) -> [u8; HASH_LEN],
-    value: [u8; HASH_LEN],
-    start: u32,
-    steps: u32,
+    walk: ChainWalk,
 ) -> [u8; HASH_LEN] {
-    let mut out = value;
-    for step_offset in 0..steps {
-        let step = start + step_offset;
+    let mut out = walk.value;
+    for step_offset in 0..walk.steps {
+        let step = walk.start + step_offset;
         let addr = address_word(step);
         out = hash_node(&[tag, pk_seed.as_ref(), addr.as_ref(), out.as_ref()]);
     }
@@ -56,19 +76,14 @@ pub(crate) fn wots_chain_walk(
 /// Stateless hypertree WOTS-C chain walk (`b"wots-c-chain"` + ADRS word).
 pub(crate) fn stateless_wots_chain_from_address_base(
     pk_seed: &[u8; HASH_LEN],
-    address_base: [u8; HASH_LEN],
-    chain_index: u32,
-    value: [u8; HASH_LEN],
-    start: u32,
-    steps: u32,
+    addr: AddressBaseChain,
+    walk: ChainWalk,
 ) -> [u8; HASH_LEN] {
     wots_chain_walk(
         b"wots-c-chain",
         pk_seed,
-        |step| wots_chain_address_word(address_base, chain_index, step),
-        value,
-        start,
-        steps,
+        |step| wots_chain_address_word(addr.address_base, addr.chain_index, step),
+        walk,
     )
 }
 
@@ -84,39 +99,48 @@ pub(crate) struct StatelessWotsChainCtx<'a> {
 /// Stateless hypertree WOTS-C chain walk with full ADRS coordinates.
 pub(crate) fn stateless_wots_chain(
     ctx: &StatelessWotsChainCtx<'_>,
-    value: [u8; HASH_LEN],
-    start: u32,
-    steps: u32,
+    walk: ChainWalk,
 ) -> [u8; HASH_LEN] {
-    use crate::primitives::hash::address_word32;
+    use crate::primitives::hash::{address_word32, AddressWord32};
     wots_chain_walk(
         b"wots-c-chain",
         ctx.pk_seed,
-        |step| address_word32(ctx.layer, ctx.tree, 0, ctx.keypair, ctx.chain_index, step),
-        value,
-        start,
-        steps,
+        |step| {
+            address_word32(AddressWord32 {
+                layer: ctx.layer,
+                tree: ctx.tree,
+                address_type: 0,
+                keypair: ctx.keypair,
+                chain: ctx.chain_index,
+                step,
+            })
+        },
+        walk,
     )
 }
 
 /// Stateful UXMSS WOTS-C chain walk (`b"uxmss-wots-chain"`).
 pub(crate) fn stateful_chain_no_mask(
     pk_seed: &[u8; HASH_LEN],
-    leaf_index: u32,
-    chain_index: u32,
-    value: [u8; HASH_LEN],
-    start: u32,
-    steps: u32,
+    ctx: StatefulChainCtx,
+    walk: ChainWalk,
 ) -> [u8; HASH_LEN] {
-    use crate::primitives::hash::address_word32;
+    use crate::primitives::hash::{address_word32, AddressWord32};
     use crate::types::ADDRESS_TYPE_WOTS_HASH;
     wots_chain_walk(
         b"uxmss-wots-chain",
         pk_seed,
-        |step| address_word32(0, 0, ADDRESS_TYPE_WOTS_HASH, leaf_index, chain_index, step),
-        value,
-        start,
-        steps,
+        |step| {
+            address_word32(AddressWord32 {
+                layer: 0,
+                tree: 0,
+                address_type: ADDRESS_TYPE_WOTS_HASH,
+                keypair: ctx.leaf_index,
+                chain: ctx.chain_index,
+                step,
+            })
+        },
+        walk,
     )
 }
 

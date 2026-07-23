@@ -56,47 +56,49 @@ where
     let mut stack: Vec<([u8; HASH_LEN], u32)> = Vec::with_capacity(height as usize + 1);
     let mut auth_path = vec![[0u8; HASH_LEN]; height as usize];
 
-    #[cfg(feature = "parallel")]
-    {
-        use rayon::prelude::*;
-        let mut start = 0u32;
-        while start < leaf_count {
-            let end = start.saturating_add(PARALLEL_LEAF_BATCH).min(leaf_count);
-            let batch: Vec<[u8; HASH_LEN]> = (start..end).into_par_iter().map(&leaf_hash).collect();
-            for (offset, node) in batch.into_iter().enumerate() {
-                fold_leaf(
-                    start + offset as u32,
-                    node,
-                    selected_leaf,
-                    &mut stack,
-                    &mut auth_path,
-                    &mut parent,
-                );
-            }
-            start = end;
-        }
-    }
-    #[cfg(not(feature = "parallel"))]
-    {
-        for i in 0..leaf_count {
-            let node = leaf_hash(i);
-            fold_leaf(
-                i,
-                node,
-                selected_leaf,
-                &mut stack,
-                &mut auth_path,
-                &mut parent,
-            );
-        }
-    }
+    let root = {
+        let mut fold = FoldLeafState {
+            selected_leaf,
+            stack: &mut stack,
+            auth_path: &mut auth_path,
+        };
 
-    let root = match stack.pop() {
-        Some((node, _)) => node,
-        // Unreachable for height < 32: leaf_count >= 1 always leaves one node.
-        None => [0u8; HASH_LEN],
+        #[cfg(feature = "parallel")]
+        {
+            use rayon::prelude::*;
+            let mut start = 0u32;
+            while start < leaf_count {
+                let end = start.saturating_add(PARALLEL_LEAF_BATCH).min(leaf_count);
+                let batch: Vec<[u8; HASH_LEN]> =
+                    (start..end).into_par_iter().map(&leaf_hash).collect();
+                for (offset, node) in batch.into_iter().enumerate() {
+                    fold_leaf(start + offset as u32, node, &mut fold, &mut parent);
+                }
+                start = end;
+            }
+        }
+        #[cfg(not(feature = "parallel"))]
+        {
+            for i in 0..leaf_count {
+                let node = leaf_hash(i);
+                fold_leaf(i, node, &mut fold, &mut parent);
+            }
+        }
+
+        match fold.stack.pop() {
+            Some((node, _)) => node,
+            // Unreachable for height < 32: leaf_count >= 1 always leaves one node.
+            None => [0u8; HASH_LEN],
+        }
     };
     (root, auth_path)
+}
+
+/// Mutable fold state threaded through every leaf of a streaming treehash.
+struct FoldLeafState<'a> {
+    selected_leaf: u32,
+    stack: &'a mut Vec<([u8; HASH_LEN], u32)>,
+    auth_path: &'a mut [[u8; HASH_LEN]],
 }
 
 /// Fold one leaf into the streaming stack, merging equal-height siblings and
@@ -108,25 +110,23 @@ where
 fn fold_leaf(
     i: u32,
     mut node: [u8; HASH_LEN],
-    selected_leaf: u32,
-    stack: &mut Vec<([u8; HASH_LEN], u32)>,
-    auth_path: &mut [[u8; HASH_LEN]],
+    state: &mut FoldLeafState<'_>,
     parent: &mut impl FnMut(u32, u64, [u8; HASH_LEN], [u8; HASH_LEN]) -> [u8; HASH_LEN],
 ) {
     let mut node_h = 0u32;
-    record_auth_sibling(auth_path, selected_leaf, i, node_h, &node);
+    record_auth_sibling(state.auth_path, state.selected_leaf, i, node_h, &node);
 
-    while stack.last().is_some_and(|(_, h)| *h == node_h) {
-        let Some((left, _)) = stack.pop() else {
+    while state.stack.last().is_some_and(|(_, h)| *h == node_h) {
+        let Some((left, _)) = state.stack.pop() else {
             break;
         };
         let next_h = node_h + 1;
         let parent_index = u64::from(i >> next_h);
         node = parent(next_h, parent_index, left, node);
         node_h = next_h;
-        record_auth_sibling(auth_path, selected_leaf, i, node_h, &node);
+        record_auth_sibling(state.auth_path, state.selected_leaf, i, node_h, &node);
     }
-    stack.push((node, node_h));
+    state.stack.push((node, node_h));
 }
 
 #[inline]
