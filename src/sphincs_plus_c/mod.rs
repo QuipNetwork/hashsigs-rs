@@ -41,7 +41,7 @@ impl SphincsPlusCPublicKey {
     }
 }
 
-/// Convert an ERC-7913 32-byte hash into the signed message bytes.
+/// Convert a 32-byte hash into the signed message bytes.
 /// The hash IS the message: exactly its 32 bytes.
 pub fn to_message(hash: &[u8; HASH_LEN]) -> [u8; HASH_LEN] {
     *hash
@@ -52,7 +52,7 @@ pub fn verify(pk: &SphincsPlusCPublicKey, message: &[u8], sig: &StatelessSignatu
     verify_raw(&pk.pk_seed, &pk.hypertree_root, message, sig)
 }
 
-/// Verify a SPHINCS+C signature over a 32-byte hash (ERC-7913 shape).
+/// Verify a SPHINCS+C signature over a 32-byte hash.
 pub fn verify_hash(
     pk: &SphincsPlusCPublicKey,
     hash: &[u8; HASH_LEN],
@@ -99,6 +99,58 @@ pub(crate) mod hypertree;
 /// Verifier-interface facade (opaque key/signature bytes, tri-state verdict).
 pub mod verifier;
 pub use verifier::SphincsPlusCVerifier;
+
+/// Stateless SPHINCS+C signer implementing [`crate::signer::SignerInterface`].
+///
+/// Holds the signing key plus its 64-byte verifying key (`pkSeed‖hypertreeRoot`).
+/// Signing never mutates observable state; the `&mut self` in the trait is
+/// only there for the stateful sibling.
+#[derive(Clone)]
+pub struct SphincsPlusCSigner {
+    signing_key: SphincsPlusCSigningKey,
+    public_key: SphincsPlusCPublicKey,
+}
+
+impl SphincsPlusCSigner {
+    /// Build a signer from seed material (the [`keygen`] inputs).
+    pub fn from_seeds(
+        stateless_sk_seed: [u8; HASH_LEN],
+        stateless_prf_seed: [u8; HASH_LEN],
+        pk_seed: [u8; HASH_LEN],
+    ) -> Self {
+        let (signing_key, public_key) = keygen(stateless_sk_seed, stateless_prf_seed, pk_seed);
+        Self {
+            signing_key,
+            public_key,
+        }
+    }
+
+    /// The independent public key (`pkSeed`, `hypertreeRoot`).
+    pub fn public_key(&self) -> &SphincsPlusCPublicKey {
+        &self.public_key
+    }
+
+    /// The signing key material.
+    pub fn signing_key(&self) -> &SphincsPlusCSigningKey {
+        &self.signing_key
+    }
+}
+
+impl crate::signer::SignerInterface for SphincsPlusCSigner {
+    fn sign_envelope(&mut self, hash: &[u8; HASH_LEN]) -> Option<alloc::vec::Vec<u8>> {
+        let signature = sign(&self.signing_key, &to_message(hash))?;
+        Some(crate::envelope::encode_stateless_signature_envelope(
+            &signature,
+        ))
+    }
+
+    fn verifying_key(&self) -> alloc::vec::Vec<u8> {
+        let mut key = alloc::vec::Vec::with_capacity(64);
+        key.extend_from_slice(&self.public_key.pk_seed);
+        key.extend_from_slice(&self.public_key.hypertree_root);
+        key
+    }
+}
 
 /// Sign an arbitrary message at the SPHINCS+C layer.
 pub fn sign(
@@ -173,7 +225,7 @@ mod tests {
         let sig = sign(&sk, &message).expect("sign");
         assert!(verify(&pk, &message, &sig));
         assert!(verify_hash(&pk, &message, &sig));
-        // ERC-7913 key shape: pk_seed || hypertree_root
+        // verifier key shape: pk_seed || hypertree_root
         let mut key = [0u8; 64];
         key[..32].copy_from_slice(&pk.pk_seed);
         key[32..].copy_from_slice(&pk.hypertree_root);

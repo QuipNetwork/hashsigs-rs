@@ -21,18 +21,18 @@
 //! `pkSeed || hypertreeRoot` key, stateless signature envelope) and
 //! [`crate::shrincs::ShrincsVerifier`] (32-byte public-key commitment,
 //! stateful envelope; its stateless delegation path is the inherent
-//! `verify_stateless_envelope`). On EVM the same shape is standardized as
-//! ERC-7913 (`verify(bytes,bytes32,bytes) -> bytes4`); the name here is
-//! generic because the interface is portable beyond the EVM.
+//! `verify_stateless_envelope`). The same byte-level shape is what EVM signature-verifier contracts
+//! consume, so a verifier built to this interface interoperates with them;
+//! the name here stays scheme-neutral because the interface is portable.
 
 use crate::types::HASH_LEN;
 
-/// Outcome of a verifier-interface call. On EVM this maps onto ERC-7913's
-/// magic-value / `0xffffffff` / revert tri-state.
+/// Outcome of a verifier-interface call: a valid signature, a well-formed
+/// but rejected one, or an envelope that could not be decoded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VerifyOutcome {
     /// The signature verified. Mirrors returning
-    /// `IERC7913SignatureVerifier.verify.selector`.
+    /// `IVerifierInterfaceSignatureVerifier.verify.selector`.
     Valid,
     /// A well-formed envelope carrying a cryptographically invalid
     /// signature, or a key that is not exactly 32 bytes. Mirrors returning

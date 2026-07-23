@@ -905,7 +905,7 @@ pub fn shrincs_verify_stateless_action(
     .map_err(js_error)
 }
 
-/// Independent SPHINCS+C verify (ERC-7913 shape): key = pkSeed‖hypertreeRoot
+/// Independent SPHINCS+C verify (verifier-interface shape): key = pkSeed‖hypertreeRoot
 /// (64 bytes hex), hash = 32-byte hex, signature = stateless envelope.
 /// No SHRINCS commitment or action envelope.
 #[cfg(feature = "wasm-bindings")]
@@ -942,7 +942,7 @@ fn sphincs_plus_c_verify_inner(
     ))
 }
 
-/// ERC-7913 SHRINCS stateful verify (`ShrincsVerifier::verify`):
+/// the verifier interface SHRINCS stateful verify (`ShrincsVerifier::verify`):
 /// `key` is the 32-byte SHRINCS `publicKeyCommitment` hex, `signature_hex`
 /// is `abi.encode(PublicKey, SHRINCS.Signature)` hex (no mode prefix — this
 /// is NOT the account wrapper's ERC-1271 envelope; see
@@ -952,16 +952,16 @@ fn sphincs_plus_c_verify_inner(
 /// framing itself cannot be decoded.
 #[cfg(feature = "wasm-bindings")]
 #[wasm_bindgen(js_name = shrincsVerifyEnvelope)]
-pub fn shrincs_erc7913_verify(
+pub fn shrincs_verify_envelope(
     key_hex: &str,
     hash_hex: &str,
     signature_hex: &str,
 ) -> Result<bool, JsValue> {
-    shrincs_erc7913_verify_inner(key_hex, hash_hex, signature_hex).map_err(js_error)
+    shrincs_verify_envelope_inner(key_hex, hash_hex, signature_hex).map_err(js_error)
 }
 
 #[cfg(any(test, feature = "wasm-bindings"))]
-fn shrincs_erc7913_verify_inner(
+fn shrincs_verify_envelope_inner(
     key_hex: &str,
     hash_hex: &str,
     signature_hex: &str,
@@ -974,12 +974,12 @@ fn shrincs_erc7913_verify_inner(
         crate::shrincs::VerifyOutcome::Invalid => Ok(false),
         crate::shrincs::VerifyOutcome::Malformed => Err(WasmErr {
             code: ERR_ENVELOPE_MALFORMED,
-            message: "ERC-7913 stateful envelope could not be decoded".into(),
+            message: "the verifier interface stateful envelope could not be decoded".into(),
         }),
     }
 }
 
-/// ERC-7913 SHRINCS stateless verify (`ShrincsVerifier::verify_stateless`):
+/// the verifier interface SHRINCS stateless verify (`ShrincsVerifier::verify_stateless`):
 /// `key` is the 32-byte SHRINCS `publicKeyCommitment` hex, `signature_hex`
 /// is `abi.encode(PublicKey, SPHINCSPlusC.Signature)` hex. Delegates to the
 /// pinned `SphincsPlusCVerifier` internally, mirroring
@@ -989,16 +989,16 @@ fn shrincs_erc7913_verify_inner(
 /// decoded.
 #[cfg(feature = "wasm-bindings")]
 #[wasm_bindgen(js_name = shrincsVerifyStatelessEnvelope)]
-pub fn shrincs_erc7913_verify_stateless(
+pub fn shrincs_verify_stateless_envelope(
     key_hex: &str,
     hash_hex: &str,
     signature_hex: &str,
 ) -> Result<bool, JsValue> {
-    shrincs_erc7913_verify_stateless_inner(key_hex, hash_hex, signature_hex).map_err(js_error)
+    shrincs_verify_stateless_envelope_inner(key_hex, hash_hex, signature_hex).map_err(js_error)
 }
 
 #[cfg(any(test, feature = "wasm-bindings"))]
-fn shrincs_erc7913_verify_stateless_inner(
+fn shrincs_verify_stateless_envelope_inner(
     key_hex: &str,
     hash_hex: &str,
     signature_hex: &str,
@@ -1015,7 +1015,7 @@ fn shrincs_erc7913_verify_stateless_inner(
         crate::shrincs::VerifyOutcome::Invalid => Ok(false),
         crate::shrincs::VerifyOutcome::Malformed => Err(WasmErr {
             code: ERR_ENVELOPE_MALFORMED,
-            message: "ERC-7913 stateless envelope could not be decoded".into(),
+            message: "the verifier interface stateless envelope could not be decoded".into(),
         }),
     }
 }

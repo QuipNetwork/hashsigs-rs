@@ -36,7 +36,7 @@ mod vector_conformance;
 pub(crate) mod test_fixtures;
 
 pub use crate::verifier::{VerifierInterface, VerifyOutcome};
-pub use signer::{ShrincsSigner, ShrincsSignerResult, ShrincsSigningKey};
+pub use signer::{ShrincsSigner, ShrincsSignerResult, ShrincsSigningKey, ShrincsStatefulSigner};
 pub use dispatch::prepare_stateless_delegation;
 pub use verifier::ShrincsVerifier;
 

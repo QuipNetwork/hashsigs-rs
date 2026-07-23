@@ -783,7 +783,7 @@ pub fn decode_1271_envelope(data: &[u8]) -> Option<Erc1271Envelope> {
     }
 }
 
-/// Mirrors `SHRINCS.decodePublicKeyCommitment`: the ERC-7913 `key` bytes are
+/// Mirrors `SHRINCS.decodePublicKeyCommitment`: the verifier `key` bytes are
 /// exactly one 32-byte commitment word, nothing else.
 pub fn decode_public_key_commitment(key: &[u8]) -> Option<[u8; HASH_LEN]> {
     if key.len() != HASH_LEN {

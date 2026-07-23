@@ -73,6 +73,7 @@ pub mod account;
 /// Solidity-ABI codec for the shared wire types (envelopes, keys,
 /// ERC-1271 action envelopes). Scheme-neutral: depends only on `types`.
 pub mod envelope;
+pub mod signer;
 pub mod verifier;
 pub(crate) mod primitives;
 pub mod shrincs;
@@ -85,6 +86,7 @@ pub mod wotsplus;
 #[cfg(all(test, feature = "std"))]
 pub(crate) mod test_support;
 
+pub use signer::SignerInterface;
 pub use verifier::{VerifierInterface, VerifyOutcome};
 pub use sphincs_plus_c::{
     keygen as sphincs_plus_c_keygen, sign as sphincs_plus_c_sign, to_message as sphincs_plus_c_to_message,

@@ -16,7 +16,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 
-//! ERC-7913-shaped independent SPHINCS+C verifier facade.
+//! Verifier-interface facade for the independent SPHINCS+C scheme.
 //!
 //! Key = (pk_seed || hypertree_root) as two 32-byte words. Input is an arbitrary
 //! 32-byte hash. No SHRINCS commitment or action envelope.
@@ -73,7 +73,7 @@ impl SphincsPlusCVerifier {
         sphincs_plus_c::verify_hash(pk, hash, signature)
     }
 
-    /// Verify over arbitrary message bytes (non-ERC-7913 helper).
+    /// Verify over arbitrary message bytes (non-verifier-interface helper).
     pub fn verify_message(
         &self,
         pk: &SphincsPlusCPublicKey,
