@@ -25,17 +25,25 @@
 //! `process_init`, `process_verify_stateful_action`,
 //! `process_verify_stateless_action`, `process_set_policy_monotonic`,
 //! `process_set_policy_recovery_rotation`, `process_set_policy_leaf_bitmap`,
-//! `process_enter_recovery_mode`, `process_rotate_to_fresh_key`, and
-//! `process_rotate_full_key` are exposed `pub(crate)` and are not yet wired
-//! into [`process_instruction`]: the instruction dispatch enum/router that
-//! picks between these is a later task. Until then, this module's own tests
-//! call them directly through a test-only dispatcher (see `tests` below), so
+//! `process_enter_recovery_mode`, `process_rotate_to_fresh_key`,
+//! `process_rotate_full_key`, `process_is_valid_signature`, and
+//! `process_is_leaf_used` are exposed `pub(crate)` and are not yet wired into
+//! [`process_instruction`]: the instruction dispatch enum/router that picks
+//! between these is a later task. Until then, this module's own tests call
+//! them directly through a test-only dispatcher (see `tests` below), so
 //! `#[allow(dead_code)]` on the handlers is expected and will be removed once
 //! the real router lands.
 //!
 //! `process_rotate_to_fresh_key`/`process_rotate_full_key` authorize their
 //! rotation through [`crate::rotation`] rather than a dedicated raw-verify
 //! path -- see that module's doc comment for why.
+//!
+//! `process_is_valid_signature`/`process_is_leaf_used` are READ-ONLY query
+//! handlers ported from the deleted wasm host wrapper's `isValidSignature`/
+//! `isLeafUsed` (`src/account/mod.rs` prior to its removal at `d982d45~1`):
+//! unlike every other handler above, they never call `store_state` or touch a
+//! leaf-bitmap PDA -- they answer through `set_return_data` and always return
+//! `Ok(())`, even when the query answer is "no".
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use hashsigs_rs::shrincs::verifier::{
@@ -152,6 +160,38 @@ pub(crate) struct RotateFullKeyArgs {
     pub next_hypertree_root: [u8; HASH_LEN],
     pub next_commitment: [u8; HASH_LEN],
     pub recovery_signature: StatelessSignatureDto,
+}
+
+/// [`IsValidSignatureArgs::mode`] value selecting stateful-action
+/// verification. Mirrors the deleted wasm host wrapper's
+/// `ERC1271_MODE_STATEFUL_ACTION` (`src/envelope.rs` prior to its removal at
+/// `d982d45~1`).
+pub(crate) const MODE_STATEFUL_ACTION: u8 = 1;
+/// [`IsValidSignatureArgs::mode`] value selecting stateless-action
+/// verification. Mirrors `ERC1271_MODE_STATELESS_ACTION`.
+pub(crate) const MODE_STATELESS_ACTION: u8 = 2;
+
+/// Instruction data for [`process_is_valid_signature`]: a mode-prefixed
+/// ERC-1271-style envelope, modeled on the deleted wasm host wrapper's
+/// `isValidSignature`/`Erc1271Envelope` (`src/account/mod.rs` and
+/// `src/envelope.rs` prior to their removal at `d982d45~1`), kept
+/// Borsh-decodable instead of ABI-encoded. `mode` selects how
+/// `signature_bytes` decodes: [`MODE_STATEFUL_ACTION`] for a
+/// `StatefulSignatureDto`, [`MODE_STATELESS_ACTION`] for a
+/// `StatelessSignatureDto`; any other value is a malformed envelope.
+#[derive(Debug, Clone, BorshSerialize, BorshDeserialize)]
+pub(crate) struct IsValidSignatureArgs {
+    pub mode: u8,
+    pub public_key: ShrincsPublicKeyDto,
+    pub action_type: [u8; HASH_LEN],
+    pub payload_hash: [u8; HASH_LEN],
+    pub signature_bytes: Vec<u8>,
+}
+
+/// Instruction data for [`process_is_leaf_used`].
+#[derive(Debug, Clone, BorshSerialize, BorshDeserialize)]
+pub(crate) struct IsLeafUsedArgs {
+    pub leaf_index: u32,
 }
 
 fn load_state(
@@ -728,6 +768,102 @@ pub(crate) fn process_rotate_full_key(
     store_state(account_info, &state)
 }
 
+/// Accounts: `[account PDA (read-only)]`.
+///
+/// ERC-1271-style read-only query, ported from the deleted wasm host
+/// wrapper's `isValidSignature` (`src/account/mod.rs` prior to its removal at
+/// `d982d45~1`). Rebuilds the [`ActionContext`] from account STATE
+/// (`state.nonce`/`state.key_version`) exactly like
+/// [`process_verify_stateful_action`]/[`process_verify_stateless_action`] --
+/// this is a point-in-time check against the CURRENT nonce: a signature that
+/// verifies here answers "is this valid right now", not "will this still be
+/// valid later" (an actual mutating action against the same nonce can still
+/// be replayed afterward, and this query does nothing to prevent that).
+///
+/// Unlike the mutating action handlers, this never calls `store_state`: no
+/// nonce bump, no leaf-policy check/commit, no stateless-budget consumption.
+/// `set_return_data` carries the boolean answer and this always returns
+/// `Ok(())` for a well-formed envelope, even when `is_valid` is `false` --
+/// it is a query, not a mutation, so there is nothing to fail closed against.
+/// A malformed envelope (undecodable `signature_bytes`, unknown `mode`) is
+/// still a distinct `Err(ProgramError::InvalidInstructionData)`: that is a
+/// caller/encoding bug, not a "no" answer to the query.
+#[allow(dead_code)] // wired into dispatch in a later task
+pub(crate) fn process_is_valid_signature(
+    program_id: &Pubkey,
+    accounts: &[AccountInfo],
+    args: IsValidSignatureArgs,
+) -> ProgramResult {
+    let accounts_iter = &mut accounts.iter();
+    let account_info = next_account_info(accounts_iter)?;
+
+    let state = load_state(account_info, program_id)?;
+    let public_key: PublicKey = args.public_key.into();
+    let domain_separator = messages::domain_separator(program_id, account_info.key);
+    let context: ActionContext = messages::action_context(
+        domain_separator,
+        state.nonce,
+        state.key_version,
+        args.action_type,
+        args.payload_hash,
+    );
+
+    let is_valid = match args.mode {
+        MODE_STATEFUL_ACTION => {
+            let signature: StatefulSignature = StatefulSignatureDto::try_from_slice(&args.signature_bytes)
+                .map_err(|_| ProgramError::InvalidInstructionData)?
+                .into();
+            ShrincsVerifier::new().verify_stateful(
+                state.current_public_key_commitment,
+                &public_key,
+                &context,
+                &signature,
+            )
+        }
+        MODE_STATELESS_ACTION => {
+            let signature: StatelessSignature = StatelessSignatureDto::try_from_slice(&args.signature_bytes)
+                .map_err(|_| ProgramError::InvalidInstructionData)?
+                .into();
+            ShrincsVerifier::new().verify_stateless(
+                state.current_public_key_commitment,
+                &public_key,
+                &context,
+                &signature,
+            )
+        }
+        _ => return Err(ProgramError::InvalidInstructionData),
+    };
+
+    set_return_data(&[is_valid as u8]);
+    Ok(())
+}
+
+/// Accounts: `[account PDA (read-only), leaf-bitmap word PDA (read-only) for
+/// `args.leaf_index`'s word]`.
+///
+/// Read-only bitmap query, ported from the deleted wasm host wrapper's
+/// `isLeafUsed` (`src/account/mod.rs` prior to its removal at `d982d45~1`),
+/// answering via `set_return_data` instead of a return value. No mutation:
+/// unlike [`commit_stateful_leaf_use`]'s `mark_leaf_used` call, this never
+/// creates the bitmap-word PDA on a miss -- [`is_leaf_used`] already treats
+/// an uncreated word as "every leaf in it is unused" and returns `Ok(false)`
+/// without touching the account.
+#[allow(dead_code)] // wired into dispatch in a later task
+pub(crate) fn process_is_leaf_used(
+    program_id: &Pubkey,
+    accounts: &[AccountInfo],
+    args: IsLeafUsedArgs,
+) -> ProgramResult {
+    let accounts_iter = &mut accounts.iter();
+    let account_info = next_account_info(accounts_iter)?;
+    let bitmap_account = next_account_info(accounts_iter)?;
+
+    let state = load_state(account_info, program_id)?;
+    let used = is_leaf_used(program_id, account_info.key, &state.key_version, args.leaf_index, bitmap_account)?;
+    set_return_data(&[used as u8]);
+    Ok(())
+}
+
 /// Crate entrypoint. Instruction dispatch (the enum selecting between
 /// `process_init` / `process_verify_stateful_action` /
 /// `process_verify_stateless_action` / the policy / recovery / rotation
@@ -773,6 +909,8 @@ mod tests {
         EnterRecoveryMode,
         RotateToFreshKey(RotateToFreshKeyArgs),
         RotateFullKey(RotateFullKeyArgs),
+        IsValidSignature(IsValidSignatureArgs),
+        IsLeafUsed(IsLeafUsedArgs),
     }
 
     fn test_dispatch(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> ProgramResult {
@@ -798,6 +936,10 @@ mod tests {
                 process_rotate_to_fresh_key(program_id, accounts, args)
             }
             TestInstruction::RotateFullKey(args) => process_rotate_full_key(program_id, accounts, args),
+            TestInstruction::IsValidSignature(args) => {
+                process_is_valid_signature(program_id, accounts, args)
+            }
+            TestInstruction::IsLeafUsed(args) => process_is_leaf_used(program_id, accounts, args),
         }
     }
 
@@ -2055,5 +2197,244 @@ mod tests {
         )
         .await;
         assert_custom_error(&result, ShrincsAccountError::InvalidSignature);
+    }
+
+    // --- read-only queries (Task 7) -----------------------------------------
+
+    /// Submit a [`TestInstruction::IsValidSignature`] query against the
+    /// single read-only `[account PDA]` layout and return its return data.
+    async fn query_is_valid_signature(
+        context: &mut ProgramTestContext,
+        program_id: &SdkPubkey,
+        account_pda_key: &SdkPubkey,
+        args: IsValidSignatureArgs,
+    ) -> Vec<u8> {
+        context.last_blockhash = context.get_new_latest_blockhash().await.unwrap();
+        let ix = Instruction {
+            program_id: *program_id,
+            accounts: vec![AccountMeta::new_readonly(*account_pda_key, false)],
+            data: borsh::to_vec(&TestInstruction::IsValidSignature(args)).unwrap(),
+        };
+        let transaction = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&context.payer.pubkey()),
+            &[&context.payer],
+            context.last_blockhash,
+        );
+        let result = context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap();
+        result.result.expect("is_valid_signature query should succeed");
+        result.metadata.expect("metadata present").return_data.expect("return data set").data
+    }
+
+    /// Submit a [`TestInstruction::IsLeafUsed`] query against the read-only
+    /// `[account PDA, leaf-bitmap word PDA]` layout and return its return data.
+    async fn query_is_leaf_used(
+        context: &mut ProgramTestContext,
+        program_id: &SdkPubkey,
+        account_pda_key: &SdkPubkey,
+        bitmap_key: &SdkPubkey,
+        leaf_index: u32,
+    ) -> Vec<u8> {
+        context.last_blockhash = context.get_new_latest_blockhash().await.unwrap();
+        let ix = Instruction {
+            program_id: *program_id,
+            accounts: vec![
+                AccountMeta::new_readonly(*account_pda_key, false),
+                AccountMeta::new_readonly(*bitmap_key, false),
+            ],
+            data: borsh::to_vec(&TestInstruction::IsLeafUsed(IsLeafUsedArgs { leaf_index })).unwrap(),
+        };
+        let transaction = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&context.payer.pubkey()),
+            &[&context.payer],
+            context.last_blockhash,
+        );
+        let result = context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap();
+        result.result.expect("is_leaf_used query should succeed");
+        result.metadata.expect("metadata present").return_data.expect("return data set").data
+    }
+
+    #[tokio::test]
+    async fn is_valid_signature_verifies_without_mutating_state() {
+        let (program_test, program_id) = setup_test().await;
+        let mut context = program_test.start_with_context().await;
+        let program_id = program_id.pubkey();
+        let owner = Keypair::new();
+        let salt = [41u8; HASH_LEN];
+
+        let (keys, public_key) =
+            ShrincsSigner::keygen(b"shrincs-account-example test is_valid_signature", 1024).expect("keygen");
+        let commitment: [u8; HASH_LEN] = public_key
+            .public_key_commitment
+            .clone()
+            .try_into()
+            .expect("commitment is 32 bytes");
+        let account_pda_key = init_account(&mut context, &program_id, &owner, salt, commitment).await;
+        let state_before = fetch_state(&mut context, &account_pda_key).await;
+
+        let domain_separator = messages::domain_separator(&program_id, &account_pda_key);
+        let action_type = messages::ACTION_STATELESS;
+        let payload_hash = messages::action_payload(&action_type, b"is_valid_signature query payload");
+        let action_context = messages::action_context(
+            domain_separator,
+            state_before.nonce,
+            state_before.key_version,
+            action_type,
+            payload_hash,
+        );
+        let message = CoreShrincsVerifier::new().stateless_action_message_hash(commitment, &action_context);
+        let signature = ShrincsSigner::sign_stateless_raw(&keys, &message).expect("sign");
+
+        // A signature that currently verifies against `state.nonce`/`state.key_version` reads `[1]`.
+        let valid_args = IsValidSignatureArgs {
+            mode: MODE_STATELESS_ACTION,
+            public_key: public_key.clone().into(),
+            action_type,
+            payload_hash,
+            signature_bytes: borsh::to_vec(&StatelessSignatureDto::from(signature.clone())).unwrap(),
+        };
+        let return_data =
+            query_is_valid_signature(&mut context, &program_id, &account_pda_key, valid_args).await;
+        assert_eq!(return_data, vec![1], "current valid signature must read as valid");
+        assert_eq!(
+            fetch_state(&mut context, &account_pda_key).await,
+            state_before,
+            "a valid query must not mutate nonce, key_version, or any other state field"
+        );
+
+        // A tampered signature over the same context reads `[0]`, not an aborted transaction.
+        let mut tampered_signature = signature;
+        tampered_signature.fors.randomizer[0] ^= 0x01;
+        let tampered_args = IsValidSignatureArgs {
+            mode: MODE_STATELESS_ACTION,
+            public_key: public_key.into(),
+            action_type,
+            payload_hash,
+            signature_bytes: borsh::to_vec(&StatelessSignatureDto::from(tampered_signature)).unwrap(),
+        };
+        let return_data =
+            query_is_valid_signature(&mut context, &program_id, &account_pda_key, tampered_args).await;
+        assert_eq!(return_data, vec![0], "tampered signature must read as invalid, not abort the instruction");
+        assert_eq!(
+            fetch_state(&mut context, &account_pda_key).await,
+            state_before,
+            "an invalid query must not mutate state either -- it is Ok(()) with is_valid = false"
+        );
+    }
+
+    #[tokio::test]
+    async fn is_leaf_used_reflects_bitmap_policy_consumption() {
+        let (program_test, program_id) = setup_test().await;
+        let mut context = program_test.start_with_context().await;
+        let program_id = program_id.pubkey();
+        let owner = Keypair::new();
+        let salt = [42u8; HASH_LEN];
+
+        let (mut keys, public_key) =
+            ShrincsSigner::keygen(b"shrincs-account-example test is_leaf_used", 1024).expect("keygen");
+        let commitment: [u8; HASH_LEN] = public_key
+            .public_key_commitment
+            .clone()
+            .try_into()
+            .expect("commitment is 32 bytes");
+        let account_pda_key = init_account(&mut context, &program_id, &owner, salt, commitment).await;
+
+        // Switch to LeafBitmap before any stateful use (the policy is not frozen yet).
+        context.last_blockhash = context.get_new_latest_blockhash().await.unwrap();
+        let instruction = policy_instruction(
+            &program_id,
+            &account_pda_key,
+            &owner.pubkey(),
+            TestInstruction::SetPolicyLeafBitmap,
+        );
+        let transaction = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer, &owner],
+            context.last_blockhash,
+        );
+        context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap()
+            .result
+            .expect("set_policy_leaf_bitmap should succeed");
+
+        let (bitmap_key, _) = crate::pda::bitmap_word_pda(&program_id, &account_pda_key, &[0u8; HASH_LEN], 0);
+
+        // Leaf 1 reads unused before any stateful action consumes it.
+        let return_data =
+            query_is_leaf_used(&mut context, &program_id, &account_pda_key, &bitmap_key, 1).await;
+        assert_eq!(return_data, vec![0], "leaf 1 must read unused before any stateful action");
+
+        // Consume leaf 1 via an ordinary stateful action under LeafBitmap policy.
+        let domain_separator = messages::domain_separator(&program_id, &account_pda_key);
+        let action_type = messages::ACTION_STATEFUL;
+        let payload_hash = messages::action_payload(&action_type, b"consume leaf 1 under bitmap policy");
+        let action_context = messages::action_context(
+            domain_separator,
+            [0u8; HASH_LEN],
+            [0u8; HASH_LEN],
+            action_type,
+            payload_hash,
+        );
+        let signature =
+            ShrincsSigner::sign_stateful_action(&mut keys, &public_key, &action_context).expect("sign");
+        assert_eq!(signature.auth_path.len(), 1, "first stateful signature uses leaf 1");
+
+        context.last_blockhash = context.get_new_latest_blockhash().await.unwrap();
+        let instruction = Instruction {
+            program_id,
+            accounts: vec![
+                AccountMeta::new(account_pda_key, false),
+                AccountMeta::new(bitmap_key, false),
+                AccountMeta::new(context.payer.pubkey(), true),
+                AccountMeta::new_readonly(solana_program::system_program::id(), false),
+            ],
+            data: {
+                let mut data = Vec::new();
+                TestInstruction::StatefulAction(StatefulActionArgs {
+                    public_key: public_key.into(),
+                    action_type,
+                    payload_hash,
+                    signature: signature.into(),
+                })
+                .serialize(&mut data)
+                .unwrap();
+                data
+            },
+        };
+        let transaction = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer],
+            context.last_blockhash,
+        );
+        context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap()
+            .result
+            .expect("stateful action under LeafBitmap policy should succeed");
+
+        // Leaf 1 now reads used; leaf 2 (same bitmap word) still reads unused.
+        let return_data =
+            query_is_leaf_used(&mut context, &program_id, &account_pda_key, &bitmap_key, 1).await;
+        assert_eq!(return_data, vec![1], "leaf 1 must read used after the stateful action consumes it");
+
+        let return_data =
+            query_is_leaf_used(&mut context, &program_id, &account_pda_key, &bitmap_key, 2).await;
+        assert_eq!(return_data, vec![0], "leaf 2 (same bitmap word) must remain unused");
     }
 }
