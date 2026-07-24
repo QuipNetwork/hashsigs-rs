@@ -231,52 +231,34 @@ reruns the selected `test-fast.sh` area whenever something changes.
 
 ## SHRINCS Layout
 
-The SHRINCS Rust code follows the same high-level split as the Solidity
-implementation:
+`src/shrincs/` is flat: it has no `core`, `components`, `signers`, or
+`verifiers` subdirectories. Its files:
 
-- public compatibility entrypoints
-  - `src/shrincs/signer.rs`
-  - `src/shrincs/verifier.rs`
-- public signer/verifier surfaces
-  - `src/shrincs/signers/shrincs_signer.rs`
-  - `src/shrincs/verifiers/shrincs_verifier.rs`
-  - `src/shrincs/verifiers/sphincs_plus_c_verifier.rs`
-- pure scheme orchestration
-  - `src/shrincs/core/shrincs.rs`
-  - `src/shrincs/core/sphincs_plus_c.rs`
-- shared components
-  - `src/shrincs/components/hash.rs`
-  - `src/shrincs/components/public_key.rs`
-  - `src/shrincs/components/uxmss.rs`
-  - `src/shrincs/components/fors_c.rs`
-  - `src/shrincs/components/hypertree.rs`
-- signer-only implementation modules
-  - `src/shrincs/signers/uxmss.rs`
-  - `src/shrincs/signers/fors_c.rs`
-  - `src/shrincs/signers/hypertree.rs`
-  - `src/shrincs/signers/utils.rs`
-  - `src/shrincs/signers/types.rs`
+- `mod.rs` — module root; owns commitment derivation and action-hash dispatch,
+  and composes the independent `sphincs_plus_c` (stateless) and `uxmss`
+  (stateful) modules.
+- `keys.rs` (`pub`) — the composed `Keys` type and `Commitment` newtype:
+  `compute_commitment`, `recompute_commitment`, `recover_commitment`,
+  `import`, `reset`, and 264-byte serialization.
+- `signer.rs` (`pub`) — `ShrincsSigner`: key generation, signing-key import,
+  and stateful/stateless signing.
+- `verifier.rs` (`pub`) — `ShrincsVerifier`: `verify_stateful` and
+  `verify_stateless`.
+- `uxmss.rs` (`pub(crate)`) — the stateful half (UXMSS over WOTS+):
+  `SkSeed`/`PrfSeed`/`PkSeed`/`Root` newtypes, `Secret`/`PublicKey`/`Key`, and
+  stateful signing.
+- `public_key.rs` — the stateful public-key wire layout and commitment
+  derivation, shared by `dispatch`, `signer_utils`, and `signer` so
+  encoding/decoding and commitment computation stay on one path.
+- `signer_types.rs`, `signer_utils.rs` — internal signer helper types and
+  utilities.
+- `dispatch.rs` — internal action-hash dispatch glue.
+- `vector_conformance.rs` — vector-conformance tests.
+- `test_fixtures.rs` (`pub(crate)`) — test fixtures.
 
-`src/shrincs/components/public_key.rs` is the canonical shared owner for:
-
-- hybrid public-key commitment derivation
-- stateful rotation-target commitment derivation
-- encoded stateful public-key encoding
-- encoded stateful public-key decoding
-
-Both the signer and the hybrid core use that module so commitment assembly,
-validation, and rotation decoding stay on one implementation path.
-
-`src/shrincs/core/messages.rs` is the shared owner for canonical SHRINCS
-message-hash construction:
-
-- `stateful_action_message_hash(...)`
-- `stateless_action_message_hash(...)`
-- `stateful_rotation_message_hash(...)`
-- `full_rotation_message_hash(...)`
-
-Both public facades delegate to that lower-level module rather than depending
-on each other for canonical message construction.
+The stateless half, `sphincs_plus_c`, is a sibling top-level module at
+`src/sphincs_plus_c/`, not a child of `shrincs/`. FORS-C and hypertree logic
+live there and in `src/primitives/`.
 
 ## WASM Testing
 
@@ -596,16 +578,16 @@ NOTE: if on Mac, do not use brew to install rust and instead use https://www.rus
 ├── bin/
 │   └── build-wasm.sh  # cargo + wasm-bindgen helper (nodejs + web → ts/src)
 ├── src/
-│   ├── wotsplus/  # WOTS+ primitives
-│   ├── shrincs/   # SHRINCS types, primitives, orchestration, and public surfaces
-│   │   ├── components/  # low-level SHRINCS primitives (Hash / UXMSS / FORS-C / Hypertree)
-│   │   ├── core/        # scheme orchestration (hybrid SHRINCS / stateless SPHINCS+C)
-│   │   ├── signers/     # canonical SHRINCS signer ownership
-│   │   ├── verifiers/   # canonical SHRINCS verifier ownership
-│   │   ├── signer.rs    # compatibility signer entrypoint
-│   │   ├── verifier.rs  # compatibility verifier entrypoint
-│   │   ├── types.rs     # shared SHRINCS structs
-│   │   └── profiles.rs  # compile-time profile constants
+│   ├── envelope.rs      # signature envelope encoding
+│   ├── primitives/      # shared hash/WOTS-C/profile building blocks
+│   ├── wotsplus/        # WOTS+ primitives
+│   ├── sphincs_plus_c/  # stateless SPHINCS+C scheme
+│   ├── shrincs/         # composed SHRINCS keys, signer, verifier (flat)
+│   │   ├── keys.rs      # Keys / Commitment, public API
+│   │   ├── signer.rs    # ShrincsSigner, public API
+│   │   ├── verifier.rs  # ShrincsVerifier, public API
+│   │   ├── uxmss.rs     # stateful UXMSS half, crate-internal
+│   │   └── public_key.rs  # stateful public-key encoding + commitment derivation
 │   └── wasm/      # Verifier / signer wasm-bindgen surface
 ├── ts/            # @quip.network/hashsigs-wasm (loadShrincsWasm entry)
 ├── solana/        # Solana program implementation
@@ -614,26 +596,21 @@ NOTE: if on Mac, do not use brew to install rust and instead use https://www.rus
 
 ## SHRINCS Architecture
 
-The `shrincs` module is layered to mirror the Solidity architecture:
+`shrincs` composes two independent schemes rather than layering shared
+components:
 
-- `components/` owns low-level primitives
-  - `hash.rs`
-  - `uxmss.rs`
-  - `fors_c.rs`
-  - `hypertree.rs`
-- `core/` owns scheme composition and hybrid-key validation
-  - `shrincs.rs`
-  - `sphincs_plus_c.rs`
-- `signers/` and `verifiers/` own the canonical public Rust surfaces
-- `signer.rs` and `verifier.rs` are compatibility shims that preserve the
-  historical public import paths
+- `sphincs_plus_c` (`src/sphincs_plus_c/`) — the stateless half, used for
+  durable recovery.
+- `uxmss` (`src/shrincs/uxmss.rs`, `pub(crate)`) — the stateful half, used for
+  the fast-path signing chain.
 
-Public API stability note:
+`shrincs` binds the two into a `Keys` and exposes them through three public
+modules: `keys` (the composed key type and commitment), `signer`
+(`ShrincsSigner`), and `verifier` (`ShrincsVerifier`).
 
-- prefer `hashsigs_rs::shrincs::*`, `hashsigs_rs::shrincs::signer::*`, and
-  `hashsigs_rs::shrincs::verifier::*` as the stable public surface
-- the deeper `components/`, `core/`, `signers/`, and `verifiers/` modules are
-  internal architecture, not the primary external API contract
+Public API stability note: the stable public surface is
+`hashsigs_rs::shrincs::keys`, `hashsigs_rs::shrincs::signer`, and
+`hashsigs_rs::shrincs::verifier`.
 
 ## License
 
