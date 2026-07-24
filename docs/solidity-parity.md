@@ -83,6 +83,23 @@ audit.
   tests in `solidity_account_vectors.rs` and `envelope_vectors.rs` run
   un-ignored under both 128s profiles.
 
+## SHRINCS account example
+
+The SHRINCS account state machine, removed from `hashsigs-rs` core in the
+redesign, is now demonstrated at
+[`solana/examples/shrincs-account/`](../solana/examples/shrincs-account/), a
+standalone workspace member built on the retained public primitives
+(`ShrincsVerifier::verify_stateful`/`verify_stateless`, `ActionContext`). See
+that crate's README for the full instruction set and policy model.
+
+Its key rotation authorizes through an ordinary action (an `ActionContext`
+digest tagged `ACTION_ROTATE_STATEFUL`/`ACTION_ROTATE_FULL`), not Solidity's
+dedicated `rotateStatefulViaStateless`/`statelessRotate` preimage. A signature
+built for Solidity's rotation message hash doesn't verify against this
+example, and vice versa. This is deliberate: the example owns its own
+wrapper-message convention so the core crate can stay a pure signature
+primitive with no rotation-shaped opinions.
+
 ## Known gaps
 
 - No test drives the account state machine against Solidity-produced call
