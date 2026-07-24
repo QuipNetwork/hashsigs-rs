@@ -109,3 +109,6 @@ mod profile {
 }
 
 pub use profile::*;
+
+/// Maximum grind counter for WOTS-C target-sum searches (stateless + stateful).
+pub(crate) const WOTS_C_MAX_GRIND_COUNTER: u32 = 1 << 24;

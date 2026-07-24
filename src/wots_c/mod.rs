@@ -38,9 +38,7 @@ use crate::primitives::hash::hash_node;
 use crate::primitives::profiles::NUM_WOTS_CHAINS;
 use crate::primitives::HASH_LEN;
 
-/// Maximum grind counter for WOTS-C target-sum searches (stateless + stateful).
-/// Distinct from `profiles::FORS_C_MAX_GRIND_COUNTER` (FORS-only).
-pub(crate) const WOTS_C_MAX_GRIND_COUNTER: u32 = 1 << 24;
+pub(crate) use crate::primitives::profiles::WOTS_C_MAX_GRIND_COUNTER;
 
 /// Value and step range for one WOTS-C chain walk.
 #[derive(Clone, Copy)]
