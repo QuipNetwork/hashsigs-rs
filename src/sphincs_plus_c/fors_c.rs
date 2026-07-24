@@ -62,8 +62,7 @@ const FORS_DIGEST_BYTES: usize =
 /// this module) because it is part of the crate's public wire-type surface:
 /// the `tests/` integration suite and the `solana` workspace member
 /// reconstruct it from their DTOs, importing it at its canonical path
-/// `crate::sphincs_plus_c::fors_c::Entry` (they alias it locally as
-/// `ForsEntry`).
+/// `crate::sphincs_plus_c::ForsEntry`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry {
     /// Revealed FORS secret leaf for one signed FORS tree.
@@ -118,8 +117,7 @@ impl Entry {
 /// this module) because it is part of the crate's public wire-type surface:
 /// the `tests/` integration suite and the `solana` workspace member
 /// reconstruct it from their DTOs, importing it at its canonical path
-/// `crate::sphincs_plus_c::fors_c::Signature` (they alias it locally as
-/// `ForsSignature`).
+/// `crate::sphincs_plus_c::ForsSignature`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Signature {
     /// Randomizer mixed into FORS digest derivation.

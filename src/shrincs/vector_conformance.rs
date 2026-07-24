@@ -44,8 +44,7 @@ use crate::shrincs::test_fixtures::{
 };
 use super::ShrincsVerifier;
 use crate::primitives::HASH_LEN;
-use crate::sphincs_plus_c::fors_c::{Entry as ForsEntry, Signature as ForsSignature};
-use crate::sphincs_plus_c::hypertree::LayerSignature as HypertreeLayerSignature;
+use crate::sphincs_plus_c::{ForsEntry, ForsSignature, LayerSignature as HypertreeLayerSignature};
 use crate::sphincs_plus_c::Signature as StatelessSignature;
 use super::public_key::PublicKey;
 use super::signature::Signature as StatefulSignature;

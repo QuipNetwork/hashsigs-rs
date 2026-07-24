@@ -69,20 +69,25 @@ pub(crate) fn verify_raw(
 
 /// FORS-C signature wire type and its ABI codec, plus internal sign/verify.
 ///
-/// `pub` (rather than `pub(crate)`) because `fors_c::Entry`/`fors_c::Signature`
-/// are part of the crate's public wire-type surface: the `tests/` integration
-/// suite and the `solana` workspace member reconstruct them from their DTOs,
-/// importing them at the canonical path `crate::sphincs_plus_c::fors_c`.
-pub mod fors_c;
+/// `pub(crate)` because the module itself is an implementation detail;
+/// `fors_c::Entry`/`fors_c::Signature` are part of the crate's public
+/// wire-type surface and are re-exported below as `ForsEntry`/`ForsSignature`:
+/// the `tests/` integration suite and the `solana` workspace member
+/// reconstruct them from their DTOs, importing them at the canonical path
+/// `crate::sphincs_plus_c::{ForsEntry, ForsSignature}`.
+pub(crate) mod fors_c;
+pub use fors_c::{Entry as ForsEntry, Signature as ForsSignature};
 
 /// Hypertree layer signature wire type and its ABI codec, plus internal
 /// sign/verify.
 ///
-/// `pub` (rather than `pub(crate)`) because `hypertree::LayerSignature` is
-/// part of the crate's public wire-type surface: the `tests/` integration
-/// suite and the `solana` workspace member reconstruct it from their DTOs,
-/// importing it at the canonical path `crate::sphincs_plus_c::hypertree::LayerSignature`.
-pub mod hypertree;
+/// `pub(crate)` because the module itself is an implementation detail;
+/// `hypertree::LayerSignature` is part of the crate's public wire-type
+/// surface and is re-exported below: the `tests/` integration suite and the
+/// `solana` workspace member reconstruct it from their DTOs, importing it at
+/// the canonical path `crate::sphincs_plus_c::LayerSignature`.
+pub(crate) mod hypertree;
+pub use hypertree::LayerSignature;
 
 /// Structured, newtyped SPHINCS+C key: [`key::Key`] = [`key::Secret`] +
 /// [`key::PublicKey`]. Reused as the stateless half of a SHRINCS key.

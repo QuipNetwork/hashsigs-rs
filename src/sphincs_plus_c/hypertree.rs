@@ -59,8 +59,8 @@ const HYPERTREE_SUBTREE_HEIGHT: usize =
 /// Kept `pub` (rather than `pub(crate)`) because it is part of the crate's
 /// public wire-type surface: the `tests/` integration suite and the `solana`
 /// workspace member reconstruct it from their DTOs, importing it at its
-/// canonical path `crate::sphincs_plus_c::hypertree::LayerSignature` (they
-/// alias it locally as `HypertreeLayerSignature`).
+/// canonical path `crate::sphincs_plus_c::LayerSignature` (they alias it
+/// locally as `HypertreeLayerSignature`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LayerSignature {
     /// Expected WOTS-C public-key hash for this layer.

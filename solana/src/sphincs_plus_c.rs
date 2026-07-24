@@ -28,8 +28,9 @@ use hashsigs_rs::shrincs::{
     ActionContext, PublicKey as ShrincsPublicKey, Signature as StatefulSignature,
     StatelessSignature,
 };
-use hashsigs_rs::sphincs_plus_c::fors_c::{Entry as ForsEntry, Signature as ForsSignature};
-use hashsigs_rs::sphincs_plus_c::hypertree::LayerSignature as HypertreeLayerSignature;
+use hashsigs_rs::sphincs_plus_c::{
+    ForsEntry, ForsSignature, LayerSignature as HypertreeLayerSignature,
+};
 use hashsigs_rs::wots_c::Signature as WotsCSignature;
 
 #[derive(Debug, Clone, BorshSerialize, BorshDeserialize)]

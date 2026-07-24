@@ -173,8 +173,7 @@ mod tests {
     use super::*;
     use alloc::vec;
     use crate::primitives::profiles::NUM_HYPERTREE_LAYERS;
-    use crate::sphincs_plus_c::fors_c::{Entry, Signature as ForsSignature};
-    use crate::sphincs_plus_c::hypertree::LayerSignature;
+    use crate::sphincs_plus_c::{ForsEntry as Entry, ForsSignature, LayerSignature};
     use crate::wots_c::Signature as WotsCSignature;
 
     fn sample_public_key() -> PublicKey {
