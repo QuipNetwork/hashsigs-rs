@@ -38,14 +38,17 @@ use super::public_key::{
     decode_stateful_public_key, public_key_commitment as public_key_commitment_from_parts,
 };
 
-/// Canonical message hash for a stateful action verify, binding the
-/// operation tag, active hash-suite ID, and the context's domain separator,
-/// nonce, key version, action type, and payload hash.
-pub(crate) fn stateful_action_message_hash(
+/// Canonical action-verify message hash, binding the operation tag, active
+/// hash-suite ID, and the context's domain separator, nonce, key version,
+/// action type, and payload hash. Shared body for
+/// `stateful_action_message_hash` and `stateless_action_message_hash`, which
+/// differ only in `op_tag`.
+fn action_message_hash(
+    op_tag: &[u8],
     expected_public_key_commitment: [u8; HASH_LEN],
     context: &ActionContext,
 ) -> [u8; HASH_LEN] {
-    let op = keccak_packed(&[b"shrincs-verify-stateful"]);
+    let op = keccak_packed(&[op_tag]);
     keccak_packed(&[
         &op,
         &HASH_SUITE_ID.to_be_bytes(),
@@ -58,23 +61,22 @@ pub(crate) fn stateful_action_message_hash(
     ])
 }
 
+/// Canonical message hash for a stateful action verify. See
+/// `action_message_hash`.
+pub(crate) fn stateful_action_message_hash(
+    expected_public_key_commitment: [u8; HASH_LEN],
+    context: &ActionContext,
+) -> [u8; HASH_LEN] {
+    action_message_hash(b"shrincs-verify-stateful", expected_public_key_commitment, context)
+}
+
 /// Canonical message hash for a stateless action verify. See
-/// `stateful_action_message_hash`.
+/// `action_message_hash`.
 pub(crate) fn stateless_action_message_hash(
     expected_public_key_commitment: [u8; HASH_LEN],
     context: &ActionContext,
 ) -> [u8; HASH_LEN] {
-    let op = keccak_packed(&[b"shrincs-verify-stateless"]);
-    keccak_packed(&[
-        &op,
-        &HASH_SUITE_ID.to_be_bytes(),
-        &expected_public_key_commitment,
-        &context.domain_separator,
-        &context.nonce,
-        &context.key_version,
-        &context.action_type,
-        &context.payload_hash,
-    ])
+    action_message_hash(b"shrincs-verify-stateless", expected_public_key_commitment, context)
 }
 
 fn verify_stateless_crypto(
