@@ -319,7 +319,7 @@ impl fmt::Debug for Key {
 impl PublicKey {
     /// Encoded stateful public key `pk_seed(32) ‖ root(32) ‖ max(4 BE)`,
     /// 68 bytes (`STATEFUL_PUBLIC_KEY_BYTES`).
-    pub fn to_bytes(&self) -> [u8; crate::types::STATEFUL_PUBLIC_KEY_BYTES] {
+    pub fn to_bytes(self) -> [u8; crate::types::STATEFUL_PUBLIC_KEY_BYTES] {
         let mut out = [0u8; crate::types::STATEFUL_PUBLIC_KEY_BYTES];
         out[..HASH_LEN].copy_from_slice(self.pk_seed.as_bytes());
         out[HASH_LEN..HASH_LEN * 2].copy_from_slice(self.root.as_bytes());
