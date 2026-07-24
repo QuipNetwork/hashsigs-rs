@@ -54,9 +54,13 @@ pub use crate::primitives::{
     HASH_SUITE_KECCAK_256, HASH_SUITE_SHA2_256,
 };
 pub use crate::types::{
-    ActionContext, PublicKey, StatefulPublicKey, StatefulSignature, StatelessSignature,
-    STATEFUL_PUBLIC_KEY_BYTES,
+    ActionContext, PublicKey, StatefulPublicKey, StatefulSignature, STATEFUL_PUBLIC_KEY_BYTES,
 };
+// SHRINCS genuinely has a stateless signing path (SPHINCS+C is the stateless
+// half of the hybrid key), so this is a legitimate semantic re-export, not a
+// component shim: `shrincs::StatelessSignature` names that path's wire type
+// at its canonical home, `sphincs_plus_c::Signature`.
+pub use crate::sphincs_plus_c::Signature as StatelessSignature;
 
 // Re-export commitment helpers used by wasm/tests.
 #[allow(unused_imports)] // used by wasm/test modules under cfg

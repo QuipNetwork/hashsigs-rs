@@ -24,8 +24,9 @@
 
 use crate::primitives::hash::word32;
 use crate::sphincs_plus_c::hypertree::hypertree_public_root;
+use crate::sphincs_plus_c::Signature as StatelessSignature;
 use crate::sphincs_plus_c::{self};
-use crate::types::{ActionContext, PublicKey, StatefulSignature, StatelessSignature};
+use crate::types::{ActionContext, PublicKey, StatefulSignature};
 use crate::shrincs::uxmss;
 use crate::primitives::HASH_LEN;
 

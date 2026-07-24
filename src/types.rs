@@ -20,8 +20,6 @@
 use alloc::vec::Vec;
 
 use crate::primitives::HASH_LEN;
-use crate::sphincs_plus_c::fors_c;
-use crate::sphincs_plus_c::hypertree;
 
 // Encoded stateful public key layout, kept 68 bytes across all profiles:
 // 32-byte pkSeed slot || 32-byte root slot || 4-byte maxSignatures.
@@ -59,14 +57,6 @@ pub struct StatefulSignature {
     pub chains: Vec<[u8; HASH_LEN]>,
     /// Unbalanced authentication path. Its length is also the leaf index.
     pub auth_path: Vec<[u8; HASH_LEN]>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StatelessSignature {
-    /// FORS-C signature that signs the external message and returns the first root.
-    pub fors: fors_c::Signature,
-    /// Hypertree layers that carry the FORS root up to the pinned hypertree root.
-    pub hypertree: Vec<hypertree::LayerSignature>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -34,9 +34,12 @@ pub use crate::primitives::{
     HASH_SUITE_KECCAK_256,
 };
 pub use crate::types::{
-    ActionContext, PublicKey, StatefulPublicKey, StatefulSignature, StatelessSignature,
-    STATEFUL_PUBLIC_KEY_BYTES,
+    ActionContext, PublicKey, StatefulPublicKey, StatefulSignature, STATEFUL_PUBLIC_KEY_BYTES,
 };
+// SHRINCS genuinely has a stateless signing path, so this is a legitimate
+// semantic re-export (not a component shim) — see `shrincs::mod`'s matching
+// re-export for the rationale.
+pub use crate::sphincs_plus_c::Signature as StatelessSignature;
 // Profile parameter tuple also lived in main's shrincs_verifier_types (via
 // `pub use profile::*`); re-export from the current profiles module.
 pub use crate::primitives::profiles::{
@@ -188,7 +191,7 @@ impl ShrincsVerifier {
         // expects (an encode-then-decode round trip the Solidity adapter
         // never pays).
         let Some(delegate_signature) =
-            envelope::decode_stateless_signature_envelope(&delegate_signature_envelope)
+            crate::sphincs_plus_c::Signature::from_bytes(&delegate_signature_envelope)
         else {
             // `prepare_stateless_delegation` only ever emits a canonically
             // re-encoded envelope for a delegation it accepted, so this

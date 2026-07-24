@@ -217,7 +217,7 @@ pub fn sphincs_plus_c_sign(
             message: "stateless signing failed for the supplied key/message".into(),
         })
     })?;
-    Ok(crate::envelope::encode_stateless_signature_envelope(&signature))
+    Ok(signature.to_bytes())
 }
 
 /// Verify a SPHINCS+C stateless signature envelope over `message` (hashed
@@ -440,7 +440,7 @@ pub fn shrincs_sign_stateless(
     // signed under the keypair's embedded stateless key. Return exactly what
     // `sphincsPlusCSign` returns (the signature-only encoding) so
     // `shrincsVerifyStateless` is a direct `sphincsPlusCVerify`.
-    Ok(crate::envelope::encode_stateless_signature_envelope(&signature))
+    Ok(signature.to_bytes())
 }
 
 /// Verify a SHRINCS stateful signature (`shrincsSign`'s output, which carries

@@ -28,10 +28,8 @@ use crate::primitives::hash::word32;
 use crate::primitives::hash_suite::HASH_SUITE_ID;
 use crate::primitives::HASH_LEN;
 use crate::sphincs_plus_c;
-use crate::types::{
-    ActionContext, PublicKey, StatefulSignature, StatelessSignature,
-    STATEFUL_PUBLIC_KEY_BYTES,
-};
+use crate::sphincs_plus_c::Signature as StatelessSignature;
+use crate::types::{ActionContext, PublicKey, StatefulSignature, STATEFUL_PUBLIC_KEY_BYTES};
 use crate::shrincs::uxmss;
 use super::public_key::{
     decode_stateful_public_key, public_key_commitment as public_key_commitment_from_parts,
@@ -215,7 +213,7 @@ pub fn prepare_stateless_delegation(
     let pk_seed: [u8; HASH_LEN] = public_key.pk_seed.try_into().ok()?;
     let hypertree_root: [u8; HASH_LEN] = public_key.hypertree_root.try_into().ok()?;
     Some((
-        crate::envelope::encode_stateless_key(pk_seed, hypertree_root),
-        crate::envelope::encode_stateless_signature_envelope(&signature),
+        sphincs_plus_c::encode_stateless_key(pk_seed, hypertree_root),
+        signature.to_bytes(),
     ))
 }

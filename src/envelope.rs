@@ -17,11 +17,15 @@
 
 //! EVM envelope codec: byte-exact Solidity `abi.encode` framing for the
 //! SHRINCS wire shapes, matching the codec surface folded into
-//! `hashsigs-solidity`'s `SHRINCS.sol` / `SPHINCSPlusC.sol` (encoders
-//! `encodeStatefulEnvelope`, `encodeStatelessEnvelope`, `encodeStatelessKey`,
-//! `sliceStatelessSignatureEnvelope` / `encodeStatelessSignatureEnvelope`;
-//! decoders `decodePublicKeyCommitment`, `decodeStatefulEnvelope`,
-//! `prepareStatelessDelegation`).
+//! `hashsigs-solidity`'s `SHRINCS.sol` (encoders `encodeStatefulEnvelope`,
+//! `encodeStatelessEnvelope`; decoders `decodePublicKeyCommitment`,
+//! `decodeStatefulEnvelope`, `decodeStatelessEnvelope`). The
+//! `SPHINCSPlusC.sol`-side signature-only envelope
+//! (`encodeStatelessKey`/`sliceStatelessSignatureEnvelope`/
+//! `encodeStatelessSignatureEnvelope`) now lives on
+//! `sphincs_plus_c::Signature::{to_bytes,from_bytes}` and
+//! `sphincs_plus_c::encode_stateless_key`; `prepareStatelessDelegation` lives
+//! in `shrincs::dispatch`.
 //!
 //! # Strictness divergence from the Solidity re-tag functions
 //!
@@ -63,18 +67,18 @@
 use alloc::vec::Vec;
 
 use crate::primitives::abi::{
-    encode_bytes, encode_bytes32_array, encode_dynamic_array, encode_tuple, word_from_u32,
-    AbiReader, Field,
+    encode_bytes, encode_bytes32_array, encode_tuple, word_from_u32, AbiReader, Field,
 };
-use crate::primitives::profiles::{NUM_HYPERTREE_LAYERS, WOTS_CHAINS_STATEFUL};
+use crate::primitives::profiles::WOTS_CHAINS_STATEFUL;
 #[cfg(test)]
-use crate::primitives::profiles::NUM_FORS_TREES;
+use crate::primitives::profiles::NUM_HYPERTREE_LAYERS;
 use crate::primitives::HASH_LEN;
 #[cfg(test)]
-use crate::sphincs_plus_c::fors_c::Entry;
-use crate::sphincs_plus_c::fors_c::Signature;
+use crate::sphincs_plus_c::fors_c::{Entry, Signature};
+#[cfg(test)]
 use crate::sphincs_plus_c::hypertree::LayerSignature;
-use crate::types::{PublicKey, StatefulSignature, StatelessSignature};
+use crate::sphincs_plus_c::Signature as StatelessSignature;
+use crate::types::{PublicKey, StatefulSignature};
 #[cfg(test)]
 use crate::wots_c::Signature as WotsCSignature;
 
@@ -100,23 +104,6 @@ fn encode_stateful_signature_body(signature: &StatefulSignature) -> Vec<u8> {
     ])
 }
 
-fn encode_fors_signature_body(signature: &Signature) -> Vec<u8> {
-    signature.to_bytes()
-}
-
-fn encode_hypertree_layer_body(layer: &LayerSignature) -> Vec<u8> {
-    layer.to_bytes()
-}
-
-fn encode_stateless_signature_body(signature: &StatelessSignature) -> Vec<u8> {
-    encode_tuple(alloc::vec![
-        Field::Dynamic(encode_fors_signature_body(&signature.fors)),
-        Field::Dynamic(encode_dynamic_array(
-            signature.hypertree.iter().map(encode_hypertree_layer_body).collect(),
-        )),
-    ])
-}
-
 fn decode_public_key(reader: &AbiReader, base: usize) -> Option<PublicKey> {
     Some(PublicKey {
         stateful_public_key: reader.decode_bytes(base, base)?,
@@ -135,30 +122,6 @@ fn decode_stateful_signature(reader: &AbiReader, base: usize) -> Option<Stateful
             base,
             base.checked_add(96)?,
             MAX_STATEFUL_AUTH_PATH_LEN,
-        )?,
-    })
-}
-
-fn decode_fors_signature(reader: &AbiReader, base: usize) -> Option<Signature> {
-    Signature::decode(reader, base)
-}
-
-fn decode_hypertree_layer_signature(
-    reader: &AbiReader,
-    base: usize,
-) -> Option<LayerSignature> {
-    LayerSignature::decode(reader, base)
-}
-
-fn decode_stateless_signature(reader: &AbiReader, base: usize) -> Option<StatelessSignature> {
-    let fors_start = reader.decode_offset(base, base)?;
-    Some(StatelessSignature {
-        fors: decode_fors_signature(reader, fors_start)?,
-        hypertree: reader.decode_dynamic_array(
-            base,
-            base.checked_add(32)?,
-            NUM_HYPERTREE_LAYERS as usize,
-            decode_hypertree_layer_signature,
         )?,
     })
 }
@@ -199,7 +162,7 @@ pub fn encode_stateless_envelope(
 ) -> Vec<u8> {
     encode_tuple(alloc::vec![
         Field::Dynamic(encode_public_key_body(public_key)),
-        Field::Dynamic(encode_stateless_signature_body(signature)),
+        Field::Dynamic(signature.encode_body()),
     ])
 }
 
@@ -210,41 +173,8 @@ pub fn decode_stateless_envelope(data: &[u8]) -> Option<(PublicKey, StatelessSig
     let signature_start = reader.decode_offset(0, 32)?;
     let decoded = (
         decode_public_key(&reader, public_key_start)?,
-        decode_stateless_signature(&reader, signature_start)?,
+        StatelessSignature::decode(&reader, signature_start)?,
     );
-    reader.finish()?;
-    Some(decoded)
-}
-
-/// Mirrors `SHRINCS.encodeStatelessKey`. Layout:
-/// `abi.encode(bytes32 pkSeed, bytes32 hypertreeRoot)`, which for two static
-/// words is exactly the 64-byte concatenation with no offsets.
-pub fn encode_stateless_key(
-    pk_seed: [u8; HASH_LEN],
-    hypertree_root: [u8; HASH_LEN],
-) -> [u8; 64] {
-    let mut out = [0u8; 64];
-    out[..32].copy_from_slice(&pk_seed);
-    out[32..].copy_from_slice(&hypertree_root);
-    out
-}
-
-/// Byte-identical (for canonically framed inputs) to
-/// `SHRINCS.sliceStatelessSignatureEnvelope` / mirrors
-/// `SPHINCSPlusC.encodeStatelessSignatureEnvelope`. Layout:
-/// `abi.encode(SPHINCSPlusC.Signature)`.
-pub fn encode_stateless_signature_envelope(signature: &StatelessSignature) -> Vec<u8> {
-    encode_tuple(alloc::vec![Field::Dynamic(encode_stateless_signature_body(
-        signature
-    ))])
-}
-
-/// Strict decoder for the layout `encode_stateless_signature_envelope`
-/// produces.
-pub fn decode_stateless_signature_envelope(data: &[u8]) -> Option<StatelessSignature> {
-    let reader = AbiReader::new(data);
-    let signature_start = reader.decode_offset(0, 0)?;
-    let decoded = decode_stateless_signature(&reader, signature_start)?;
     reader.finish()?;
     Some(decoded)
 }
@@ -347,26 +277,6 @@ mod tests {
     }
 
     #[test]
-    fn stateless_key_encodes_to_64_byte_layout() {
-        let pk_seed = [0x12; HASH_LEN];
-        let hypertree_root = [0x34; HASH_LEN];
-        let encoded = encode_stateless_key(pk_seed, hypertree_root);
-        assert_eq!(encoded.len(), 64);
-        assert_eq!(&encoded[..HASH_LEN], &pk_seed); // pkSeed occupies the first word
-        assert_eq!(&encoded[HASH_LEN..], &hypertree_root); // hypertreeRoot the second
-    }
-
-    #[test]
-    fn stateless_signature_envelope_round_trips() {
-        let signature = sample_stateless_signature();
-        let encoded = encode_stateless_signature_envelope(&signature);
-        let decoded =
-            decode_stateless_signature_envelope(&encoded).expect("valid envelope must decode");
-        assert_eq!(decoded, signature);
-        assert_eq!(encode_stateless_signature_envelope(&decoded), encoded);
-    }
-
-    #[test]
     fn public_key_commitment_round_trips() {
         let commitment = [0x42; HASH_LEN];
         assert_eq!(decode_public_key_commitment(&commitment), Some(commitment));
@@ -394,7 +304,7 @@ mod tests {
         expected_key[..32].copy_from_slice(&public_key.pk_seed);
         expected_key[32..].copy_from_slice(&public_key.hypertree_root);
         assert_eq!(delegate_key, expected_key);
-        assert_eq!(delegate_signature, encode_stateless_signature_envelope(&signature));
+        assert_eq!(delegate_signature, signature.to_bytes());
 
         // A wrong expected commitment must fail closed.
         let mut wrong_commitment = commitment;
@@ -481,27 +391,6 @@ mod tests {
         assert!(decode_public_key_commitment(&[0u8; 33]).is_none());
     }
 
-    #[test]
-    fn stateless_signature_with_empty_hypertree_round_trips_as_empty() {
-        // Unlike the Solidity slice-copy re-tag (which Panics on an empty
-        // hypertree/authPath because it indexes the last element), this
-        // strict abi.decode-style path has no such precondition and simply
-        // decodes the zero-length array.
-        let signature = StatelessSignature {
-            fors: Signature {
-                randomizer: [0x01; HASH_LEN],
-                counter: 0,
-                entries: vec![],
-            },
-            hypertree: vec![],
-        };
-        let encoded = encode_stateless_signature_envelope(&signature);
-        assert_eq!(
-            decode_stateless_signature_envelope(&encoded),
-            Some(signature)
-        );
-    }
-
     /// Read a clean ABI length/offset word at `pos` (big-endian u64 in the
     /// low 8 bytes of a 32-byte word).
     fn read_abi_usize(buf: &[u8], pos: usize) -> usize {
@@ -525,14 +414,6 @@ mod tests {
             decode_stateful_envelope(&encoded).is_none(),
             "single trailing byte must be rejected"
         );
-
-        let mut stateless =
-            encode_stateless_signature_envelope(&sample_stateless_signature());
-        stateless.extend_from_slice(&[0xAA, 0xBB]);
-        assert!(
-            decode_stateless_signature_envelope(&stateless).is_none(),
-            "trailing junk on stateless signature envelope must be rejected"
-        );
     }
 
     #[test]
@@ -553,47 +434,6 @@ mod tests {
         assert!(
             decode_stateful_envelope(&encoded).is_none(),
             "chains length WOTS_CHAINS_STATEFUL+1 must be rejected"
-        );
-
-        // FORS entries are a dynamic struct array capped at NUM_FORS_TREES.
-        let mut encoded = encode_stateless_signature_envelope(&sample_stateless_signature());
-        // Outer head: one offset to the signature body.
-        let sig_start = read_abi_usize(&encoded, 0);
-        // Signature body head: fors_off@0, hypertree_off@32.
-        let fors_start = sig_start + read_abi_usize(&encoded, sig_start);
-        // ForsSignature head: randomizer_off@0, counter@32, entries_off@64.
-        let entries_start = fors_start + read_abi_usize(&encoded, fors_start + 64);
-        write_abi_usize(&mut encoded, entries_start, NUM_FORS_TREES as usize + 1);
-        assert!(
-            decode_stateless_signature_envelope(&encoded).is_none(),
-            "FORS entries length NUM_FORS_TREES+1 must be rejected"
-        );
-    }
-
-    #[test]
-    fn aliased_dynamic_array_offsets_are_rejected() {
-        // Build a valid `bytes[]` auth_path of two elements inside a FORS
-        // entry, then rewrite both element offsets to the first payload so a
-        // lenient decoder would double-read one blob (alias). Sequential
-        // offset checks must reject.
-        let mut encoded =
-            encode_stateless_signature_envelope(&sample_stateless_signature());
-        let sig_start = read_abi_usize(&encoded, 0);
-        let fors_start = sig_start + read_abi_usize(&encoded, sig_start);
-        let entries_start = fors_start + read_abi_usize(&encoded, fors_start + 64);
-        // entries: length word, then one offset per entry (sample has 2).
-        // Offsets are relative to the start of the offset table (entries_start+32).
-        let entry0_start =
-            entries_start + 32 + read_abi_usize(&encoded, entries_start + 32);
-        // ForsEntry head: secret_leaf_off@0, auth_path_off@32.
-        let auth_start = entry0_start + read_abi_usize(&encoded, entry0_start + 32);
-        // auth_path is bytes[] with length 2; force the second element offset
-        // equal to the first (relative to the offset table at auth_start+32).
-        let first_elem_rel = read_abi_usize(&encoded, auth_start + 32);
-        write_abi_usize(&mut encoded, auth_start + 64, first_elem_rel);
-        assert!(
-            decode_stateless_signature_envelope(&encoded).is_none(),
-            "aliased bytes[] element offsets must be rejected"
         );
     }
 }

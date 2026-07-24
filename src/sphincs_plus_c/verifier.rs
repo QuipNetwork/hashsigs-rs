@@ -21,9 +21,8 @@
 //! Key = (pk_seed || hypertree_root) as two 32-byte words. Input is an arbitrary
 //! 32-byte hash. No SHRINCS commitment or action envelope.
 
-use crate::sphincs_plus_c::{self, PublicKey};
+use crate::sphincs_plus_c::{self, PublicKey, Signature};
 use crate::primitives::HASH_LEN;
-use crate::types::StatelessSignature;
 
 /// Independent stateless-only verifier (Solidity `SPHINCSPlusCVerifier` shape).
 pub struct SphincsPlusCVerifier;
@@ -53,7 +52,7 @@ impl SphincsPlusCVerifier {
         &self,
         key: &[u8],
         hash: &[u8; HASH_LEN],
-        signature: &StatelessSignature,
+        signature: &Signature,
     ) -> bool {
         if key.len() != 64 {
             return false;
@@ -69,7 +68,7 @@ impl SphincsPlusCVerifier {
         &self,
         pk: &PublicKey,
         hash: &[u8; HASH_LEN],
-        signature: &StatelessSignature,
+        signature: &Signature,
     ) -> bool {
         sphincs_plus_c::verify_hash(pk, hash, signature)
     }
@@ -79,7 +78,7 @@ impl SphincsPlusCVerifier {
         &self,
         pk: &PublicKey,
         message: &[u8],
-        signature: &StatelessSignature,
+        signature: &Signature,
     ) -> bool {
         sphincs_plus_c::verify(pk, message, signature)
     }
@@ -98,8 +97,7 @@ impl crate::verifier::VerifierInterface for SphincsPlusCVerifier {
         if key.len() != 64 {
             return VerifyOutcome::Invalid;
         }
-        let Some(decoded) = crate::envelope::decode_stateless_signature_envelope(signature)
-        else {
+        let Some(decoded) = Signature::from_bytes(signature) else {
             return VerifyOutcome::Malformed;
         };
         let mut hash32 = [0u8; 32];
@@ -115,8 +113,6 @@ impl crate::verifier::VerifierInterface for SphincsPlusCVerifier {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
-    use crate::envelope;
     #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
     use crate::verifier::{VerifierInterface, VerifyOutcome};
 
@@ -149,7 +145,7 @@ mod tests {
         let pk_seed = hash_packed(&[b"sphincs-plus-c-verifier-pk", seed_label]);
         let sk = sphincs_plus_c::keygen(sk_seed, prf_seed, pk_seed);
         let signature = sphincs_plus_c::sign(&sk, &hash).expect("stateless sign");
-        let envelope = envelope::encode_stateless_signature_envelope(&signature);
+        let envelope = signature.to_bytes();
         let key = key64(&sk.public_key);
         (key, envelope)
     }

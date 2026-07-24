@@ -23,7 +23,6 @@
 //! No SHRINCS public-key-bundle commitment and no action envelope.
 
 use crate::primitives::HASH_LEN;
-use crate::types::StatelessSignature;
 
 /// Convert a 32-byte hash into the signed message bytes.
 /// The hash IS the message: exactly its 32 bytes.
@@ -32,16 +31,12 @@ pub fn to_message(hash: &[u8; HASH_LEN]) -> [u8; HASH_LEN] {
 }
 
 /// Verify a SPHINCS+C signature over an arbitrary message.
-pub fn verify(pk: &key::PublicKey, message: &[u8], sig: &StatelessSignature) -> bool {
+pub fn verify(pk: &key::PublicKey, message: &[u8], sig: &Signature) -> bool {
     verify_raw(pk.pk_seed.as_bytes(), pk.root.as_bytes(), message, sig)
 }
 
 /// Verify a SPHINCS+C signature over a 32-byte hash.
-pub fn verify_hash(
-    pk: &key::PublicKey,
-    hash: &[u8; HASH_LEN],
-    sig: &StatelessSignature,
-) -> bool {
+pub fn verify_hash(pk: &key::PublicKey, hash: &[u8; HASH_LEN], sig: &Signature) -> bool {
     verify(pk, &to_message(hash), sig)
 }
 
@@ -50,7 +45,7 @@ pub(crate) fn verify_raw(
     pk_seed: &[u8; HASH_LEN],
     hypertree_root: &[u8; HASH_LEN],
     message: &[u8],
-    signature: &StatelessSignature,
+    signature: &Signature,
 ) -> bool {
     if signature.hypertree.is_empty() {
         return false;
@@ -94,6 +89,18 @@ pub mod hypertree;
 pub mod key;
 pub use key::{Key, PkSeed, PrfSeed, PublicKey, Root, Secret, SkSeed};
 
+/// The stateless signature wire type and its ABI codec, plus the
+/// SPHINCS+C key-spec byte helper.
+///
+/// `pub` (rather than `pub(crate)`) because `Signature` is part of the
+/// crate's public wire-type surface: the `tests/` integration suite and the
+/// `solana` workspace member reconstruct it from their DTOs, importing it at
+/// the canonical path `crate::sphincs_plus_c::Signature` (also re-exported as
+/// `crate::shrincs::StatelessSignature`, a legitimate semantic alias — SHRINCS
+/// genuinely has a stateless signing path).
+pub mod signature;
+pub use signature::{encode_stateless_key, Signature};
+
 /// Verifier-interface facade (opaque key/signature bytes, tri-state verdict).
 pub mod verifier;
 pub use verifier::SphincsPlusCVerifier;
@@ -134,9 +141,7 @@ impl SphincsPlusCSigner {
 impl crate::signer::SignerInterface for SphincsPlusCSigner {
     fn sign_envelope(&mut self, hash: &[u8; HASH_LEN]) -> Option<alloc::vec::Vec<u8>> {
         let signature = sign(&self.key, &to_message(hash))?;
-        Some(crate::envelope::encode_stateless_signature_envelope(
-            &signature,
-        ))
+        Some(signature.to_bytes())
     }
 
     fn verifying_key(&self) -> alloc::vec::Vec<u8> {
@@ -148,10 +153,7 @@ impl crate::signer::SignerInterface for SphincsPlusCSigner {
 }
 
 /// Sign an arbitrary message at the SPHINCS+C layer.
-pub fn sign(
-    signing_key: &key::Key,
-    message: &[u8],
-) -> Option<StatelessSignature> {
+pub fn sign(signing_key: &key::Key, message: &[u8]) -> Option<Signature> {
     let signed_fors = fors_c::sign_fors_c(signing_key, message)?;
     let hypertree_layers = hypertree::sign_hypertree(
         signing_key,
@@ -159,7 +161,7 @@ pub fn sign(
         signed_fors.tree_index,
         signed_fors.leaf_index,
     )?;
-    Some(StatelessSignature {
+    Some(Signature {
         fors: signed_fors.signature,
         hypertree: hypertree_layers,
     })
