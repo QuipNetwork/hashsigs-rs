@@ -198,6 +198,10 @@ impl SkSeed {
     pub const fn new(bytes: [u8; HASH_LEN]) -> Self {
         Self(bytes)
     }
+    /// Wrap a slice, returning `None` for any length other than 32.
+    pub fn from_slice(bytes: &[u8]) -> Option<Self> {
+        Some(Self(word32(bytes)?))
+    }
     /// Borrow the raw bytes for hashing.
     pub fn as_bytes(&self) -> &[u8; HASH_LEN] {
         &self.0
@@ -208,6 +212,10 @@ impl PrfSeed {
     /// Wrap 32 raw bytes.
     pub const fn new(bytes: [u8; HASH_LEN]) -> Self {
         Self(bytes)
+    }
+    /// Wrap a slice, returning `None` for any length other than 32.
+    pub fn from_slice(bytes: &[u8]) -> Option<Self> {
+        Some(Self(word32(bytes)?))
     }
     /// Borrow the raw bytes for hashing.
     pub fn as_bytes(&self) -> &[u8; HASH_LEN] {
@@ -327,6 +335,50 @@ impl PublicKey {
             pk_seed: PkSeed::from_slice(bytes.get(..HASH_LEN)?)?,
             root: Root::from_slice(bytes.get(HASH_LEN..HASH_LEN * 2)?)?,
             max_signatures: u32::from_be_bytes(word4(bytes.get(HASH_LEN * 2..)?)?),
+        })
+    }
+}
+
+impl Secret {
+    /// Flat layout `sk_seed(32) ‖ prf_seed(32)`, 64 bytes.
+    pub fn to_bytes(&self) -> [u8; 64] {
+        let mut out = [0u8; 64];
+        out[..HASH_LEN].copy_from_slice(self.sk_seed.as_bytes());
+        out[HASH_LEN..].copy_from_slice(self.prf_seed.as_bytes());
+        out
+    }
+    /// Parse the 64-byte flat layout; `None` on wrong length.
+    pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() != 64 {
+            return None;
+        }
+        Some(Self {
+            sk_seed: SkSeed::from_slice(bytes.get(..HASH_LEN)?)?,
+            prf_seed: PrfSeed::from_slice(bytes.get(HASH_LEN..)?)?,
+        })
+    }
+}
+
+impl Key {
+    /// Flat layout `Secret(64) ‖ PublicKey(68) ‖ next_leaf_index(4 BE)`,
+    /// 136 bytes.
+    pub fn to_bytes(&self) -> [u8; 136] {
+        let mut out = [0u8; 136];
+        out[..64].copy_from_slice(&self.secret.to_bytes());
+        out[64..64 + crate::types::STATEFUL_PUBLIC_KEY_BYTES]
+            .copy_from_slice(&self.public_key.to_bytes());
+        out[132..].copy_from_slice(&self.next_leaf_index.to_be_bytes());
+        out
+    }
+    /// Parse the 136-byte flat layout; `None` on wrong length.
+    pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() != 136 {
+            return None;
+        }
+        Some(Self {
+            secret: Secret::from_bytes(bytes.get(..64)?)?,
+            public_key: PublicKey::from_bytes(bytes.get(64..132)?)?,
+            next_leaf_index: u32::from_be_bytes(word4(bytes.get(132..)?)?),
         })
     }
 }

@@ -22,6 +22,8 @@
 
 pub(crate) mod uxmss;
 mod dispatch;
+/// The composed SHRINCS key: SPHINCS+C ⊕ UXMSS ⊕ commitment.
+pub mod keys;
 mod messages;
 mod public_key;
 mod signer_types;
@@ -36,6 +38,7 @@ mod vector_conformance;
 pub(crate) mod test_fixtures;
 
 pub use crate::verifier::{VerifierInterface, VerifyOutcome};
+pub use keys::{Commitment, Keys};
 pub use signer::{ShrincsSigner, ShrincsSignerResult, ShrincsSigningKey, ShrincsStatefulSigner};
 pub use dispatch::prepare_stateless_delegation;
 pub use verifier::ShrincsVerifier;
