@@ -25,18 +25,22 @@
 //! `process_init`, `process_verify_stateful_action`,
 //! `process_verify_stateless_action`, `process_set_policy_monotonic`,
 //! `process_set_policy_recovery_rotation`, `process_set_policy_leaf_bitmap`,
-//! and `process_enter_recovery_mode` are exposed `pub(crate)` and are not yet
-//! wired into [`process_instruction`]: the instruction dispatch enum/router
-//! that picks between these (and the rotation handlers still to come) is a
-//! later task. Until then, this module's own tests call them directly
-//! through a test-only dispatcher (see `tests` below), so
+//! `process_enter_recovery_mode`, `process_rotate_to_fresh_key`, and
+//! `process_rotate_full_key` are exposed `pub(crate)` and are not yet wired
+//! into [`process_instruction`]: the instruction dispatch enum/router that
+//! picks between these is a later task. Until then, this module's own tests
+//! call them directly through a test-only dispatcher (see `tests` below), so
 //! `#[allow(dead_code)]` on the handlers is expected and will be removed once
 //! the real router lands.
+//!
+//! `process_rotate_to_fresh_key`/`process_rotate_full_key` authorize their
+//! rotation through [`crate::rotation`] rather than a dedicated raw-verify
+//! path -- see that module's doc comment for why.
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use hashsigs_rs::shrincs::verifier::{
     ActionContext, PublicKey, ShrincsVerifier, StatefulSignature, StatelessSignature,
-    STATELESS_SIGNATURE_LIMIT,
+    STATEFUL_PUBLIC_KEY_BYTES, STATELESS_SIGNATURE_LIMIT,
 };
 use hashsigs_rs_solana::sphincs_plus_c::{
     ShrincsPublicKeyDto, StatefulSignatureDto, StatelessSignatureDto,
@@ -54,6 +58,7 @@ use solana_program::{
 
 use crate::messages;
 use crate::pda::{account_pda, is_leaf_used, mark_leaf_used, LeafBitmapAccounts, ACCOUNT_SEED_PREFIX};
+use crate::rotation::{self, RotationAuthorization};
 use crate::state::{increment_u256_be, ShrincsAccountState, StatefulPolicy, HASH_LEN};
 
 /// Freshly installed keys begin stateful signing at leaf 1: `auth_path` is
@@ -64,9 +69,10 @@ const INITIAL_STATEFUL_LEAF_INDEX: u32 = 1;
 
 /// Distinct wrapper failure reasons for the handlers in this module.
 /// Mirrors (a subset of) `hashsigs_rs::account::AccountError`'s numbering
-/// scheme, restricted to what `process_init`,
-/// `process_verify_stateful_action`, and `process_verify_stateless_action`
-/// can return; owner/rotation-only variants belong to later tasks' handlers.
+/// scheme, covering what `process_init`, `process_verify_stateful_action`,
+/// `process_verify_stateless_action`, the policy/recovery setters, and the
+/// rotation handlers (`process_rotate_to_fresh_key`/`process_rotate_full_key`,
+/// via `crate::rotation`) can return.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
 pub(crate) enum ShrincsAccountError {
@@ -79,6 +85,11 @@ pub(crate) enum ShrincsAccountError {
     StatefulPolicyFrozen = 6,
     StatefulIndexRollback = 7,
     RecoveryPolicyRequired = 8,
+    /// A rotation's `next_stateful_public_key` decodes to `max_signatures == 0`.
+    RotationTargetInvalid = 9,
+    /// A rotation's caller-declared `next_commitment` doesn't match the
+    /// recomputed `ShrincsVerifier::public_key_commitment`.
+    CommitmentMismatch = 10,
 }
 
 impl From<ShrincsAccountError> for ProgramError {
@@ -116,6 +127,31 @@ pub(crate) struct StatelessActionArgs {
 #[derive(Debug, Clone, BorshSerialize, BorshDeserialize)]
 pub(crate) struct SetPolicyMonotonicArgs {
     pub initial_leaf_index: u32,
+}
+
+/// Instruction data for [`process_rotate_to_fresh_key`]. `recovery_signature`
+/// is the CURRENT key's stateless signature authorizing this rotation (see
+/// `crate::rotation`); the stateless half (`pk_seed`/`hypertree_root`) is not
+/// repeated here because this rotation flavor keeps it unchanged.
+#[derive(Debug, Clone, BorshSerialize, BorshDeserialize)]
+pub(crate) struct RotateToFreshKeyArgs {
+    pub current_public_key: ShrincsPublicKeyDto,
+    pub next_stateful_public_key: [u8; STATEFUL_PUBLIC_KEY_BYTES],
+    pub next_commitment: [u8; HASH_LEN],
+    pub recovery_signature: StatelessSignatureDto,
+}
+
+/// Instruction data for [`process_rotate_full_key`]. Like
+/// [`RotateToFreshKeyArgs`], but also replaces the stateless half with
+/// `next_pk_seed`/`next_hypertree_root`.
+#[derive(Debug, Clone, BorshSerialize, BorshDeserialize)]
+pub(crate) struct RotateFullKeyArgs {
+    pub current_public_key: ShrincsPublicKeyDto,
+    pub next_stateful_public_key: [u8; STATEFUL_PUBLIC_KEY_BYTES],
+    pub next_pk_seed: [u8; HASH_LEN],
+    pub next_hypertree_root: [u8; HASH_LEN],
+    pub next_commitment: [u8; HASH_LEN],
+    pub recovery_signature: StatelessSignatureDto,
 }
 
 fn load_state(
@@ -556,10 +592,146 @@ pub(crate) fn process_enter_recovery_mode(program_id: &Pubkey, accounts: &[Accou
     store_state(account_info, &state)
 }
 
+/// Reset per-epoch state on a successful rotation, shared by both flavors
+/// (ports the deleted `install_rotated_key`, `solana/src/account.rs` prior to
+/// `5e13d35~1`, line ~487): install `next_commitment`, bump `key_version` and
+/// `nonce`, and reopen the account for ordinary use (`next_stateful_leaf_index`
+/// back to 1, `MonotonicIndex` unfrozen, `recovery_mode` cleared).
+/// `reset_stateless_usage` is the caller's per-flavor decision on
+/// `stateless_signatures_used` (always false for fresh-key; only true for
+/// full-key when [`rotation::stateless_half_changed`] reports the stateless
+/// half moved).
+fn install_rotated_key(
+    state: &mut ShrincsAccountState,
+    next_commitment: [u8; HASH_LEN],
+    reset_stateless_usage: bool,
+) {
+    state.current_public_key_commitment = next_commitment;
+    increment_u256_be(&mut state.key_version);
+    if reset_stateless_usage {
+        state.stateless_signatures_used = 0;
+    }
+    state.next_stateful_leaf_index = INITIAL_STATEFUL_LEAF_INDEX;
+    state.stateful_policy = StatefulPolicy::MonotonicIndex as u8;
+    state.stateful_policy_frozen = false;
+    state.recovery_mode = false;
+    increment_u256_be(&mut state.nonce);
+}
+
+/// Require `RecoveryRotation` policy AND `state.recovery_mode == true` --
+/// both gates the deleted port's rotation handlers checked before
+/// authorizing anything (`solana/src/account.rs` prior to `5e13d35~1`,
+/// `process_rotate_to_fresh_key`/`process_rotate_full_key`, lines ~710-716
+/// and ~770-776): `RecoveryPolicyRequired` if the active policy isn't
+/// `RecoveryRotation`, `RecoveryNotArmed` if recovery mode isn't armed.
+fn require_recovery_mode(state: &ShrincsAccountState) -> Result<(), ProgramError> {
+    if StatefulPolicy::try_from(state.stateful_policy)? != StatefulPolicy::RecoveryRotation {
+        return Err(ShrincsAccountError::RecoveryPolicyRequired.into());
+    }
+    if !state.recovery_mode {
+        return Err(ShrincsAccountError::RecoveryNotArmed.into());
+    }
+    Ok(())
+}
+
+/// Accounts: `[account PDA (writable)]`.
+///
+/// Rotates the stateful bundle only, keeping the current stateless half in
+/// place. Authorized by the CURRENT key's stateless recovery signature over
+/// an `ACTION_ROTATE_STATEFUL` action (see [`crate::rotation`] for what that
+/// binds and why there is no owner-signer requirement here: the deleted port
+/// (`solana/src/account.rs` prior to `5e13d35~1`, `process_rotate_to_fresh_key`,
+/// line 699) took only this same single-account layout -- the stateless
+/// recovery signature IS the sole authorization).
+#[allow(dead_code)] // called by this module's tests; wired into dispatch in a later task
+pub(crate) fn process_rotate_to_fresh_key(
+    program_id: &Pubkey,
+    accounts: &[AccountInfo],
+    args: RotateToFreshKeyArgs,
+) -> ProgramResult {
+    let accounts_iter = &mut accounts.iter();
+    let account_info = next_account_info(accounts_iter)?;
+
+    let mut state = load_state(account_info, program_id)?;
+    require_recovery_mode(&state)?;
+
+    let current_public_key: PublicKey = args.current_public_key.into();
+    let recovery_signature: StatelessSignature = args.recovery_signature.into();
+    let auth = RotationAuthorization {
+        state: &state,
+        domain_separator: messages::domain_separator(program_id, account_info.key),
+        current_public_key: &current_public_key,
+        recovery_signature: &recovery_signature,
+    };
+    rotation::authorize_fresh_key_rotation(&auth, &args.next_stateful_public_key, args.next_commitment)?;
+
+    let previous_commitment = state.current_public_key_commitment;
+    // Fresh-key rotation keeps the current stateless half unchanged, so its
+    // usage accounting carries forward: reset_stateless_usage = false.
+    install_rotated_key(&mut state, args.next_commitment, false);
+    msg!(
+        "shrincs-account-event:KeyRotated:previous={:?}:next={:?}:key_version={:?}:full_rotation=false",
+        previous_commitment,
+        state.current_public_key_commitment,
+        state.key_version
+    );
+    store_state(account_info, &state)
+}
+
+/// Accounts: `[account PDA (writable)]`.
+///
+/// Rotates both the stateful bundle and the stateless half. Authorized by
+/// the CURRENT key's stateless recovery signature over an `ACTION_ROTATE_FULL`
+/// action, exactly like [`process_rotate_to_fresh_key`] -- see that
+/// function's doc comment for the account-layout rationale.
+#[allow(dead_code)] // called by this module's tests; wired into dispatch in a later task
+pub(crate) fn process_rotate_full_key(
+    program_id: &Pubkey,
+    accounts: &[AccountInfo],
+    args: RotateFullKeyArgs,
+) -> ProgramResult {
+    let accounts_iter = &mut accounts.iter();
+    let account_info = next_account_info(accounts_iter)?;
+
+    let mut state = load_state(account_info, program_id)?;
+    require_recovery_mode(&state)?;
+
+    let current_public_key: PublicKey = args.current_public_key.into();
+    let recovery_signature: StatelessSignature = args.recovery_signature.into();
+    let stateless_key_changed = rotation::stateless_half_changed(
+        &current_public_key,
+        &args.next_pk_seed,
+        &args.next_hypertree_root,
+    );
+    let auth = RotationAuthorization {
+        state: &state,
+        domain_separator: messages::domain_separator(program_id, account_info.key),
+        current_public_key: &current_public_key,
+        recovery_signature: &recovery_signature,
+    };
+    rotation::authorize_full_key_rotation(
+        &auth,
+        &args.next_stateful_public_key,
+        args.next_pk_seed,
+        args.next_hypertree_root,
+        args.next_commitment,
+    )?;
+
+    let previous_commitment = state.current_public_key_commitment;
+    install_rotated_key(&mut state, args.next_commitment, stateless_key_changed);
+    msg!(
+        "shrincs-account-event:KeyRotated:previous={:?}:next={:?}:key_version={:?}:full_rotation=true",
+        previous_commitment,
+        state.current_public_key_commitment,
+        state.key_version
+    );
+    store_state(account_info, &state)
+}
+
 /// Crate entrypoint. Instruction dispatch (the enum selecting between
 /// `process_init` / `process_verify_stateful_action` /
-/// `process_verify_stateless_action` / the policy-and-rotation handlers still
-/// to come) is a later task; until it lands this always succeeds without
+/// `process_verify_stateless_action` / the policy / recovery / rotation
+/// handlers) is a later task; until it lands this always succeeds without
 /// doing anything.
 pub fn process_instruction(
     program_id: &Pubkey,
@@ -599,6 +771,8 @@ mod tests {
         SetPolicyRecoveryRotation,
         SetPolicyLeafBitmap,
         EnterRecoveryMode,
+        RotateToFreshKey(RotateToFreshKeyArgs),
+        RotateFullKey(RotateFullKeyArgs),
     }
 
     fn test_dispatch(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> ProgramResult {
@@ -620,6 +794,10 @@ mod tests {
             }
             TestInstruction::SetPolicyLeafBitmap => process_set_policy_leaf_bitmap(program_id, accounts),
             TestInstruction::EnterRecoveryMode => process_enter_recovery_mode(program_id, accounts),
+            TestInstruction::RotateToFreshKey(args) => {
+                process_rotate_to_fresh_key(program_id, accounts, args)
+            }
+            TestInstruction::RotateFullKey(args) => process_rotate_full_key(program_id, accounts, args),
         }
     }
 
@@ -1441,5 +1619,441 @@ mod tests {
 
         let state = fetch_state(&mut context, &account_pda_key).await;
         assert!(state.recovery_mode, "recovery_mode must be armed after enter_recovery_mode");
+    }
+
+    // --- rotation (Task 6) --------------------------------------------------
+
+    fn fixed_hash_bytes(bytes: &[u8]) -> [u8; HASH_LEN] {
+        bytes.try_into().expect("expected a 32-byte field")
+    }
+
+    fn fixed_stateful_key_bytes(bytes: &[u8]) -> [u8; STATEFUL_PUBLIC_KEY_BYTES] {
+        bytes.try_into().expect("expected a 68-byte stateful public key")
+    }
+
+    /// Switch to `RecoveryRotation` policy and arm recovery mode -- the
+    /// shared precondition every rotation test needs.
+    async fn arm_recovery(
+        context: &mut ProgramTestContext,
+        program_id: &SdkPubkey,
+        account_pda_key: &SdkPubkey,
+        owner: &Keypair,
+    ) {
+        for instruction_kind in [TestInstruction::SetPolicyRecoveryRotation, TestInstruction::EnterRecoveryMode] {
+            context.last_blockhash = context.get_new_latest_blockhash().await.unwrap();
+            let instruction = policy_instruction(program_id, account_pda_key, &owner.pubkey(), instruction_kind);
+            let transaction = Transaction::new_signed_with_payer(
+                &[instruction],
+                Some(&context.payer.pubkey()),
+                &[&context.payer, owner],
+                context.last_blockhash,
+            );
+            context
+                .banks_client
+                .process_transaction_with_metadata(transaction)
+                .await
+                .unwrap()
+                .result
+                .expect("arming recovery mode should succeed");
+        }
+    }
+
+    /// Submit `instruction` against the single-account `[account PDA
+    /// (writable)]` layout shared by the stateless-action and rotation
+    /// handlers, returning the on-chain result.
+    async fn send_single_account(
+        context: &mut ProgramTestContext,
+        program_id: &SdkPubkey,
+        account_pda_key: &SdkPubkey,
+        instruction: TestInstruction,
+    ) -> Result<(), solana_sdk::transaction::TransactionError> {
+        context.last_blockhash = context.get_new_latest_blockhash().await.unwrap();
+        let ix = Instruction {
+            program_id: *program_id,
+            accounts: vec![AccountMeta::new(*account_pda_key, false)],
+            data: borsh::to_vec(&instruction).unwrap(),
+        };
+        let transaction = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&context.payer.pubkey()),
+            &[&context.payer],
+            context.last_blockhash,
+        );
+        context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap()
+            .result
+    }
+
+    /// Attempt an ordinary `StatelessAction` signed by `keys`/`public_key`,
+    /// hashing the action message against `message_commitment`. Reused by
+    /// the rotation tests to check both "the old key/commitment no longer
+    /// works" and "the new key's action verifies" after a rotation.
+    async fn try_stateless_action(
+        context: &mut ProgramTestContext,
+        program_id: &SdkPubkey,
+        account_pda_key: &SdkPubkey,
+        keys: &Keys,
+        public_key: &PublicKey,
+        message_commitment: [u8; HASH_LEN],
+    ) -> Result<(), solana_sdk::transaction::TransactionError> {
+        let state = fetch_state(context, account_pda_key).await;
+        let domain_separator = messages::domain_separator(program_id, account_pda_key);
+        let action_type = messages::ACTION_STATELESS;
+        let payload_hash = messages::action_payload(&action_type, b"post-rotation probe");
+        let action_context = messages::action_context(
+            domain_separator,
+            state.nonce,
+            state.key_version,
+            action_type,
+            payload_hash,
+        );
+        let message =
+            CoreShrincsVerifier::new().stateless_action_message_hash(message_commitment, &action_context);
+        let signature = ShrincsSigner::sign_stateless_raw(keys, &message).expect("sign");
+        let args = StatelessActionArgs {
+            public_key: public_key.clone().into(),
+            action_type,
+            payload_hash,
+            signature: signature.into(),
+        };
+        send_single_account(context, program_id, account_pda_key, TestInstruction::StatelessAction(args)).await
+    }
+
+    /// Build a fresh-key rotation's args, keeping the CURRENT stateless half
+    /// (`public_key.pk_seed`/`hypertree_root`) for the next commitment, and
+    /// assert the embedded recovery signature verifies against `state`
+    /// before returning it -- confirming the produced signature is genuinely
+    /// valid, not just structurally well-formed, before any test asserts the
+    /// rotation itself succeeds.
+    fn build_fresh_key_rotation_args(
+        program_id: &SdkPubkey,
+        account_pda_key: &SdkPubkey,
+        state: &ShrincsAccountState,
+        keys: &Keys,
+        public_key: &PublicKey,
+    ) -> RotateToFreshKeyArgs {
+        let commitment = fixed_hash_bytes(&public_key.public_key_commitment);
+        let current_pk_seed = fixed_hash_bytes(&public_key.pk_seed);
+        let current_hypertree_root = fixed_hash_bytes(&public_key.hypertree_root);
+        let (_next_keys, next_public_key) =
+            ShrincsSigner::keygen(b"shrincs-account-example test rotate fresh next", 1024).expect("keygen");
+        let next_stateful_public_key = fixed_stateful_key_bytes(&next_public_key.stateful_public_key);
+        let next_commitment = CoreShrincsVerifier::new().public_key_commitment(
+            &next_stateful_public_key,
+            current_pk_seed,
+            current_hypertree_root,
+        );
+
+        let domain_separator = messages::domain_separator(program_id, account_pda_key);
+        let payload_hash = messages::rotate_stateful_payload(&next_stateful_public_key, &next_commitment);
+        let action_context = messages::action_context(
+            domain_separator,
+            state.nonce,
+            state.key_version,
+            messages::ACTION_ROTATE_STATEFUL,
+            payload_hash,
+        );
+        let message = CoreShrincsVerifier::new().stateless_action_message_hash(commitment, &action_context);
+        let recovery_signature = ShrincsSigner::sign_stateless_raw(keys, &message).expect("sign");
+        assert!(
+            CoreShrincsVerifier::new().verify_stateless(commitment, public_key, &action_context, &recovery_signature),
+            "recovery signature must verify before submitting the rotation"
+        );
+
+        RotateToFreshKeyArgs {
+            current_public_key: public_key.clone().into(),
+            next_stateful_public_key,
+            next_commitment,
+            recovery_signature: recovery_signature.into(),
+        }
+    }
+
+    /// Build a full rotation's args with a completely fresh stateless half,
+    /// asserting the embedded recovery signature verifies before returning
+    /// it (see [`build_fresh_key_rotation_args`]'s doc comment).
+    fn build_full_key_rotation_args(
+        program_id: &SdkPubkey,
+        account_pda_key: &SdkPubkey,
+        state: &ShrincsAccountState,
+        keys: &Keys,
+        public_key: &PublicKey,
+    ) -> RotateFullKeyArgs {
+        let commitment = fixed_hash_bytes(&public_key.public_key_commitment);
+        let (_next_keys, next_public_key) =
+            ShrincsSigner::keygen(b"shrincs-account-example test rotate full next", 1024).expect("keygen");
+        let next_stateful_public_key = fixed_stateful_key_bytes(&next_public_key.stateful_public_key);
+        let next_pk_seed = fixed_hash_bytes(&next_public_key.pk_seed);
+        let next_hypertree_root = fixed_hash_bytes(&next_public_key.hypertree_root);
+        let next_commitment = CoreShrincsVerifier::new().public_key_commitment(
+            &next_stateful_public_key,
+            next_pk_seed,
+            next_hypertree_root,
+        );
+
+        let domain_separator = messages::domain_separator(program_id, account_pda_key);
+        let payload_hash = messages::rotate_full_payload(
+            &next_stateful_public_key,
+            &next_pk_seed,
+            &next_hypertree_root,
+            &next_commitment,
+        );
+        let action_context = messages::action_context(
+            domain_separator,
+            state.nonce,
+            state.key_version,
+            messages::ACTION_ROTATE_FULL,
+            payload_hash,
+        );
+        let message = CoreShrincsVerifier::new().stateless_action_message_hash(commitment, &action_context);
+        let recovery_signature = ShrincsSigner::sign_stateless_raw(keys, &message).expect("sign");
+        assert!(
+            CoreShrincsVerifier::new().verify_stateless(commitment, public_key, &action_context, &recovery_signature),
+            "recovery signature must verify before submitting the rotation"
+        );
+
+        RotateFullKeyArgs {
+            current_public_key: public_key.clone().into(),
+            next_stateful_public_key,
+            next_pk_seed,
+            next_hypertree_root,
+            next_commitment,
+            recovery_signature: recovery_signature.into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn rotate_to_fresh_key_with_valid_recovery_signature_succeeds() {
+        let (program_test, program_id) = setup_test().await;
+        let mut context = program_test.start_with_context().await;
+        let program_id = program_id.pubkey();
+        let owner = Keypair::new();
+        let salt = [31u8; HASH_LEN];
+
+        let (keys, public_key) =
+            ShrincsSigner::keygen(b"shrincs-account-example test rotate fresh", 1024).expect("keygen");
+        let commitment = fixed_hash_bytes(&public_key.public_key_commitment);
+        let account_pda_key = init_account(&mut context, &program_id, &owner, salt, commitment).await;
+        arm_recovery(&mut context, &program_id, &account_pda_key, &owner).await;
+
+        let state_before = fetch_state(&mut context, &account_pda_key).await;
+        let args = build_fresh_key_rotation_args(&program_id, &account_pda_key, &state_before, &keys, &public_key);
+        let next_commitment = args.next_commitment;
+        let next_stateful_public_key = args.next_stateful_public_key;
+
+        send_single_account(&mut context, &program_id, &account_pda_key, TestInstruction::RotateToFreshKey(args))
+            .await
+            .expect("valid fresh-key rotation should succeed");
+
+        let state = fetch_state(&mut context, &account_pda_key).await;
+        assert_eq!(state.current_public_key_commitment, next_commitment);
+        let mut expected_key_version = state_before.key_version;
+        increment_u256_be(&mut expected_key_version);
+        assert_eq!(state.key_version, expected_key_version, "key_version advances by one");
+        assert_eq!(state.stateless_signatures_used, 0, "fresh-key rotation preserves stateless usage");
+        assert_eq!(state.next_stateful_leaf_index, 1);
+        assert_eq!(state.stateful_policy, StatefulPolicy::MonotonicIndex as u8);
+        assert!(!state.stateful_policy_frozen);
+        assert!(!state.recovery_mode);
+        assert_ne!(state.nonce, state_before.nonce, "nonce advances on rotation");
+
+        let old_result =
+            try_stateless_action(&mut context, &program_id, &account_pda_key, &keys, &public_key, commitment).await;
+        assert!(old_result.is_err(), "the old key/commitment must be rejected after rotation");
+
+        let new_public_key = PublicKey {
+            stateful_public_key: next_stateful_public_key.to_vec(),
+            public_key_commitment: next_commitment.to_vec(),
+            pk_seed: public_key.pk_seed.clone(),
+            hypertree_root: public_key.hypertree_root.clone(),
+        };
+        try_stateless_action(&mut context, &program_id, &account_pda_key, &keys, &new_public_key, next_commitment)
+            .await
+            .expect("the new key's action should verify after rotation");
+    }
+
+    #[tokio::test]
+    async fn rotate_full_key_with_fresh_stateless_half_resets_budget() {
+        let (program_test, program_id) = setup_test().await;
+        let mut context = program_test.start_with_context().await;
+        let program_id = program_id.pubkey();
+        let owner = Keypair::new();
+        let salt = [32u8; HASH_LEN];
+
+        let (keys, public_key) =
+            ShrincsSigner::keygen(b"shrincs-account-example test rotate full", 1024).expect("keygen");
+        let commitment = fixed_hash_bytes(&public_key.public_key_commitment);
+        let account_pda_key = init_account(&mut context, &program_id, &owner, salt, commitment).await;
+        arm_recovery(&mut context, &program_id, &account_pda_key, &owner).await;
+
+        let state_before = fetch_state(&mut context, &account_pda_key).await;
+        let args = build_full_key_rotation_args(&program_id, &account_pda_key, &state_before, &keys, &public_key);
+        let next_commitment = args.next_commitment;
+
+        send_single_account(&mut context, &program_id, &account_pda_key, TestInstruction::RotateFullKey(args))
+            .await
+            .expect("valid full-key rotation should succeed");
+
+        let state = fetch_state(&mut context, &account_pda_key).await;
+        assert_eq!(state.current_public_key_commitment, next_commitment);
+        assert_eq!(state.stateless_signatures_used, 0, "fresh stateless half resets usage accounting");
+        let mut expected_key_version = state_before.key_version;
+        increment_u256_be(&mut expected_key_version);
+        assert_eq!(state.key_version, expected_key_version);
+        assert!(!state.recovery_mode);
+    }
+
+    #[tokio::test]
+    async fn rotate_rejected_when_not_in_recovery_mode() {
+        let (program_test, program_id) = setup_test().await;
+        let mut context = program_test.start_with_context().await;
+        let program_id = program_id.pubkey();
+        let owner = Keypair::new();
+        let salt = [33u8; HASH_LEN];
+
+        let (keys, public_key) =
+            ShrincsSigner::keygen(b"shrincs-account-example test rotate not armed", 1024).expect("keygen");
+        let commitment = fixed_hash_bytes(&public_key.public_key_commitment);
+        let account_pda_key = init_account(&mut context, &program_id, &owner, salt, commitment).await;
+
+        // Switch to RecoveryRotation but do NOT enter recovery mode: the
+        // "not in recovery mode" gate, not the "wrong policy" gate.
+        context.last_blockhash = context.get_new_latest_blockhash().await.unwrap();
+        let instruction = policy_instruction(
+            &program_id,
+            &account_pda_key,
+            &owner.pubkey(),
+            TestInstruction::SetPolicyRecoveryRotation,
+        );
+        let transaction = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer, &owner],
+            context.last_blockhash,
+        );
+        context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap()
+            .result
+            .expect("set_policy_recovery_rotation should succeed");
+
+        let state = fetch_state(&mut context, &account_pda_key).await;
+        let args = build_fresh_key_rotation_args(&program_id, &account_pda_key, &state, &keys, &public_key);
+        let result = send_single_account(
+            &mut context,
+            &program_id,
+            &account_pda_key,
+            TestInstruction::RotateToFreshKey(args),
+        )
+        .await;
+        assert_custom_error(&result, ShrincsAccountError::RecoveryNotArmed);
+    }
+
+    #[tokio::test]
+    async fn rotate_rejected_when_next_stateful_key_has_zero_max_signatures() {
+        let (program_test, program_id) = setup_test().await;
+        let mut context = program_test.start_with_context().await;
+        let program_id = program_id.pubkey();
+        let owner = Keypair::new();
+        let salt = [34u8; HASH_LEN];
+
+        let (keys, public_key) =
+            ShrincsSigner::keygen(b"shrincs-account-example test rotate zero max sig", 1024).expect("keygen");
+        let commitment = fixed_hash_bytes(&public_key.public_key_commitment);
+        let account_pda_key = init_account(&mut context, &program_id, &owner, salt, commitment).await;
+        arm_recovery(&mut context, &program_id, &account_pda_key, &owner).await;
+
+        let state = fetch_state(&mut context, &account_pda_key).await;
+        let mut args = build_fresh_key_rotation_args(&program_id, &account_pda_key, &state, &keys, &public_key);
+        args.next_stateful_public_key[64..68].copy_from_slice(&0u32.to_be_bytes());
+
+        let result = send_single_account(
+            &mut context,
+            &program_id,
+            &account_pda_key,
+            TestInstruction::RotateToFreshKey(args),
+        )
+        .await;
+        assert_custom_error(&result, ShrincsAccountError::RotationTargetInvalid);
+    }
+
+    #[tokio::test]
+    async fn rotate_rejected_when_next_commitment_mismatches() {
+        let (program_test, program_id) = setup_test().await;
+        let mut context = program_test.start_with_context().await;
+        let program_id = program_id.pubkey();
+        let owner = Keypair::new();
+        let salt = [35u8; HASH_LEN];
+
+        let (keys, public_key) =
+            ShrincsSigner::keygen(b"shrincs-account-example test rotate bad commitment", 1024).expect("keygen");
+        let commitment = fixed_hash_bytes(&public_key.public_key_commitment);
+        let account_pda_key = init_account(&mut context, &program_id, &owner, salt, commitment).await;
+        arm_recovery(&mut context, &program_id, &account_pda_key, &owner).await;
+
+        let state = fetch_state(&mut context, &account_pda_key).await;
+        let mut args = build_fresh_key_rotation_args(&program_id, &account_pda_key, &state, &keys, &public_key);
+        args.next_commitment[0] ^= 0x01;
+
+        let result = send_single_account(
+            &mut context,
+            &program_id,
+            &account_pda_key,
+            TestInstruction::RotateToFreshKey(args),
+        )
+        .await;
+        assert_custom_error(&result, ShrincsAccountError::CommitmentMismatch);
+    }
+
+    #[tokio::test]
+    async fn rotate_rejected_when_recovery_signature_is_from_wrong_key() {
+        let (program_test, program_id) = setup_test().await;
+        let mut context = program_test.start_with_context().await;
+        let program_id = program_id.pubkey();
+        let owner = Keypair::new();
+        let salt = [36u8; HASH_LEN];
+
+        let (keys, public_key) =
+            ShrincsSigner::keygen(b"shrincs-account-example test rotate wrong key", 1024).expect("keygen");
+        let commitment = fixed_hash_bytes(&public_key.public_key_commitment);
+        let account_pda_key = init_account(&mut context, &program_id, &owner, salt, commitment).await;
+        arm_recovery(&mut context, &program_id, &account_pda_key, &owner).await;
+
+        let (wrong_keys, _wrong_public_key) =
+            ShrincsSigner::keygen(b"shrincs-account-example test rotate wrong signer", 1024).expect("keygen");
+
+        let state = fetch_state(&mut context, &account_pda_key).await;
+        let mut args = build_fresh_key_rotation_args(&program_id, &account_pda_key, &state, &keys, &public_key);
+
+        // Re-sign the SAME context/payload with the WRONG key's stateless half.
+        let domain_separator = messages::domain_separator(&program_id, &account_pda_key);
+        let payload_hash = messages::rotate_stateful_payload(&args.next_stateful_public_key, &args.next_commitment);
+        let action_context = messages::action_context(
+            domain_separator,
+            state.nonce,
+            state.key_version,
+            messages::ACTION_ROTATE_STATEFUL,
+            payload_hash,
+        );
+        let message = CoreShrincsVerifier::new().stateless_action_message_hash(commitment, &action_context);
+        let wrong_signature = ShrincsSigner::sign_stateless_raw(&wrong_keys, &message).expect("sign");
+        assert!(
+            !CoreShrincsVerifier::new().verify_stateless(commitment, &public_key, &action_context, &wrong_signature),
+            "a wrong-key signature must not verify"
+        );
+        args.recovery_signature = wrong_signature.into();
+
+        let result = send_single_account(
+            &mut context,
+            &program_id,
+            &account_pda_key,
+            TestInstruction::RotateToFreshKey(args),
+        )
+        .await;
+        assert_custom_error(&result, ShrincsAccountError::InvalidSignature);
     }
 }

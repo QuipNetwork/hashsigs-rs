@@ -20,6 +20,7 @@
 pub mod messages;
 pub mod pda;
 pub mod processor;
+pub mod rotation;
 pub mod state;
 
 use crate::processor::process_instruction;
