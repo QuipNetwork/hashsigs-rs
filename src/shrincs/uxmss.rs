@@ -39,6 +39,9 @@ use crate::wots_c::{ChainWalk, wots_chain_walk, WOTS_C_MAX_GRIND_COUNTER};
 // 32-byte pkSeed slot || 32-byte root slot || 4-byte maxSignatures.
 pub const STATEFUL_PUBLIC_KEY_BYTES: usize = 68;
 
+pub(crate) const INITIAL_STATEFUL_LEAF_INDEX: u32 = 1;
+pub(crate) const MAX_STATEFUL_SIGNATURES_LIMIT: u32 = 4096;
+
 /// Leaf/chain coordinates for a stateful UXMSS WOTS-C chain walk.
 #[derive(Clone, Copy)]
 struct StatefulChainCtx {

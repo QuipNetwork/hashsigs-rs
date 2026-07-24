@@ -90,8 +90,7 @@ use crate::shrincs::ShrincsVerifier;
 
 pub struct ShrincsSigner;
 
-pub(crate) const INITIAL_STATEFUL_LEAF_INDEX: u32 = 1;
-pub(crate) const MAX_STATEFUL_SIGNATURES_LIMIT: u32 = 4096;
+pub(crate) use super::uxmss::{INITIAL_STATEFUL_LEAF_INDEX, MAX_STATEFUL_SIGNATURES_LIMIT};
 
 use crate::trace_macros::stateless_trace_enabled;
 

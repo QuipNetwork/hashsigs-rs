@@ -27,8 +27,9 @@
 //! Flat layout: `stateful(136) ‖ stateless(128)` = 264 bytes.
 
 use crate::primitives::hash::word32;
-use crate::shrincs::signer::{INITIAL_STATEFUL_LEAF_INDEX, MAX_STATEFUL_SIGNATURES_LIMIT};
-use crate::shrincs::uxmss::{self, stateful_subtree_root};
+use crate::shrincs::uxmss::{
+    self, stateful_subtree_root, INITIAL_STATEFUL_LEAF_INDEX, MAX_STATEFUL_SIGNATURES_LIMIT,
+};
 use crate::sphincs_plus_c;
 use crate::primitives::HASH_LEN;
 

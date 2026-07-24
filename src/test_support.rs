@@ -22,8 +22,7 @@ use crate::shrincs::{derive32, encode_stateful_public_key, public_key_from_compo
 use crate::sphincs_plus_c;
 use crate::shrincs::PublicKey;
 use crate::shrincs::uxmss;
-
-const INITIAL_STATEFUL_LEAF_INDEX: u32 = 1;
+use crate::shrincs::uxmss::INITIAL_STATEFUL_LEAF_INDEX;
 
 /// Build a signing key that exercises only the stateful subsystem, with a
 /// placeholder hypertree root. Avoids compute-infeasible stateless hypertree
