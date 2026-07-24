@@ -52,6 +52,14 @@ pub(crate) fn hash_node(parts: &[&[u8]]) -> [u8; HASH_LEN] {
     mask_hash(hash_packed(parts))
 }
 
+/// Small deterministic KDF: `hash_packed(&[domain, seed, data])`. Domain tags
+/// separate the different seeds derived from the same master input. Shared by
+/// SHRINCS key generation and the SPHINCS+C hypertree layer-seed derivation so
+/// the two sides can't drift apart.
+pub(crate) fn derive32(domain: &[u8], seed: &[u8], data: &[u8]) -> [u8; HASH_LEN] {
+    hash_packed(&[domain, seed, data])
+}
+
 pub(crate) fn word32(input: &[u8]) -> Option<[u8; HASH_LEN]> {
     input.try_into().ok()
 }

@@ -196,20 +196,15 @@ pub fn keygen(
 mod tests {
     use super::*;
     #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
-    use crate::primitives::hash::hash_packed;
-
-    #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
-    fn derive32(domain: &[u8], seed: &[u8]) -> [u8; HASH_LEN] {
-        hash_packed(&[domain, seed, &[]])
-    }
+    use crate::primitives::hash::{derive32, hash_packed};
 
     /// Independent keygen at the SPHINCS+C layer (no SHRINCS hybrid fields).
     #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
     fn independent_keygen(seed: &[u8]) -> (Key, PublicKey) {
         let key = keygen(
-            derive32(b"shrincs-stateless-sk-seed", seed),
-            derive32(b"shrincs-stateless-prf-seed", seed),
-            derive32(b"shrincs-pk-seed", seed),
+            derive32(b"shrincs-stateless-sk-seed", seed, &[]),
+            derive32(b"shrincs-stateless-prf-seed", seed, &[]),
+            derive32(b"shrincs-pk-seed", seed, &[]),
         );
         let public_key = key.public_key;
         (key, public_key)

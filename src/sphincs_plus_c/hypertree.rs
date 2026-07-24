@@ -35,7 +35,7 @@ use crate::primitives::abi::{
     collect_hash_words, encode_bytes, encode_dynamic_array, encode_tuple, AbiReader, Field,
 };
 use crate::primitives::hash::{
-    base_w_digit, hash_node, hash_packed, hypertree_address_word, word32,
+    base_w_digit, derive32, hash_node, hash_packed, hypertree_address_word, word32,
     wots_address_base, wots_chain_address_word, wots_digest_bytes,
 };
 use crate::primitives::profiles::{
@@ -385,10 +385,6 @@ fn hypertree_root_from_path32(
 }
 
 // ---- signing ----
-
-fn derive32(domain: &[u8], seed: &[u8], data: &[u8]) -> [u8; HASH_LEN] {
-    hash_packed(&[domain, seed, data])
-}
 
 fn stateless_trace_enabled() -> bool {
     #[cfg(feature = "std")]

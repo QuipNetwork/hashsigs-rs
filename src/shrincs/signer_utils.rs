@@ -17,16 +17,12 @@
 
 //! Signer-specific helpers for the SHRINCS hybrid scheme.
 //!
-//! `hash_packed` is re-exported from the shared `crate::primitives::hash` module so signer
+//! `derive32` is re-exported from the shared `crate::primitives::hash` module so signer
 //! call sites keep one import path; keeping a single copy prevents the signer
 //! and verifier from drifting apart. Only the helpers that are genuinely
-//! signer-specific (seed KDF and public-key assembly) are defined below.
+//! signer-specific (public-key assembly) are defined below.
 
-// Re-export the byte-identical helper shared with the verifier. Keeping one copy
-// in `crate::primitives::hash` prevents the two sides from drifting apart.
 use alloc::vec::Vec;
-
-pub(crate) use crate::primitives::hash::hash_packed;
 
 use crate::primitives::HASH_LEN;
 use super::public_key::public_key_commitment;
@@ -47,8 +43,4 @@ pub(crate) fn public_key_from_components(
     }
 }
 
-pub(crate) fn derive32(domain: &[u8], seed: &[u8], data: &[u8]) -> [u8; HASH_LEN] {
-    // Small deterministic KDF used only inside SHRINCS key generation. Domain
-    // tags separate the different seeds derived from the same master input.
-    hash_packed(&[domain, seed, data])
-}
+pub(crate) use crate::primitives::hash::derive32;
