@@ -575,15 +575,6 @@ pub fn encode_stateless_key(
     out
 }
 
-/// Mirrors `SPHINCSPlusC.decodeStatelessKey`. Requires exactly 64 bytes;
-/// never panics on malformed input.
-pub fn decode_stateless_key(data: &[u8]) -> Option<([u8; HASH_LEN], [u8; HASH_LEN])> {
-    if data.len() != 64 {
-        return None;
-    }
-    Some((data[..32].try_into().ok()?, data[32..64].try_into().ok()?))
-}
-
 /// Byte-identical (for canonically framed inputs) to
 /// `SHRINCS.sliceStatelessSignatureEnvelope` / mirrors
 /// `SPHINCSPlusC.encodeStatelessSignatureEnvelope`. Layout:
@@ -702,15 +693,13 @@ mod tests {
     }
 
     #[test]
-    fn stateless_key_round_trips() {
+    fn stateless_key_encodes_to_64_byte_layout() {
         let pk_seed = [0x12; HASH_LEN];
         let hypertree_root = [0x34; HASH_LEN];
         let encoded = encode_stateless_key(pk_seed, hypertree_root);
         assert_eq!(encoded.len(), 64);
-        let (decoded_seed, decoded_root) =
-            decode_stateless_key(&encoded).expect("valid key must decode");
-        assert_eq!(decoded_seed, pk_seed);
-        assert_eq!(decoded_root, hypertree_root);
+        assert_eq!(&encoded[..HASH_LEN], &pk_seed); // pkSeed occupies the first word
+        assert_eq!(&encoded[HASH_LEN..], &hypertree_root); // hypertreeRoot the second
     }
 
     #[test]
@@ -830,15 +819,6 @@ mod tests {
         assert!(pad_byte_pos < last);
         encoded[pad_byte_pos] = 0x01;
         assert!(decode_stateful_envelope(&encoded).is_none());
-    }
-
-    #[test]
-    fn stateless_key_wrong_length_is_rejected() {
-        let key = encode_stateless_key([1; HASH_LEN], [2; HASH_LEN]);
-        assert!(decode_stateless_key(&key[..63]).is_none());
-        let mut too_long = key.to_vec();
-        too_long.push(0);
-        assert!(decode_stateless_key(&too_long).is_none());
     }
 
     #[test]
