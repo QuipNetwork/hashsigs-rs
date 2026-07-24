@@ -85,8 +85,8 @@ use crate::shrincs::ShrincsVerifier;
 
 pub struct ShrincsSigner;
 
-const INITIAL_STATEFUL_LEAF_INDEX: u32 = 1;
-const MAX_STATEFUL_SIGNATURES_LIMIT: u32 = 4096;
+pub(crate) const INITIAL_STATEFUL_LEAF_INDEX: u32 = 1;
+pub(crate) const MAX_STATEFUL_SIGNATURES_LIMIT: u32 = 4096;
 
 fn stateless_trace_enabled() -> bool {
     #[cfg(feature = "std")]

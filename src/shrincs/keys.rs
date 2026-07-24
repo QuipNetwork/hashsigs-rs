@@ -27,8 +27,10 @@
 //! Flat layout: `stateful(136) ‖ stateless(128)` = 264 bytes, byte-identical
 //! to the legacy `ShrincsSigningKey` order.
 
-use crate::shrincs::uxmss;
+use crate::shrincs::signer::{INITIAL_STATEFUL_LEAF_INDEX, MAX_STATEFUL_SIGNATURES_LIMIT};
+use crate::shrincs::uxmss::{self, stateful_subtree_root};
 use crate::sphincs_plus_c;
+use crate::sphincs_plus_c::hypertree::hypertree_public_root;
 use crate::types::HASH_LEN;
 
 use super::public_key_commitment;
@@ -110,6 +112,44 @@ impl Keys {
             public_key_commitment,
         })
     }
+
+    /// Parse and validate a persisted 264-byte secret.
+    ///
+    /// Unlike [`Keys::from_bytes`], this recomputes both tree roots from the
+    /// seeds and rejects any mismatch (corrupted or field-spliced input) — the
+    /// roots are consensus-critical inputs to every signature. The stateful
+    /// counter may sit at the exhausted position (`next == max + 1`), which
+    /// stateful signing legitimately produces. On success the commitment is
+    /// recomputed, never trusted from the input.
+    pub fn import(bytes: &[u8]) -> Option<Self> {
+        let keys = Self::from_bytes(bytes)?;
+        let max = keys.stateful.public_key.max_signatures;
+        if max == 0 || max > MAX_STATEFUL_SIGNATURES_LIMIT {
+            return None;
+        }
+        let next = keys.stateful.next_leaf_index;
+        if next < INITIAL_STATEFUL_LEAF_INDEX || next > max.saturating_add(1) {
+            return None;
+        }
+        // The stateful root always covers the whole tree from leaf 1,
+        // independent of `next`.
+        let stateful_root = stateful_subtree_root(
+            keys.stateful.secret.sk_seed.as_bytes(),
+            keys.stateful.public_key.pk_seed.as_bytes(),
+            INITIAL_STATEFUL_LEAF_INDEX,
+            max,
+        );
+        let hypertree_root = hypertree_public_root(
+            keys.stateless.secret.sk_seed.as_bytes(),
+            keys.stateless.public_key.pk_seed.as_bytes(),
+        );
+        if &stateful_root != keys.stateful.public_key.root.as_bytes()
+            || &hypertree_root != keys.stateless.public_key.root.as_bytes()
+        {
+            return None;
+        }
+        Some(keys)
+    }
 }
 
 // `Keys` intentionally does not derive `Zeroize`: its secret halves
@@ -156,13 +196,11 @@ mod tests {
         assert!(Keys::from_bytes(&[0u8; KEYS_BYTES + 1]).is_none());
     }
 
-    /// `compute_commitment` must match the commitment production `keygen`
-    /// installs in the public key — same preimage, same keccak.
-    #[test]
-    fn commitment_matches_production_keygen() {
+    /// A `Keys` with real, seed-derived roots, plus the `PublicKey` production
+    /// `keygen` installs — for cross-checking commitment and import.
+    fn production_keys() -> (Keys, crate::types::PublicKey) {
         use crate::shrincs::signer::ShrincsSigner;
-        let (sk, pk) =
-            ShrincsSigner::keygen(b"keys commitment cross-check", 4).expect("keygen");
+        let (sk, pk) = ShrincsSigner::keygen(b"keys import cross-check", 4).expect("keygen");
         let stateful = uxmss::Key {
             secret: uxmss::Secret {
                 sk_seed: uxmss::SkSeed::new(sk.stateful_sk_seed),
@@ -185,11 +223,66 @@ mod tests {
                 root: sphincs_plus_c::Root::new(sk.hypertree_root),
             },
         };
-        let commitment = Keys::compute_commitment(&stateful, &stateless);
+        let public_key_commitment = Keys::compute_commitment(&stateful, &stateless);
+        (
+            Keys {
+                stateless,
+                stateful,
+                public_key_commitment,
+            },
+            pk,
+        )
+    }
+
+    /// `compute_commitment` must match the commitment production `keygen`
+    /// installs in the public key — same preimage, same keccak.
+    #[test]
+    fn commitment_matches_production_keygen() {
+        let (keys, pk) = production_keys();
         assert_eq!(
-            commitment.as_bytes().as_slice(),
+            keys.public_key_commitment.as_bytes().as_slice(),
             pk.public_key_commitment.as_slice()
         );
+    }
+
+    #[test]
+    fn import_accepts_valid_seed_derived_key() {
+        let (keys, _) = production_keys();
+        assert_eq!(Keys::import(&keys.to_bytes()), Some(keys));
+    }
+
+    #[test]
+    fn import_rejects_tampered_stateful_root() {
+        let (keys, _) = production_keys();
+        let mut bytes = keys.to_bytes();
+        bytes[96] ^= 0x01; // stateful root occupies bytes 96..128
+        assert!(Keys::import(&bytes).is_none());
+    }
+
+    #[test]
+    fn import_rejects_tampered_hypertree_root() {
+        let (keys, _) = production_keys();
+        let mut bytes = keys.to_bytes();
+        bytes[232] ^= 0x01; // stateless hypertree root occupies bytes 232..264
+        assert!(Keys::import(&bytes).is_none());
+    }
+
+    #[test]
+    fn import_rejects_out_of_bounds_max() {
+        let (keys, _) = production_keys();
+        let mut bytes = keys.to_bytes();
+        bytes[128..132].copy_from_slice(&0u32.to_be_bytes()); // max_signatures = 0
+        assert!(Keys::import(&bytes).is_none());
+    }
+
+    #[test]
+    fn import_accepts_exhausted_counter() {
+        let (keys, _) = production_keys();
+        let mut bytes = keys.to_bytes();
+        // next_leaf_index (bytes 132..136) = max + 1 (exhausted but legal).
+        let exhausted = keys.stateful.public_key.max_signatures + 1;
+        bytes[132..136].copy_from_slice(&exhausted.to_be_bytes());
+        assert!(Keys::import(&bytes).is_some());
     }
 
     #[test]
