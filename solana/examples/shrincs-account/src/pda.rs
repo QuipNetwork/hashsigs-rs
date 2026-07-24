@@ -120,17 +120,17 @@ pub fn is_leaf_used(
 /// Bundled to keep [`create_or_adopt_pda`] within the positional-argument
 /// budget. `payer`/`target`/`system_program` share the instruction's account
 /// lifetime `'info`; the struct borrows them for the call's lifetime `'a`.
-struct PdaInit<'a, 'info> {
+pub(crate) struct PdaInit<'a, 'info> {
     /// Signer funding any rent shortfall on `target`.
-    payer: &'a AccountInfo<'info>,
+    pub payer: &'a AccountInfo<'info>,
     /// Destination PDA to bring under `program_id` ownership.
-    target: &'a AccountInfo<'info>,
+    pub target: &'a AccountInfo<'info>,
     /// System program, required by the allocate/assign/transfer/create CPIs.
-    system_program: &'a AccountInfo<'info>,
+    pub system_program: &'a AccountInfo<'info>,
     /// Program that should own `target` once created.
-    program_id: &'a Pubkey,
+    pub program_id: &'a Pubkey,
     /// Fixed data length to allocate for `target`.
-    space: usize,
+    pub space: usize,
 }
 
 /// Create `target` as a `program_id`-owned PDA of `init.space` bytes,
@@ -145,7 +145,7 @@ struct PdaInit<'a, 'info> {
 /// deny the leaf or the account. Callers must confirm `target.data_is_empty()`
 /// before calling. `signer_seeds` are the PDA seeds (including bump)
 /// authorizing the CPIs.
-fn create_or_adopt_pda(init: &PdaInit, signer_seeds: &[&[u8]]) -> ProgramResult {
+pub(crate) fn create_or_adopt_pda(init: &PdaInit, signer_seeds: &[&[u8]]) -> ProgramResult {
     let rent = Rent::get()?;
     let required_lamports = rent.minimum_balance(init.space);
     let current_lamports = init.target.lamports();

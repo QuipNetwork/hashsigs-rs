@@ -58,11 +58,9 @@ use solana_program::{
     account_info::{next_account_info, AccountInfo},
     entrypoint::ProgramResult,
     msg,
-    program::{invoke_signed, set_return_data},
+    program::set_return_data,
     program_error::ProgramError,
     pubkey::Pubkey,
-    system_instruction::create_account,
-    sysvar::{rent::Rent, Sysvar},
 };
 
 use crate::messages;
@@ -285,10 +283,16 @@ fn commit_stateful_leaf_use(
 }
 
 /// Create `target` as a `program_id`-owned PDA of `space` bytes for the
-/// account-state PDA itself. Unlike [`crate::pda::mark_leaf_used`]'s bitmap
-/// words (which tolerate a pre-funded destination to resist griefing), the
-/// account PDA is created exactly once by its owner in `process_init`, so a
-/// plain `create_account` CPI is sufficient here.
+/// account-state PDA itself, using the same griefing-resistant create-or-adopt
+/// pattern as the bitmap word PDAs. The account PDA address is deterministic
+/// (`account_pda(program_id, owner, salt)`), so a plain `create_account` CPI
+/// would let anyone permanently block `Init` for that `(owner, salt)` by
+/// sending the address a single lamport before the owner calls it
+/// (`create_account` then fails `AccountAlreadyInUse`). Delegating to
+/// [`crate::pda::create_or_adopt_pda`] tops up a pre-funded, still-empty
+/// destination instead of failing. `process_init` has already confirmed
+/// `target.data_is_empty()` (rejecting re-init), satisfying that function's
+/// precondition.
 fn create_account_pda<'info>(
     payer: &AccountInfo<'info>,
     target: &AccountInfo<'info>,
@@ -297,12 +301,15 @@ fn create_account_pda<'info>(
     space: usize,
     signer_seeds: &[&[u8]],
 ) -> ProgramResult {
-    let rent = Rent::get()?;
-    let lamports = rent.minimum_balance(space);
-    invoke_signed(
-        &create_account(payer.key, target.key, lamports, space as u64, program_id),
-        &[payer.clone(), target.clone(), system_program.clone()],
-        &[signer_seeds],
+    crate::pda::create_or_adopt_pda(
+        &crate::pda::PdaInit {
+            payer,
+            target,
+            system_program,
+            program_id,
+            space,
+        },
+        signer_seeds,
     )
 }
 
@@ -2012,7 +2019,15 @@ mod tests {
         let account_pda_key = init_account(&mut context, &program_id, &owner, salt, commitment).await;
         arm_recovery(&mut context, &program_id, &account_pda_key, &owner).await;
 
+        // Consume one stateless action first so `stateless_signatures_used` is
+        // non-zero going into the rotation; otherwise asserting it stays 0
+        // afterward cannot distinguish "preserved" from "reset to 0".
+        try_stateless_action(&mut context, &program_id, &account_pda_key, &keys, &public_key, commitment)
+            .await
+            .expect("a stateless action under armed recovery should succeed");
+
         let state_before = fetch_state(&mut context, &account_pda_key).await;
+        assert_eq!(state_before.stateless_signatures_used, 1, "setup consumed one stateless signature");
         let args = build_fresh_key_rotation_args(&program_id, &account_pda_key, &state_before, &keys, &public_key);
         let next_commitment = args.next_commitment;
         let next_stateful_public_key = args.next_stateful_public_key;
@@ -2026,7 +2041,10 @@ mod tests {
         let mut expected_key_version = state_before.key_version;
         increment_u256_be(&mut expected_key_version);
         assert_eq!(state.key_version, expected_key_version, "key_version advances by one");
-        assert_eq!(state.stateless_signatures_used, 0, "fresh-key rotation preserves stateless usage");
+        assert_eq!(
+            state.stateless_signatures_used, state_before.stateless_signatures_used,
+            "fresh-key rotation preserves stateless usage (kept at 1, not reset to 0)"
+        );
         assert_eq!(state.next_stateful_leaf_index, 1);
         assert_eq!(state.stateful_policy, StatefulPolicy::MonotonicIndex as u8);
         assert!(!state.stateful_policy_frozen);

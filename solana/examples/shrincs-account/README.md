@@ -83,6 +83,12 @@ installed key authorizes installing a new commitment:
 Neither rotation instruction takes an owner signer. The stateless recovery
 signature is the sole authorization once recovery mode is armed.
 
+While recovery mode is armed, the stateless key holds full stateless-*action*
+authority, not merely a single rotation: any number of `VerifyStatelessAction`
+calls and rotations are accepted until a rotation clears `recovery_mode` (or
+the owner reconfigures the policy). Arming recovery is an owner-gated grant of
+that authority, not a one-shot ticket.
+
 ## Intentional divergences from Solidity
 
 1. **Rotation authorizes through an ordinary action.** Solidity authorizes
@@ -105,9 +111,11 @@ signature is the sole authorization once recovery mode is armed.
    its own wrapper-message convention.
 
 2. **Rotation doesn't decrement `stateless_signatures_used`.** The deleted
-   port did. This is benign: `STATELESS_SIGNATURE_LIMIT` (2^18 to 2^20
-   depending on profile) is a policy cap on an effectively unlimited
-   SPHINCS+C stateless key, and rotations are rare relative to that budget.
+   port did. The stateless recovery signature that authorizes each rotation
+   isn't counted against the budget either. This is benign:
+   `STATELESS_SIGNATURE_LIMIT` (2^18 to 2^20 depending on profile) is a policy
+   cap on an effectively unlimited SPHINCS+C stateless key, and rotations are
+   rare relative to that budget.
 
 3. **Leaf-bitmap word PDAs are orphaned on rotation.** They're not closed or
    rent-refunded when the account rotates to a new `key_version`. This
