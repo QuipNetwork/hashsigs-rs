@@ -430,7 +430,8 @@ pub mod wotsplus_solana_test {
 
 pub mod sphincs_plus_c_solana_test {
     use borsh::BorshSerialize;
-    use hashsigs_rs::{sphincs_plus_c_keygen, sphincs_plus_c_sign, SphincsPlusCSigningKey};
+    use hashsigs_rs::sphincs_plus_c::Key as SphincsPlusCSigningKey;
+    use hashsigs_rs::{sphincs_plus_c_keygen, sphincs_plus_c_sign};
     use hashsigs_rs_solana::processor::WOTSPlusInstruction;
     use hashsigs_rs_solana::sphincs_plus_c::StatelessSignatureDto;
     use solana_sdk::{instruction::Instruction, msg, pubkey::Pubkey, signer::Signer, transaction::Transaction};
@@ -482,11 +483,10 @@ pub mod sphincs_plus_c_solana_test {
         let stateless_sk_seed = derive32(b"sphincs-plus-c-solana-sk-seed", seed);
         let stateless_prf_seed = derive32(b"sphincs-plus-c-solana-prf-seed", seed);
         let pk_seed = derive32(b"sphincs-plus-c-solana-pk-seed", seed);
-        let (signing_key, public_key) =
-            sphincs_plus_c_keygen(stateless_sk_seed, stateless_prf_seed, pk_seed);
+        let signing_key = sphincs_plus_c_keygen(stateless_sk_seed, stateless_prf_seed, pk_seed);
         let mut key = [0u8; 64];
-        key[..32].copy_from_slice(&public_key.pk_seed);
-        key[32..].copy_from_slice(&public_key.hypertree_root);
+        key[..32].copy_from_slice(signing_key.public_key.pk_seed.as_bytes());
+        key[32..].copy_from_slice(signing_key.public_key.root.as_bytes());
         (signing_key, key)
     }
 

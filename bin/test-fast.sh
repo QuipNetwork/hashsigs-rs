@@ -20,9 +20,6 @@ Fast local-loop test entrypoints:
   signer-boundary       cargo test stateful_boundary_leaves_and_empty_message_round_trip -- --exact
   signer-stateless      cargo test generated_stateless_raw_signature_verifies -- --exact
   signer-exact <name>   cargo test <name> -- --exact
-  account               cargo test account::
-  account-rotation      cargo test rotation -- --nocapture
-  account-policy        cargo test policy -- --nocapture
   account-exact <name>  cargo test <name> -- --exact
   vectors               cargo test --test test_vectors
   vectors-shrincs       cargo test --test test_vectors solidity_exported_
@@ -48,9 +45,8 @@ Examples:
   ./bin/test-fast.sh signer-stateful
   ./bin/test-fast.sh --profile 256s-sha2 signer-stateful
   ./bin/test-fast.sh signer-exact generated_stateful_signature_verifies
-  ./bin/test-fast.sh account-exact full_rotation_with_replaced_stateless_key_resets_usage
+  ./bin/test-fast.sh account-exact sphincs_plus_c::tests::sphincs_plus_c_sign_verify_round_trip
   ./bin/test-fast.sh vectors-exact solidity_exported_stateful_action_vector_verifies_in_rust
-  ./bin/test-fast.sh account-policy
   ./bin/test-fast.sh wasm-compile
 EOF
 }
@@ -149,15 +145,6 @@ case "$area" in
     test_name="$1"
     shift
     cargo_test "$test_name" -- --exact "$@"
-    ;;
-  account)
-    cargo_test account:: "$@"
-    ;;
-  account-rotation)
-    cargo_test rotation -- --nocapture "$@"
-    ;;
-  account-policy)
-    cargo_test policy -- --nocapture "$@"
     ;;
   account-exact)
     if [ "${1:-}" = "" ]; then

@@ -24,15 +24,8 @@ audit.
   stateful envelope, tri-state outcome, `version_tag()` pins);
   `SphincsPlusCVerifier` (also `VerifierInterface`) mirrors
   `SPHINCSPlusCVerifier.sol`.
-- Account wrapper (`account::ShrincsAccountVerifierExample`): policy machine,
-  nonce/key-version/budget accounting, both rotations, ERC-1271
-  `isValidSignature`, and a typed `AccountEvent` trail at the exact Solidity
-  emission points. 13 of 15 audit checkpoints byte/behavior-equal; the two
-  exceptions are listed under maintainer decisions.
 - Solana program: verify-only instructions for SPHINCS+C, SHRINCS stateless,
-  and SHRINCS stateful, plus a PDA account program mirroring the account
-  state machine (init, both action verifies, both rotations, policy setters,
-  recovery mode, event logs).
+  and SHRINCS stateful.
 
 ## Intentional divergences (do not port)
 
@@ -64,11 +57,7 @@ audit.
    the budget unconditionally; Rust resets only when the stateless key
    material actually changed, because a fresh budget for a reused few-time
    key permits over-use. Recommendation: adopt the Rust behavior upstream.
-3. **Solana domain separator.** The account program uses
-   `keccak(keccak("shrincs-account-v1") ‖ program_id ‖ account_pubkey)`,
-   substituting program id for chain id and the PDA for `address(this)`.
-   The recipe is a single function; confirm or replace before deployment.
-4. **Rotation calldata decoders.** The envelope codec does not parse
+3. **Rotation calldata decoders.** The envelope codec does not parse
    `rotateToFreshKey`/`rotateFullKey` `abi.encodeCall` shapes (no named
    envelope exists for them in `SHRINCS.sol`); rotation vectors are pinned
    through oracle-decoded fields instead.
