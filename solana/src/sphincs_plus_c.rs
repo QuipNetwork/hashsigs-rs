@@ -162,7 +162,7 @@ impl From<StatelessSignature> for StatelessSignatureDto {
     }
 }
 
-/// Compact Borsh DTO for `hashsigs_rs::shrincs::StatefulSignature` (UXMSS
+/// Compact Borsh DTO for `hashsigs_rs::shrincs::Signature` (UXMSS
 /// fast path): fixed-width hash fields, flat hash lists.
 #[derive(Debug, Clone, BorshSerialize, BorshDeserialize)]
 pub struct StatefulSignatureDto {

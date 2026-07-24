@@ -26,9 +26,11 @@ use crate::primitives::hash::keccak_packed;
 use crate::sphincs_plus_c::verifier::SphincsPlusCVerifier;
 use crate::verifier::VerifyOutcome;
 // Wire types/constants live in dedicated shrincs submodules after the
-// restructure. Re-export them here so the historical path
-// `hashsigs_rs::shrincs::verifier::*` still resolves (main used
-// `pub use self::shrincs_verifier_types::*`).
+// restructure. Re-export them here so `hashsigs_rs::shrincs::verifier::*`
+// still glob-imports (main used `pub use self::shrincs_verifier_types::*`).
+// Not every symbol keeps its historical name: the public key type was
+// renamed from `StatefulPublicKey` to `PublicKey` (disambiguated by the
+// `shrincs` module path instead), and there is no `StatefulPublicKey` alias.
 pub use crate::primitives::{
     ADDRESS_TYPE_FORS_TREE, ADDRESS_TYPE_TREE, ADDRESS_TYPE_WOTS_HASH, HASH_LEN,
     HASH_SUITE_KECCAK_256,

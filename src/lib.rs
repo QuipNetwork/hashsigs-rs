@@ -64,24 +64,15 @@ extern crate alloc;
 #[macro_use]
 mod trace_macros;
 
-// Layering: `primitives` and `types` are scheme-neutral; `sphincs_plus_c`
-// is the stateless scheme and is oblivious to `shrincs`; `shrincs` builds
-// its hybrid (stateful UXMSS + stateless recovery) on top of
-// `sphincs_plus_c`. `wasm` sits above both.
-/// Internal ABI codec for Solidity/on-chain interop and the cross-repo
-/// vector tests (`tests/envelope_vectors.rs`,
-/// `tests/generate_shrincs_vectors.rs`). Not part of the stable public API —
-/// subject to change without notice. JS/TS consumers never see this module;
-/// they get opaque signature bytes from `shrincs.sign()` /
-/// `shrincs.signStateless()` via the `wasm` module.
-#[doc(hidden)]
-pub mod envelope;
+// Layering: `primitives` is scheme-neutral; `sphincs_plus_c` is the
+// stateless scheme and is oblivious to `shrincs`; `shrincs` builds its
+// hybrid (stateful UXMSS + stateless recovery) on top of `sphincs_plus_c`.
+// `wasm` sits above both.
 pub mod signer;
 pub mod verifier;
 pub(crate) mod primitives;
 pub mod shrincs;
 pub mod sphincs_plus_c;
-pub(crate) mod types;
 #[cfg(feature = "std")]
 pub mod wasm;
 pub mod wotsplus;
