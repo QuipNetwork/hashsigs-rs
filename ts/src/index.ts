@@ -10,10 +10,13 @@
 // module once and returns `{ sphincsPlusC, shrincs, shrincsImportSigningKey }`
 // — two plain namespace objects plus one standalone function, all working
 // directly with `Uint8Array` — mirroring `@noble/post-quantum`'s call shape
-// (`sign(message, ...)`, `verify(signature, message, publicKey)`). The async
-// boundary is unavoidable (a `.wasm` module has to be instantiated before any
-// of this runs), so unlike noble's fully synchronous API, callers await
-// `loadHashSigs()` once and then call every method synchronously.
+// (`sign(message, ...)`, `verify(signature, message, publicKey)`). The
+// account is deliberately NOT part of this surface — `WasmShrincsAccount` is
+// a separate, lower-level handle reached through `loadShrincsWasm()`
+// directly. The async boundary here is unavoidable (a `.wasm` module has to
+// be instantiated before any of this runs), so unlike noble's fully
+// synchronous API, callers await `loadHashSigs()` once and then call every
+// method synchronously.
 import { loadShrincsWasm } from "./loader.node.js";
 export { loadShrincsWasm };
 
@@ -31,8 +34,8 @@ export type { ShrincsAccountSnapshot, ShrincsErrorCode } from "./nodejs/hashsigs
 // these directly (private constructors — instances come from
 // `sphincsPlusCKeygen` / `shrincsKeygen` / `shrincsImportSigningKey`, or
 // from the `sphincsPlusC`/`shrincs` wrappers below, which unwrap them into
-// plain objects); they only need the names to annotate variables and
-// fields. Type-only is also load-bearing for the browser: the `browser`
+// plain decomposed objects); they only need the names to annotate variables
+// and fields. Type-only is also load-bearing for the browser: the `browser`
 // exports condition maps the package entry to loader.browser.js, which has
 // no runtime class bindings — a VALUE export here would exist in Node and
 // silently not exist in browser bundles.
@@ -43,30 +46,89 @@ export type {
 } from "./nodejs/hashsigs_rs.js";
 
 // ── noble-style Uint8Array API ──────────────────────────────────────────
+//
+// Keys are DECOMPOSED nested objects, never a monolithic flat `secretKey` /
+// `publicKey` field: every leaf is a 32-byte seed or root, named for what it
+// is. The flat wasm byte layouts (`Keys::to_bytes` / `encode_public_key_flat`
+// on the Rust side) are an internal serialization detail — the ser/de
+// helpers below are the only code that knows those offsets.
 
-/** `sphincsPlusC.keygen()`'s return shape: plain bytes, no live wasm handle. */
+/** `sphincsPlusC.keygen()`'s return shape; also reused as `ShrincsKeys.stateless`. */
 export interface SphincsPlusCKeys {
-  /** 128 bytes: `statelessSkSeed ‖ statelessPrfSeed ‖ pkSeed ‖ hypertreeRoot`. */
-  secretKey: Uint8Array;
-  /** 64 bytes: `pkSeed ‖ hypertreeRoot`. */
-  publicKey: Uint8Array;
+  /** The 32-byte seeds that derive every WOTS+/FORS-C secret in the tree. */
+  secret: { skSeed: Uint8Array; prfSeed: Uint8Array };
+  /** The 32-byte public roots `sphincsPlusC.verify()` / `shrincs.verifyStateless()` pin. */
+  publicKey: { pkSeed: Uint8Array; root: Uint8Array };
 }
 
 /**
- * `shrincs.keygen()`'s return shape. `secretKey` is MUTATED IN PLACE by
- * `shrincs.sign()` — the same `Uint8Array` instance is reused and advanced,
- * it is never replaced. Persist it (e.g. to disk) after every stateful
- * `sign()` call to avoid one-time-leaf reuse on restart.
+ * `shrincs.keygen()`'s return shape. `stateful` is MUTATED IN PLACE by
+ * `shrincs.sign()` (`nextLeafIndex` and `remaining` advance); `stateless`
+ * never changes after keygen. Persist the object (e.g. via
+ * `shrincsKeysToSecretBytes`) after every stateful `sign()` call to avoid
+ * one-time-leaf reuse on restart.
  */
 export interface ShrincsKeys {
-  /** 264 bytes; see `ShrincsSigningKey`'s field order in the Rust source. */
-  secretKey: Uint8Array;
-  /** 164 bytes: `statefulPublicKey ‖ publicKeyCommitment ‖ pkSeed ‖ hypertreeRoot`; the value `shrincs.verify()` checks against. */
-  publicKey: Uint8Array;
-  /** 32 bytes; the account's installed-key identity (bound on account actions). */
+  /** The stateless (SPHINCS+C) half of the hybrid key; never advances. */
+  stateless: SphincsPlusCKeys;
+  /** The stateful (hypertree) half of the hybrid key; advances on `sign()`. */
+  stateful: {
+    secret: { skSeed: Uint8Array; prfSeed: Uint8Array };
+    publicKey: { pkSeed: Uint8Array; root: Uint8Array; maxSignatures: number };
+    /** The next unused leaf index; 1-based, advances by one on every `sign()`. */
+    nextLeafIndex: number;
+    /** Derived: `maxSignatures - (nextLeafIndex - 1)`, the leaves left to spend. */
+    remaining: number;
+  };
+  /** The 32-byte value `shrincs.verify()` checks against; the account's installed-key identity. */
   publicKeyCommitment: Uint8Array;
-  /** 64 bytes (`pkSeed ‖ hypertreeRoot`); the value `shrincs.verifyStateless()` pins. */
-  statelessPublicKey: Uint8Array;
+}
+
+/** Concatenate byte arrays into one fresh `Uint8Array`. */
+function concatBytes(...parts: Uint8Array[]): Uint8Array {
+  const total = parts.reduce((sum, part) => sum + part.length, 0);
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const part of parts) {
+    out.set(part, offset);
+    offset += part.length;
+  }
+  return out;
+}
+
+/** Big-endian u32 -> 4 bytes, matching the Rust side's `to_be_bytes()`. */
+function u32BEBytes(value: number): Uint8Array {
+  const out = new Uint8Array(4);
+  new DataView(out.buffer).setUint32(0, value, false);
+  return out;
+}
+
+/** Big-endian u32 read at `offset` within `bytes`, matching `DataView.getUint32(offset, false)`. */
+function readU32BE(bytes: Uint8Array, offset: number): number {
+  return new DataView(bytes.buffer, bytes.byteOffset + offset, 4).getUint32(0, false);
+}
+
+// ── SphincsPlusCKeys ser/de: 128-byte secret = skSeed(32) ‖ prfSeed(32) ‖
+// pkSeed(32) ‖ root(32) (`SphincsPlusCSigningKey`'s field order). The
+// 64-byte publicKey is exactly the secret's trailing pkSeed ‖ root, so it is
+// always re-derived from the secret, never carried separately.
+
+/** Recompose a `SphincsPlusCKeys`' 128-byte flat secret (`skSeed ‖ prfSeed ‖ pkSeed ‖ root`). */
+function sphincsPlusCKeysToSecretBytes(keys: SphincsPlusCKeys): Uint8Array {
+  return concatBytes(keys.secret.skSeed, keys.secret.prfSeed, keys.publicKey.pkSeed, keys.publicKey.root);
+}
+
+/** Decompose a 128-byte flat SPHINCS+C secret into `{ secret, publicKey }`. */
+function sphincsPlusCKeysFromSecretBytes(secret: Uint8Array): SphincsPlusCKeys {
+  return {
+    secret: { skSeed: secret.slice(0, 32), prfSeed: secret.slice(32, 64) },
+    publicKey: { pkSeed: secret.slice(64, 96), root: secret.slice(96, 128) },
+  };
+}
+
+/** Flatten a `{ pkSeed, root }` public key into the 64-byte `pkSeed ‖ root` the wasm verify calls take. */
+function sphincsPlusCPublicKeyToBytes(publicKey: { pkSeed: Uint8Array; root: Uint8Array }): Uint8Array {
+  return concatBytes(publicKey.pkSeed, publicKey.root);
 }
 
 function makeSphincsPlusC(wasm: ShrincsWasmModule) {
@@ -74,15 +136,56 @@ function makeSphincsPlusC(wasm: ShrincsWasmModule) {
     /** Derive a keypair from a REQUIRED 32-byte seed (no RNG fallback). */
     keygen(seed: Uint8Array): SphincsPlusCKeys {
       const keys = wasm.sphincsPlusCKeygen(seed);
-      return { secretKey: keys.secretKey, publicKey: keys.publicKey };
+      return sphincsPlusCKeysFromSecretBytes(keys.secretKey);
     },
-    /** Stateless: never mutates `keys.secretKey`. */
+    /** Stateless: never mutates `keys`. */
     sign(message: Uint8Array, keys: SphincsPlusCKeys): Uint8Array {
-      return wasm.sphincsPlusCSign(message, keys.secretKey);
+      return wasm.sphincsPlusCSign(message, sphincsPlusCKeysToSecretBytes(keys));
     },
-    verify(signature: Uint8Array, message: Uint8Array, publicKey: Uint8Array): boolean {
-      return wasm.sphincsPlusCVerify(signature, message, publicKey);
+    verify(
+      signature: Uint8Array,
+      message: Uint8Array,
+      publicKey: { pkSeed: Uint8Array; root: Uint8Array },
+    ): boolean {
+      return wasm.sphincsPlusCVerify(signature, message, sphincsPlusCPublicKeyToBytes(publicKey));
     },
+  };
+}
+
+// ── ShrincsKeys ser/de: 264-byte secret = stateful(136) ‖ stateless(128)
+// (`Keys::to_bytes`'s flat layout), where stateful is
+// skSeed(32) ‖ prfSeed(32) ‖ pkSeed(32) ‖ root(32) ‖ maxSignatures(u32 BE) ‖
+// nextLeafIndex(u32 BE), and stateless is the same 128-byte layout as
+// `SphincsPlusCKeys` above.
+
+const STATEFUL_SECRET_LEN = 136;
+
+/** Recompose a `ShrincsKeys`' 264-byte flat secret in `Keys::to_bytes`'s field order. */
+function shrincsKeysToSecretBytes(keys: ShrincsKeys): Uint8Array {
+  return concatBytes(
+    keys.stateful.secret.skSeed,
+    keys.stateful.secret.prfSeed,
+    keys.stateful.publicKey.pkSeed,
+    keys.stateful.publicKey.root,
+    u32BEBytes(keys.stateful.publicKey.maxSignatures),
+    u32BEBytes(keys.stateful.nextLeafIndex),
+    sphincsPlusCKeysToSecretBytes(keys.stateless),
+  );
+}
+
+/** Decompose a 264-byte flat SHRINCS secret (plus its 32-byte commitment) into a `ShrincsKeys`. */
+function shrincsKeysFromSecretBytes(secret: Uint8Array, publicKeyCommitment: Uint8Array): ShrincsKeys {
+  const maxSignatures = readU32BE(secret, 128);
+  const nextLeafIndex = readU32BE(secret, 132);
+  return {
+    stateless: sphincsPlusCKeysFromSecretBytes(secret.slice(STATEFUL_SECRET_LEN)),
+    stateful: {
+      secret: { skSeed: secret.slice(0, 32), prfSeed: secret.slice(32, 64) },
+      publicKey: { pkSeed: secret.slice(64, 96), root: secret.slice(96, 128), maxSignatures },
+      nextLeafIndex,
+      remaining: maxSignatures - (nextLeafIndex - 1),
+    },
+    publicKeyCommitment,
   };
 }
 
@@ -99,61 +202,88 @@ function makeShrincs(wasm: ShrincsWasmModule) {
      */
     keygen(seed: Uint8Array, maxSignatures = DEFAULT_MAX_STATEFUL_SIGNATURES): ShrincsKeys {
       const keys = wasm.shrincsKeygen(seed, maxSignatures);
-      return {
-        secretKey: keys.secretKey,
-        publicKey: keys.publicKey,
-        publicKeyCommitment: keys.publicKeyCommitment,
-        statelessPublicKey: keys.statelessPublicKey,
-      };
+      return shrincsKeysFromSecretBytes(keys.secretKey, keys.publicKeyCommitment);
     },
     /**
-     * STATEFUL: consumes the next unused leaf and advances `keys.secretKey`
-     * IN PLACE (the wasm `&mut` binding writes the advanced counter back
-     * into the same `Uint8Array` you pass in). Throws
+     * STATEFUL: consumes the next unused leaf and advances `keys.stateful`
+     * IN PLACE (`nextLeafIndex` and `remaining`). Throws
      * `ERR_STATEFUL_LEAVES_EXHAUSTED` once every leaf is spent — use
      * `signStateless` for unlimited recovery-path signing.
      */
     sign(message: Uint8Array, keys: ShrincsKeys): Uint8Array {
-      return wasm.shrincsSign(message, keys.secretKey);
+      const secret = shrincsKeysToSecretBytes(keys);
+      const signature = wasm.shrincsSign(message, secret);
+      keys.stateful.nextLeafIndex = readU32BE(secret, 132);
+      keys.stateful.remaining = keys.stateful.publicKey.maxSignatures - (keys.stateful.nextLeafIndex - 1);
+      return signature;
     },
-    /** Stateless recovery path: never mutates `keys.secretKey`. */
+    /** Stateless recovery path: never mutates `keys`. */
     signStateless(message: Uint8Array, keys: ShrincsKeys): Uint8Array {
-      return wasm.shrincsSignStateless(message, keys.secretKey);
+      return wasm.shrincsSignStateless(message, shrincsKeysToSecretBytes(keys));
     },
     /**
-     * Verify a stateful signature against the signer's 164-byte `publicKey`,
-     * the same call shape as `verifyStateless`. Pass `keys.publicKey`.
+     * Verify a stateful signature against the signer's 32-byte
+     * `publicKeyCommitment` — the commitment-path shape: `signature` carries
+     * the full public key, and this checks it hashes to the pinned
+     * commitment before verifying. Pass `keys.publicKeyCommitment`.
      */
-    verify(signature: Uint8Array, message: Uint8Array, publicKey: Uint8Array): boolean {
-      return wasm.shrincsVerify(signature, message, publicKey);
+    verify(signature: Uint8Array, message: Uint8Array, publicKeyCommitment: Uint8Array): boolean {
+      return wasm.shrincsVerify(signature, message, publicKeyCommitment);
     },
     /**
      * A stateless SHRINCS signature is a SPHINCS+C signature, so this is a
-     * direct SPHINCS+C verify. Pass `keys.statelessPublicKey` (the 64-byte
-     * `pkSeed ‖ hypertreeRoot`), not the commitment.
+     * direct SPHINCS+C verify. Pass `keys.stateless.publicKey`.
      */
-    verifyStateless(signature: Uint8Array, message: Uint8Array, statelessPublicKey: Uint8Array): boolean {
-      return wasm.shrincsVerifyStateless(signature, message, statelessPublicKey);
+    verifyStateless(
+      signature: Uint8Array,
+      message: Uint8Array,
+      statelessPublicKey: { pkSeed: Uint8Array; root: Uint8Array },
+    ): boolean {
+      return wasm.shrincsVerifyStateless(signature, message, sphincsPlusCPublicKeyToBytes(statelessPublicKey));
+    },
+    /**
+     * Regenerate a fresh stateful chain from `newSeed`, discarding any
+     * relationship to prior stateful signatures (e.g. after suspected leaf
+     * reuse). MUTATES `keys.stateful` IN PLACE (fresh seeds, root,
+     * `nextLeafIndex` back to 1, `remaining` back to `maxSignatures`) and
+     * `keys.publicKeyCommitment`; `keys.stateless` and `maxSignatures` are
+     * untouched. This wasm build has no RNG — `newSeed` must be fresh
+     * entropy the caller supplies.
+     */
+    reset(keys: ShrincsKeys, newSeed: Uint8Array): void {
+      const secret = shrincsKeysToSecretBytes(keys);
+      wasm.shrincsReset(secret, newSeed);
+      const publicKeyCommitment = wasm.shrincsComputePublicKeyCommitment(secret);
+      const updated = shrincsKeysFromSecretBytes(secret, publicKeyCommitment);
+      keys.stateful = updated.stateful;
+      keys.publicKeyCommitment = updated.publicKeyCommitment;
+    },
+    /** Recompute the 32-byte `publicKeyCommitment` `keys` currently implies. */
+    computePublicKeyCommitment(keys: ShrincsKeys): Uint8Array {
+      return wasm.shrincsComputePublicKeyCommitment(shrincsKeysToSecretBytes(keys));
+    },
+    /**
+     * Recover the 32-byte `publicKeyCommitment` a `shrincs.sign()` signature
+     * implies, ecrecover-style, by decoding the public key it carries and
+     * recomputing the commitment from it.
+     */
+    recoverPublicKeyCommitment(signature: Uint8Array): Uint8Array {
+      return wasm.shrincsRecoverPublicKeyCommitment(signature);
     },
   };
 }
 
 /**
  * Rebuild a `ShrincsKeys` object from a previously persisted 264-byte
- * `secretKey` (e.g. `keys.secretKey` after several `shrincs.sign()` calls).
- * Recomputes both roots and the commitment from the seeds and rejects any
- * mismatch with `ERR_IMPORT_INVALID`. Accepts an already-exhausted key:
- * stateful signing then throws `ERR_STATEFUL_LEAVES_EXHAUSTED`, but
- * stateless signing still works.
+ * secret (e.g. `shrincsKeysToSecretBytes(keys)` after several
+ * `shrincs.sign()` calls). Recomputes both roots and the commitment from the
+ * seeds and rejects any mismatch with `ERR_IMPORT_INVALID`. Accepts an
+ * already-exhausted key: stateful signing then throws
+ * `ERR_STATEFUL_LEAVES_EXHAUSTED`, but stateless signing still works.
  */
 function importShrincsSigningKey(wasm: ShrincsWasmModule, secretKey: Uint8Array): ShrincsKeys {
   const keys = wasm.shrincsImportSigningKey(secretKey);
-  return {
-    secretKey: keys.secretKey,
-    publicKey: keys.publicKey,
-    publicKeyCommitment: keys.publicKeyCommitment,
-    statelessPublicKey: keys.statelessPublicKey,
-  };
+  return shrincsKeysFromSecretBytes(keys.secretKey, keys.publicKeyCommitment);
 }
 
 /** The `sphincsPlusC` namespace object `loadHashSigs()` resolves to. */
@@ -185,6 +315,12 @@ export async function loadHashSigs(): Promise<{
     shrincsImportSigningKey: (secretKey: Uint8Array) => importShrincsSigningKey(wasm, secretKey),
   };
 }
+
+// Exported so a persistence round trip (`shrincsKeysToSecretBytes` ->
+// `shrincsImportSigningKey`) can be exercised without a private-API import;
+// `shrincsKeysFromSecretBytes` stays internal — the validating
+// `shrincsImportSigningKey` path is the only supported way back from bytes.
+export { shrincsKeysToSecretBytes };
 
 // ── compile-time conformance (zero emit, zero runtime) ─────────────────────
 import type {
