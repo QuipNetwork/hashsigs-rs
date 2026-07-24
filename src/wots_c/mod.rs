@@ -23,10 +23,10 @@
 //! (`b"uxmss-wots-chain"`). Tags and address layouts are caller parameters —
 //! they must stay byte-identical to the pre-merge constructions.
 //!
-//! `Signature::to_bytes`/`from_bytes` are byte-identical to the historical
-//! `envelope::encode_wots_c_signature_body`/`decode_wots_c_signature`, which
-//! now delegate here (still called by the hypertree codec until a later
-//! refactor task folds them away entirely).
+//! `Signature::to_bytes`/`from_bytes` are byte-identical to the pre-refactor
+//! `envelope::encode_wots_c_signature_body`/`decode_wots_c_signature` (that
+//! module has since been deleted); the hypertree codec embeds a WOTS-C
+//! signature via `Signature::decode`.
 
 use alloc::vec::Vec;
 
@@ -259,17 +259,16 @@ impl Signature {
         })
     }
 
-    /// Decode a standalone byte blob produced by `to_bytes`. Byte-identical
-    /// to the historical `envelope::decode_wots_c_signature`, built as a
-    /// top-level entrypoint: a fresh `AbiReader` at base 0 (mirroring
-    /// `decode_stateless_signature_envelope`), rejecting trailing bytes.
+    /// Decode a standalone byte blob produced by `to_bytes`: a fresh `AbiReader`
+    /// at base 0, rejecting trailing bytes. Byte-identical to the pre-refactor
+    /// `envelope::decode_wots_c_signature` (that module has since been deleted).
     ///
-    /// Not yet called from `envelope.rs`: the hypertree codec decodes a
-    /// WOTS-C signature embedded at an offset inside a larger shared
-    /// `AbiReader` (via `decode`, above), where a trailing-bytes check would
-    /// spuriously reject the rest of the envelope. This standalone entrypoint
-    /// is the `to_bytes` round-trip counterpart, part of the public codec
-    /// surface for external callers that hold an isolated WOTS-C signature blob.
+    /// The hypertree codec instead decodes a WOTS-C signature embedded at an
+    /// offset inside a larger shared `AbiReader` (via `decode`, above), where a
+    /// trailing-bytes check would spuriously reject the rest of the envelope.
+    /// This standalone entrypoint is the `to_bytes` round-trip counterpart, part
+    /// of the public codec surface for external callers that hold an isolated
+    /// WOTS-C signature blob.
     pub fn from_bytes(data: &[u8]) -> Option<Self> {
         let reader = AbiReader::new(data);
         let decoded = Self::decode(&reader, 0)?;

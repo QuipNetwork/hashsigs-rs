@@ -168,7 +168,7 @@ impl ShrincsVerifier {
 pub trait ShrincsVerifierExt {
     /// Stateless verify through the verifier interface shapes, delegated to the pinned SPHINCS+C sibling.
     /// Mirrors `SHRINCSVerifier.verifyStateless`: decode the commitment key,
-    /// run `envelope::prepare_stateless_delegation` (mirroring
+    /// run `prepare_stateless_delegation` (mirroring
     /// `SHRINCS.prepareStatelessDelegation`) to extract the delegate
     /// `(pkSeed, hypertreeRoot)` key and re-encoded signature envelope, then
     /// hand both to `SphincsPlusCVerifier::verify`, exactly like the
@@ -191,9 +191,9 @@ impl ShrincsVerifierExt for ShrincsVerifier {
         let Some(commitment) = decode_public_key_commitment(key) else {
             return VerifyOutcome::Invalid;
         };
-        // `prepare_stateless_delegation` folds envelope-decode failure,
-        // commitment mismatch, and public-key shape failure into a single
-        // `None` (see envelope.rs's doc comment on that function). Decode
+        // `prepare_stateless_delegation` (in `super`/`dispatch`) folds
+        // envelope-decode failure, commitment mismatch, and public-key shape
+        // failure into a single `None`. Decode
         // once more here, purely to split "framing that can't be read at
         // all" (Malformed) from "well-formed but rejected" (Invalid),
         // without duplicating its commitment/shape-check logic.
