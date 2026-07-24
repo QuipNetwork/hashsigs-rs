@@ -5,8 +5,7 @@ Core Rust hash-signature workspace with:
 - `hashsigs-rs`: one crate containing:
   - `wotsplus` primitives
   - `shrincs` signer / verifier primitives
-  - `account` policy wrapper
-  - `wasm` verifier / signer / account bindings
+  - `wasm` verifier / signer bindings
 - `solana/`: Solana program integration
 
 ## Building
@@ -32,9 +31,8 @@ cargo build-sbf
 
 ## WASM Packaging
 
-The crate exposes a noble-style SPHINCS+C/SHRINCS signer surface and a
-SHRINCS account wrapper under `src/wasm/` behind the `wasm-bindings` feature.
-The supported build path is
+The crate exposes a noble-style SPHINCS+C/SHRINCS signer surface under
+`src/wasm/` behind the `wasm-bindings` feature. The supported build path is
 `bin/build-wasm.sh`, which runs `cargo build` for `wasm32-unknown-unknown` and
 then the `wasm-bindgen` CLI (not `wasm-pack`) for the `nodejs` and `web`
 targets.
@@ -85,7 +83,8 @@ swaps the Node loader for the browser loader at bundle time:
 import { loadHashSigs } from "@quip.network/hashsigs-wasm";
 
 const { shrincs } = await loadHashSigs();
-const keys = shrincs.keygen(new Uint8Array(32).fill(0xab), 16);
+const seed = crypto.getRandomValues(new Uint8Array(32));
+const keys = shrincs.keygen(seed, 16);
 ```
 
 CI builds and tests this package on merge requests and the default branch
@@ -97,9 +96,6 @@ Current WASM scope:
 - supported:
   - noble-style Uint8Array signer/verifier entry point (`loadHashSigs()`) for
     SPHINCS+C and SHRINCS keygen, sign, and verify
-  - `WasmShrincsAccount`, the stateful account wrapper, via the low-level
-    `loadShrincsWasm()` loader — its own methods build the canonical
-    message hashes a caller must sign
   - Node and browser packaging under `@quip.network/hashsigs-wasm`
 - not implemented:
   - WOTS-specific wasm bindings
@@ -198,8 +194,6 @@ after every edit. `bin/test-fast.sh` wraps the common targeted commands:
 ./bin/test-fast.sh signer-exact generated_stateful_signature_verifies
 ./bin/test-fast.sh wasm-exact wasm_keypair_binding_signs_and_exports_public_key
 ./bin/test-fast.sh signer-import
-./bin/test-fast.sh account-policy
-./bin/test-fast.sh account-exact full_rotation_with_replaced_stateless_key_resets_usage
 ./bin/test-fast.sh vectors-exact solidity_exported_stateful_action_vector_verifies_in_rust
 ./bin/test-fast.sh wasm-compile
 ./bin/test-fast.sh sha2-compile
@@ -211,9 +205,6 @@ Typical usage:
 - use `signer-stateful`, `signer-import`, `signer-boundary`, `signer-stateless`,
   `signer-import-exact <test-name>`, or `signer-exact <test-name>` while
   editing SHRINCS signer code
-- use `account-policy` or `account-rotation` instead of the broader `account`
-  target when you only need one account behavior slice, or `account-exact
-  <test-name>` for one exact case
 - use `vectors-shrincs` when you only care about the SHRINCS Solidity-exported
   vector cross-checks, or `vectors-exact <test-name>` for one exact vector test
 - use `wasm` for native wasm-module tests, `wasm-exact <test-name>` for one
@@ -232,7 +223,6 @@ For an automatic polling loop on file changes:
 ./bin/test-watch.sh help
 ./bin/test-watch.sh signer-stateful
 ./bin/test-watch.sh signer-exact 1 generated_stateful_signature_verifies
-./bin/test-watch.sh account-exact 1 full_rotation_with_replaced_stateless_key_resets_usage
 ./bin/test-watch.sh wasm-compile 2
 ```
 
@@ -298,8 +288,7 @@ Two layers cover the wasm surface:
 2. **TS packaging conformance** (`cd ts && npm test`, after `npm run build`):
    loads the built `dist/` package through both Node and browser loaders and
    exercises `loadHashSigs()` (keygen, sign, verify, stateful-leaf advance,
-   import) and the `WasmShrincsAccount` surface reached through the low-level
-   `loadShrincsWasm()` loader.
+   import).
 
 For Rust-only wasm target unit tests (optional), install a matching
 `wasm-bindgen-test-runner` and run:
@@ -308,17 +297,26 @@ For Rust-only wasm target unit tests (optional), install a matching
 cargo test --features wasm-bindings --target wasm32-unknown-unknown
 ```
 
-When changing `WasmShrincsKeys`, `WasmSphincsPlusCKeys`, or
-`WasmShrincsAccount` in `src/wasm/`, treat the TS conformance suite as the
-packaging gate and the Rust suite as the crypto gate.
+When changing `WasmShrincsKeys` or `WasmSphincsPlusCKeys` in `src/wasm/`,
+treat the TS conformance suite as the packaging gate and the Rust suite as
+the crypto gate.
 
 ## WASM API
 
 `loadHashSigs()` is the noble-style entry point. It awaits the wasm module
 once and resolves to `{ sphincsPlusC, shrincs, shrincsImportSigningKey }` —
-two namespace objects plus one standalone function, whose methods take and
-return `Uint8Array` only; no hex strings appear on this surface. After the
-initial `await`, every call is synchronous.
+two namespace objects plus one standalone function. Keys decompose into
+nested objects (never a flat `secretKey`/`publicKey` field). Every leaf in
+those objects and every sign/verify argument is a `Uint8Array`. The surface
+carries no hex strings. After the initial `await`, every call is
+synchronous.
+
+`keygen` and `reset` require a caller-supplied 32-byte seed. The library has
+no RNG: pass cryptographically secure random bytes, such as
+`crypto.getRandomValues(new Uint8Array(32))` in the browser or Node's
+`crypto.randomBytes(32)`/webcrypto. A weak seed produces a weak key, and
+nothing in the library checks seed quality. See
+[SECURITY.md](SECURITY.md#seed-entropy-is-the-callers-responsibility).
 
 Messages are exactly 32 bytes. Callers pre-hash arbitrary data and pass the
 32-byte digest, matching how the on-chain verifier treats its hash argument
@@ -332,16 +330,17 @@ import { loadHashSigs } from "@quip.network/hashsigs-wasm";
 
 const { sphincsPlusC } = await loadHashSigs();
 
-const keys = sphincsPlusC.keygen(seed); // seed: 32-byte Uint8Array
-// keys.secretKey: Uint8Array(128)
-// keys.publicKey: Uint8Array(64) = pkSeed ‖ hypertreeRoot
+const seed = crypto.getRandomValues(new Uint8Array(32));
+const keys = sphincsPlusC.keygen(seed);
+// keys.secret: { skSeed: Uint8Array(32), prfSeed: Uint8Array(32) }
+// keys.publicKey: { pkSeed: Uint8Array(32), root: Uint8Array(32) }
 
 const sig = sphincsPlusC.sign(message32, keys);
 const ok = sphincsPlusC.verify(sig, message32, keys.publicKey); // boolean
 ```
 
-`sign` is stateless: it never mutates `keys.secretKey`. `verify` never
-throws — a malformed signature or wrong-length input is simply `false`.
+`sign` is stateless: it never mutates `keys`. `verify` never throws — a
+malformed signature or wrong-length input is simply `false`.
 
 ### SHRINCS (hybrid, stateful with stateless recovery)
 
@@ -350,51 +349,63 @@ import { loadHashSigs } from "@quip.network/hashsigs-wasm";
 
 const { shrincs } = await loadHashSigs();
 
+const seed = crypto.getRandomValues(new Uint8Array(32));
 const keys = shrincs.keygen(seed, maxSignatures); // maxSignatures defaults to 1024
-// keys.secretKey: Uint8Array(264)
-// keys.publicKey: Uint8Array(164)
+// keys.stateless: SphincsPlusCKeys — never changes after keygen
+// keys.stateful: { secret, publicKey, nextLeafIndex, remaining } — advances on sign()
 // keys.publicKeyCommitment: Uint8Array(32)
-// keys.statelessPublicKey: Uint8Array(64)  — pkSeed ‖ hypertreeRoot
 
-const sig = shrincs.sign(message32, keys);               // STATEFUL: advances keys.secretKey in place
+const sig = shrincs.sign(message32, keys);               // STATEFUL: advances keys.stateful in place
 const recovery = shrincs.signStateless(message32, keys); // stateless recovery path, no mutation
 
-const ok = shrincs.verify(sig, message32, keys.publicKey);
+// shrincs.verify checks the commitment path: it hashes the public key the
+// signature carries and compares against the pinned commitment.
+const ok = shrincs.verify(sig, message32, keys.publicKeyCommitment);
 // A stateless SHRINCS signature is a SPHINCS+C signature, so verifyStateless is
-// a SPHINCS+C verify: pass keys.statelessPublicKey, the 64-byte stateless key.
-const okRecovery = shrincs.verifyStateless(recovery, message32, keys.statelessPublicKey);
+// a SPHINCS+C verify: pass keys.stateless.publicKey.
+const okRecovery = shrincs.verifyStateless(recovery, message32, keys.stateless.publicKey);
 ```
 
 `shrincs.signStateless` produces the same bytes as `sphincsPlusC.sign` under the
-keypair's stateless key, and `shrincs.verifyStateless(sig, msg, keys.statelessPublicKey)`
-is exactly `sphincsPlusC.verify(sig, msg, keys.statelessPublicKey)`.
+keypair's stateless key, and `shrincs.verifyStateless(sig, msg, keys.stateless.publicKey)`
+is exactly `sphincsPlusC.verify(sig, msg, keys.stateless.publicKey)`.
 
 `shrincs.sign` is stateful:
 
-- each call consumes one one-time UXMSS leaf and advances `keys.secretKey`
-  (a 264-byte `Uint8Array`) **in place** — the same buffer the caller holds
-  gets mutated, so the next `sign` call automatically uses the next leaf. No
-  new key object comes back.
-- once the stateful budget is spent, it throws an `Error` with
-  `error.code === "ERR_STATEFUL_LEAVES_EXHAUSTED"`.
+- each call consumes one one-time UXMSS leaf and advances `keys.stateful`
+  (`nextLeafIndex`, `remaining`) **in place** — the same object the caller
+  holds gets mutated, so the next `sign` call automatically uses the next
+  leaf. No new key object comes back.
+- once the stateful budget runs out, it throws an `Error` with
+  `error.code === "ERR_STATEFUL_LEAVES_EXHAUSTED"`. Call `shrincs.signStateless`
+  for unlimited recovery-path signing past that point, or `shrincs.reset(keys,
+  newSeed)` to start a fresh stateful chain — `reset` requires a new 32-byte
+  seed (no library RNG, same rule as `keygen`), produces a new
+  `publicKeyCommitment`, and leaves `keys.stateless` untouched.
 
-Footgun: cloning `keys.secretKey` and signing from the copy reuses a leaf,
-which breaks the one-time-signature security the scheme depends on. Persist
-and reuse the same advancing buffer. Never sign again from a snapshot taken
-before an earlier `sign` call.
+Footgun: signing from a copy of `keys` taken before an earlier `sign` call
+reuses a leaf, which breaks the one-time-signature security the scheme
+depends on. The next section covers persisting `keys`. Do it after every
+stateful `sign` call, and never sign again from an older snapshot.
+
+Two more `shrincs` helpers work with commitments directly:
+`computePublicKeyCommitment(keys)` recomputes the 32-byte commitment `keys`
+currently implies, and `recoverPublicKeyCommitment(signature)` recovers the
+commitment a given `shrincs.sign()` signature implies, like `ecrecover`.
 
 ### Persisting and importing a SHRINCS key
 
-`keys.secretKey` is plain bytes. Save and restore it directly: write the
-`Uint8Array` to disk or a database after every stateful `sign()` call. To
-rebuild a keypair object from a persisted 264-byte `secretKey`, use
-`shrincsImportSigningKey`:
+Serialize `keys` to its 264-byte flat secret with `shrincsKeysToSecretBytes`
+and write that to disk or a database after every stateful `sign()` call. To
+rebuild the keypair object on restart, use `shrincsImportSigningKey`:
 
 ```ts
-import { loadHashSigs } from "@quip.network/hashsigs-wasm";
+import { loadHashSigs, shrincsKeysToSecretBytes } from "@quip.network/hashsigs-wasm";
 
 const { shrincsImportSigningKey } = await loadHashSigs();
-const keys = shrincsImportSigningKey(persistedSecretKey);
+
+const persisted = shrincsKeysToSecretBytes(keys); // 264 bytes, after every sign()
+const restored = shrincsImportSigningKey(persisted);
 ```
 
 `shrincsImportSigningKey` recomputes both roots and the commitment from the
@@ -405,101 +416,27 @@ already-exhausted key: stateful signing then throws
 See [SECURITY.md](SECURITY.md) for the operational rules around holding and
 persisting this key material.
 
-### WasmShrincsAccount
-
-`WasmShrincsAccount` is the stateful account wrapper, reached through the
-low-level `loadShrincsWasm()` loader rather than the `sphincsPlusC`/`shrincs`
-namespaces described earlier. Scalar byte fields — keys, commitments,
-addresses, message digests — are `Uint8Array`. `u64` fields such as
-`statelessSignaturesUsed` on the snapshot cross the boundary as JavaScript
-`bigint`. The `ShrincsAccountSnapshot` type is importable (type-only) from
-the package entry.
-
-The account tracks its own nonce, key version, domain separator, and
-stateful policy, and exposes methods that build the exact message a caller
-must sign from that state — callers never assemble the signing context by
-hand:
-
-- `statefulActionMessageHash(actionType, payloadHash)`
-- `statelessActionMessageHash(actionType, payloadHash)`
-- `statefulRotationMessageHash(nextPublicKey)`
-- `fullRotationMessageHash(nextPublicKey)`
-
-Sign the returned bytes with `shrincs.sign()` or `shrincs.signStateless()`
-and pass the result straight to the matching verify/rotate method as raw
-bytes:
-
-```ts
-import { loadShrincsWasm, loadHashSigs } from "@quip.network/hashsigs-wasm";
-
-const wasm = await loadShrincsWasm();
-const { shrincs } = await loadHashSigs();
-
-const owner = new Uint8Array(32).fill(0x11);
-const chainId = new Uint8Array(32).fill(0x22);
-const contractAddress = new Uint8Array(20).fill(0x33);
-
-const keys = shrincs.keygen(seed, 8);
-const account = new wasm.WasmShrincsAccount(
-  owner,
-  chainId,
-  contractAddress,
-  keys.publicKeyCommitment,
-);
-
-const actionType = new Uint8Array(32).fill(0x44);
-const payloadHash = new Uint8Array(32).fill(0x55);
-
-// Build the message the account will re-derive and verify against.
-const message = account.statefulActionMessageHash(actionType, payloadHash);
-
-const signature = shrincs.sign(message, keys); // stateful: consumes the next leaf
-account.verifyStatefulAction(keys.publicKey, actionType, payloadHash, signature); // throws on rejection
-console.log(account.snapshot()); // nonce advanced
-```
-
-Both action methods take the signer's 164-byte `publicKey` first — the account
-binds it to its stored commitment — then the signature. `verifyStatefulAction`
-takes the `shrincs.sign()` signature. `account.verifyStatelessAction(publicKey,
-actionType, payloadHash, signature)` takes the `shrincs.signStateless()`
-signature, and its verify path is a SPHINCS+C verify.
-
-Rotation is the same shape: sign `account.statefulRotationMessageHash(nextPublicKey)`
-or `account.fullRotationMessageHash(nextPublicKey)` with `shrincs.signStateless()`,
-then pass the current key's `publicKey`, the resulting signature, and
-`nextPublicKey` to `rotateToFreshKey` / `rotateFullKey`. `nextPublicKey` is the
-replacement keypair's 164-byte flat `publicKey`, exactly as `shrincs.keygen()`
-returns it.
-
-`WasmShrincsAccount` also exposes `snapshot`, `setStatefulPolicy*`,
-`enterRecoveryMode`, and `isValidSignature` (an ERC-1271 compatibility
-view). Malformed input throws an `Error` with a typed `error.code`
-(`ShrincsErrorCode`). Cryptographic verification failure throws
-`ERR_INVALID_SIGNATURE` for the action/rotation methods and returns a plain
-boolean only from `sphincsPlusC.verify()` / `shrincs.verify()` /
-`shrincs.verifyStateless()`.
-
 ### Object shapes
 
-Names match the generated Tsify types re-exported from
-`@quip.network/hashsigs-wasm` (see `ts/src/index.ts`).
-
-Account snapshot (`ShrincsAccountSnapshot`), fields are camelCase:
+Names match `ts/src/index.ts`, the source of truth for the decomposed key
+types:
 
 ```ts
-type ShrincsAccountSnapshot = {
-  currentShrincsPublicKey: string;
-  owner: string;
-  chainId: string;
-  contractAddress: string;
-  domainSeparator: string;
-  nonce: string;
-  keyVersion: string;
-  statelessSignaturesUsed: bigint; // u64 over the wasm boundary
-  statefulPolicy: string;
-  nextStatefulLeafIndex: number;
-  recoveryMode: boolean;
-};
+interface SphincsPlusCKeys {
+  secret: { skSeed: Uint8Array; prfSeed: Uint8Array };
+  publicKey: { pkSeed: Uint8Array; root: Uint8Array };
+}
+
+interface ShrincsKeys {
+  stateless: SphincsPlusCKeys;
+  stateful: {
+    secret: { skSeed: Uint8Array; prfSeed: Uint8Array };
+    publicKey: { pkSeed: Uint8Array; root: Uint8Array; maxSignatures: number };
+    nextLeafIndex: number;
+    remaining: number;
+  };
+  publicKeyCommitment: Uint8Array;
+}
 ```
 
 ## Testing
@@ -674,8 +611,7 @@ NOTE: if on Mac, do not use brew to install rust and instead use https://www.rus
 │   │   ├── verifier.rs  # compatibility verifier entrypoint
 │   │   ├── types.rs     # shared SHRINCS structs
 │   │   └── profiles.rs  # compile-time profile constants
-│   ├── account/   # Rust account-policy wrapper
-│   └── wasm/      # Verifier / signer / account wasm-bindgen surface
+│   └── wasm/      # Verifier / signer wasm-bindgen surface
 ├── ts/            # @quip.network/hashsigs-wasm (loadShrincsWasm entry)
 ├── solana/        # Solana program implementation
 └── tests/         # Test vectors and unit tests
@@ -703,61 +639,6 @@ Public API stability note:
   `hashsigs_rs::shrincs::verifier::*` as the stable public surface
 - the deeper `components/`, `core/`, `signers/`, and `verifiers/` modules are
   internal architecture, not the primary external API contract
-
-## Account Layer Notes
-
-The `account` module is an off-chain Rust policy wrapper that tracks nonce,
-key-version, stateful-leaf use, and recovery-mode transitions around the core
-SHRINCS primitives. It is intentionally close to the Solidity example account
-wrapper, but it is not a literal runtime-equivalent copy.
-
-The Rust account wrapper enforces a hardened security policy model:
-
-- switches between stateful leaf-tracking policies (monotonic index and leaf
-  bitmap) are frozen after the first successful stateful use in a key epoch;
-  switching to `RecoveryRotation` stays available so key rotation is always
-  reachable
-- `RecoveryRotation` disables the stateful path for the whole recovery-policy epoch
-- `rotateToFreshKey(...)` preserves stateless usage accounting because the stateless key is unchanged
-- `rotateFullKey(...)` resets stateless usage accounting only when the supplied
-  rotation target actually changes the stateless key material
-
-Current intentional differences:
-
-- Owner / caller model:
-  Rust stores `owner` as a generic 32-byte value and takes an explicit
-  `caller` argument for owner-gated methods. Solidity stores `owner` as an
-  `address` and relies on `msg.sender`. The Rust model is therefore an
-  integration-supplied authority check, not a chain-enforced caller model.
-
-- Event semantics:
-  Solidity emits wrapper events such as policy changes, recovery-mode entry,
-  key rotation, and successful signature verification. Rust currently mutates
-  wrapper state and returns `bool` / `Result` values, but does not emit
-  first-class event records. Treat this as an observability difference rather
-  than a cryptographic or policy-enforcement difference.
-
-- Constructor / account identity model:
-  Rust account initialization takes `owner`, `chainId`, `contractAddress`, and
-  the initial SHRINCS public-key commitment as explicit inputs. Solidity gets
-  owner, chain id, and contract identity from the live execution environment.
-  The Rust constructor should therefore be understood as an off-chain
-  simulation/adaptation surface, not a one-to-one deployment API mirror.
-
-The account module now recomputes its domain separator from stored `chainId`
-and `contractAddress`, and `rotateToFreshKey(...)` is narrowed to a dedicated
-stateful-only recovery-rotation target. It also enforces hardened
-policy/accounting behavior that goes beyond the current Solidity example
-wrapper:
-
-- the stateful leaf-tracking model must be chosen before the first successful
-  stateful signature in a key epoch; only `RecoveryRotation` may still be
-  selected afterwards, so a used key can always rotate out
-- selecting `RecoveryRotation` blocks the stateful path immediately; `enterRecoveryMode(...)`
-  then permits stateless action verification and stateless recovery rotations
-- stateful-only rotation consumes one stateless recovery use and carries that counter forward
-- full-key rotation consumes one stateless recovery use under the old key and resets the
-  counter only when the newly installed stateless key actually differs
 
 ## License
 

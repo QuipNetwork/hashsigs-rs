@@ -75,7 +75,6 @@ primitives. It includes:
 
 - standalone `wotsplus` functionality
 - core `shrincs` signer / verifier primitives
-- an `account` policy wrapper
 - a `wasm` export surface for JS/TS consumers
 
 Those layers have different security responsibilities. The most important rule
@@ -97,67 +96,85 @@ Security implication:
 
 Guidance:
 
-- use raw verification only when the calling system already owns freshness and
-  replay state
-- prefer the canonical action / rotation flows in the account wrapper when the
-  use case is account authorization rather than bare signature checking
+- the calling system owns freshness, nonce management, and replay state; this
+  library verifies signatures and nothing more
+- build domain separation, nonces, and expiry into the message you hash before
+  signing — the library has no place to enforce them for you
 
-### Replay protection lives at the account-policy layer
+### Freshness and replay protection are the caller's responsibility
 
-Replay resistance is provided by the higher-level account wrapper, not by raw
-signature verification alone.
+Signatures from this crate carry no replay protection and no freshness
+guarantee. `sign` produces a signature over exactly the 32-byte digest it's
+given, and `verify` checks exactly that signature against exactly that
+digest. Neither call knows whether anyone signed or verified the digest
+before.
 
-The account layer binds signatures to wrapper-owned state such as:
+Integrators must build their own:
 
-- domain separator
-- nonce
-- key version
-- stateful leaf-use policy
-- stateless usage accounting
-- recovery mode
+- nonce or sequence-number tracking
+- domain separation (chain ID, contract address, action type, or a
+  comparable value, folded into the digest before signing)
+- expiry or freshness windows, if the use case needs them
+
+For the stateful SHRINCS path, replay resistance also depends on leaf-use
+discipline. The caller must persist key state and never resubmit a
+signature produced by a leaf already consumed. See
+[Stateful signing must not reuse leaves](#stateful-signing-must-not-reuse-leaves)
+below.
 
 Guidance:
 
-- production integrations should prefer canonical account-action and recovery
-  flows over raw message validation
-- if you bypass the account layer, you must implement equivalent freshness
-  protections yourself
+- don't assume any nonce, sequence, or domain-separation enforcement exists
+  inside this library — none does
+- design the signed message, the 32-byte digest, to carry whatever freshness
+  and replay-prevention data your app needs before it reaches `sign`
 
-### Stateful signing must not reuse leaves
+### Seed entropy is the caller's responsibility
 
-The stateful SHRINCS path depends on one-time leaf use.
+`keygen` and `reset` require a caller-supplied 32-byte seed. The library has
+no RNG fallback and performs no seed-quality check.
 
 Security implication:
 
-- reusing a stateful signing leaf is a real misuse hazard
-- production callers should use the canonical stateful signing flow that
-  advances leaf state automatically
+- a weak or predictable seed produces a weak key; the library can't detect
+  this and derives a key from it regardless
+- there is no library-side entropy source to fall back on if the caller
+  supplies bad input
 
 Guidance:
 
-- do not build production systems around explicit-leaf signing helpers
-- do not clone, roll back, or restore signer state in a way that can cause the
-  same stateful leaf to sign twice
-- if durable state is externalized, treat state advancement as security-critical
+- generate the seed with a cryptographically secure source: `crypto.getRandomValues`
+  in the browser, `crypto.randomBytes`/webcrypto in Node, or the platform CSPRNG
+  in other host environments
+- never derive a seed from predictable input such as a counter, timestamp, or
+  user-supplied password without a proper key-derivation function
+- the same rule applies to the seed passed to `reset`
 
-### Stateless recovery rotation is policy-gated
+### Stateful signing must not reuse leaves
 
-Stateless signatures are supported for recovery and rotation flows, but they are
- not intended to bypass wrapper policy.
+The stateful SHRINCS path depends on one-time leaf use. Each `sign()` call
+consumes one leaf and advances the in-memory key state. Signing twice from
+the same state reuses a leaf, breaks the one-time-signature security the
+scheme depends on, and can expose enough of the secret key to forge further
+signatures under that leaf.
 
-Current intended model:
+Security implication:
 
-- normal stateful actions happen through the stateful path
-- stateless recovery rotation is gated by:
-  - `RecoveryRotation`
-  - explicit `recoveryMode`
+- signing from a stale copy of the key state (a clone, a snapshot taken
+  before an earlier `sign()` call, or a value not yet written back after a
+  crash) causes a leaf reuse
+- the library enforces exhaustion: once the leaf budget runs out, `sign()`
+  throws instead of reusing a leaf
 
 Guidance:
 
-- use recovery/stateless signatures only through the intended canonical wrapper
-  flows
-- do not treat stateless signatures as unrestricted general-purpose authority in
-  account-style integrations
+- persist the current key state after every stateful `sign()` call, before
+  using the signature for anything — a crash between signing and
+  persisting is exactly the window that causes reuse on restart
+- never sign again from a snapshot or clone taken before a later `sign()`
+  call succeeded
+- once the stateful budget runs out, switch to the stateless path or call
+  `reset` with a fresh seed; don't work around the exhaustion error
 
 ### Public-key commitment binding is security-critical
 
@@ -175,50 +192,30 @@ Security implication:
 Guidance:
 
 - always verify against the installed/original public key bundle
-- do not reintroduce message-specific replacement public keys
-- treat `public_key_commitment` as the installed bundle identifier for account
-  and rotation flows
+- don't reintroduce message-specific replacement public keys
+- treat `public_key_commitment` as the installed key's identifier for every
+  verification call
 
-### Rust account layer is an off-chain adaptation
+### WASM exports are low-level signature primitives only
 
-The Rust `account` module is intentionally close to the Solidity example wrapper
-but is not a chain-enforced runtime.
-
-Security implication:
-
-- owner/caller checks in Rust are integration-supplied checks
-- they are not equivalent to `msg.sender` enforcement on-chain
-
-Guidance:
-
-- do not assume the Rust account wrapper is a drop-in authority model for
-  on-chain execution environments
-- treat it as an off-chain policy/state-management helper that still depends on
-  correct embedding by the integrating application
-
-### WASM exports include low-level and high-level surfaces
-
-The WASM layer exposes both a low-level noble-style signing/verification
-primitive (`sphincsPlusC`/`shrincs`) and a high-level, policy-enforcing
-`WasmShrincsAccount` wrapper.
+The WASM layer exposes a single noble-style signing/verification surface
+(`sphincsPlusC`/`shrincs`, from `loadHashSigs()`). No higher-level,
+policy-enforcing wrapper exists.
 
 Security implication:
 
 - `sphincsPlusC.sign()`/`verify()` and `shrincs.sign()`/`verify()` perform no
-  freshness, replay, or policy checks; they sign and verify exactly the
-  32-byte message they're given
-- misuse is possible if integrations build authorization logic on the raw
-  noble-style functions and skip canonical message construction or freshness
-  state
+  freshness, replay, or authorization checks; they sign and verify exactly
+  the 32-byte digest they're given
+- misuse is possible if integrations treat a valid signature as proof of
+  authorization by itself, without their own freshness and replay state
 
 Guidance:
 
-- prefer `WasmShrincsAccount`'s `statefulActionMessageHash` /
-  `statelessActionMessageHash` / `statefulRotationMessageHash` /
-  `fullRotationMessageHash` methods, which build the canonical message from
-  the account's own state, over hand-rolled message construction
-- prefer the account wrapper's action and rotation flows over ad hoc
-  raw-message signing for production authorization use cases
+- build any authorization, freshness, or replay logic your app needs in the
+  calling code, and fold the relevant context into the digest before
+  signing: nonce, domain, action type, or whatever the use case requires
+- see [Freshness and replay protection are the caller's responsibility](#freshness-and-replay-protection-are-the-callers-responsibility)
 
 ### Verifier timing / constant-time threat model
 
@@ -245,12 +242,13 @@ same-origin trust boundary, not inside a hardened enclave.
 
 Security implication:
 
-- secret key material is a plain `Uint8Array` the caller holds directly: the
-  128-byte SPHINCS+C `secretKey` and the 264-byte SHRINCS `secretKey`, both
-  returned by `sphincsPlusC.keygen()` / `shrincs.keygen()` (or reconstructed by
-  `shrincsImportSigningKey`)
+- secret key material is a set of plain `Uint8Array` fields the caller holds
+  directly: `keys.secret.skSeed`/`prfSeed` for SPHINCS+C, and
+  `keys.stateful.secret.skSeed`/`prfSeed` plus `keys.stateless.secret.skSeed`/`prfSeed`
+  for SHRINCS, all returned by `sphincsPlusC.keygen()` / `shrincs.keygen()`
+  (or reconstructed by `shrincsImportSigningKey`)
 - any XSS, malicious same-origin script, compromised front-end dependency, or
-  hostile extension able to run in the page context can read that buffer
+  hostile extension able to run in the page context can read those fields
   directly from JS
 
 Guidance:
@@ -258,11 +256,12 @@ Guidance:
 - don't run the browser signer in pages that execute untrusted third-party JS
 - treat browser local storage, IndexedDB, and ordinary JS heap state as a soft
   boundary, not a strong secret store
-- for SHRINCS stateful signing, persist and reuse the same advancing
-  `secretKey` buffer. `shrincs.sign()` mutates it in place on every call; never
-  sign from a clone or a snapshot taken before an earlier `sign()` call, or you
+- for SHRINCS stateful signing, persist and reuse the same `keys` object.
+  `shrincs.sign()` mutates `keys.stateful` in place on every call; never sign
+  from a clone or a snapshot taken before an earlier `sign()` call, or you
   reuse a one-time leaf and break the signature's security
-- zero the `secretKey` buffer (`secretKey.fill(0)`) once it's no longer needed
+- zero each secret field (`skSeed.fill(0)`, `prfSeed.fill(0)`) once the key
+  material is no longer needed
 
 ### WOTS+ robustness note
 
