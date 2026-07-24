@@ -93,11 +93,12 @@ fn assert_verify_budget(what: &str, allocs: u64) {
 fn stateless_verify_stays_within_allocation_budget() {
     let _guard = MEASURE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     // SPHINCS+C layer: independent keypair, arbitrary 32-byte message.
-    let (sk, pk) = hashsigs_rs::sphincs_plus_c::keygen([0x11; 32], [0x22; 32], [0x33; 32]);
+    let sk = hashsigs_rs::sphincs_plus_c::keygen([0x11; 32], [0x22; 32], [0x33; 32]);
     let message = [0x44u8; 32];
     let sig = hashsigs_rs::sphincs_plus_c::sign(&sk, &message).expect("sign");
 
-    let (valid, allocs) = measured(|| hashsigs_rs::sphincs_plus_c::verify(&pk, &message, &sig));
+    let (valid, allocs) =
+        measured(|| hashsigs_rs::sphincs_plus_c::verify(&sk.public_key, &message, &sig));
     assert!(valid);
     assert_verify_budget("SPHINCS+C stateless verify", allocs);
 

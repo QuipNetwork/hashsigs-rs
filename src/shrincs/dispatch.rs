@@ -49,9 +49,9 @@ fn verify_stateless_crypto(
     let Some(hypertree_root) = word32(&public_key.hypertree_root) else {
         return false;
     };
-    let pk = sphincs_plus_c::SphincsPlusCPublicKey {
-        pk_seed,
-        hypertree_root,
+    let pk = sphincs_plus_c::PublicKey {
+        pk_seed: sphincs_plus_c::PkSeed::new(pk_seed),
+        root: sphincs_plus_c::Root::new(hypertree_root),
     };
     sphincs_plus_c::verify(&pk, message, signature)
 }

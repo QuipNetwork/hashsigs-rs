@@ -25,7 +25,7 @@
 
 use crate::primitives::hash::word32;
 use crate::sphincs_plus_c::hypertree::hypertree_public_root;
-use crate::sphincs_plus_c::{self, SphincsPlusCSigningKey};
+use crate::sphincs_plus_c::{self};
 use crate::types::{ActionContext, PublicKey, StatefulSignature, StatelessSignature, HASH_LEN};
 use crate::shrincs::uxmss::{self, StatefulSecret};
 
@@ -256,11 +256,15 @@ impl ShrincsSigner {
                 message.len()
             );
         }
-        let spk = SphincsPlusCSigningKey {
-            stateless_sk_seed: signing_key.stateless_sk_seed,
-            stateless_prf_seed: signing_key.stateless_prf_seed,
-            pk_seed: signing_key.pk_seed,
-            hypertree_root: signing_key.hypertree_root,
+        let spk = sphincs_plus_c::Key {
+            secret: sphincs_plus_c::Secret {
+                sk_seed: sphincs_plus_c::SkSeed::new(signing_key.stateless_sk_seed),
+                prf_seed: sphincs_plus_c::PrfSeed::new(signing_key.stateless_prf_seed),
+            },
+            public_key: sphincs_plus_c::PublicKey {
+                pk_seed: sphincs_plus_c::PkSeed::new(signing_key.pk_seed),
+                root: sphincs_plus_c::Root::new(signing_key.hypertree_root),
+            },
         };
         let sig = sphincs_plus_c::sign(&spk, message)?;
         if stateless_trace_enabled() {
@@ -578,21 +582,22 @@ mod tests {
     #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
     #[test]
     fn stateless_sign_via_sphincs_plus_c_verifies_hybrid_and_independent() {
-        use crate::sphincs_plus_c::{self, SphincsPlusCPublicKey, SphincsPlusCSigningKey};
+        use crate::sphincs_plus_c::{self};
         let (signing_key, public_key) =
             fixture_or_fresh_full_key("sphincs-plus-c hybrid cross-check", 4);
         let message = hash_packed(&[b"sphincs-plus-c-hybrid-cross"]);
-        let spk = SphincsPlusCSigningKey {
-            stateless_sk_seed: signing_key.stateless_sk_seed,
-            stateless_prf_seed: signing_key.stateless_prf_seed,
-            pk_seed: signing_key.pk_seed,
-            hypertree_root: signing_key.hypertree_root,
+        let spk = sphincs_plus_c::Key {
+            secret: sphincs_plus_c::Secret {
+                sk_seed: sphincs_plus_c::SkSeed::new(signing_key.stateless_sk_seed),
+                prf_seed: sphincs_plus_c::PrfSeed::new(signing_key.stateless_prf_seed),
+            },
+            public_key: sphincs_plus_c::PublicKey {
+                pk_seed: sphincs_plus_c::PkSeed::new(signing_key.pk_seed),
+                root: sphincs_plus_c::Root::new(signing_key.hypertree_root),
+            },
         };
         let sig = sphincs_plus_c::sign(&spk, &message).expect("independent sign");
-        let pk = SphincsPlusCPublicKey {
-            pk_seed: signing_key.pk_seed,
-            hypertree_root: signing_key.hypertree_root,
-        };
+        let pk = spk.public_key;
         assert!(sphincs_plus_c::verify(&pk, &message, &sig));
         let expected = expected_key(&public_key);
         assert!(ShrincsVerifier::new().verify_stateless_unsafe_raw(

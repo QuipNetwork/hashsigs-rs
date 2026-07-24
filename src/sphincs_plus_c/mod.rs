@@ -22,24 +22,7 @@
 //! is arbitrary bytes (or raw 32-byte hash via `to_message` / `verify_hash`).
 //! No SHRINCS public-key-bundle commitment and no action envelope.
 
-use crate::primitives::hash::word32;
 use crate::types::{StatelessSignature, HASH_LEN};
-
-/// Stateless SPHINCS+C public key: public seed + hypertree root.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SphincsPlusCPublicKey {
-    pub pk_seed: [u8; HASH_LEN],
-    pub hypertree_root: [u8; HASH_LEN],
-}
-
-impl SphincsPlusCPublicKey {
-    pub fn from_slices(pk_seed: &[u8], hypertree_root: &[u8]) -> Option<Self> {
-        Some(Self {
-            pk_seed: word32(pk_seed)?,
-            hypertree_root: word32(hypertree_root)?,
-        })
-    }
-}
 
 /// Convert a 32-byte hash into the signed message bytes.
 /// The hash IS the message: exactly its 32 bytes.
@@ -48,13 +31,13 @@ pub fn to_message(hash: &[u8; HASH_LEN]) -> [u8; HASH_LEN] {
 }
 
 /// Verify a SPHINCS+C signature over an arbitrary message.
-pub fn verify(pk: &SphincsPlusCPublicKey, message: &[u8], sig: &StatelessSignature) -> bool {
-    verify_raw(&pk.pk_seed, &pk.hypertree_root, message, sig)
+pub fn verify(pk: &key::PublicKey, message: &[u8], sig: &StatelessSignature) -> bool {
+    verify_raw(pk.pk_seed.as_bytes(), pk.root.as_bytes(), message, sig)
 }
 
 /// Verify a SPHINCS+C signature over a 32-byte hash.
 pub fn verify_hash(
-    pk: &SphincsPlusCPublicKey,
+    pk: &key::PublicKey,
     hash: &[u8; HASH_LEN],
     sig: &StatelessSignature,
 ) -> bool {
@@ -88,13 +71,13 @@ pub(crate) fn verify_raw(
     )
 }
 
-// Canonical definition lives in `types` (the leaf module) so `fors_c` and
-// `hypertree` accept it without importing upward; re-exported here because
-// this layer is its public home.
-pub use crate::types::SphincsPlusCSigningKey;
-
 pub(crate) mod fors_c;
 pub(crate) mod hypertree;
+
+/// Structured, newtyped SPHINCS+C key: [`key::Key`] = [`key::Secret`] +
+/// [`key::PublicKey`]. Reused as the stateless half of a SHRINCS key.
+pub mod key;
+pub use key::{Key, PkSeed, PrfSeed, PublicKey, Root, Secret, SkSeed};
 
 /// Verifier-interface facade (opaque key/signature bytes, tri-state verdict).
 pub mod verifier;
@@ -107,54 +90,51 @@ pub use verifier::SphincsPlusCVerifier;
 /// only there for the stateful sibling.
 #[derive(Clone)]
 pub struct SphincsPlusCSigner {
-    signing_key: SphincsPlusCSigningKey,
-    public_key: SphincsPlusCPublicKey,
+    key: key::Key,
 }
 
 impl SphincsPlusCSigner {
     /// Build a signer from seed material (the [`keygen`] inputs).
     pub fn from_seeds(
-        stateless_sk_seed: [u8; HASH_LEN],
-        stateless_prf_seed: [u8; HASH_LEN],
+        sk_seed: [u8; HASH_LEN],
+        prf_seed: [u8; HASH_LEN],
         pk_seed: [u8; HASH_LEN],
     ) -> Self {
-        let (signing_key, public_key) = keygen(stateless_sk_seed, stateless_prf_seed, pk_seed);
         Self {
-            signing_key,
-            public_key,
+            key: keygen(sk_seed, prf_seed, pk_seed),
         }
     }
 
-    /// The independent public key (`pkSeed`, `hypertreeRoot`).
-    pub fn public_key(&self) -> &SphincsPlusCPublicKey {
-        &self.public_key
+    /// The independent public key (`pkSeed`, `root`).
+    pub fn public_key(&self) -> &key::PublicKey {
+        &self.key.public_key
     }
 
-    /// The signing key material.
-    pub fn signing_key(&self) -> &SphincsPlusCSigningKey {
-        &self.signing_key
+    /// The full signing key.
+    pub fn signing_key(&self) -> &key::Key {
+        &self.key
     }
 }
 
 impl crate::signer::SignerInterface for SphincsPlusCSigner {
     fn sign_envelope(&mut self, hash: &[u8; HASH_LEN]) -> Option<alloc::vec::Vec<u8>> {
-        let signature = sign(&self.signing_key, &to_message(hash))?;
+        let signature = sign(&self.key, &to_message(hash))?;
         Some(crate::envelope::encode_stateless_signature_envelope(
             &signature,
         ))
     }
 
     fn verifying_key(&self) -> alloc::vec::Vec<u8> {
-        let mut key = alloc::vec::Vec::with_capacity(64);
-        key.extend_from_slice(&self.public_key.pk_seed);
-        key.extend_from_slice(&self.public_key.hypertree_root);
-        key
+        let mut out = alloc::vec::Vec::with_capacity(64);
+        out.extend_from_slice(self.key.public_key.pk_seed.as_bytes());
+        out.extend_from_slice(self.key.public_key.root.as_bytes());
+        out
     }
 }
 
 /// Sign an arbitrary message at the SPHINCS+C layer.
 pub fn sign(
-    signing_key: &SphincsPlusCSigningKey,
+    signing_key: &key::Key,
     message: &[u8],
 ) -> Option<StatelessSignature> {
     let signed_fors = fors_c::sign_fors_c(signing_key, message)?;
@@ -178,22 +158,21 @@ pub fn sign(
 /// internal access to build a fully independent SPHINCS+C keypair.
 /// `stateless_prf_seed` only affects signing randomness, not the public key.
 pub fn keygen(
-    stateless_sk_seed: [u8; HASH_LEN],
-    stateless_prf_seed: [u8; HASH_LEN],
+    sk_seed: [u8; HASH_LEN],
+    prf_seed: [u8; HASH_LEN],
     pk_seed: [u8; HASH_LEN],
-) -> (SphincsPlusCSigningKey, SphincsPlusCPublicKey) {
-    let hypertree_root = hypertree::hypertree_public_root(&stateless_sk_seed, &pk_seed);
-    let signing_key = SphincsPlusCSigningKey {
-        stateless_sk_seed,
-        stateless_prf_seed,
-        pk_seed,
-        hypertree_root,
-    };
-    let public_key = SphincsPlusCPublicKey {
-        pk_seed,
-        hypertree_root,
-    };
-    (signing_key, public_key)
+) -> key::Key {
+    let hypertree_root = hypertree::hypertree_public_root(&sk_seed, &pk_seed);
+    key::Key {
+        secret: key::Secret {
+            sk_seed: key::SkSeed::new(sk_seed),
+            prf_seed: key::PrfSeed::new(prf_seed),
+        },
+        public_key: key::PublicKey {
+            pk_seed: key::PkSeed::new(pk_seed),
+            root: key::Root::new(hypertree_root),
+        },
+    }
 }
 
 #[cfg(test)]
@@ -209,12 +188,14 @@ mod tests {
 
     /// Independent keygen at the SPHINCS+C layer (no SHRINCS hybrid fields).
     #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
-    fn independent_keygen(seed: &[u8]) -> (SphincsPlusCSigningKey, SphincsPlusCPublicKey) {
-        keygen(
+    fn independent_keygen(seed: &[u8]) -> (Key, PublicKey) {
+        let key = keygen(
             derive32(b"shrincs-stateless-sk-seed", seed),
             derive32(b"shrincs-stateless-prf-seed", seed),
             derive32(b"shrincs-pk-seed", seed),
-        )
+        );
+        let public_key = key.public_key;
+        (key, public_key)
     }
 
     #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
@@ -227,8 +208,8 @@ mod tests {
         assert!(verify_hash(&pk, &message, &sig));
         // verifier key shape: pk_seed || hypertree_root
         let mut key = [0u8; 64];
-        key[..32].copy_from_slice(&pk.pk_seed);
-        key[32..].copy_from_slice(&pk.hypertree_root);
+        key[..32].copy_from_slice(pk.pk_seed.as_bytes());
+        key[32..].copy_from_slice(pk.root.as_bytes());
         assert!(crate::sphincs_plus_c::verifier::SphincsPlusCVerifier::new().verify(
             &key,
             &message,

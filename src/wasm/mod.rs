@@ -41,7 +41,7 @@ use crate::shrincs::{
 // above.
 #[cfg(any(test, feature = "wasm-bindings"))]
 #[cfg(any(test, feature = "wasm-bindings"))]
-use crate::sphincs_plus_c::SphincsPlusCSigningKey;
+use crate::types::SphincsPlusCSigningKey;
 #[cfg(any(test, feature = "wasm-bindings"))]
 use zeroize::Zeroize;
 
@@ -631,8 +631,8 @@ pub fn sphincs_plus_c_keygen(seed: &[u8]) -> Result<WasmSphincsPlusCKeys, JsValu
     let stateless_prf_seed = crate::shrincs::derive32(b"shrincs-stateless-prf-seed", &seed, &[]);
     let pk_seed = crate::shrincs::derive32(b"shrincs-pk-seed", &seed, &[]);
     seed.zeroize();
-    let (signing_key, _public_key) =
-        crate::sphincs_plus_c::keygen(stateless_sk_seed, stateless_prf_seed, pk_seed);
+    let signing_key = crate::sphincs_plus_c::keygen(stateless_sk_seed, stateless_prf_seed, pk_seed)
+        .to_legacy_signing_key();
     Ok(WasmSphincsPlusCKeys { signing_key })
 }
 
@@ -647,8 +647,9 @@ pub fn sphincs_plus_c_sign(
     secret_key: &[u8],
 ) -> Result<alloc::vec::Vec<u8>, JsValue> {
     let signing_key = deserialize_sphincs_plus_c_signing_key(secret_key).map_err(js_error)?;
+    let full_key = crate::sphincs_plus_c::key::Key::from_legacy_signing_key(&signing_key);
     let hash = message_hash(message).map_err(js_error)?;
-    let signature = crate::sphincs_plus_c::sign(&signing_key, &hash).ok_or_else(|| {
+    let signature = crate::sphincs_plus_c::sign(&full_key, &hash).ok_or_else(|| {
         js_error(WasmErr {
             code: ERR_SIGNING_FAILED,
             message: "stateless signing failed for the supplied key/message".into(),

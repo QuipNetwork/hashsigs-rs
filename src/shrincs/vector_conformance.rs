@@ -239,7 +239,7 @@ fn verify_stateless_case(case: &Value) -> bool {
     // the independent path may still accept pure crypto — only assert when
     // hybrid accepts.
     if hybrid_ok {
-        let pk = crate::sphincs_plus_c::SphincsPlusCPublicKey::from_slices(
+        let pk = crate::sphincs_plus_c::PublicKey::from_slices(
             &public_key.pk_seed,
             &public_key.hypertree_root,
         )

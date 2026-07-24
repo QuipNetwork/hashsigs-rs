@@ -33,7 +33,7 @@ use crate::primitives::profiles::{
     FORS_C_MAX_GRIND_COUNTER, FORS_TREE_HEIGHT, HYPERTREE_HEIGHT, NUM_FORS_TREES,
     NUM_HYPERTREE_LAYERS,
 };
-use crate::types::SphincsPlusCSigningKey;
+use super::key::Key;
 use crate::types::{ForsEntry, ForsSignature, HASH_LEN};
 
 /// Signed FORS trees per signature: the final tree is omitted (FORS-C).
@@ -477,7 +477,7 @@ pub(crate) struct SignedForsC {
 }
 
 pub(crate) fn sign_fors_c(
-    signing_key: &SphincsPlusCSigningKey,
+    signing_key: &Key,
     message: &[u8],
 ) -> Option<SignedForsC> {
     if stateless_trace_enabled() {
@@ -495,7 +495,8 @@ pub(crate) fn sign_fors_c(
     // This is the FORS-C local message randomizer. It is deterministic for the
     // same stateless PRF seed and message, matching the SPHINCS-style separation
     // between SK.seed-derived signing secrets and SK.prf-derived randomness.
-    let randomizer = hash_packed(&[b"fors-randomizer", &signing_key.stateless_prf_seed, message]);
+    let randomizer =
+        hash_packed(&[b"fors-randomizer", signing_key.secret.prf_seed.as_bytes(), message]);
     stateless_trace("stateless trace: FORS randomizer ready");
 
     if let Some((counter, digest)) =
@@ -522,8 +523,8 @@ pub(crate) fn sign_fors_c(
             // provide the siblings needed to recompute that tree's root.
             let leaf = digest.signed_tree_indices[fors_tree];
             let (root, secret_leaf, auth_path) = fors_tree_root_and_auth_path(
-                &signing_key.pk_seed,
-                &signing_key.stateless_sk_seed,
+                signing_key.public_key.pk_seed.as_bytes(),
+                signing_key.secret.sk_seed.as_bytes(),
                 ForsLeafCoords {
                     tree_index: digest.tree_index,
                     leaf_index: digest.leaf_index,
@@ -542,7 +543,7 @@ pub(crate) fn sign_fors_c(
         // The public seed is included so roots from a different FORS key cannot
         // be transplanted into this key.
         return Some(SignedForsC {
-            root: fors_public_key_hash(&signing_key.pk_seed, &roots),
+            root: fors_public_key_hash(signing_key.public_key.pk_seed.as_bytes(), &roots),
             signature: ForsSignature {
                 randomizer,
                 counter,
@@ -561,7 +562,7 @@ pub(crate) fn sign_fors_c(
 /// to the parallel version below: both return the lowest winning counter.
 #[cfg(not(feature = "parallel"))]
 fn winning_fors_counter_and_digest(
-    signing_key: &SphincsPlusCSigningKey,
+    signing_key: &Key,
     message: &[u8],
     randomizer: &[u8; HASH_LEN],
     limit: u32,
@@ -578,8 +579,8 @@ fn winning_fors_counter_and_digest(
         // The counter is public and stored in the signature. Its only job is to
         // find a digest whose omitted final FORS tree opens leaf zero.
         let Some(digest) = signer_fors_digest(
-            &signing_key.pk_seed,
-            &signing_key.hypertree_root,
+            signing_key.public_key.pk_seed.as_bytes(),
+            signing_key.public_key.root.as_bytes(),
             message,
             randomizer,
             counter,
@@ -604,7 +605,7 @@ fn winning_fors_counter_and_digest(
 /// matching the sequential search and keeping signature bytes identical.
 #[cfg(feature = "parallel")]
 fn winning_fors_counter_and_digest(
-    signing_key: &SphincsPlusCSigningKey,
+    signing_key: &Key,
     message: &[u8],
     randomizer: &[u8; HASH_LEN],
     limit: u32,
@@ -616,8 +617,8 @@ fn winning_fors_counter_and_digest(
     }
     let winner = (0..limit).into_par_iter().find_map_first(|counter| {
         let digest = signer_fors_digest(
-            &signing_key.pk_seed,
-            &signing_key.hypertree_root,
+            signing_key.public_key.pk_seed.as_bytes(),
+            signing_key.public_key.root.as_bytes(),
             message,
             randomizer,
             counter,

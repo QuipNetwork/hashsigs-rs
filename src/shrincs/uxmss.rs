@@ -25,8 +25,9 @@
 
 use alloc::vec::Vec;
 
-use zeroize::Zeroizing;
-use crate::primitives::hash::{base_w16_digit, hash_node, hash_packed};
+use core::fmt;
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
+use crate::primitives::hash::{base_w16_digit, hash_node, hash_packed, word32};
 use crate::primitives::profiles::{
     WOTS_BASE_STATEFUL, WOTS_CHAINS_STATEFUL, WOTS_TARGET_SUM_STATEFUL,
 };
@@ -173,6 +174,223 @@ pub(crate) struct StatefulSecret {
     pub pk_seed: [u8; HASH_LEN],
     pub max_signatures: u32,
     pub next_leaf_index: u32,
+}
+
+// ── Structured, newtyped UXMSS key (the SHRINCS stateful fast path) ──────────
+//
+// Each 32-byte role is its own type, distinct from the identically-shaped
+// `sphincs_plus_c` roles by module path, so the two `pk_seed`s / roots of the
+// SHRINCS hybrid cannot be swapped. This `Key` is the stateful half of a
+// `shrincs::Keys`. Flat layout (matching the wasm ABI / legacy serialization):
+// `Secret = sk_seed(32) ‖ prf_seed(32)` (64 B), `PublicKey =
+// pk_seed(32) ‖ root(32) ‖ max_signatures(4 BE)` (68 B), `Key = Secret ‖
+// PublicKey ‖ next_leaf_index(4 BE)` (136 B).
+
+/// Secret seed deriving stateful WOTS-C chain secrets.
+#[derive(Clone, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]
+pub struct SkSeed([u8; HASH_LEN]);
+
+/// Secret PRF seed deriving stateful WOTS-C message randomizers.
+#[derive(Clone, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]
+pub struct PrfSeed([u8; HASH_LEN]);
+
+/// Public seed used by stateful WOTS-C and the unbalanced tree hashing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PkSeed([u8; HASH_LEN]);
+
+/// Root of the stateful unbalanced authentication tree.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Root([u8; HASH_LEN]);
+
+impl SkSeed {
+    /// Wrap 32 raw bytes.
+    pub const fn new(bytes: [u8; HASH_LEN]) -> Self {
+        Self(bytes)
+    }
+    /// Wrap a slice, returning `None` for any length other than 32.
+    pub fn from_slice(bytes: &[u8]) -> Option<Self> {
+        Some(Self(word32(bytes)?))
+    }
+    /// Borrow the raw bytes for hashing.
+    pub fn as_bytes(&self) -> &[u8; HASH_LEN] {
+        &self.0
+    }
+}
+
+impl PrfSeed {
+    /// Wrap 32 raw bytes.
+    pub const fn new(bytes: [u8; HASH_LEN]) -> Self {
+        Self(bytes)
+    }
+    /// Wrap a slice, returning `None` for any length other than 32.
+    pub fn from_slice(bytes: &[u8]) -> Option<Self> {
+        Some(Self(word32(bytes)?))
+    }
+    /// Borrow the raw bytes for hashing.
+    pub fn as_bytes(&self) -> &[u8; HASH_LEN] {
+        &self.0
+    }
+}
+
+impl PkSeed {
+    /// Wrap 32 raw bytes.
+    pub const fn new(bytes: [u8; HASH_LEN]) -> Self {
+        Self(bytes)
+    }
+    /// Wrap a slice, returning `None` for any length other than 32.
+    pub fn from_slice(bytes: &[u8]) -> Option<Self> {
+        Some(Self(word32(bytes)?))
+    }
+    /// Borrow the raw bytes for hashing.
+    pub fn as_bytes(&self) -> &[u8; HASH_LEN] {
+        &self.0
+    }
+}
+
+impl Root {
+    /// Wrap 32 raw bytes.
+    pub const fn new(bytes: [u8; HASH_LEN]) -> Self {
+        Self(bytes)
+    }
+    /// Wrap a slice, returning `None` for any length other than 32.
+    pub fn from_slice(bytes: &[u8]) -> Option<Self> {
+        Some(Self(word32(bytes)?))
+    }
+    /// Borrow the raw bytes for hashing.
+    pub fn as_bytes(&self) -> &[u8; HASH_LEN] {
+        &self.0
+    }
+}
+
+impl fmt::Debug for SkSeed {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("SkSeed(<redacted>)")
+    }
+}
+
+impl fmt::Debug for PrfSeed {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("PrfSeed(<redacted>)")
+    }
+}
+
+/// The secret half of a stateful key: the 64 bytes that are actually secret.
+#[derive(Clone, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]
+pub struct Secret {
+    /// Derives stateful WOTS-C chain secrets.
+    pub sk_seed: SkSeed,
+    /// Derives stateful WOTS-C message randomizers.
+    pub prf_seed: PrfSeed,
+}
+
+impl fmt::Debug for Secret {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Secret")
+            .field("sk_seed", &"<redacted>")
+            .field("prf_seed", &"<redacted>")
+            .finish()
+    }
+}
+
+/// The public half of a stateful key: `pk_seed ‖ root ‖ max_signatures`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PublicKey {
+    /// Public seed used by stateful WOTS-C and the unbalanced tree.
+    pub pk_seed: PkSeed,
+    /// Root of the stateful unbalanced authentication tree.
+    pub root: Root,
+    /// Highest accepted stateful leaf index.
+    pub max_signatures: u32,
+}
+
+/// A stateful UXMSS key: secret seeds, public bundle, and the monotonic
+/// leaf counter that `sign` advances.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Key {
+    /// Secret seeds.
+    pub secret: Secret,
+    /// Public seed, root, and budget.
+    pub public_key: PublicKey,
+    /// Next monotonic leaf index; advanced on each stateful signature.
+    pub next_leaf_index: u32,
+}
+
+impl fmt::Debug for Key {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Key")
+            .field("secret", &self.secret)
+            .field("public_key", &self.public_key)
+            .field("next_leaf_index", &self.next_leaf_index)
+            .finish()
+    }
+}
+
+impl PublicKey {
+    /// Encoded stateful public key `pk_seed(32) ‖ root(32) ‖ max(4 BE)`,
+    /// 68 bytes (`STATEFUL_PUBLIC_KEY_BYTES`).
+    pub fn to_bytes(&self) -> [u8; crate::types::STATEFUL_PUBLIC_KEY_BYTES] {
+        let mut out = [0u8; crate::types::STATEFUL_PUBLIC_KEY_BYTES];
+        out[..HASH_LEN].copy_from_slice(self.pk_seed.as_bytes());
+        out[HASH_LEN..HASH_LEN * 2].copy_from_slice(self.root.as_bytes());
+        out[HASH_LEN * 2..].copy_from_slice(&self.max_signatures.to_be_bytes());
+        out
+    }
+    /// Parse the 68-byte encoded stateful public key; `None` on wrong length.
+    pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() != crate::types::STATEFUL_PUBLIC_KEY_BYTES {
+            return None;
+        }
+        Some(Self {
+            pk_seed: PkSeed::from_slice(bytes.get(..HASH_LEN)?)?,
+            root: Root::from_slice(bytes.get(HASH_LEN..HASH_LEN * 2)?)?,
+            max_signatures: u32::from_be_bytes(word4(bytes.get(HASH_LEN * 2..)?)?),
+        })
+    }
+}
+
+impl Key {
+    // ── Temporary bridge to the legacy signing struct. Removed once
+    //    the signing path takes `&mut Key` directly. ──
+
+    /// Snapshot the fields the UXMSS signing routines need.
+    pub(crate) fn to_stateful_secret(&self) -> StatefulSecret {
+        StatefulSecret {
+            sk_seed: *self.secret.sk_seed.as_bytes(),
+            prf_seed: *self.secret.prf_seed.as_bytes(),
+            pk_seed: *self.public_key.pk_seed.as_bytes(),
+            max_signatures: self.public_key.max_signatures,
+            next_leaf_index: self.next_leaf_index,
+        }
+    }
+}
+
+impl From<PublicKey> for StatefulPublicKey {
+    fn from(pk: PublicKey) -> Self {
+        Self {
+            pk_seed: *pk.pk_seed.as_bytes(),
+            root: *pk.root.as_bytes(),
+            max_signatures: pk.max_signatures,
+        }
+    }
+}
+
+impl From<StatefulPublicKey> for PublicKey {
+    fn from(pk: StatefulPublicKey) -> Self {
+        Self {
+            pk_seed: PkSeed::new(pk.pk_seed),
+            root: Root::new(pk.root),
+            max_signatures: pk.max_signatures,
+        }
+    }
+}
+
+fn word4(bytes: &[u8]) -> Option<[u8; 4]> {
+    if bytes.len() != 4 {
+        return None;
+    }
+    let mut out = [0u8; 4];
+    out.copy_from_slice(bytes);
+    Some(out)
 }
 
 pub(crate) fn sign_stateful_raw(
@@ -403,4 +621,51 @@ fn stateful_auth_path(
         path.push(stateful_wots_pk_hash(sk_seed, pk_seed, previous_leaf));
     }
     path
+}
+
+#[cfg(test)]
+mod key_tests {
+    use super::*;
+
+    #[test]
+    fn public_key_bytes_round_trip() {
+        let pk = PublicKey {
+            pk_seed: PkSeed::new([7u8; HASH_LEN]),
+            root: Root::new([9u8; HASH_LEN]),
+            max_signatures: 1024,
+        };
+        let bytes = pk.to_bytes();
+        assert_eq!(bytes.len(), crate::types::STATEFUL_PUBLIC_KEY_BYTES);
+        // max_signatures is the trailing 4 big-endian bytes.
+        assert_eq!(&bytes[HASH_LEN * 2..], &1024u32.to_be_bytes());
+        assert_eq!(PublicKey::from_bytes(&bytes), Some(pk));
+    }
+
+    #[test]
+    fn public_key_bridges_to_and_from_legacy() {
+        let pk = PublicKey {
+            pk_seed: PkSeed::new([1u8; HASH_LEN]),
+            root: Root::new([2u8; HASH_LEN]),
+            max_signatures: 8,
+        };
+        let legacy: StatefulPublicKey = pk.into();
+        assert_eq!(legacy.max_signatures, 8);
+        assert_eq!(PublicKey::from(legacy), pk);
+    }
+
+    #[test]
+    fn from_bytes_rejects_wrong_length() {
+        assert_eq!(PublicKey::from_bytes(&[0u8; 67]), None);
+    }
+
+    #[test]
+    fn secret_debug_is_redacted() {
+        let secret = Secret {
+            sk_seed: SkSeed::new([3u8; HASH_LEN]),
+            prf_seed: PrfSeed::new([4u8; HASH_LEN]),
+        };
+        let shown = alloc::format!("{secret:?}");
+        assert!(shown.contains("redacted"));
+        assert!(!shown.contains("03"));
+    }
 }

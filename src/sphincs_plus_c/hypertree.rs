@@ -35,7 +35,7 @@ use crate::primitives::profiles::{
     WOTS_TARGET_SUM_STATELESS,
 };
 use crate::types::{HypertreeLayerSignature, WotsCSignature, HASH_LEN};
-use crate::types::SphincsPlusCSigningKey;
+use super::key::Key;
 use crate::primitives::wotsplusc;
 use crate::primitives::wotsplusc::WOTS_C_MAX_GRIND_COUNTER;
 
@@ -360,7 +360,7 @@ struct HypertreeSubtree {
 }
 
 pub(crate) fn sign_hypertree(
-    signing_key: &SphincsPlusCSigningKey,
+    signing_key: &Key,
     fors_root: [u8; HASH_LEN],
     bottom_tree: u64,
     bottom_leaf: u32,
@@ -386,7 +386,7 @@ pub(crate) fn sign_hypertree(
     // `stateless_sk_seed` is the shared SK.seed-style master for FORS-C and
     // hypertree WOTS-C signing secrets.
     // `pk_seed` is the global public seed used for stateless hashing.
-    let layer_seeds = hypertree_layer_seeds(&signing_key.stateless_sk_seed);
+    let layer_seeds = hypertree_layer_seeds(signing_key.secret.sk_seed.as_bytes());
     let mut layers = Vec::with_capacity(NUM_HYPERTREE_LAYERS as usize);
 
     // `current` is the value being authenticated by the current layer. At layer
@@ -407,7 +407,7 @@ pub(crate) fn sign_hypertree(
         // signing and extract the auth path and next root from the same node
         // table instead of recomputing them separately.
         let subtree = hypertree_subtree(
-            &signing_key.pk_seed,
+            signing_key.public_key.pk_seed.as_bytes(),
             &layer_seeds[layer as usize],
             layer,
             tree,
@@ -416,9 +416,9 @@ pub(crate) fn sign_hypertree(
         let coords = WotsKeypair { layer, tree, keypair: leaf };
         let (_, sk_seed) = hypertree_leaf_seeds(&layer_seeds[layer as usize], tree, leaf);
         let seeds = WotsSeeds {
-            pk_seed: &signing_key.pk_seed,
+            pk_seed: signing_key.public_key.pk_seed.as_bytes(),
             sk_seed: &sk_seed,
-            prf_seed: &signing_key.stateless_prf_seed,
+            prf_seed: signing_key.secret.prf_seed.as_bytes(),
         };
         let wots_c_signature =
             sign_stateless_wots_c(&seeds, &coords, &subtree.selected_leaf_hash, &current)?;

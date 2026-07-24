@@ -21,7 +21,7 @@
 //! Key = (pk_seed || hypertree_root) as two 32-byte words. Input is an arbitrary
 //! 32-byte hash. No SHRINCS commitment or action envelope.
 
-use crate::sphincs_plus_c::{self, SphincsPlusCPublicKey};
+use crate::sphincs_plus_c::{self, PublicKey};
 use crate::types::{StatelessSignature, HASH_LEN};
 
 /// Independent stateless-only verifier (Solidity `SPHINCSPlusCVerifier` shape).
@@ -57,7 +57,7 @@ impl SphincsPlusCVerifier {
         if key.len() != 64 {
             return false;
         }
-        let Some(pk) = SphincsPlusCPublicKey::from_slices(&key[..32], &key[32..64]) else {
+        let Some(pk) = PublicKey::from_slices(&key[..32], &key[32..64]) else {
             return false;
         };
         sphincs_plus_c::verify_hash(&pk, hash, signature)
@@ -66,7 +66,7 @@ impl SphincsPlusCVerifier {
     /// Verify with an already-decoded public key.
     pub fn verify_with_pk(
         &self,
-        pk: &SphincsPlusCPublicKey,
+        pk: &PublicKey,
         hash: &[u8; HASH_LEN],
         signature: &StatelessSignature,
     ) -> bool {
@@ -76,7 +76,7 @@ impl SphincsPlusCVerifier {
     /// Verify over arbitrary message bytes (non-verifier-interface helper).
     pub fn verify_message(
         &self,
-        pk: &SphincsPlusCPublicKey,
+        pk: &PublicKey,
         message: &[u8],
         signature: &StatelessSignature,
     ) -> bool {
@@ -146,18 +146,18 @@ mod tests {
         let sk_seed = hash_packed(&[b"sphincs-plus-c-verifier-sk", seed_label]);
         let prf_seed = hash_packed(&[b"sphincs-plus-c-verifier-prf", seed_label]);
         let pk_seed = hash_packed(&[b"sphincs-plus-c-verifier-pk", seed_label]);
-        let (sk, pk) = sphincs_plus_c::keygen(sk_seed, prf_seed, pk_seed);
+        let sk = sphincs_plus_c::keygen(sk_seed, prf_seed, pk_seed);
         let signature = sphincs_plus_c::sign(&sk, &hash).expect("stateless sign");
         let envelope = envelope::encode_stateless_signature_envelope(&signature);
-        let key = key64(&pk);
+        let key = key64(&sk.public_key);
         (key, envelope)
     }
 
     #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
-    fn key64(pk: &crate::sphincs_plus_c::SphincsPlusCPublicKey) -> [u8; 64] {
+    fn key64(pk: &crate::sphincs_plus_c::PublicKey) -> [u8; 64] {
         let mut key = [0u8; 64];
-        key[..32].copy_from_slice(&pk.pk_seed);
-        key[32..].copy_from_slice(&pk.hypertree_root);
+        key[..32].copy_from_slice(pk.pk_seed.as_bytes());
+        key[32..].copy_from_slice(pk.root.as_bytes());
         key
     }
 
