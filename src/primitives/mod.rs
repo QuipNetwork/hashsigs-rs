@@ -20,6 +20,7 @@
 //! treehash, compile-time profiles, and fixed-capacity buffers. Nothing in
 //! here knows about either scheme's key or envelope shapes.
 
+pub(crate) mod abi;
 pub(crate) mod buf;
 pub(crate) mod hash;
 pub(crate) mod hash_backend;
