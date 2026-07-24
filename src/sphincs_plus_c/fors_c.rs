@@ -39,7 +39,7 @@ use crate::primitives::abi::{
     collect_hash_words, encode_bytes, encode_dynamic_array, encode_tuple, word_from_u32,
     AbiReader, Field,
 };
-use crate::primitives::hash::{fors_address_word, hash_node, hash_packed, read_bits32, read_bits64, word32};
+use crate::primitives::hash::{fors_address_word, hash_node, hash_packed, read_bits32, read_bits64};
 use crate::primitives::profiles::{
     FORS_C_MAX_GRIND_COUNTER, FORS_TREE_HEIGHT, HYPERTREE_HEIGHT, NUM_FORS_TREES,
     NUM_HYPERTREE_LAYERS,
@@ -400,33 +400,28 @@ fn fors_entry_root32(
 ) -> Option<[u8; HASH_LEN]> {
     let shifted_fors_tree = u64::from(coords.fors_tree) << height;
     let leaf_low_index = shifted_fors_tree + u64::from(coords.leaf);
-    let mut node = hash_fors_leaf32(
+    let leaf = hash_fors_leaf32(
         pk_seed,
         fors_address_word(coords.tree_index, coords.leaf_index, 0, leaf_low_index),
         &entry.secret_leaf,
     )?;
-    let mut index = coords.leaf;
-    for level in 0..height {
-        let sibling = word32(entry.auth_path.get(level as usize)?)?;
-        let (left, right) = if index & 1 == 0 {
-            (node, sibling)
-        } else {
-            (sibling, node)
-        };
-        let node_height = level + 1;
-        let shifted_tree = u64::from(coords.fors_tree) << (height - node_height);
-        let parent_index = u64::from(index >> 1);
-        let parent_low_index = shifted_tree + parent_index;
-        let address_word = fors_address_word(
-            coords.tree_index,
-            coords.leaf_index,
-            node_height,
-            parent_low_index,
-        );
-        node = hash_fors_node32(pk_seed, address_word, left, right)?;
-        index >>= 1;
-    }
-    Some(node)
+    crate::primitives::treehash::root_from_auth_path(
+        height,
+        coords.leaf,
+        leaf,
+        &entry.auth_path,
+        |node_height, parent_index, left, right| {
+            let shifted_tree = u64::from(coords.fors_tree) << (height - node_height);
+            let parent_low_index = shifted_tree + u64::from(parent_index);
+            let address_word = fors_address_word(
+                coords.tree_index,
+                coords.leaf_index,
+                node_height,
+                parent_low_index,
+            );
+            hash_node(&[b"fors-node", pk_seed, &address_word, left, right])
+        },
+    )
 }
 
 fn hash_fors_leaf32(
@@ -438,18 +433,6 @@ fn hash_fors_leaf32(
         return None;
     }
     Some(hash_node(&[b"fors-leaf", pk_seed, &address_word, sk]))
-}
-
-fn hash_fors_node32(
-    pk_seed: &[u8],
-    address_word: [u8; HASH_LEN],
-    left: [u8; HASH_LEN],
-    right: [u8; HASH_LEN],
-) -> Option<[u8; HASH_LEN]> {
-    if pk_seed.len() != HASH_LEN {
-        return None;
-    }
-    Some(hash_node(&[b"fors-node", pk_seed, &address_word, &left, &right]))
 }
 
 fn fors_digest(

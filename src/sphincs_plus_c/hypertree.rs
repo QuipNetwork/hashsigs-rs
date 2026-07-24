@@ -365,27 +365,23 @@ fn hypertree_root_from_path32(
         return None;
     }
     let pk_seed = word32(pk_seed)?;
-    let mut node = leaf;
-    let mut index = path.leaf_index;
-    for level in 0..height {
-        let sibling = word32(auth_path.get(level as usize)?)?;
-        let (left, right) = if index & 1 == 0 {
-            (node, sibling)
-        } else {
-            (sibling, node)
-        };
-        let address_word =
-            hypertree_address_word(path.layer, path.tree_index, level + 1, u64::from(index >> 1));
-        node = hash_node(&[
-            b"hypertree-node".as_ref(),
-            pk_seed.as_ref(),
-            address_word.as_ref(),
-            left.as_ref(),
-            right.as_ref(),
-        ]);
-        index >>= 1;
-    }
-    Some(node)
+    crate::primitives::treehash::root_from_auth_path(
+        height,
+        path.leaf_index,
+        leaf,
+        auth_path,
+        |level, parent_index, left, right| {
+            let address_word =
+                hypertree_address_word(path.layer, path.tree_index, level, u64::from(parent_index));
+            hash_node(&[
+                b"hypertree-node".as_ref(),
+                pk_seed.as_ref(),
+                address_word.as_ref(),
+                left.as_ref(),
+                right.as_ref(),
+            ])
+        },
+    )
 }
 
 // ---- signing ----

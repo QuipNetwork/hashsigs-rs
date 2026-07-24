@@ -94,6 +94,41 @@ where
     (root, auth_path)
 }
 
+/// Verification-side Merkle auth-path climb, shared by every caller that
+/// recomputes a root from a leaf plus its authentication path (hypertree
+/// layer verification, FORS tree verification).
+///
+/// Starts at `leaf`; for each `auth_path` sibling, picks `(node, sibling)` or
+/// `(sibling, node)` by the current index's parity, and hashes the pair via
+/// `parent_hash(level, parent_index, left, right)` where `level` runs
+/// `1..=height` and `parent_index` is the index at that level. Domain
+/// separation (tag, address-word derivation) is entirely caller-owned via
+/// `parent_hash`. Returns `None` if `auth_path` is shorter than `height`.
+pub(crate) fn root_from_auth_path(
+    height: u32,
+    leaf_index: u32,
+    leaf: [u8; HASH_LEN],
+    auth_path: &[[u8; HASH_LEN]],
+    parent_hash: impl Fn(u32, u32, &[u8; HASH_LEN], &[u8; HASH_LEN]) -> [u8; HASH_LEN],
+) -> Option<[u8; HASH_LEN]> {
+    if (auth_path.len() as u32) < height {
+        return None;
+    }
+    let mut node = leaf;
+    let mut index = leaf_index;
+    for level in 0..height {
+        let sibling = auth_path.get(level as usize)?;
+        let (left, right) = if index & 1 == 0 {
+            (&node, sibling)
+        } else {
+            (sibling, &node)
+        };
+        node = parent_hash(level + 1, index >> 1, left, right);
+        index >>= 1;
+    }
+    Some(node)
+}
+
 /// Mutable fold state threaded through every leaf of a streaming treehash.
 struct FoldLeafState<'a> {
     selected_leaf: u32,
