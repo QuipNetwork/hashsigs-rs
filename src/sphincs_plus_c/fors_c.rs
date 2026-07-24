@@ -16,18 +16,29 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 
-//! FORS-C sign and verify.
+//! FORS-C sign and verify, plus the FORS-C signature wire type and its ABI
+//! codec.
 //!
 //! Signs the external message digest with `NUM_FORS_TREES - 1` few-time
 //! secret-tree openings, mirroring Solidity's `ForsC.sol`. Builds on the
 //! shared `hash`/`treehash` helpers and is consumed by `sphincs_plus_c`, which
 //! chains the reconstructed FORS root into the hypertree.
+//!
+//! `Entry::to_bytes`/`from_bytes` and `Signature::to_bytes`/`from_bytes` are
+//! byte-identical to the historical
+//! `envelope::encode_fors_entry_body`/`decode_fors_entry` and
+//! `envelope::encode_fors_signature_body`/`decode_fors_signature`, which now
+//! delegate here.
 
 use alloc::format;
 use alloc::vec::Vec;
 
 use zeroize::Zeroizing;
 
+use crate::primitives::abi::{
+    collect_hash_words, encode_bytes, encode_dynamic_array, encode_tuple, word_from_u32,
+    AbiReader, Field,
+};
 use crate::primitives::hash::{fors_address_word, hash_node, hash_packed, read_bits32, read_bits64, word32};
 use crate::primitives::profiles::{
     FORS_C_MAX_GRIND_COUNTER, FORS_TREE_HEIGHT, HYPERTREE_HEIGHT, NUM_FORS_TREES,
@@ -35,7 +46,6 @@ use crate::primitives::profiles::{
 };
 use super::key::Key;
 use crate::primitives::HASH_LEN;
-use crate::types::{ForsEntry, ForsSignature};
 
 /// Signed FORS trees per signature: the final tree is omitted (FORS-C).
 const SIGNED_TREES: usize = NUM_FORS_TREES as usize - 1;
@@ -44,6 +54,124 @@ const SIGNED_TREES: usize = NUM_FORS_TREES as usize - 1;
 /// plus `HYPERTREE_HEIGHT` coordinate bits, rounded up to whole bytes.
 const FORS_DIGEST_BYTES: usize =
     (NUM_FORS_TREES as usize * FORS_TREE_HEIGHT as usize + HYPERTREE_HEIGHT as usize).div_ceil(8);
+
+/// Revealed FORS secret leaf and authentication path for one signed FORS
+/// tree.
+///
+/// Kept `pub` (rather than `pub(crate)`, unlike the sign/verify internals in
+/// this module) because it is part of the crate's public wire-type surface:
+/// the `tests/` integration suite and the `solana` workspace member
+/// reconstruct it from their DTOs, importing it at its canonical path
+/// `crate::sphincs_plus_c::fors_c::Entry` (they alias it locally as
+/// `ForsEntry`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Entry {
+    /// Revealed FORS secret leaf for one signed FORS tree.
+    pub secret_leaf: [u8; HASH_LEN],
+    /// Authentication path from that FORS leaf to that FORS tree root.
+    pub auth_path: Vec<[u8; HASH_LEN]>,
+}
+
+impl Entry {
+    /// ABI-encode the FORS entry body. Byte-identical to the historical
+    /// `envelope::encode_fors_entry_body`.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        encode_tuple(alloc::vec![
+            Field::Dynamic(encode_bytes(&self.secret_leaf)),
+            Field::Dynamic(encode_dynamic_array(
+                self.auth_path.iter().map(|node| encode_bytes(node)).collect(),
+            )),
+        ])
+    }
+
+    /// Decode a FORS entry already located at `base` within a shared
+    /// `AbiReader`. No trailing-bytes check here: `base` commonly sits
+    /// inside a larger encoded envelope, so exhaustion is the calling
+    /// top-level decoder's responsibility (see `from_bytes` for the
+    /// standalone entrypoint that does check).
+    pub(crate) fn decode(reader: &AbiReader, base: usize) -> Option<Self> {
+        Some(Self {
+            secret_leaf: reader.decode_bytes32_field(base, base)?,
+            auth_path: collect_hash_words(reader.decode_array_bytes(
+                base,
+                base.checked_add(32)?,
+                FORS_TREE_HEIGHT as usize,
+            )?)?,
+        })
+    }
+
+    /// Decode a standalone byte blob produced by `to_bytes`. Byte-identical
+    /// to the historical `envelope::decode_fors_entry`, built as a top-level
+    /// entrypoint: a fresh `AbiReader` at base 0, rejecting trailing bytes.
+    pub fn from_bytes(data: &[u8]) -> Option<Self> {
+        let reader = AbiReader::new(data);
+        let decoded = Self::decode(&reader, 0)?;
+        reader.finish()?;
+        Some(decoded)
+    }
+}
+
+/// FORS-C signature: randomizer, target-sum grind counter, and one revealed
+/// entry per signed FORS tree.
+///
+/// Kept `pub` (rather than `pub(crate)`, unlike the sign/verify internals in
+/// this module) because it is part of the crate's public wire-type surface:
+/// the `tests/` integration suite and the `solana` workspace member
+/// reconstruct it from their DTOs, importing it at its canonical path
+/// `crate::sphincs_plus_c::fors_c::Signature` (they alias it locally as
+/// `ForsSignature`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Signature {
+    /// Randomizer mixed into FORS digest derivation.
+    pub randomizer: [u8; HASH_LEN],
+    /// Counter mixed into FORS digest derivation.
+    pub counter: u32,
+    /// FORS-C reveals `num_fors_trees - 1` entries; the omitted final tree must select leaf 0.
+    pub entries: Vec<Entry>,
+}
+
+impl Signature {
+    /// ABI-encode the FORS signature body. Byte-identical to the historical
+    /// `envelope::encode_fors_signature_body`.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        encode_tuple(alloc::vec![
+            Field::Dynamic(encode_bytes(&self.randomizer)),
+            Field::Static(word_from_u32(self.counter)),
+            Field::Dynamic(encode_dynamic_array(
+                self.entries.iter().map(Entry::to_bytes).collect(),
+            )),
+        ])
+    }
+
+    /// Decode a FORS signature already located at `base` within a shared
+    /// `AbiReader`. No trailing-bytes check here: `base` commonly sits
+    /// inside a larger encoded envelope, so exhaustion is the calling
+    /// top-level decoder's responsibility (see `from_bytes` for the
+    /// standalone entrypoint that does check).
+    pub(crate) fn decode(reader: &AbiReader, base: usize) -> Option<Self> {
+        Some(Self {
+            randomizer: reader.decode_bytes32_field(base, base)?,
+            counter: reader.read_u32(base.checked_add(32)?)?,
+            entries: reader.decode_dynamic_array(
+                base,
+                base.checked_add(64)?,
+                NUM_FORS_TREES as usize,
+                Entry::decode,
+            )?,
+        })
+    }
+
+    /// Decode a standalone byte blob produced by `to_bytes`. Byte-identical
+    /// to the historical `envelope::decode_fors_signature`, built as a
+    /// top-level entrypoint: a fresh `AbiReader` at base 0, rejecting
+    /// trailing bytes.
+    pub fn from_bytes(data: &[u8]) -> Option<Self> {
+        let reader = AbiReader::new(data);
+        let decoded = Self::decode(&reader, 0)?;
+        reader.finish()?;
+        Some(decoded)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ForsDigest {
@@ -64,7 +192,7 @@ pub(crate) fn verify_fors_c_and_return_root(
     pk_seed: &[u8; HASH_LEN],
     hypertree_root: &[u8; HASH_LEN],
     message: &[u8],
-    signature: &ForsSignature,
+    signature: &Signature,
 ) -> Option<([u8; HASH_LEN], u64, u32)> {
     let signed_trees = NUM_FORS_TREES as usize - 1;
     if signature.entries.len() != signed_trees {
@@ -268,7 +396,7 @@ fn fors_entry_root32(
     height: u32,
     pk_seed: &[u8],
     coords: ForsLeafCoords,
-    entry: &ForsEntry,
+    entry: &Entry,
 ) -> Option<[u8; HASH_LEN]> {
     let shifted_fors_tree = u64::from(coords.fors_tree) << height;
     let leaf_low_index = shifted_fors_tree + u64::from(coords.leaf);
@@ -470,7 +598,7 @@ pub(crate) struct SignedForsC {
     pub root: [u8; HASH_LEN],
     /// Signature payload that the verifier consumes: one secret leaf and auth path
     /// for every signed FORS tree.
-    pub signature: ForsSignature,
+    pub signature: Signature,
     /// Layer-0 hypertree tree selected by the FORS message digest.
     pub tree_index: u64,
     /// Layer-0 hypertree leaf selected by the FORS message digest.
@@ -534,7 +662,7 @@ pub(crate) fn sign_fors_c(
                 },
             );
             *root_slot = root;
-            entries.push(ForsEntry {
+            entries.push(Entry {
                 secret_leaf,
                 auth_path,
             });
@@ -545,7 +673,7 @@ pub(crate) fn sign_fors_c(
         // be transplanted into this key.
         return Some(SignedForsC {
             root: fors_public_key_hash(signing_key.public_key.pk_seed.as_bytes(), &roots),
-            signature: ForsSignature {
+            signature: Signature {
                 randomizer,
                 counter,
                 entries,

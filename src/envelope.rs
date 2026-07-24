@@ -66,15 +66,14 @@ use crate::primitives::abi::{
     collect_hash_words, encode_bytes, encode_bytes32_array, encode_dynamic_array, encode_tuple,
     word_from_u32, AbiReader, Field,
 };
-use crate::primitives::profiles::{
-    FORS_TREE_HEIGHT, HYPERTREE_HEIGHT, NUM_FORS_TREES, NUM_HYPERTREE_LAYERS,
-    WOTS_CHAINS_STATEFUL,
-};
+use crate::primitives::profiles::{HYPERTREE_HEIGHT, NUM_HYPERTREE_LAYERS, WOTS_CHAINS_STATEFUL};
+#[cfg(test)]
+use crate::primitives::profiles::NUM_FORS_TREES;
 use crate::primitives::HASH_LEN;
-use crate::types::{
-    ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey, StatefulSignature,
-    StatelessSignature,
-};
+#[cfg(test)]
+use crate::sphincs_plus_c::fors_c::Entry;
+use crate::sphincs_plus_c::fors_c::Signature;
+use crate::types::{HypertreeLayerSignature, PublicKey, StatefulSignature, StatelessSignature};
 use crate::wots_c::Signature as WotsCSignature;
 
 /// Upper bound on a stateful auth-path length (equals the leaf index).
@@ -103,23 +102,8 @@ fn encode_stateful_signature_body(signature: &StatefulSignature) -> Vec<u8> {
     ])
 }
 
-fn encode_fors_entry_body(entry: &ForsEntry) -> Vec<u8> {
-    encode_tuple(alloc::vec![
-        Field::Dynamic(encode_bytes(&entry.secret_leaf)),
-        Field::Dynamic(encode_dynamic_array(
-            entry.auth_path.iter().map(|node| encode_bytes(node)).collect(),
-        )),
-    ])
-}
-
-fn encode_fors_signature_body(signature: &ForsSignature) -> Vec<u8> {
-    encode_tuple(alloc::vec![
-        Field::Dynamic(encode_bytes(&signature.randomizer)),
-        Field::Static(word_from_u32(signature.counter)),
-        Field::Dynamic(encode_dynamic_array(
-            signature.entries.iter().map(encode_fors_entry_body).collect(),
-        )),
-    ])
+fn encode_fors_signature_body(signature: &Signature) -> Vec<u8> {
+    signature.to_bytes()
 }
 
 fn encode_wots_c_signature_body(signature: &WotsCSignature) -> Vec<u8> {
@@ -167,28 +151,8 @@ fn decode_stateful_signature(reader: &AbiReader, base: usize) -> Option<Stateful
     })
 }
 
-fn decode_fors_entry(reader: &AbiReader, base: usize) -> Option<ForsEntry> {
-    Some(ForsEntry {
-        secret_leaf: reader.decode_bytes32_field(base, base)?,
-        auth_path: collect_hash_words(reader.decode_array_bytes(
-            base,
-            base.checked_add(32)?,
-            FORS_TREE_HEIGHT as usize,
-        )?)?,
-    })
-}
-
-fn decode_fors_signature(reader: &AbiReader, base: usize) -> Option<ForsSignature> {
-    Some(ForsSignature {
-        randomizer: reader.decode_bytes32_field(base, base)?,
-        counter: reader.read_u32(base.checked_add(32)?)?,
-        entries: reader.decode_dynamic_array(
-            base,
-            base.checked_add(64)?,
-            NUM_FORS_TREES as usize,
-            decode_fors_entry,
-        )?,
-    })
+fn decode_fors_signature(reader: &AbiReader, base: usize) -> Option<Signature> {
+    Signature::decode(reader, base)
 }
 
 fn decode_wots_c_signature(reader: &AbiReader, base: usize) -> Option<WotsCSignature> {
@@ -350,15 +314,15 @@ mod tests {
 
     fn sample_stateless_signature() -> StatelessSignature {
         StatelessSignature {
-            fors: ForsSignature {
+            fors: Signature {
                 randomizer: [0x77; HASH_LEN],
                 counter: 7,
                 entries: vec![
-                    ForsEntry {
+                    Entry {
                         secret_leaf: [0x88; HASH_LEN],
                         auth_path: vec![[0x99; HASH_LEN], [0xA0; HASH_LEN]],
                     },
-                    ForsEntry {
+                    Entry {
                         secret_leaf: [0xA1; HASH_LEN],
                         auth_path: vec![[0xA2; HASH_LEN]],
                     },
@@ -550,7 +514,7 @@ mod tests {
         // strict abi.decode-style path has no such precondition and simply
         // decodes the zero-length array.
         let signature = StatelessSignature {
-            fors: ForsSignature {
+            fors: Signature {
                 randomizer: [0x01; HASH_LEN],
                 counter: 0,
                 entries: vec![],

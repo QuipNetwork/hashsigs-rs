@@ -54,8 +54,8 @@ pub use crate::primitives::{
     HASH_SUITE_KECCAK_256, HASH_SUITE_SHA2_256,
 };
 pub use crate::types::{
-    ActionContext, ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey,
-    StatefulPublicKey, StatefulSignature, StatelessSignature, STATEFUL_PUBLIC_KEY_BYTES,
+    ActionContext, HypertreeLayerSignature, PublicKey, StatefulPublicKey, StatefulSignature,
+    StatelessSignature, STATEFUL_PUBLIC_KEY_BYTES,
 };
 
 // Re-export commitment helpers used by wasm/tests.

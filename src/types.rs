@@ -20,6 +20,7 @@
 use alloc::vec::Vec;
 
 use crate::primitives::HASH_LEN;
+use crate::sphincs_plus_c::fors_c;
 use crate::wots_c::Signature;
 
 // Encoded stateful public key layout, kept 68 bytes across all profiles:
@@ -61,24 +62,6 @@ pub struct StatefulSignature {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ForsEntry {
-    /// Revealed FORS secret leaf for one signed FORS tree.
-    pub secret_leaf: [u8; HASH_LEN],
-    /// Authentication path from that FORS leaf to that FORS tree root.
-    pub auth_path: Vec<[u8; HASH_LEN]>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ForsSignature {
-    /// Randomizer mixed into FORS digest derivation.
-    pub randomizer: [u8; HASH_LEN],
-    /// Counter mixed into FORS digest derivation.
-    pub counter: u32,
-    /// FORS-C reveals `num_fors_trees - 1` entries; the omitted final tree must select leaf 0.
-    pub entries: Vec<ForsEntry>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HypertreeLayerSignature {
     /// Expected WOTS-C public-key hash for this layer.
     pub wots_c_pk_hash: [u8; HASH_LEN],
@@ -91,7 +74,7 @@ pub struct HypertreeLayerSignature {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatelessSignature {
     /// FORS-C signature that signs the external message and returns the first root.
-    pub fors: ForsSignature,
+    pub fors: fors_c::Signature,
     /// Hypertree layers that carry the FORS root up to the pinned hypertree root.
     pub hypertree: Vec<HypertreeLayerSignature>,
 }

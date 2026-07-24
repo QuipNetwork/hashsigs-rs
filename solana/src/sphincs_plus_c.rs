@@ -25,9 +25,10 @@
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use hashsigs_rs::shrincs::{
-    ActionContext, ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey as ShrincsPublicKey,
-    StatefulSignature, StatelessSignature,
+    ActionContext, HypertreeLayerSignature, PublicKey as ShrincsPublicKey, StatefulSignature,
+    StatelessSignature,
 };
+use hashsigs_rs::sphincs_plus_c::fors_c::{Entry as ForsEntry, Signature as ForsSignature};
 use hashsigs_rs::wots_c::Signature as WotsCSignature;
 
 #[derive(Debug, Clone, BorshSerialize, BorshDeserialize)]

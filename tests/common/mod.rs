@@ -39,9 +39,10 @@ use std::path::{Path, PathBuf};
 
 use flate2::read::GzDecoder;
 use hashsigs_rs::shrincs::{
-    ActionContext, ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey,
-    StatefulSignature, StatelessSignature, HASH_LEN,
+    ActionContext, HypertreeLayerSignature, PublicKey, StatefulSignature, StatelessSignature,
+    HASH_LEN,
 };
+use hashsigs_rs::sphincs_plus_c::fors_c::{Entry as ForsEntry, Signature as ForsSignature};
 use hashsigs_rs::wots_c::Signature as WotsCSignature;
 use serde_json::Value;
 

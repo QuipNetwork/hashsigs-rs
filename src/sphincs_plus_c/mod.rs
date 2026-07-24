@@ -72,7 +72,13 @@ pub(crate) fn verify_raw(
     )
 }
 
-pub(crate) mod fors_c;
+/// FORS-C signature wire type and its ABI codec, plus internal sign/verify.
+///
+/// `pub` (rather than `pub(crate)`) because `fors_c::Entry`/`fors_c::Signature`
+/// are part of the crate's public wire-type surface: the `tests/` integration
+/// suite and the `solana` workspace member reconstruct them from their DTOs,
+/// importing them at the canonical path `crate::sphincs_plus_c::fors_c`.
+pub mod fors_c;
 pub(crate) mod hypertree;
 
 /// Structured, newtyped SPHINCS+C key: [`key::Key`] = [`key::Secret`] +
