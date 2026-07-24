@@ -70,32 +70,20 @@ pub(crate) fn wots_chain_walk(
     out
 }
 
-/// Generic digit-sum grind: try counters until digit sum equals `target_sum`.
-///
-/// `digits_from_counter` returns the base-w digits for a candidate counter.
-/// On success, `build_chains` produces the revealed chain values for those digits.
+/// Find the lowest counter in `0..limit` for which `try_counter` returns
+/// `Some`, paired with its payload.
 ///
 /// Sequential fallback (default / `parallel` feature off). Kept byte-identical
 /// to the parallel version below: both return the *lowest* winning counter.
 #[cfg(not(feature = "parallel"))]
-pub(crate) fn grind_digit_sum<D, B, C>(
-    max_counter: u32,
-    target_sum: u32,
-    digits_from_counter: D,
-    build_chains: B,
-) -> Option<(u32, C)>
-where
-    D: Fn(u32) -> Option<(u32, Vec<u32>)>,
-    B: Fn(&[u32]) -> C,
-{
-    for counter in 0..max_counter {
-        let Some((digit_sum, digits)) = digits_from_counter(counter) else {
-            continue;
-        };
-        if digit_sum != target_sum {
-            continue;
+pub(crate) fn lowest_winning_counter<T>(
+    limit: u32,
+    try_counter: impl Fn(u32) -> Option<T>,
+) -> Option<(u32, T)> {
+    for counter in 0..limit {
+        if let Some(t) = try_counter(counter) {
+            return Some((counter, t));
         }
-        return Some((counter, build_chains(&digits)));
     }
     None
 }
@@ -108,6 +96,42 @@ where
 /// the cost of some parallel speedup (later shards may compute past the
 /// eventual winner before the result is known).
 #[cfg(feature = "parallel")]
+pub(crate) fn lowest_winning_counter<T: Send>(
+    limit: u32,
+    try_counter: impl Fn(u32) -> Option<T> + Sync,
+) -> Option<(u32, T)> {
+    use rayon::prelude::*;
+    (0..limit)
+        .into_par_iter()
+        .find_map_first(|counter| try_counter(counter).map(|t| (counter, t)))
+}
+
+/// Generic digit-sum grind: try counters until digit sum equals `target_sum`.
+///
+/// `digits_from_counter` returns the base-w digits for a candidate counter.
+/// On success, `build_chains` produces the revealed chain values for those digits.
+#[cfg(not(feature = "parallel"))]
+pub(crate) fn grind_digit_sum<D, B, C>(
+    max_counter: u32,
+    target_sum: u32,
+    digits_from_counter: D,
+    build_chains: B,
+) -> Option<(u32, C)>
+where
+    D: Fn(u32) -> Option<(u32, Vec<u32>)>,
+    B: Fn(&[u32]) -> C,
+{
+    lowest_winning_counter(max_counter, |counter| {
+        let (digit_sum, digits) = digits_from_counter(counter)?;
+        (digit_sum == target_sum).then(|| build_chains(&digits))
+    })
+}
+
+/// Generic digit-sum grind: try counters until digit sum equals `target_sum`.
+///
+/// `digits_from_counter` returns the base-w digits for a candidate counter.
+/// On success, `build_chains` produces the revealed chain values for those digits.
+#[cfg(feature = "parallel")]
 pub(crate) fn grind_digit_sum<D, B, C>(
     max_counter: u32,
     target_sum: u32,
@@ -116,14 +140,13 @@ pub(crate) fn grind_digit_sum<D, B, C>(
 ) -> Option<(u32, C)>
 where
     D: Fn(u32) -> Option<(u32, Vec<u32>)> + Sync,
-    B: Fn(&[u32]) -> C,
+    B: Fn(&[u32]) -> C + Sync,
+    C: Send,
 {
-    use rayon::prelude::*;
-    let (counter, digits) = (0..max_counter).into_par_iter().find_map_first(|counter| {
+    lowest_winning_counter(max_counter, |counter| {
         let (digit_sum, digits) = digits_from_counter(counter)?;
-        (digit_sum == target_sum).then_some((counter, digits))
-    })?;
-    Some((counter, build_chains(&digits)))
+        (digit_sum == target_sum).then(|| build_chains(&digits))
+    })
 }
 
 /// WOTS-C signature: randomizer, target-sum grind counter, and one revealed

@@ -684,32 +684,30 @@ fn winning_fors_counter_and_digest(
     if trace_enabled {
         hashsigs_println!("stateless trace: FORS counter search start limit={limit}");
     }
-    for counter in 0..limit {
+    // The counter is public and stored in the signature. Its only job is to
+    // find a digest whose omitted final FORS tree opens leaf zero.
+    let result = crate::wots_c::lowest_winning_counter(limit, |counter| {
         if trace_enabled && counter > 0 && counter % trace_every == 0 {
             hashsigs_println!("stateless trace: FORS counter search tried={counter}/{limit}");
         }
-        // The counter is public and stored in the signature. Its only job is to
-        // find a digest whose omitted final FORS tree opens leaf zero.
-        let Some(digest) = signer_fors_digest(
+        let digest = signer_fors_digest(
             signing_key.public_key.pk_seed.as_bytes(),
             signing_key.public_key.root.as_bytes(),
             message,
             randomizer,
             counter,
-        ) else {
-            continue;
-        };
-        if digest.omitted_final_tree_is_zero {
-            if trace_enabled {
-                hashsigs_println!("stateless trace: FORS counter search success counter={counter}");
+        )?;
+        digest.omitted_final_tree_is_zero.then_some(digest)
+    });
+    if trace_enabled {
+        match &result {
+            Some((counter, _)) => {
+                hashsigs_println!("stateless trace: FORS counter search success counter={counter}")
             }
-            return Some((counter, digest));
+            None => hashsigs_println!("stateless trace: FORS counter search exhausted limit={limit}"),
         }
     }
-    if trace_enabled {
-        hashsigs_println!("stateless trace: FORS counter search exhausted limit={limit}");
-    }
-    None
+    result
 }
 
 /// Parallel grind: shards the counter range across the rayon global pool.
@@ -722,12 +720,11 @@ fn winning_fors_counter_and_digest(
     randomizer: &[u8; HASH_LEN],
     limit: u32,
 ) -> Option<(u32, SigningForsDigest)> {
-    use rayon::prelude::*;
     let trace_enabled = stateless_trace_enabled();
     if trace_enabled {
         hashsigs_println!("stateless trace: FORS counter search start (parallel) limit={limit}");
     }
-    let winner = (0..limit).into_par_iter().find_map_first(|counter| {
+    let winner = crate::wots_c::lowest_winning_counter(limit, |counter| {
         let digest = signer_fors_digest(
             signing_key.public_key.pk_seed.as_bytes(),
             signing_key.public_key.root.as_bytes(),
@@ -735,9 +732,7 @@ fn winning_fors_counter_and_digest(
             randomizer,
             counter,
         )?;
-        digest
-            .omitted_final_tree_is_zero
-            .then_some((counter, digest))
+        digest.omitted_final_tree_is_zero.then_some(digest)
     });
     if trace_enabled {
         match &winner {
