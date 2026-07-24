@@ -27,13 +27,14 @@
 //! Flat layout: `stateful(136) ‖ stateless(128)` = 264 bytes, byte-identical
 //! to the legacy `ShrincsSigningKey` order.
 
+use crate::primitives::hash::word32;
 use crate::shrincs::signer::{INITIAL_STATEFUL_LEAF_INDEX, MAX_STATEFUL_SIGNATURES_LIMIT};
 use crate::shrincs::uxmss::{self, stateful_subtree_root};
 use crate::sphincs_plus_c;
 use crate::sphincs_plus_c::hypertree::hypertree_public_root;
 use crate::types::HASH_LEN;
 
-use super::public_key_commitment;
+use super::{derive32, public_key_commitment};
 
 /// Number of bytes in the flat secret serialization of a [`Keys`].
 pub const KEYS_BYTES: usize = 264;
@@ -150,6 +151,58 @@ impl Keys {
         }
         Some(keys)
     }
+
+    /// Regenerate a fresh stateful chain from `new_seed`, discarding any
+    /// relationship to prior stateful signatures — that is the point of a
+    /// reset. The stateless recovery half and the `max_signatures` budget
+    /// are untouched; the commitment is recomputed. Same derivation as
+    /// [`ShrincsSigner::keygen`](crate::shrincs::signer::ShrincsSigner::keygen)'s
+    /// stateful half. `new_seed` is arbitrary-length seed material hashed by
+    /// [`derive32`]; this library has no RNG, so the caller must supply
+    /// fresh entropy.
+    pub fn reset(&mut self, new_seed: &[u8]) {
+        let max = self.stateful.public_key.max_signatures;
+        let sk = derive32(b"shrincs-stateful-sk-seed", new_seed, &[]);
+        let prf = derive32(b"shrincs-stateful-prf-seed", new_seed, &[]);
+        let pk = derive32(b"shrincs-stateful-pk-seed", new_seed, &[]);
+        let root = stateful_subtree_root(&sk, &pk, INITIAL_STATEFUL_LEAF_INDEX, max);
+        self.stateful = uxmss::Key {
+            secret: uxmss::Secret {
+                sk_seed: uxmss::SkSeed::new(sk),
+                prf_seed: uxmss::PrfSeed::new(prf),
+            },
+            public_key: uxmss::PublicKey {
+                pk_seed: uxmss::PkSeed::new(pk),
+                root: uxmss::Root::new(root),
+                max_signatures: max,
+            },
+            next_leaf_index: INITIAL_STATEFUL_LEAF_INDEX,
+        };
+        self.public_key_commitment = Self::compute_commitment(&self.stateful, &self.stateless);
+    }
+
+    /// Recompute the commitment from this key's current public halves.
+    /// Convenience wrapper around [`Keys::compute_commitment`].
+    pub fn recompute_commitment(&self) -> Commitment {
+        Self::compute_commitment(&self.stateful, &self.stateless)
+    }
+
+    /// Decode a stateful envelope and recompute the commitment its carried
+    /// public key implies, ecrecover-style. The envelope's own
+    /// `public_key_commitment` field is never trusted: an attacker controls
+    /// the envelope bytes, so the recovered value is only a claim, to be
+    /// checked by the caller against a stored commitment. Returns `None` on
+    /// a malformed envelope or wrong-length fields.
+    pub fn recover_commitment(stateful_envelope: &[u8]) -> Option<Commitment> {
+        let (pk, _sig) = crate::envelope::decode_stateful_envelope(stateful_envelope)?;
+        let pk_seed = word32(&pk.pk_seed)?;
+        let hypertree_root = word32(&pk.hypertree_root)?;
+        Some(Commitment::new(public_key_commitment(
+            &pk.stateful_public_key,
+            &pk_seed,
+            &hypertree_root,
+        )))
+    }
 }
 
 // `Keys` intentionally does not derive `Zeroize`: its secret halves
@@ -252,6 +305,60 @@ mod tests {
         let exhausted = keys.stateful.public_key.max_signatures + 1;
         bytes[132..136].copy_from_slice(&exhausted.to_be_bytes());
         assert!(Keys::import(&bytes).is_some());
+    }
+
+    #[test]
+    fn reset_generates_fresh_stateful_chain() {
+        let (mut keys, _pk) = production_keys();
+        let original_stateless = keys.stateless.clone();
+        let original_commitment = keys.public_key_commitment;
+        let original_max = keys.stateful.public_key.max_signatures;
+
+        keys.reset(b"a completely different reset seed");
+
+        assert_ne!(keys.public_key_commitment, original_commitment);
+        assert_eq!(keys.stateless, original_stateless);
+        assert_eq!(keys.stateful.next_leaf_index, INITIAL_STATEFUL_LEAF_INDEX);
+        assert_eq!(keys.stateful.public_key.max_signatures, original_max);
+        assert!(Keys::import(&keys.to_bytes()).is_some());
+    }
+
+    #[test]
+    fn reset_is_deterministic() {
+        let (mut keys_a, _) = production_keys();
+        let (mut keys_b, _) = production_keys();
+
+        keys_a.reset(b"same reset seed");
+        keys_b.reset(b"same reset seed");
+
+        assert_eq!(keys_a.stateful, keys_b.stateful);
+        assert_eq!(keys_a.public_key_commitment, keys_b.public_key_commitment);
+    }
+
+    #[test]
+    fn recompute_commitment_matches_current_commitment() {
+        let (keys, _pk) = production_keys();
+        assert_eq!(keys.recompute_commitment(), keys.public_key_commitment);
+    }
+
+    #[test]
+    fn recover_commitment_from_envelope_matches_keygen_commitment() {
+        let (mut keys, pk) = production_keys();
+        let pre_sign_commitment = keys.public_key_commitment;
+        let sig =
+            crate::shrincs::signer::ShrincsSigner::sign_stateful_raw(&mut keys, &[0x11; 32])
+                .expect("sign");
+        let env = crate::envelope::encode_stateful_envelope(&pk, &sig);
+
+        let recovered = Keys::recover_commitment(&env).expect("recover");
+
+        assert_eq!(recovered, pre_sign_commitment);
+        assert_eq!(recovered, production_keys().0.public_key_commitment);
+    }
+
+    #[test]
+    fn recover_commitment_rejects_garbage_envelope() {
+        assert!(Keys::recover_commitment(&[0u8; 4]).is_none());
     }
 
     #[test]
