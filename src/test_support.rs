@@ -18,9 +18,8 @@
 
 //! Consolidated `#[cfg(test)]` helpers shared across modules.
 
-use crate::shrincs::{
-    derive32, encode_stateful_public_key, public_key_from_components, ShrincsSigningKey,
-};
+use crate::shrincs::{derive32, encode_stateful_public_key, public_key_from_components, Keys};
+use crate::sphincs_plus_c;
 use crate::types::PublicKey;
 use crate::shrincs::uxmss;
 
@@ -29,7 +28,7 @@ const INITIAL_STATEFUL_LEAF_INDEX: u32 = 1;
 /// Build a signing key that exercises only the stateful subsystem, with a
 /// placeholder hypertree root. Avoids compute-infeasible stateless hypertree
 /// keygen so it runs on every profile.
-pub(crate) fn stateful_only_key(seed: &[u8], max: u32) -> (ShrincsSigningKey, PublicKey) {
+pub(crate) fn stateful_only_key(seed: &[u8], max: u32) -> (Keys, PublicKey) {
     let stateful_sk_seed = derive32(b"shrincs-stateful-sk-seed", seed, &[]);
     let stateful_prf_seed = derive32(b"shrincs-stateful-prf-seed", seed, &[]);
     let stateful_pk_seed = derive32(b"shrincs-stateful-pk-seed", seed, &[]);
@@ -41,17 +40,37 @@ pub(crate) fn stateful_only_key(seed: &[u8], max: u32) -> (ShrincsSigningKey, Pu
     );
     let pk_seed = derive32(b"shrincs-pk-seed", seed, &[]);
     let hypertree_root = derive32(b"placeholder-hypertree-root", seed, &[]);
-    let signing_key = ShrincsSigningKey {
-        stateful_sk_seed,
-        stateful_prf_seed,
-        stateful_pk_seed,
-        stateful_root,
-        max_stateful_signatures: max,
-        next_stateful_leaf_index: INITIAL_STATEFUL_LEAF_INDEX,
-        stateless_sk_seed: derive32(b"shrincs-stateless-sk-seed", seed, &[]),
-        stateless_prf_seed: derive32(b"shrincs-stateless-prf-seed", seed, &[]),
-        pk_seed,
-        hypertree_root,
+    let stateful = uxmss::Key {
+        secret: uxmss::Secret {
+            sk_seed: uxmss::SkSeed::new(stateful_sk_seed),
+            prf_seed: uxmss::PrfSeed::new(stateful_prf_seed),
+        },
+        public_key: uxmss::PublicKey {
+            pk_seed: uxmss::PkSeed::new(stateful_pk_seed),
+            root: uxmss::Root::new(stateful_root),
+            max_signatures: max,
+        },
+        next_leaf_index: INITIAL_STATEFUL_LEAF_INDEX,
+    };
+    let stateless = sphincs_plus_c::Key {
+        secret: sphincs_plus_c::Secret {
+            sk_seed: sphincs_plus_c::SkSeed::new(derive32(b"shrincs-stateless-sk-seed", seed, &[])),
+            prf_seed: sphincs_plus_c::PrfSeed::new(derive32(
+                b"shrincs-stateless-prf-seed",
+                seed,
+                &[],
+            )),
+        },
+        public_key: sphincs_plus_c::PublicKey {
+            pk_seed: sphincs_plus_c::PkSeed::new(pk_seed),
+            root: sphincs_plus_c::Root::new(hypertree_root),
+        },
+    };
+    let public_key_commitment = Keys::compute_commitment(&stateful, &stateless);
+    let signing_key = Keys {
+        stateless,
+        stateful,
+        public_key_commitment,
     };
     let public_key = public_key_from_components(
         encode_stateful_public_key(stateful_pk_seed, stateful_root, max),

@@ -23,11 +23,13 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use super::ShrincsSigningKey;
+use super::uxmss;
+use super::Keys;
 use super::{
     ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey, RotationTarget,
     StatefulRotationTarget, StatelessSignature, WotsCSignature, HASH_LEN,
 };
+use crate::sphincs_plus_c;
 
 pub(crate) const FIXTURE_PATH_ENV: &str = "SHRINCS_TEST_KEY_FIXTURE_PATH";
 pub(crate) const KEY_MODE_ENV: &str = "SHRINCS_TEST_KEY_MODE";
@@ -77,36 +79,52 @@ pub(crate) struct SigningKeyDto {
     pub(crate) hypertree_root: [u8; HASH_LEN],
 }
 
-impl From<&ShrincsSigningKey> for SigningKeyDto {
-    fn from(value: &ShrincsSigningKey) -> Self {
+impl From<&Keys> for SigningKeyDto {
+    fn from(value: &Keys) -> Self {
         Self {
-            stateful_sk_seed: value.stateful_sk_seed,
-            stateful_prf_seed: value.stateful_prf_seed,
-            stateful_pk_seed: value.stateful_pk_seed,
-            stateful_root: value.stateful_root,
-            max_stateful_signatures: value.max_stateful_signatures,
-            next_stateful_leaf_index: value.next_stateful_leaf_index,
-            stateless_sk_seed: value.stateless_sk_seed,
-            stateless_prf_seed: value.stateless_prf_seed,
-            pk_seed: value.pk_seed,
-            hypertree_root: value.hypertree_root,
+            stateful_sk_seed: *value.stateful.secret.sk_seed.as_bytes(),
+            stateful_prf_seed: *value.stateful.secret.prf_seed.as_bytes(),
+            stateful_pk_seed: *value.stateful.public_key.pk_seed.as_bytes(),
+            stateful_root: *value.stateful.public_key.root.as_bytes(),
+            max_stateful_signatures: value.stateful.public_key.max_signatures,
+            next_stateful_leaf_index: value.stateful.next_leaf_index,
+            stateless_sk_seed: *value.stateless.secret.sk_seed.as_bytes(),
+            stateless_prf_seed: *value.stateless.secret.prf_seed.as_bytes(),
+            pk_seed: *value.stateless.public_key.pk_seed.as_bytes(),
+            hypertree_root: *value.stateless.public_key.root.as_bytes(),
         }
     }
 }
 
-impl From<SigningKeyDto> for ShrincsSigningKey {
+impl From<SigningKeyDto> for Keys {
     fn from(value: SigningKeyDto) -> Self {
+        let stateful = uxmss::Key {
+            secret: uxmss::Secret {
+                sk_seed: uxmss::SkSeed::new(value.stateful_sk_seed),
+                prf_seed: uxmss::PrfSeed::new(value.stateful_prf_seed),
+            },
+            public_key: uxmss::PublicKey {
+                pk_seed: uxmss::PkSeed::new(value.stateful_pk_seed),
+                root: uxmss::Root::new(value.stateful_root),
+                max_signatures: value.max_stateful_signatures,
+            },
+            next_leaf_index: value.next_stateful_leaf_index,
+        };
+        let stateless = sphincs_plus_c::Key {
+            secret: sphincs_plus_c::Secret {
+                sk_seed: sphincs_plus_c::SkSeed::new(value.stateless_sk_seed),
+                prf_seed: sphincs_plus_c::PrfSeed::new(value.stateless_prf_seed),
+            },
+            public_key: sphincs_plus_c::PublicKey {
+                pk_seed: sphincs_plus_c::PkSeed::new(value.pk_seed),
+                root: sphincs_plus_c::Root::new(value.hypertree_root),
+            },
+        };
+        let public_key_commitment = Keys::compute_commitment(&stateful, &stateless);
         Self {
-            stateful_sk_seed: value.stateful_sk_seed,
-            stateful_prf_seed: value.stateful_prf_seed,
-            stateful_pk_seed: value.stateful_pk_seed,
-            stateful_root: value.stateful_root,
-            max_stateful_signatures: value.max_stateful_signatures,
-            next_stateful_leaf_index: value.next_stateful_leaf_index,
-            stateless_sk_seed: value.stateless_sk_seed,
-            stateless_prf_seed: value.stateless_prf_seed,
-            pk_seed: value.pk_seed,
-            hypertree_root: value.hypertree_root,
+            stateless,
+            stateful,
+            public_key_commitment,
         }
     }
 }
@@ -492,7 +510,7 @@ pub(crate) fn fixture_entry_opt<'a>(
         .find(|entry| entry.seed_label == seed_label)
 }
 
-pub(crate) fn fixture_pair(entry: &KeyFixtureEntry) -> (ShrincsSigningKey, PublicKey) {
+pub(crate) fn fixture_pair(entry: &KeyFixtureEntry) -> (Keys, PublicKey) {
     (
         entry.signing_key.clone().into(),
         entry.public_key.clone().into(),

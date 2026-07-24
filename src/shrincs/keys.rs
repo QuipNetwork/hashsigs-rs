@@ -200,38 +200,7 @@ mod tests {
     /// `keygen` installs — for cross-checking commitment and import.
     fn production_keys() -> (Keys, crate::types::PublicKey) {
         use crate::shrincs::signer::ShrincsSigner;
-        let (sk, pk) = ShrincsSigner::keygen(b"keys import cross-check", 4).expect("keygen");
-        let stateful = uxmss::Key {
-            secret: uxmss::Secret {
-                sk_seed: uxmss::SkSeed::new(sk.stateful_sk_seed),
-                prf_seed: uxmss::PrfSeed::new(sk.stateful_prf_seed),
-            },
-            public_key: uxmss::PublicKey {
-                pk_seed: uxmss::PkSeed::new(sk.stateful_pk_seed),
-                root: uxmss::Root::new(sk.stateful_root),
-                max_signatures: sk.max_stateful_signatures,
-            },
-            next_leaf_index: sk.next_stateful_leaf_index,
-        };
-        let stateless = sphincs_plus_c::Key {
-            secret: sphincs_plus_c::Secret {
-                sk_seed: sphincs_plus_c::SkSeed::new(sk.stateless_sk_seed),
-                prf_seed: sphincs_plus_c::PrfSeed::new(sk.stateless_prf_seed),
-            },
-            public_key: sphincs_plus_c::PublicKey {
-                pk_seed: sphincs_plus_c::PkSeed::new(sk.pk_seed),
-                root: sphincs_plus_c::Root::new(sk.hypertree_root),
-            },
-        };
-        let public_key_commitment = Keys::compute_commitment(&stateful, &stateless);
-        (
-            Keys {
-                stateless,
-                stateful,
-                public_key_commitment,
-            },
-            pk,
-        )
+        ShrincsSigner::keygen(b"keys import cross-check", 4).expect("keygen")
     }
 
     /// `compute_commitment` must match the commitment production `keygen`

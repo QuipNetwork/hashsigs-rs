@@ -32,8 +32,8 @@
 #[cfg(any(test, feature = "wasm-bindings"))]
 use crate::verifier::VerifierInterface as _;
 use crate::shrincs::{
-    ActionContext as CoreActionContext, PublicKey, RotationContext as CoreRotationContext,
-    ShrincsSigner, ShrincsSigningKey, ShrincsVerifier, HASH_LEN, STATEFUL_PUBLIC_KEY_BYTES,
+    ActionContext as CoreActionContext, Keys, PublicKey, RotationContext as CoreRotationContext,
+    ShrincsSigner, ShrincsVerifier, HASH_LEN, STATEFUL_PUBLIC_KEY_BYTES,
 };
 // The Uint8Array-native noble-style free functions (sphincsPlusC*/shrincs
 // keygen/sign/verify) work directly with the independent SPHINCS+C layer and
@@ -677,48 +677,22 @@ pub fn sphincs_plus_c_verify(signature: &[u8], message: &[u8], public_key: &[u8]
 /// SHRINCS secret key: `statefulSkSeed(32) ‖ statefulPrfSeed(32) ‖
 /// statefulPkSeed(32) ‖ statefulRoot(32) ‖ maxStatefulSignatures(u32 BE) ‖
 /// nextStatefulLeafIndex(u32 BE) ‖ statelessSkSeed(32) ‖ statelessPrfSeed(32)
-/// ‖ pkSeed(32) ‖ hypertreeRoot(32)`, 264 bytes total — the exact field
-/// order of `ShrincsSigningKey`.
+/// ‖ pkSeed(32) ‖ hypertreeRoot(32)`, 264 bytes total — `Keys::to_bytes`'s
+/// flat layout (`stateful(136) ‖ stateless(128)`), the same field order the
+/// legacy `ShrincsSigningKey` used.
 #[cfg(any(test, feature = "wasm-bindings"))]
-fn serialize_shrincs_signing_key(key: &ShrincsSigningKey) -> alloc::vec::Vec<u8> {
-    let mut out = alloc::vec::Vec::with_capacity(264);
-    out.extend_from_slice(&key.stateful_sk_seed);
-    out.extend_from_slice(&key.stateful_prf_seed);
-    out.extend_from_slice(&key.stateful_pk_seed);
-    out.extend_from_slice(&key.stateful_root);
-    out.extend_from_slice(&key.max_stateful_signatures.to_be_bytes());
-    out.extend_from_slice(&key.next_stateful_leaf_index.to_be_bytes());
-    out.extend_from_slice(&key.stateless_sk_seed);
-    out.extend_from_slice(&key.stateless_prf_seed);
-    out.extend_from_slice(&key.pk_seed);
-    out.extend_from_slice(&key.hypertree_root);
-    out
+fn serialize_shrincs_signing_key(key: &Keys) -> alloc::vec::Vec<u8> {
+    key.to_bytes().to_vec()
 }
 
 /// Deserialize the flat layout above WITHOUT validating the roots — callers
 /// MUST run the result through `ShrincsSigner::import_signing_key` before
 /// trusting it (this only checks the length and slices the fields).
 #[cfg(any(test, feature = "wasm-bindings"))]
-fn deserialize_shrincs_signing_key(bytes: &[u8]) -> Result<ShrincsSigningKey, WasmErr> {
-    if bytes.len() != 264 {
-        return Err(WasmErr {
-            code: ERR_BAD_LENGTH,
-            message: format!("shrincs secretKey must be 264 bytes, got {}", bytes.len()),
-        });
-    }
-    let max_stateful_signatures = u32::from_be_bytes(bytes_fixed::<4>(&bytes[128..132])?);
-    let next_stateful_leaf_index = u32::from_be_bytes(bytes_fixed::<4>(&bytes[132..136])?);
-    Ok(ShrincsSigningKey {
-        stateful_sk_seed: bytes_word32(&bytes[0..32])?,
-        stateful_prf_seed: bytes_word32(&bytes[32..64])?,
-        stateful_pk_seed: bytes_word32(&bytes[64..96])?,
-        stateful_root: bytes_word32(&bytes[96..128])?,
-        max_stateful_signatures,
-        next_stateful_leaf_index,
-        stateless_sk_seed: bytes_word32(&bytes[136..168])?,
-        stateless_prf_seed: bytes_word32(&bytes[168..200])?,
-        pk_seed: bytes_word32(&bytes[200..232])?,
-        hypertree_root: bytes_word32(&bytes[232..264])?,
+fn deserialize_shrincs_signing_key(bytes: &[u8]) -> Result<Keys, WasmErr> {
+    Keys::from_bytes(bytes).ok_or_else(|| WasmErr {
+        code: ERR_BAD_LENGTH,
+        message: format!("shrincs secretKey must be 264 bytes, got {}", bytes.len()),
     })
 }
 
@@ -826,7 +800,7 @@ fn require_public_key_len(bytes: &[u8]) -> Result<(), WasmErr> {
 #[cfg(feature = "wasm-bindings")]
 #[wasm_bindgen]
 pub struct WasmShrincsKeys {
-    signing_key: ShrincsSigningKey,
+    signing_key: Keys,
     public_key: PublicKey,
 }
 
@@ -935,7 +909,7 @@ pub fn shrincs_sign(
     // Pre-check exhaustion explicitly. Core signals BOTH exhaustion and
     // (astronomically rare) WOTS-C grinding failure as `None`; without this
     // check the two are conflated under one misleading error code.
-    if signing_key.next_stateful_leaf_index > signing_key.max_stateful_signatures {
+    if signing_key.stateful.next_leaf_index > signing_key.stateful.public_key.max_signatures {
         return Err(js_error(WasmErr {
             code: ERR_STATEFUL_LEAVES_EXHAUSTED,
             message: "no unused stateful leaf available for this key".into(),
@@ -1190,7 +1164,7 @@ mod tests {
         fixture_entry_opt, fixture_pair, load_fixture_file, stateful_signer_fixture_path,
         TestKeyMode,
     };
-    use crate::shrincs::{PublicKey as SignerPublicKey, ShrincsSigner, ShrincsSigningKey};
+    use crate::shrincs::{Keys, PublicKey as SignerPublicKey, ShrincsSigner};
     #[cfg(all(feature = "wasm-bindings", target_arch = "wasm32"))]
     use wasm_bindgen_test::wasm_bindgen_test;
 
@@ -1213,7 +1187,7 @@ mod tests {
         hex_string(&out)
     }
 
-    fn signing_key_and_public_key() -> (ShrincsSigningKey, SignerPublicKey) {
+    fn signing_key_and_public_key() -> (Keys, SignerPublicKey) {
         ShrincsSigner::keygen(b"wasm verifier test seed", 4).unwrap()
     }
 
@@ -1221,7 +1195,7 @@ mod tests {
     use crate::test_support::stateful_only_key;
 
     #[cfg(all(feature = "wasm-bindings", target_arch = "wasm32"))]
-    fn stateful_signing_key_and_public_key() -> (ShrincsSigningKey, SignerPublicKey) {
+    fn stateful_signing_key_and_public_key() -> (Keys, SignerPublicKey) {
         match TestKeyMode::from_env() {
             TestKeyMode::Fresh => stateful_only_key(b"wasm verifier test seed", 4),
             TestKeyMode::Fixture => {
@@ -1464,10 +1438,10 @@ mod tests {
     fn sphincs_plus_c_signing_key_flat_serialization_round_trips() {
         let (key, _) = signing_key_and_public_key();
         let spk = SphincsPlusCSigningKey {
-            stateless_sk_seed: key.stateless_sk_seed,
-            stateless_prf_seed: key.stateless_prf_seed,
-            pk_seed: key.pk_seed,
-            hypertree_root: key.hypertree_root,
+            stateless_sk_seed: *key.stateless.secret.sk_seed.as_bytes(),
+            stateless_prf_seed: *key.stateless.secret.prf_seed.as_bytes(),
+            pk_seed: *key.stateless.public_key.pk_seed.as_bytes(),
+            hypertree_root: *key.stateless.public_key.root.as_bytes(),
         };
         let bytes = serialize_sphincs_plus_c_signing_key(&spk);
         assert_eq!(bytes.len(), 128);

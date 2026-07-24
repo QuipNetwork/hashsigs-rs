@@ -96,7 +96,7 @@ fn load_vectors() -> Value {
 fn fixture_or_fresh_full_key(
     seed_label: &'static str,
     max_stateful_signatures: u32,
-) -> (super::ShrincsSigningKey, PublicKey) {
+) -> (super::Keys, PublicKey) {
     match TestKeyMode::from_env() {
         TestKeyMode::Fresh => ShrincsSigner::keygen(seed_label.as_bytes(), max_stateful_signatures)
             .unwrap_or_else(|| panic!("fresh keygen failed for seed label {seed_label:?}")),

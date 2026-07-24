@@ -309,7 +309,7 @@ mod interface_tests {
     use super::*;
     use crate::shrincs::{PublicKey, ShrincsSigner, StatelessSignature};
 
-    fn keypair(seed: &[u8]) -> (crate::shrincs::ShrincsSigningKey, PublicKey) {
+    fn keypair(seed: &[u8]) -> (crate::shrincs::Keys, PublicKey) {
         ShrincsSigner::keygen(seed, 4).expect("keygen must succeed for a valid seed/budget")
     }
 

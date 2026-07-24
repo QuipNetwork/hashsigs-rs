@@ -39,7 +39,7 @@ pub(crate) mod test_fixtures;
 
 pub use crate::verifier::{VerifierInterface, VerifyOutcome};
 pub use keys::{Commitment, Keys};
-pub use signer::{ShrincsSigner, ShrincsSignerResult, ShrincsSigningKey, ShrincsStatefulSigner};
+pub use signer::{ShrincsSigner, ShrincsSignerResult, ShrincsStatefulSigner};
 pub use dispatch::prepare_stateless_delegation;
 pub use verifier::ShrincsVerifier;
 

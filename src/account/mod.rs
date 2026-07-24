@@ -1055,7 +1055,7 @@ mod tests {
     use super::*;
     use std::sync::OnceLock;
 
-    use crate::shrincs::ShrincsSigningKey;
+    use crate::shrincs::Keys;
     use crate::shrincs::test_fixtures::{
         account_cases_fixture_path, fixture_entry_opt, fixture_pair, fixture_path,
         load_account_cases_fixture_file, load_fixture_file, write_account_cases_fixture_file,
@@ -1146,7 +1146,7 @@ mod tests {
     use crate::test_support::stateful_only_key;
 
 
-    fn fixture_or_fresh_key(seed_label: &'static str, max: u32) -> (ShrincsSigningKey, SignerPublicKey) {
+    fn fixture_or_fresh_key(seed_label: &'static str, max: u32) -> (Keys, SignerPublicKey) {
         match TestKeyMode::from_env() {
             TestKeyMode::Fresh => ShrincsSigner::keygen(seed_label.as_bytes(), max)
                 .unwrap_or_else(|| panic!("fresh keygen failed for seed label {seed_label:?}")),
@@ -1164,7 +1164,7 @@ mod tests {
     fn cheap_or_fresh_stateful_key(
         seed_label: &'static str,
         max: u32,
-    ) -> (ShrincsSigningKey, SignerPublicKey) {
+    ) -> (Keys, SignerPublicKey) {
         match TestKeyMode::from_env() {
             TestKeyMode::Fresh => ShrincsSigner::keygen(seed_label.as_bytes(), max)
                 .unwrap_or_else(|| panic!("fresh keygen failed for seed label {seed_label:?}")),

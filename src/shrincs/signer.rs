@@ -17,11 +17,10 @@
 
 //! Public SHRINCS key generation and signing facade.
 //!
-//! `ShrincsSigner` derives seed material into a `ShrincsSigningKey` +
-//! `PublicKey` pair and drives both signing paths: `uxmss` for the stateful
-//! fast path, `sphincs_plus_c` for stateless recovery. Consumed by `account`
-//! and `wasm` as the only place that advances signer-side state
-//! (`next_stateful_leaf_index`).
+//! `ShrincsSigner` derives seed material into a [`Keys`] + `PublicKey` pair
+//! and drives both signing paths: `uxmss` for the stateful fast path,
+//! `sphincs_plus_c` for stateless recovery. Consumed by `account` and `wasm`
+//! as the only place that advances signer-side state (`next_leaf_index`).
 
 use crate::primitives::hash::word32;
 use crate::sphincs_plus_c::hypertree::hypertree_public_root;
@@ -29,7 +28,8 @@ use crate::sphincs_plus_c::{self};
 use crate::types::{ActionContext, PublicKey, StatefulSignature, StatelessSignature, HASH_LEN};
 use crate::shrincs::uxmss;
 
-pub use super::signer_types::{ShrincsSignerResult, ShrincsSigningKey};
+pub use super::signer_types::ShrincsSignerResult;
+use super::keys::Keys;
 use super::messages::stateful_action_message_hash;
 use super::public_key::encode_stateful_public_key;
 use super::signer_utils::{derive32, public_key_from_components};
@@ -41,7 +41,7 @@ use super::signer_utils::{derive32, public_key_from_components};
 /// once the leaf budget is exhausted. Built via
 /// [`ShrincsSigner::into_stateful_signer`].
 pub struct ShrincsStatefulSigner {
-    signing_key: ShrincsSigningKey,
+    signing_key: Keys,
     public_key: PublicKey,
 }
 
@@ -52,15 +52,17 @@ impl ShrincsStatefulSigner {
     }
 
     /// The signing key (leaf state advances as signatures are produced).
-    pub fn signing_key(&self) -> &ShrincsSigningKey {
+    pub fn signing_key(&self) -> &Keys {
         &self.signing_key
     }
 
     /// Leaves remaining before the stateful budget is exhausted.
     pub fn remaining_stateful_signatures(&self) -> u32 {
         self.signing_key
-            .max_stateful_signatures
-            .saturating_sub(self.signing_key.next_stateful_leaf_index.saturating_sub(1))
+            .stateful
+            .public_key
+            .max_signatures
+            .saturating_sub(self.signing_key.stateful.next_leaf_index.saturating_sub(1))
     }
 }
 
@@ -111,7 +113,7 @@ impl ShrincsSigner {
     pub fn keygen(
         seed_material: &[u8],
         max_stateful_signatures: u32,
-    ) -> ShrincsSignerResult<(ShrincsSigningKey, PublicKey)> {
+    ) -> ShrincsSignerResult<(Keys, PublicKey)> {
         if max_stateful_signatures == 0 {
             return None;
         }
@@ -133,17 +135,33 @@ impl ShrincsSigner {
         let pk_seed = derive32(b"shrincs-pk-seed", seed_material, &[]);
         let hypertree_root = hypertree_public_root(&stateless_sk_seed, &pk_seed);
 
-        let signing_key = ShrincsSigningKey {
-            stateful_sk_seed,
-            stateful_prf_seed,
-            stateful_pk_seed,
-            stateful_root,
-            max_stateful_signatures,
-            next_stateful_leaf_index: INITIAL_STATEFUL_LEAF_INDEX,
-            stateless_sk_seed,
-            stateless_prf_seed,
-            pk_seed,
-            hypertree_root,
+        let stateful = uxmss::Key {
+            secret: uxmss::Secret {
+                sk_seed: uxmss::SkSeed::new(stateful_sk_seed),
+                prf_seed: uxmss::PrfSeed::new(stateful_prf_seed),
+            },
+            public_key: uxmss::PublicKey {
+                pk_seed: uxmss::PkSeed::new(stateful_pk_seed),
+                root: uxmss::Root::new(stateful_root),
+                max_signatures: max_stateful_signatures,
+            },
+            next_leaf_index: INITIAL_STATEFUL_LEAF_INDEX,
+        };
+        let stateless = sphincs_plus_c::Key {
+            secret: sphincs_plus_c::Secret {
+                sk_seed: sphincs_plus_c::SkSeed::new(stateless_sk_seed),
+                prf_seed: sphincs_plus_c::PrfSeed::new(stateless_prf_seed),
+            },
+            public_key: sphincs_plus_c::PublicKey {
+                pk_seed: sphincs_plus_c::PkSeed::new(pk_seed),
+                root: sphincs_plus_c::Root::new(hypertree_root),
+            },
+        };
+        let public_key_commitment = Keys::compute_commitment(&stateful, &stateless);
+        let signing_key = Keys {
+            stateless,
+            stateful,
+            public_key_commitment,
         };
         let public_key = public_key_from_components(
             encode_stateful_public_key(stateful_pk_seed, stateful_root, max_stateful_signatures),
@@ -162,66 +180,46 @@ impl ShrincsSigner {
     /// from the seeds — returns `None` if the candidate's stored roots don't
     /// match (corrupted or field-spliced input). The rebuilt `PublicKey`
     /// (including the commitment) is derived, never taken from the caller.
-    pub fn import_signing_key(
-        candidate: ShrincsSigningKey,
-    ) -> ShrincsSignerResult<(ShrincsSigningKey, PublicKey)> {
-        let max = candidate.max_stateful_signatures;
-        if max == 0 || max > MAX_STATEFUL_SIGNATURES_LIMIT {
-            return None;
-        }
-        let next = candidate.next_stateful_leaf_index;
-        if next < INITIAL_STATEFUL_LEAF_INDEX || next > max.saturating_add(1) {
-            return None;
-        }
-        // Recompute, never trust: the roots are consensus-critical inputs to
-        // every signature this key will produce. The stateful root always
-        // covers the full tree from leaf 1 — independent of `next`.
-        let stateful_root = uxmss::stateful_subtree_root(
-            &candidate.stateful_sk_seed,
-            &candidate.stateful_pk_seed,
-            INITIAL_STATEFUL_LEAF_INDEX,
-            max,
-        );
-        let hypertree_root =
-            hypertree_public_root(&candidate.stateless_sk_seed, &candidate.pk_seed);
-        if stateful_root != candidate.stateful_root
-            || hypertree_root != candidate.hypertree_root
-        {
-            return None;
-        }
+    ///
+    /// Delegates the root-recompute/reject validation to [`Keys::import`] (the
+    /// same 264-byte flat layout), then derives the `PublicKey` from the
+    /// validated fields.
+    pub fn import_signing_key(candidate: Keys) -> ShrincsSignerResult<(Keys, PublicKey)> {
+        let validated = Keys::import(&candidate.to_bytes())?;
         let public_key = public_key_from_components(
-            encode_stateful_public_key(candidate.stateful_pk_seed, stateful_root, max),
-            candidate.pk_seed,
-            hypertree_root,
+            encode_stateful_public_key(
+                *validated.stateful.public_key.pk_seed.as_bytes(),
+                *validated.stateful.public_key.root.as_bytes(),
+                validated.stateful.public_key.max_signatures,
+            ),
+            *validated.stateless.public_key.pk_seed.as_bytes(),
+            *validated.stateless.public_key.root.as_bytes(),
         );
-        Some((candidate, public_key))
+        Some((validated, public_key))
     }
 
     /// Sign the verifier's canonical stateful action hash and advance the leaf counter.
     pub fn sign_stateful_action(
-        signing_key: &mut ShrincsSigningKey,
+        signing_key: &mut Keys,
         public_key: &PublicKey,
         context: &ActionContext,
     ) -> ShrincsSignerResult<StatefulSignature> {
         let expected = word32(&public_key.public_key_commitment)?;
         let message = stateful_action_message_hash(expected, context);
-        sign_stateful_via_uxmss(signing_key, &message)
+        uxmss::sign_stateful_raw(&mut signing_key.stateful, &message)
     }
 
     /// Sign raw bytes with the next unused stateful leaf.
     pub fn sign_stateful_raw(
-        signing_key: &mut ShrincsSigningKey,
+        signing_key: &mut Keys,
         message: &[u8],
     ) -> ShrincsSignerResult<StatefulSignature> {
-        sign_stateful_via_uxmss(signing_key, message)
+        uxmss::sign_stateful_raw(&mut signing_key.stateful, message)
     }
 
     /// Bundle a signing key with its public key into a stateful signer that
     /// implements [`crate::signer::SignerInterface`].
-    pub fn into_stateful_signer(
-        signing_key: ShrincsSigningKey,
-        public_key: PublicKey,
-    ) -> ShrincsStatefulSigner {
+    pub fn into_stateful_signer(signing_key: Keys, public_key: PublicKey) -> ShrincsStatefulSigner {
         ShrincsStatefulSigner {
             signing_key,
             public_key,
@@ -234,11 +232,11 @@ impl ShrincsSigner {
     /// noble-style `shrincsSign`/`shrincsSignStateless` free functions.
     #[cfg(test)]
     pub(crate) fn sign_stateful_raw_at_leaf(
-        signing_key: &ShrincsSigningKey,
+        signing_key: &Keys,
         leaf_index: u32,
         message: &[u8],
     ) -> ShrincsSignerResult<StatefulSignature> {
-        sign_stateful_at_leaf_via_uxmss(signing_key, leaf_index, message)
+        uxmss::sign_stateful_raw_at_leaf(&signing_key.stateful, leaf_index, message)
     }
 
     /// Sign raw bytes with FORS-C plus the hypertree.
@@ -247,7 +245,7 @@ impl ShrincsSigner {
     /// `keygen`; the message-specific FORS root is carried only inside the
     /// signature/hypertree flow.
     pub fn sign_stateless_raw(
-        signing_key: &ShrincsSigningKey,
+        signing_key: &Keys,
         message: &[u8],
     ) -> ShrincsSignerResult<StatelessSignature> {
         if stateless_trace_enabled() {
@@ -256,66 +254,13 @@ impl ShrincsSigner {
                 message.len()
             );
         }
-        let spk = sphincs_plus_c::Key {
-            secret: sphincs_plus_c::Secret {
-                sk_seed: sphincs_plus_c::SkSeed::new(signing_key.stateless_sk_seed),
-                prf_seed: sphincs_plus_c::PrfSeed::new(signing_key.stateless_prf_seed),
-            },
-            public_key: sphincs_plus_c::PublicKey {
-                pk_seed: sphincs_plus_c::PkSeed::new(signing_key.pk_seed),
-                root: sphincs_plus_c::Root::new(signing_key.hypertree_root),
-            },
-        };
-        let sig = sphincs_plus_c::sign(&spk, message)?;
+        let sig = sphincs_plus_c::sign(&signing_key.stateless, message)?;
         if stateless_trace_enabled() {
             hashsigs_println!("stateless trace: signer done");
         }
         Some(sig)
     }
 }
-
-fn sign_stateful_via_uxmss(
-    signing_key: &mut ShrincsSigningKey,
-    message: &[u8],
-) -> ShrincsSignerResult<StatefulSignature> {
-    let mut key = uxmss::Key {
-        secret: uxmss::Secret {
-            sk_seed: uxmss::SkSeed::new(signing_key.stateful_sk_seed),
-            prf_seed: uxmss::PrfSeed::new(signing_key.stateful_prf_seed),
-        },
-        public_key: uxmss::PublicKey {
-            pk_seed: uxmss::PkSeed::new(signing_key.stateful_pk_seed),
-            root: uxmss::Root::new(signing_key.stateful_root),
-            max_signatures: signing_key.max_stateful_signatures,
-        },
-        next_leaf_index: signing_key.next_stateful_leaf_index,
-    };
-    let sig = uxmss::sign_stateful_raw(&mut key, message)?;
-    signing_key.next_stateful_leaf_index = key.next_leaf_index;
-    Some(sig)
-}
-
-#[cfg(test)]
-fn sign_stateful_at_leaf_via_uxmss(
-    signing_key: &ShrincsSigningKey,
-    leaf_index: u32,
-    message: &[u8],
-) -> ShrincsSignerResult<StatefulSignature> {
-    let key = uxmss::Key {
-        secret: uxmss::Secret {
-            sk_seed: uxmss::SkSeed::new(signing_key.stateful_sk_seed),
-            prf_seed: uxmss::PrfSeed::new(signing_key.stateful_prf_seed),
-        },
-        public_key: uxmss::PublicKey {
-            pk_seed: uxmss::PkSeed::new(signing_key.stateful_pk_seed),
-            root: uxmss::Root::new(signing_key.stateful_root),
-            max_signatures: signing_key.max_stateful_signatures,
-        },
-        next_leaf_index: signing_key.next_stateful_leaf_index,
-    };
-    uxmss::sign_stateful_raw_at_leaf(&key, leaf_index, message)
-}
-
 
 #[cfg(test)]
 mod tests {
@@ -349,7 +294,7 @@ mod tests {
     fn fixture_or_fresh_full_key(
         seed_label: &'static str,
         max_stateful_signatures: u32,
-    ) -> (ShrincsSigningKey, PublicKey) {
+    ) -> (Keys, PublicKey) {
         match TestKeyMode::from_env() {
             TestKeyMode::Fresh => ShrincsSigner::keygen(
                 seed_label.as_bytes(),
@@ -382,7 +327,7 @@ mod tests {
     fn fixture_or_stateful_only_key(
         seed_label: &'static str,
         max_stateful_signatures: u32,
-    ) -> (ShrincsSigningKey, PublicKey) {
+    ) -> (Keys, PublicKey) {
         match TestKeyMode::from_env() {
             TestKeyMode::Fresh => stateful_only_key(seed_label.as_bytes(), max_stateful_signatures),
             TestKeyMode::Fixture => {
@@ -447,17 +392,41 @@ mod tests {
         // the stateful path, but it is still committed by the public key.
         let hypertree_root = derive32(b"placeholder-hypertree-root", seed, &[]);
 
-        let signing_key = ShrincsSigningKey {
-            stateful_sk_seed,
-            stateful_prf_seed,
-            stateful_pk_seed,
-            stateful_root,
-            max_stateful_signatures: max,
-            next_stateful_leaf_index: INITIAL_STATEFUL_LEAF_INDEX,
-            stateless_sk_seed: derive32(b"shrincs-stateless-sk-seed", seed, &[]),
-            stateless_prf_seed: derive32(b"shrincs-stateless-prf-seed", seed, &[]),
-            pk_seed,
-            hypertree_root,
+        let stateful = uxmss::Key {
+            secret: uxmss::Secret {
+                sk_seed: uxmss::SkSeed::new(stateful_sk_seed),
+                prf_seed: uxmss::PrfSeed::new(stateful_prf_seed),
+            },
+            public_key: uxmss::PublicKey {
+                pk_seed: uxmss::PkSeed::new(stateful_pk_seed),
+                root: uxmss::Root::new(stateful_root),
+                max_signatures: max,
+            },
+            next_leaf_index: INITIAL_STATEFUL_LEAF_INDEX,
+        };
+        let stateless = sphincs_plus_c::Key {
+            secret: sphincs_plus_c::Secret {
+                sk_seed: sphincs_plus_c::SkSeed::new(derive32(
+                    b"shrincs-stateless-sk-seed",
+                    seed,
+                    &[],
+                )),
+                prf_seed: sphincs_plus_c::PrfSeed::new(derive32(
+                    b"shrincs-stateless-prf-seed",
+                    seed,
+                    &[],
+                )),
+            },
+            public_key: sphincs_plus_c::PublicKey {
+                pk_seed: sphincs_plus_c::PkSeed::new(pk_seed),
+                root: sphincs_plus_c::Root::new(hypertree_root),
+            },
+        };
+        let public_key_commitment = Keys::compute_commitment(&stateful, &stateless);
+        let signing_key = Keys {
+            stateless,
+            stateful,
+            public_key_commitment,
         };
         let public_key = public_key_from_components(
             encode_stateful_public_key(stateful_pk_seed, stateful_root, max),
@@ -531,7 +500,7 @@ mod tests {
         let (signing_key, _) = fixture_or_fresh_full_key("deterministic keygen seed", 4);
 
         assert_eq!(
-            signing_key.next_stateful_leaf_index,
+            signing_key.stateful.next_leaf_index,
             INITIAL_STATEFUL_LEAF_INDEX
         );
     }
@@ -596,16 +565,7 @@ mod tests {
         let (signing_key, public_key) =
             fixture_or_fresh_full_key("sphincs-plus-c hybrid cross-check", 4);
         let message = hash_packed(&[b"sphincs-plus-c-hybrid-cross"]);
-        let spk = sphincs_plus_c::Key {
-            secret: sphincs_plus_c::Secret {
-                sk_seed: sphincs_plus_c::SkSeed::new(signing_key.stateless_sk_seed),
-                prf_seed: sphincs_plus_c::PrfSeed::new(signing_key.stateless_prf_seed),
-            },
-            public_key: sphincs_plus_c::PublicKey {
-                pk_seed: sphincs_plus_c::PkSeed::new(signing_key.pk_seed),
-                root: sphincs_plus_c::Root::new(signing_key.hypertree_root),
-            },
-        };
+        let spk = signing_key.stateless.clone();
         let sig = sphincs_plus_c::sign(&spk, &message).expect("independent sign");
         let pk = spk.public_key;
         assert!(sphincs_plus_c::verify(&pk, &message, &sig));
@@ -654,7 +614,7 @@ mod tests {
 
         let signature = ShrincsSigner::sign_stateful_raw(&mut signing_key, &message).unwrap();
         assert_eq!(
-            signing_key.next_stateful_leaf_index,
+            signing_key.stateful.next_leaf_index,
             INITIAL_STATEFUL_LEAF_INDEX + 1
         );
         assert!(ShrincsVerifier::new().verify_stateful_unsafe_raw(
@@ -815,12 +775,12 @@ mod tests {
     #[test]
     fn import_accepts_advanced_and_exhausted_counters() {
         let (mut key, _) = ShrincsSigner::keygen(b"import counter seed", 4).unwrap();
-        key.next_stateful_leaf_index = 3;
+        key.stateful.next_leaf_index = 3;
         let (imported, _) = ShrincsSigner::import_signing_key(key).unwrap();
-        assert_eq!(imported.next_stateful_leaf_index, 3);
+        assert_eq!(imported.stateful.next_leaf_index, 3);
 
         let (mut key, _) = ShrincsSigner::keygen(b"import counter seed", 4).unwrap();
-        key.next_stateful_leaf_index = 5; // max + 1: exhausted, still valid
+        key.stateful.next_leaf_index = 5; // max + 1: exhausted, still valid
         let (imported, _) = ShrincsSigner::import_signing_key(key).unwrap();
         assert!(ShrincsSigner::sign_stateful_raw(
             &mut { imported },
@@ -832,43 +792,47 @@ mod tests {
     #[test]
     fn import_rejects_out_of_range_counters_and_budgets() {
         let (mut key, _) = ShrincsSigner::keygen(b"import bounds seed", 4).unwrap();
-        key.next_stateful_leaf_index = 0;
+        key.stateful.next_leaf_index = 0;
         assert!(ShrincsSigner::import_signing_key(key).is_none());
 
         let (mut key, _) = ShrincsSigner::keygen(b"import bounds seed", 4).unwrap();
-        key.next_stateful_leaf_index = 6; // max + 2
+        key.stateful.next_leaf_index = 6; // max + 2
         assert!(ShrincsSigner::import_signing_key(key).is_none());
 
         let (mut key, _) = ShrincsSigner::keygen(b"import bounds seed", 4).unwrap();
-        key.max_stateful_signatures = 0;
+        key.stateful.public_key.max_signatures = 0;
         assert!(ShrincsSigner::import_signing_key(key).is_none());
 
         let (mut key, _) = ShrincsSigner::keygen(b"import bounds seed", 4).unwrap();
-        key.max_stateful_signatures = 4097; // > MAX_STATEFUL_SIGNATURES_LIMIT
+        key.stateful.public_key.max_signatures = 4097; // > MAX_STATEFUL_SIGNATURES_LIMIT
         assert!(ShrincsSigner::import_signing_key(key).is_none());
     }
 
     #[test]
     fn import_rejects_tampered_roots() {
         let (mut key, _) = ShrincsSigner::keygen(b"import tamper seed", 4).unwrap();
-        key.stateful_root[0] ^= 0x01;
+        let mut stateful_root = *key.stateful.public_key.root.as_bytes();
+        stateful_root[0] ^= 0x01;
+        key.stateful.public_key.root = uxmss::Root::new(stateful_root);
         assert!(ShrincsSigner::import_signing_key(key).is_none());
 
         let (mut key, _) = ShrincsSigner::keygen(b"import tamper seed", 4).unwrap();
-        key.hypertree_root[0] ^= 0x01;
+        let mut hypertree_root = *key.stateless.public_key.root.as_bytes();
+        hypertree_root[0] ^= 0x01;
+        key.stateless.public_key.root = sphincs_plus_c::Root::new(hypertree_root);
         assert!(ShrincsSigner::import_signing_key(key).is_none());
 
         // Field splice: seeds from one key, roots from another.
         let (key_a, _) = ShrincsSigner::keygen(b"import splice seed A", 4).unwrap();
         let (mut key_b, _) = ShrincsSigner::keygen(b"import splice seed B", 4).unwrap();
-        key_b.stateful_root = key_a.stateful_root;
+        key_b.stateful.public_key.root = key_a.stateful.public_key.root;
         assert!(ShrincsSigner::import_signing_key(key_b).is_none());
     }
 
     #[test]
     fn imported_key_signs_and_verifies() {
         let (mut key, _) = ShrincsSigner::keygen(b"import sign seed", 4).unwrap();
-        key.next_stateful_leaf_index = 2;
+        key.stateful.next_leaf_index = 2;
         let (mut imported, pk) = ShrincsSigner::import_signing_key(key).unwrap();
         let message = b"signed after import".to_vec();
         let signature = ShrincsSigner::sign_stateful_raw(&mut imported, &message).unwrap();

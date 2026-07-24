@@ -155,17 +155,38 @@ fn emit_keygen_goldens() {
     };
 
     println!("// ==== SHRINCSSignerKeygen goldens for profile {profile} ====");
-    sol_bytes32("EXPECTED_STATEFUL_SK_SEED", &signing_key.stateful_sk_seed);
-    sol_bytes32("EXPECTED_STATEFUL_PRF_SEED", &signing_key.stateful_prf_seed);
-    sol_bytes32("EXPECTED_STATEFUL_PK_SEED", &signing_key.stateful_pk_seed);
-    sol_bytes32("EXPECTED_STATEFUL_ROOT", &signing_key.stateful_root);
-    sol_bytes32("EXPECTED_STATELESS_SK_SEED", &signing_key.stateless_sk_seed);
+    sol_bytes32(
+        "EXPECTED_STATEFUL_SK_SEED",
+        signing_key.stateful.secret.sk_seed.as_bytes(),
+    );
+    sol_bytes32(
+        "EXPECTED_STATEFUL_PRF_SEED",
+        signing_key.stateful.secret.prf_seed.as_bytes(),
+    );
+    sol_bytes32(
+        "EXPECTED_STATEFUL_PK_SEED",
+        signing_key.stateful.public_key.pk_seed.as_bytes(),
+    );
+    sol_bytes32(
+        "EXPECTED_STATEFUL_ROOT",
+        signing_key.stateful.public_key.root.as_bytes(),
+    );
+    sol_bytes32(
+        "EXPECTED_STATELESS_SK_SEED",
+        signing_key.stateless.secret.sk_seed.as_bytes(),
+    );
     sol_bytes32(
         "EXPECTED_STATELESS_PRF_SEED",
-        &signing_key.stateless_prf_seed,
+        signing_key.stateless.secret.prf_seed.as_bytes(),
     );
-    sol_bytes32("EXPECTED_PK_SEED", &signing_key.pk_seed);
-    sol_bytes32("EXPECTED_HYPERTREE_ROOT", &signing_key.hypertree_root);
+    sol_bytes32(
+        "EXPECTED_PK_SEED",
+        signing_key.stateless.public_key.pk_seed.as_bytes(),
+    );
+    sol_bytes32(
+        "EXPECTED_HYPERTREE_ROOT",
+        signing_key.stateless.public_key.root.as_bytes(),
+    );
     sol_bytes32(
         "EXPECTED_PUBLIC_KEY_COMMITMENT",
         &public_key.public_key_commitment,
