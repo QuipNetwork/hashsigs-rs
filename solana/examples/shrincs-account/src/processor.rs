@@ -16,11 +16,398 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Instruction handlers for SHRINCS account actions.
+//!
+//! Ported from the deleted Solana account program (`solana/src/account.rs`
+//! prior to its removal at `5e13d35~1`), adapted to build on this crate's
+//! `state`/`pda`/`messages` modules instead of a `hashsigs-rs` dependency
+//! living directly in the handler file.
+//!
+//! `process_init`, `process_verify_stateful_action`, and
+//! `process_verify_stateless_action` are exposed `pub(crate)` and are not yet
+//! wired into [`process_instruction`]: the instruction dispatch enum/router
+//! that picks between these (and the policy/recovery/rotation handlers still
+//! to come) is a later task. Until then, this module's own tests call them
+//! directly through a test-only dispatcher (see `tests` below), so
+//! `#[allow(dead_code)]` on the handlers is expected and will be removed once
+//! the real router lands.
 
+use borsh::{BorshDeserialize, BorshSerialize};
+use hashsigs_rs::shrincs::verifier::{
+    ActionContext, PublicKey, ShrincsVerifier, StatefulSignature, StatelessSignature,
+    STATELESS_SIGNATURE_LIMIT,
+};
+use hashsigs_rs_solana::sphincs_plus_c::{
+    ShrincsPublicKeyDto, StatefulSignatureDto, StatelessSignatureDto,
+};
 use solana_program::{
-    account_info::AccountInfo, entrypoint::ProgramResult, pubkey::Pubkey,
+    account_info::{next_account_info, AccountInfo},
+    entrypoint::ProgramResult,
+    msg,
+    program::{invoke_signed, set_return_data},
+    program_error::ProgramError,
+    pubkey::Pubkey,
+    system_instruction::create_account,
+    sysvar::{rent::Rent, Sysvar},
 };
 
+use crate::messages;
+use crate::pda::{account_pda, is_leaf_used, mark_leaf_used, LeafBitmapAccounts, ACCOUNT_SEED_PREFIX};
+use crate::state::{increment_u256_be, ShrincsAccountState, StatefulPolicy, HASH_LEN};
+
+/// Freshly installed keys begin stateful signing at leaf 1: `auth_path` is
+/// never empty for a valid stateful signature (see
+/// [`hashsigs_rs::shrincs::verifier::StatefulSignature::auth_path`]'s "its
+/// length is also the leaf index" doc), so leaf 0 is not a valid leaf.
+const INITIAL_STATEFUL_LEAF_INDEX: u32 = 1;
+
+/// Distinct wrapper failure reasons for the handlers in this module.
+/// Mirrors (a subset of) `hashsigs_rs::account::AccountError`'s numbering
+/// scheme, restricted to what `process_init`,
+/// `process_verify_stateful_action`, and `process_verify_stateless_action`
+/// can return; owner/rotation-only variants belong to later tasks' handlers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub(crate) enum ShrincsAccountError {
+    InvalidSignature = 0,
+    StatefulPathDisabled = 1,
+    StatefulLeafRejected = 2,
+    RecoveryNotArmed = 3,
+    BudgetExhausted = 4,
+}
+
+impl From<ShrincsAccountError> for ProgramError {
+    fn from(err: ShrincsAccountError) -> Self {
+        ProgramError::Custom(err as u32)
+    }
+}
+
+/// Instruction data for [`process_init`].
+#[derive(Debug, Clone, BorshSerialize, BorshDeserialize)]
+pub(crate) struct InitArgs {
+    pub salt: [u8; HASH_LEN],
+    pub initial_commitment: [u8; HASH_LEN],
+}
+
+/// Instruction data for [`process_verify_stateful_action`].
+#[derive(Debug, Clone, BorshSerialize, BorshDeserialize)]
+pub(crate) struct StatefulActionArgs {
+    pub public_key: ShrincsPublicKeyDto,
+    pub action_type: [u8; HASH_LEN],
+    pub payload_hash: [u8; HASH_LEN],
+    pub signature: StatefulSignatureDto,
+}
+
+/// Instruction data for [`process_verify_stateless_action`].
+#[derive(Debug, Clone, BorshSerialize, BorshDeserialize)]
+pub(crate) struct StatelessActionArgs {
+    pub public_key: ShrincsPublicKeyDto,
+    pub action_type: [u8; HASH_LEN],
+    pub payload_hash: [u8; HASH_LEN],
+    pub signature: StatelessSignatureDto,
+}
+
+fn load_state(
+    account_info: &AccountInfo,
+    program_id: &Pubkey,
+) -> Result<ShrincsAccountState, ProgramError> {
+    if account_info.owner != program_id {
+        return Err(ProgramError::IncorrectProgramId);
+    }
+    let data = account_info.try_borrow_data()?;
+    ShrincsAccountState::try_from_slice(&data).map_err(|_| ProgramError::InvalidAccountData)
+}
+
+fn store_state(account_info: &AccountInfo, state: &ShrincsAccountState) -> ProgramResult {
+    let mut data = Vec::new();
+    state
+        .serialize(&mut data)
+        .map_err(|_| ProgramError::InvalidAccountData)?;
+    let mut account_data = account_info.try_borrow_mut_data()?;
+    if account_data.len() != data.len() {
+        return Err(ProgramError::InvalidAccountData);
+    }
+    account_data.copy_from_slice(&data);
+    Ok(())
+}
+
+/// Check whether the active policy allows `leaf_index` before verification
+/// (mirrors the deleted port's `checkStatefulLeafUse`/`precheckStatefulLeafUse`).
+fn check_stateful_leaf_use(
+    state: &ShrincsAccountState,
+    leaf_index: u32,
+    program_id: &Pubkey,
+    account_key: &Pubkey,
+    bitmap_account: &AccountInfo,
+) -> Result<(), ProgramError> {
+    match StatefulPolicy::try_from(state.stateful_policy)? {
+        StatefulPolicy::RecoveryRotation => Err(ShrincsAccountError::StatefulPathDisabled.into()),
+        StatefulPolicy::MonotonicIndex => {
+            if leaf_index == state.next_stateful_leaf_index {
+                Ok(())
+            } else {
+                Err(ShrincsAccountError::StatefulLeafRejected.into())
+            }
+        }
+        StatefulPolicy::LeafBitmap => {
+            if is_leaf_used(program_id, account_key, &state.key_version, leaf_index, bitmap_account)? {
+                Err(ShrincsAccountError::StatefulLeafRejected.into())
+            } else {
+                Ok(())
+            }
+        }
+    }
+}
+
+/// Record a successfully verified stateful leaf under the active policy
+/// (mirrors the deleted port's `commitStatefulLeafUse`).
+fn commit_stateful_leaf_use(
+    state: &mut ShrincsAccountState,
+    leaf_index: u32,
+    program_id: &Pubkey,
+    account_key: &Pubkey,
+    accounts: &LeafBitmapAccounts,
+) -> ProgramResult {
+    match StatefulPolicy::try_from(state.stateful_policy)? {
+        StatefulPolicy::MonotonicIndex => {
+            state.next_stateful_leaf_index = state.next_stateful_leaf_index.saturating_add(1);
+        }
+        StatefulPolicy::LeafBitmap => {
+            mark_leaf_used(program_id, account_key, &state.key_version, leaf_index, accounts)?;
+        }
+        StatefulPolicy::RecoveryRotation => {}
+    }
+    state.stateful_policy_frozen = true;
+    Ok(())
+}
+
+/// Create `target` as a `program_id`-owned PDA of `space` bytes for the
+/// account-state PDA itself. Unlike [`crate::pda::mark_leaf_used`]'s bitmap
+/// words (which tolerate a pre-funded destination to resist griefing), the
+/// account PDA is created exactly once by its owner in `process_init`, so a
+/// plain `create_account` CPI is sufficient here.
+fn create_account_pda<'info>(
+    payer: &AccountInfo<'info>,
+    target: &AccountInfo<'info>,
+    system_program: &AccountInfo<'info>,
+    program_id: &Pubkey,
+    space: usize,
+    signer_seeds: &[&[u8]],
+) -> ProgramResult {
+    let rent = Rent::get()?;
+    let lamports = rent.minimum_balance(space);
+    invoke_signed(
+        &create_account(payer.key, target.key, lamports, space as u64, program_id),
+        &[payer.clone(), target.clone(), system_program.clone()],
+        &[signer_seeds],
+    )
+}
+
+/// Accounts: `[payer (signer, writable), owner (signer), account PDA
+/// (writable), system_program]`. Installs the initial commitment, default
+/// `MonotonicIndex` policy, `next_stateful_leaf_index = 1`, and zeroed
+/// nonce/key_version.
+#[allow(dead_code)] // called by this module's tests; wired into dispatch in a later task
+pub(crate) fn process_init(program_id: &Pubkey, accounts: &[AccountInfo], args: InitArgs) -> ProgramResult {
+    let accounts_iter = &mut accounts.iter();
+    let payer = next_account_info(accounts_iter)?;
+    let owner_info = next_account_info(accounts_iter)?;
+    let account_info = next_account_info(accounts_iter)?;
+    let system_program = next_account_info(accounts_iter)?;
+
+    if !payer.is_signer || !owner_info.is_signer {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+
+    let (expected_pda, bump) = account_pda(program_id, owner_info.key, &args.salt);
+    if expected_pda != *account_info.key {
+        return Err(ProgramError::InvalidSeeds);
+    }
+    if !account_info.data_is_empty() {
+        return Err(ProgramError::AccountAlreadyInitialized);
+    }
+
+    let state = ShrincsAccountState {
+        current_public_key_commitment: args.initial_commitment,
+        owner: *owner_info.key,
+        nonce: [0u8; HASH_LEN],
+        key_version: [0u8; HASH_LEN],
+        stateless_signatures_used: 0,
+        stateful_policy: StatefulPolicy::MonotonicIndex as u8,
+        stateful_policy_frozen: false,
+        next_stateful_leaf_index: INITIAL_STATEFUL_LEAF_INDEX,
+        recovery_mode: false,
+    };
+    let mut data = Vec::new();
+    state
+        .serialize(&mut data)
+        .map_err(|_| ProgramError::InvalidAccountData)?;
+
+    create_account_pda(
+        payer,
+        account_info,
+        system_program,
+        program_id,
+        data.len(),
+        &[ACCOUNT_SEED_PREFIX, owner_info.key.as_ref(), &args.salt, &[bump]],
+    )?;
+
+    account_info.try_borrow_mut_data()?[..data.len()].copy_from_slice(&data);
+    msg!(
+        "shrincs-account-event:Initialized:owner={}:commitment={:?}",
+        owner_info.key,
+        args.initial_commitment
+    );
+    Ok(())
+}
+
+/// Accounts: `[account PDA (writable), leaf-bitmap word PDA (writable;
+/// required positionally, only touched under `LeafBitmap` policy), payer
+/// (signer, writable; only used to fund a new bitmap word), system_program]`.
+///
+/// Builds the [`ActionContext`] itself from account STATE (`nonce` /
+/// `key_version`) rather than accepting a caller-supplied context -- that is
+/// the replay defense. The leaf-policy gate is keyed off
+/// `signature.auth_path.len()`, the leaf the signature itself used (see the
+/// "CRITICAL" note on [`ShrincsAccountError`]'s callers), never a free
+/// caller-declared index.
+#[allow(dead_code)] // called by this module's tests; wired into dispatch in a later task
+pub(crate) fn process_verify_stateful_action(
+    program_id: &Pubkey,
+    accounts: &[AccountInfo],
+    args: StatefulActionArgs,
+) -> ProgramResult {
+    let accounts_iter = &mut accounts.iter();
+    let account_info = next_account_info(accounts_iter)?;
+    let bitmap_account = next_account_info(accounts_iter)?;
+    let payer = next_account_info(accounts_iter)?;
+    let system_program = next_account_info(accounts_iter)?;
+
+    let mut state = load_state(account_info, program_id)?;
+    let public_key: PublicKey = args.public_key.into();
+    let signature: StatefulSignature = args.signature.into();
+
+    // Bind the leaf-policy gate to the leaf the SIGNATURE actually used.
+    // `auth_path.len()` IS the stateful leaf index -- both
+    // `hashsigs_rs::types::StatefulSignature::auth_path`'s doc comment and
+    // the core verifier (`uxmss::verify_stateful_unsafe_raw`, which derives
+    // `leaf_index` the same way before recomputing the tree root) agree on
+    // this. A caller cannot forge it independently of the signature: the
+    // root recomputation folds `leaf_index` into every parent-hash step, so
+    // an attacker declaring an unused index while replaying a signature over
+    // an already-spent leaf would fail cryptographic verification, not just
+    // the policy gate.
+    if signature.auth_path.len() > u32::MAX as usize {
+        return Err(ShrincsAccountError::InvalidSignature.into());
+    }
+    let leaf_index = signature.auth_path.len() as u32;
+
+    check_stateful_leaf_use(&state, leaf_index, program_id, account_info.key, bitmap_account)?;
+
+    let domain_separator = messages::domain_separator(program_id, account_info.key);
+    let context: ActionContext = messages::action_context(
+        domain_separator,
+        state.nonce,
+        state.key_version,
+        args.action_type,
+        args.payload_hash,
+    );
+
+    let is_valid = ShrincsVerifier::new().verify_stateful(
+        state.current_public_key_commitment,
+        &public_key,
+        &context,
+        &signature,
+    );
+    // Fail closed: a CPI caller that checks only instruction success must not
+    // treat an invalid signature as accepted. Write the boolean first for
+    // callers that inspect return data, then abort the transaction.
+    set_return_data(&[is_valid as u8]);
+    if !is_valid {
+        return Err(ShrincsAccountError::InvalidSignature.into());
+    }
+
+    commit_stateful_leaf_use(
+        &mut state,
+        leaf_index,
+        program_id,
+        account_info.key,
+        &LeafBitmapAccounts {
+            bitmap_account,
+            payer,
+            system_program,
+        },
+    )?;
+    increment_u256_be(&mut state.nonce);
+    msg!(
+        "shrincs-account-event:StatefulSignatureVerified:leaf_index={}:nonce={:?}:key_version={:?}",
+        leaf_index,
+        state.nonce,
+        state.key_version
+    );
+    store_state(account_info, &state)
+}
+
+/// Accounts: `[account PDA (writable)]`.
+///
+/// Builds the [`ActionContext`] itself from account STATE, exactly like
+/// [`process_verify_stateful_action`] -- see that function's doc comment.
+#[allow(dead_code)] // called by this module's tests; wired into dispatch in a later task
+pub(crate) fn process_verify_stateless_action(
+    program_id: &Pubkey,
+    accounts: &[AccountInfo],
+    args: StatelessActionArgs,
+) -> ProgramResult {
+    let accounts_iter = &mut accounts.iter();
+    let account_info = next_account_info(accounts_iter)?;
+
+    let mut state = load_state(account_info, program_id)?;
+    let policy = StatefulPolicy::try_from(state.stateful_policy)?;
+    if policy == StatefulPolicy::RecoveryRotation && !state.recovery_mode {
+        return Err(ShrincsAccountError::RecoveryNotArmed.into());
+    }
+    if state.stateless_signatures_used >= STATELESS_SIGNATURE_LIMIT {
+        return Err(ShrincsAccountError::BudgetExhausted.into());
+    }
+
+    let public_key: PublicKey = args.public_key.into();
+    let signature: StatelessSignature = args.signature.into();
+    let domain_separator = messages::domain_separator(program_id, account_info.key);
+    let context: ActionContext = messages::action_context(
+        domain_separator,
+        state.nonce,
+        state.key_version,
+        args.action_type,
+        args.payload_hash,
+    );
+
+    let is_valid = ShrincsVerifier::new().verify_stateless(
+        state.current_public_key_commitment,
+        &public_key,
+        &context,
+        &signature,
+    );
+    // Fail closed: see `process_verify_stateful_action`.
+    set_return_data(&[is_valid as u8]);
+    if !is_valid {
+        return Err(ShrincsAccountError::InvalidSignature.into());
+    }
+
+    increment_u256_be(&mut state.nonce);
+    state.stateless_signatures_used += 1;
+    msg!(
+        "shrincs-account-event:StatelessSignatureVerified:used_count={}:nonce={:?}:key_version={:?}",
+        state.stateless_signatures_used,
+        state.nonce,
+        state.key_version
+    );
+    store_state(account_info, &state)
+}
+
+/// Crate entrypoint. Instruction dispatch (the enum selecting between
+/// `process_init` / `process_verify_stateful_action` /
+/// `process_verify_stateless_action` / the policy-and-rotation handlers still
+/// to come) is a later task; until it lands this always succeeds without
+/// doing anything.
 pub fn process_instruction(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
@@ -28,4 +415,457 @@ pub fn process_instruction(
 ) -> ProgramResult {
     let _ = (program_id, accounts, instruction_data);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use borsh::{BorshDeserialize, BorshSerialize};
+    use hashsigs_rs::shrincs::signer::ShrincsSigner;
+    use hashsigs_rs::shrincs::verifier::ShrincsVerifier as CoreShrincsVerifier;
+    use solana_program_test::*;
+    use solana_sdk::{
+        instruction::{AccountMeta, Instruction},
+        pubkey::Pubkey as SdkPubkey,
+        signature::Keypair,
+        signer::Signer,
+        transaction::Transaction,
+    };
+
+    /// Test-only instruction tag + router: the real dispatch enum is a later
+    /// task, so tests drive `process_init`/`process_verify_stateful_action`/
+    /// `process_verify_stateless_action` through `solana-program-test`'s
+    /// BanksClient (for real CPI/runtime behavior) via this local stand-in.
+    #[derive(BorshSerialize, BorshDeserialize)]
+    enum TestInstruction {
+        Init(InitArgs),
+        StatefulAction(StatefulActionArgs),
+        StatelessAction(StatelessActionArgs),
+    }
+
+    fn test_dispatch(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> ProgramResult {
+        let instruction =
+            TestInstruction::try_from_slice(data).map_err(|_| ProgramError::InvalidInstructionData)?;
+        match instruction {
+            TestInstruction::Init(args) => process_init(program_id, accounts, args),
+            TestInstruction::StatefulAction(args) => {
+                process_verify_stateful_action(program_id, accounts, args)
+            }
+            TestInstruction::StatelessAction(args) => {
+                process_verify_stateless_action(program_id, accounts, args)
+            }
+        }
+    }
+
+    async fn setup_test() -> (ProgramTest, Keypair) {
+        let program_id = Keypair::new();
+        let mut program_test = ProgramTest::new(
+            "shrincs_account_example",
+            program_id.pubkey(),
+            processor!(test_dispatch),
+        );
+        program_test.set_compute_max_units(1_400_000);
+        (program_test, program_id)
+    }
+
+    async fn init_account(
+        context: &mut ProgramTestContext,
+        program_id: &SdkPubkey,
+        owner: &Keypair,
+        salt: [u8; HASH_LEN],
+        initial_commitment: [u8; HASH_LEN],
+    ) -> SdkPubkey {
+        let (account_pda_key, _bump) = account_pda(program_id, &owner.pubkey(), &salt);
+
+        let instruction = Instruction {
+            program_id: *program_id,
+            accounts: vec![
+                AccountMeta::new(context.payer.pubkey(), true),
+                AccountMeta::new_readonly(owner.pubkey(), true),
+                AccountMeta::new(account_pda_key, false),
+                AccountMeta::new_readonly(solana_program::system_program::id(), false),
+            ],
+            data: {
+                let mut data = Vec::new();
+                TestInstruction::Init(InitArgs {
+                    salt,
+                    initial_commitment,
+                })
+                .serialize(&mut data)
+                .unwrap();
+                data
+            },
+        };
+        let transaction = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer, owner],
+            context.last_blockhash,
+        );
+        context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap()
+            .result
+            .expect("init should succeed");
+        account_pda_key
+    }
+
+    async fn fetch_state(
+        context: &mut ProgramTestContext,
+        account_pda_key: &SdkPubkey,
+    ) -> ShrincsAccountState {
+        let account = context
+            .banks_client
+            .get_account(*account_pda_key)
+            .await
+            .unwrap()
+            .expect("account exists");
+        ShrincsAccountState::try_from_slice(&account.data).expect("valid state")
+    }
+
+    #[tokio::test]
+    async fn stateful_action_valid_signature_advances_state() {
+        let (program_test, program_id) = setup_test().await;
+        let mut context = program_test.start_with_context().await;
+        let program_id = program_id.pubkey();
+        let owner = Keypair::new();
+        let salt = [7u8; HASH_LEN];
+
+        let (mut keys, public_key) =
+            ShrincsSigner::keygen(b"shrincs-account-example test stateful", 1024).expect("keygen");
+        let commitment: [u8; HASH_LEN] = public_key
+            .public_key_commitment
+            .clone()
+            .try_into()
+            .expect("commitment is 32 bytes");
+
+        let account_pda_key =
+            init_account(&mut context, &program_id, &owner, salt, commitment).await;
+
+        let domain_separator = messages::domain_separator(&program_id, &account_pda_key);
+        let action_type = messages::ACTION_STATEFUL;
+        let payload_hash = messages::action_payload(&action_type, b"stateful action payload");
+        let context_msg = messages::action_context(
+            domain_separator,
+            [0u8; HASH_LEN], // fresh account: nonce starts zeroed
+            [0u8; HASH_LEN], // fresh account: key_version starts zeroed
+            action_type,
+            payload_hash,
+        );
+        let signature = ShrincsSigner::sign_stateful_action(&mut keys, &public_key, &context_msg)
+            .expect("sign");
+        assert_eq!(signature.auth_path.len(), 1, "first stateful signature uses leaf 1");
+
+        let (bitmap_key, _) = crate::pda::bitmap_word_pda(&program_id, &account_pda_key, &[0u8; HASH_LEN], 0);
+        let instruction = Instruction {
+            program_id,
+            accounts: vec![
+                AccountMeta::new(account_pda_key, false),
+                AccountMeta::new(bitmap_key, false),
+                AccountMeta::new(context.payer.pubkey(), true),
+                AccountMeta::new_readonly(solana_program::system_program::id(), false),
+            ],
+            data: {
+                let mut data = Vec::new();
+                TestInstruction::StatefulAction(StatefulActionArgs {
+                    public_key: public_key.clone().into(),
+                    action_type,
+                    payload_hash,
+                    signature: signature.clone().into(),
+                })
+                .serialize(&mut data)
+                .unwrap();
+                data
+            },
+        };
+        let transaction = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer],
+            context.last_blockhash,
+        );
+        let result = context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap();
+        assert!(result.result.is_ok(), "valid stateful action should succeed: {:?}", result.result);
+        assert_eq!(result.metadata.unwrap().return_data.unwrap().data, vec![1]);
+
+        let state = fetch_state(&mut context, &account_pda_key).await;
+        let mut expected_nonce = [0u8; HASH_LEN];
+        expected_nonce[HASH_LEN - 1] = 1;
+        assert_eq!(state.nonce, expected_nonce, "nonce advances by one");
+        assert_eq!(state.next_stateful_leaf_index, 2, "MonotonicIndex advances past leaf 1");
+        assert!(state.stateful_policy_frozen);
+    }
+
+    #[tokio::test]
+    async fn stateful_action_tampered_signature_rejected() {
+        let (program_test, program_id) = setup_test().await;
+        let mut context = program_test.start_with_context().await;
+        let program_id = program_id.pubkey();
+        let owner = Keypair::new();
+        let salt = [9u8; HASH_LEN];
+
+        let (mut keys, public_key) =
+            ShrincsSigner::keygen(b"shrincs-account-example test tampered", 1024).expect("keygen");
+        let commitment: [u8; HASH_LEN] = public_key
+            .public_key_commitment
+            .clone()
+            .try_into()
+            .expect("commitment is 32 bytes");
+        let account_pda_key =
+            init_account(&mut context, &program_id, &owner, salt, commitment).await;
+
+        let domain_separator = messages::domain_separator(&program_id, &account_pda_key);
+        let action_type = messages::ACTION_STATEFUL;
+        let payload_hash = messages::action_payload(&action_type, b"tampered action payload");
+        let context_msg = messages::action_context(
+            domain_separator,
+            [0u8; HASH_LEN],
+            [0u8; HASH_LEN],
+            action_type,
+            payload_hash,
+        );
+        let mut signature = ShrincsSigner::sign_stateful_action(&mut keys, &public_key, &context_msg)
+            .expect("sign");
+        signature.randomizer[0] ^= 0x01; // tamper one byte
+
+        let (bitmap_key, _) = crate::pda::bitmap_word_pda(&program_id, &account_pda_key, &[0u8; HASH_LEN], 0);
+        let instruction = Instruction {
+            program_id,
+            accounts: vec![
+                AccountMeta::new(account_pda_key, false),
+                AccountMeta::new(bitmap_key, false),
+                AccountMeta::new(context.payer.pubkey(), true),
+                AccountMeta::new_readonly(solana_program::system_program::id(), false),
+            ],
+            data: {
+                let mut data = Vec::new();
+                TestInstruction::StatefulAction(StatefulActionArgs {
+                    public_key: public_key.into(),
+                    action_type,
+                    payload_hash,
+                    signature: signature.into(),
+                })
+                .serialize(&mut data)
+                .unwrap();
+                data
+            },
+        };
+        let transaction = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer],
+            context.last_blockhash,
+        );
+        let result = context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap();
+        assert!(result.result.is_err(), "tampered signature must abort the instruction");
+        let return_data = result
+            .metadata
+            .expect("metadata present even on failure")
+            .return_data
+            .expect("return data set before the fail-closed abort");
+        assert_eq!(return_data.data, vec![0]);
+    }
+
+    #[tokio::test]
+    async fn stateful_action_monotonic_reuse_rejected() {
+        let (program_test, program_id) = setup_test().await;
+        let mut context = program_test.start_with_context().await;
+        let program_id = program_id.pubkey();
+        let owner = Keypair::new();
+        let salt = [3u8; HASH_LEN];
+
+        let (mut keys, public_key) =
+            ShrincsSigner::keygen(b"shrincs-account-example test reuse", 1024).expect("keygen");
+        let keys_replay = keys.clone(); // independent signer, still at leaf 1
+        let commitment: [u8; HASH_LEN] = public_key
+            .public_key_commitment
+            .clone()
+            .try_into()
+            .expect("commitment is 32 bytes");
+        let account_pda_key =
+            init_account(&mut context, &program_id, &owner, salt, commitment).await;
+
+        let action_type = messages::ACTION_STATEFUL;
+        let (bitmap_key, _) = crate::pda::bitmap_word_pda(&program_id, &account_pda_key, &[0u8; HASH_LEN], 0);
+
+        // First action: consumes leaf 1, advances next_stateful_leaf_index to 2.
+        let domain_separator = messages::domain_separator(&program_id, &account_pda_key);
+        let payload_hash_1 = messages::action_payload(&action_type, b"first action");
+        let context_1 = messages::action_context(
+            domain_separator,
+            [0u8; HASH_LEN],
+            [0u8; HASH_LEN],
+            action_type,
+            payload_hash_1,
+        );
+        let signature_1 =
+            ShrincsSigner::sign_stateful_action(&mut keys, &public_key, &context_1).expect("sign");
+        let instruction_1 = Instruction {
+            program_id,
+            accounts: vec![
+                AccountMeta::new(account_pda_key, false),
+                AccountMeta::new(bitmap_key, false),
+                AccountMeta::new(context.payer.pubkey(), true),
+                AccountMeta::new_readonly(solana_program::system_program::id(), false),
+            ],
+            data: {
+                let mut data = Vec::new();
+                TestInstruction::StatefulAction(StatefulActionArgs {
+                    public_key: public_key.clone().into(),
+                    action_type,
+                    payload_hash: payload_hash_1,
+                    signature: signature_1.into(),
+                })
+                .serialize(&mut data)
+                .unwrap();
+                data
+            },
+        };
+        let transaction_1 = Transaction::new_signed_with_payer(
+            &[instruction_1],
+            Some(&context.payer.pubkey()),
+            &[&context.payer],
+            context.last_blockhash,
+        );
+        context
+            .banks_client
+            .process_transaction_with_metadata(transaction_1)
+            .await
+            .unwrap()
+            .result
+            .expect("first stateful action should succeed");
+
+        // Second action: a freshly, validly signed leaf-1 signature from the
+        // independent `keys_replay` clone. The leaf-policy gate must reject
+        // this because leaf 1 has already been consumed -- MonotonicIndex now
+        // expects leaf 2 -- regardless of the signature's own validity.
+        let mut keys_replay = keys_replay;
+        let payload_hash_2 = messages::action_payload(&action_type, b"replay action");
+        let context_2 = messages::action_context(
+            domain_separator,
+            [0u8; HASH_LEN],
+            [0u8; HASH_LEN],
+            action_type,
+            payload_hash_2,
+        );
+        let signature_2 =
+            ShrincsSigner::sign_stateful_action(&mut keys_replay, &public_key, &context_2)
+                .expect("sign");
+        assert_eq!(signature_2.auth_path.len(), 1, "replay reuses leaf 1");
+
+        context.last_blockhash = context.banks_client.get_latest_blockhash().await.unwrap();
+        let instruction_2 = Instruction {
+            program_id,
+            accounts: vec![
+                AccountMeta::new(account_pda_key, false),
+                AccountMeta::new(bitmap_key, false),
+                AccountMeta::new(context.payer.pubkey(), true),
+                AccountMeta::new_readonly(solana_program::system_program::id(), false),
+            ],
+            data: {
+                let mut data = Vec::new();
+                TestInstruction::StatefulAction(StatefulActionArgs {
+                    public_key: public_key.into(),
+                    action_type,
+                    payload_hash: payload_hash_2,
+                    signature: signature_2.into(),
+                })
+                .serialize(&mut data)
+                .unwrap();
+                data
+            },
+        };
+        let transaction_2 = Transaction::new_signed_with_payer(
+            &[instruction_2],
+            Some(&context.payer.pubkey()),
+            &[&context.payer],
+            context.last_blockhash,
+        );
+        let result = context
+            .banks_client
+            .process_transaction_with_metadata(transaction_2)
+            .await
+            .unwrap();
+        assert!(result.result.is_err(), "reusing leaf 1 must be rejected under MonotonicIndex");
+    }
+
+    #[tokio::test]
+    async fn stateless_action_valid_signature_advances_state() {
+        let (program_test, program_id) = setup_test().await;
+        let mut context = program_test.start_with_context().await;
+        let program_id = program_id.pubkey();
+        let owner = Keypair::new();
+        let salt = [11u8; HASH_LEN];
+
+        let (keys, public_key) =
+            ShrincsSigner::keygen(b"shrincs-account-example test stateless", 1024).expect("keygen");
+        let commitment: [u8; HASH_LEN] = public_key
+            .public_key_commitment
+            .clone()
+            .try_into()
+            .expect("commitment is 32 bytes");
+        let account_pda_key =
+            init_account(&mut context, &program_id, &owner, salt, commitment).await;
+
+        let domain_separator = messages::domain_separator(&program_id, &account_pda_key);
+        let action_type = messages::ACTION_STATELESS;
+        let payload_hash = messages::action_payload(&action_type, b"stateless action payload");
+        let context_msg = messages::action_context(
+            domain_separator,
+            [0u8; HASH_LEN],
+            [0u8; HASH_LEN],
+            action_type,
+            payload_hash,
+        );
+        // verify_stateless computes its own action-message-hash from the
+        // ActionContext, same as the stateful path; sign that same hash.
+        let message = CoreShrincsVerifier::new().stateless_action_message_hash(commitment, &context_msg);
+        let signature = ShrincsSigner::sign_stateless_raw(&keys, &message).expect("sign");
+
+        let instruction = Instruction {
+            program_id,
+            accounts: vec![AccountMeta::new(account_pda_key, false)],
+            data: {
+                let mut data = Vec::new();
+                TestInstruction::StatelessAction(StatelessActionArgs {
+                    public_key: public_key.into(),
+                    action_type,
+                    payload_hash,
+                    signature: signature.into(),
+                })
+                .serialize(&mut data)
+                .unwrap();
+                data
+            },
+        };
+        let transaction = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer],
+            context.last_blockhash,
+        );
+        let result = context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap();
+        assert!(result.result.is_ok(), "valid stateless action should succeed: {:?}", result.result);
+        assert_eq!(result.metadata.unwrap().return_data.unwrap().data, vec![1]);
+
+        let state = fetch_state(&mut context, &account_pda_key).await;
+        let mut expected_nonce = [0u8; HASH_LEN];
+        expected_nonce[HASH_LEN - 1] = 1;
+        assert_eq!(state.nonce, expected_nonce, "nonce advances by one");
+        assert_eq!(state.stateless_signatures_used, 1);
+    }
 }
