@@ -20,6 +20,7 @@
 pub mod processor;
 pub mod sphincs_plus_c;
 
+#[cfg(not(feature = "no-entrypoint"))]
 use crate::processor::process_instruction;
 
 #[cfg(not(feature = "no-entrypoint"))]
