@@ -37,7 +37,6 @@ pub use crate::types::{
     ActionContext, ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey,
     StatefulPublicKey, StatefulSignature, StatelessSignature, STATEFUL_PUBLIC_KEY_BYTES,
 };
-pub use crate::wots_c::Signature as WotsCSignature;
 // Profile parameter tuple also lived in main's shrincs_verifier_types (via
 // `pub use profile::*`); re-export from the current profiles module.
 pub use crate::primitives::profiles::{

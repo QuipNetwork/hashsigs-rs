@@ -40,8 +40,9 @@ use std::path::{Path, PathBuf};
 use flate2::read::GzDecoder;
 use hashsigs_rs::shrincs::{
     ActionContext, ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey,
-    StatefulSignature, StatelessSignature, WotsCSignature, HASH_LEN,
+    StatefulSignature, StatelessSignature, HASH_LEN,
 };
+use hashsigs_rs::wots_c::Signature as WotsCSignature;
 use serde_json::Value;
 
 pub(crate) struct AbiDecoder<'a> {

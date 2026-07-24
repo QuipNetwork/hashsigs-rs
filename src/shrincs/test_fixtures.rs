@@ -26,10 +26,10 @@ use serde::{Deserialize, Serialize};
 use super::uxmss;
 use super::Keys;
 use super::{
-    ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey, StatelessSignature,
-    WotsCSignature, HASH_LEN,
+    ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey, StatelessSignature, HASH_LEN,
 };
 use crate::sphincs_plus_c;
+use crate::wots_c::Signature as WotsCSignature;
 
 pub(crate) const FIXTURE_PATH_ENV: &str = "SHRINCS_TEST_KEY_FIXTURE_PATH";
 pub(crate) const KEY_MODE_ENV: &str = "SHRINCS_TEST_KEY_MODE";

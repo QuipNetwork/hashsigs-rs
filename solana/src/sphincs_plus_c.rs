@@ -26,8 +26,9 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 use hashsigs_rs::shrincs::{
     ActionContext, ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey as ShrincsPublicKey,
-    StatefulSignature, StatelessSignature, WotsCSignature,
+    StatefulSignature, StatelessSignature,
 };
+use hashsigs_rs::wots_c::Signature as WotsCSignature;
 
 #[derive(Debug, Clone, BorshSerialize, BorshDeserialize)]
 pub struct ForsEntryDto {

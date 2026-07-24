@@ -85,7 +85,7 @@ pub(crate) mod types;
 #[cfg(feature = "std")]
 pub mod wasm;
 pub mod wotsplus;
-pub(crate) mod wots_c;
+pub mod wots_c;
 
 #[cfg(all(test, feature = "std"))]
 pub(crate) mod test_support;

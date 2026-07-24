@@ -232,7 +232,7 @@ pub struct Signature {
 impl Signature {
     /// ABI-encode the WOTS-C signature body. Byte-identical to the historical
     /// `envelope::encode_wots_c_signature_body`.
-    pub(crate) fn to_bytes(&self) -> Vec<u8> {
+    pub fn to_bytes(&self) -> Vec<u8> {
         encode_tuple(alloc::vec![
             Field::Dynamic(encode_bytes(&self.randomizer)),
             Field::Static(word_from_u32(self.counter)),
@@ -268,10 +268,9 @@ impl Signature {
     /// WOTS-C signature embedded at an offset inside a larger shared
     /// `AbiReader` (via `decode`, above), where a trailing-bytes check would
     /// spuriously reject the rest of the envelope. This standalone entrypoint
-    /// is the `to_bytes` round-trip counterpart, provided for later callers
-    /// that hold an isolated WOTS-C signature blob.
-    #[allow(dead_code)]
-    pub(crate) fn from_bytes(data: &[u8]) -> Option<Self> {
+    /// is the `to_bytes` round-trip counterpart, part of the public codec
+    /// surface for external callers that hold an isolated WOTS-C signature blob.
+    pub fn from_bytes(data: &[u8]) -> Option<Self> {
         let reader = AbiReader::new(data);
         let decoded = Self::decode(&reader, 0)?;
         reader.finish()?;
