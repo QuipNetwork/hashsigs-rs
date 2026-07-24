@@ -22,12 +22,14 @@
 //! `state`/`pda`/`messages` modules instead of a `hashsigs-rs` dependency
 //! living directly in the handler file.
 //!
-//! `process_init`, `process_verify_stateful_action`, and
-//! `process_verify_stateless_action` are exposed `pub(crate)` and are not yet
+//! `process_init`, `process_verify_stateful_action`,
+//! `process_verify_stateless_action`, `process_set_policy_monotonic`,
+//! `process_set_policy_recovery_rotation`, `process_set_policy_leaf_bitmap`,
+//! and `process_enter_recovery_mode` are exposed `pub(crate)` and are not yet
 //! wired into [`process_instruction`]: the instruction dispatch enum/router
-//! that picks between these (and the policy/recovery/rotation handlers still
-//! to come) is a later task. Until then, this module's own tests call them
-//! directly through a test-only dispatcher (see `tests` below), so
+//! that picks between these (and the rotation handlers still to come) is a
+//! later task. Until then, this module's own tests call them directly
+//! through a test-only dispatcher (see `tests` below), so
 //! `#[allow(dead_code)]` on the handlers is expected and will be removed once
 //! the real router lands.
 
@@ -73,6 +75,10 @@ pub(crate) enum ShrincsAccountError {
     StatefulLeafRejected = 2,
     RecoveryNotArmed = 3,
     BudgetExhausted = 4,
+    OnlyOwner = 5,
+    StatefulPolicyFrozen = 6,
+    StatefulIndexRollback = 7,
+    RecoveryPolicyRequired = 8,
 }
 
 impl From<ShrincsAccountError> for ProgramError {
@@ -106,6 +112,12 @@ pub(crate) struct StatelessActionArgs {
     pub signature: StatelessSignatureDto,
 }
 
+/// Instruction data for [`process_set_policy_monotonic`].
+#[derive(Debug, Clone, BorshSerialize, BorshDeserialize)]
+pub(crate) struct SetPolicyMonotonicArgs {
+    pub initial_leaf_index: u32,
+}
+
 fn load_state(
     account_info: &AccountInfo,
     program_id: &Pubkey,
@@ -127,6 +139,21 @@ fn store_state(account_info: &AccountInfo, state: &ShrincsAccountState) -> Progr
         return Err(ProgramError::InvalidAccountData);
     }
     account_data.copy_from_slice(&data);
+    Ok(())
+}
+
+/// Require `owner_info` to be a transaction signer matching `state.owner`.
+/// Split into two distinct failures (matching [`process_init`]'s style for
+/// signer checks): a missing signature is a generic Solana
+/// `MissingRequiredSignature`, while a present-but-wrong signer is this
+/// module's own [`ShrincsAccountError::OnlyOwner`].
+fn only_owner(state: &ShrincsAccountState, owner_info: &AccountInfo) -> Result<(), ProgramError> {
+    if !owner_info.is_signer {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+    if *owner_info.key != state.owner {
+        return Err(ShrincsAccountError::OnlyOwner.into());
+    }
     Ok(())
 }
 
@@ -403,6 +430,132 @@ pub(crate) fn process_verify_stateless_action(
     store_state(account_info, &state)
 }
 
+/// Accounts: `[account PDA (writable), owner (signer)]`.
+///
+/// Owner-gated. Switches the stateful-leaf-tracking policy to
+/// `MonotonicIndex` and resets the expected-next-leaf cursor to
+/// `args.initial_leaf_index`. Blocked while `stateful_policy_frozen` (set by
+/// [`commit_stateful_leaf_use`] on first stateful use) and rejects any
+/// `initial_leaf_index` below the current cursor -- a rollback would
+/// re-enable leaves already consumed under the prior policy.
+#[allow(dead_code)] // called by this module's tests; wired into dispatch in a later task
+pub(crate) fn process_set_policy_monotonic(
+    program_id: &Pubkey,
+    accounts: &[AccountInfo],
+    args: SetPolicyMonotonicArgs,
+) -> ProgramResult {
+    let accounts_iter = &mut accounts.iter();
+    let account_info = next_account_info(accounts_iter)?;
+    let owner_info = next_account_info(accounts_iter)?;
+
+    let mut state = load_state(account_info, program_id)?;
+    only_owner(&state, owner_info)?;
+    if state.stateful_policy_frozen {
+        return Err(ShrincsAccountError::StatefulPolicyFrozen.into());
+    }
+    if args.initial_leaf_index < state.next_stateful_leaf_index {
+        return Err(ShrincsAccountError::StatefulIndexRollback.into());
+    }
+
+    state.stateful_policy = StatefulPolicy::MonotonicIndex as u8;
+    state.next_stateful_leaf_index = args.initial_leaf_index;
+    state.recovery_mode = false;
+    msg!(
+        "shrincs-account-event:StatefulPolicySet:policy={}:next_leaf={}",
+        state.stateful_policy,
+        state.next_stateful_leaf_index
+    );
+    store_state(account_info, &state)
+}
+
+/// Accounts: `[account PDA (writable), owner (signer)]`.
+///
+/// Owner-gated. Switches the stateful policy to `RecoveryRotation`.
+/// EXEMPT from the `stateful_policy_frozen` check -- an intentional Rust
+/// divergence from Solidity, documented as "Recovery-rotation freeze
+/// exemption (audit F1)" in `docs/solidity-parity.md`: Solidity requires an
+/// unfrozen policy to enter `RecoveryRotation`, but freezing happens on
+/// first stateful use and only rotation clears it, so under Solidity's rule
+/// a used monotonic/bitmap account can never reach `RecoveryRotation` (and
+/// therefore can never rotate) again. Skipping the freeze check here cannot
+/// re-enable a spent stateful leaf: [`check_stateful_leaf_use`] rejects all
+/// stateful use outright once the policy is `RecoveryRotation`.
+#[allow(dead_code)] // called by this module's tests; wired into dispatch in a later task
+pub(crate) fn process_set_policy_recovery_rotation(
+    program_id: &Pubkey,
+    accounts: &[AccountInfo],
+) -> ProgramResult {
+    let accounts_iter = &mut accounts.iter();
+    let account_info = next_account_info(accounts_iter)?;
+    let owner_info = next_account_info(accounts_iter)?;
+
+    let mut state = load_state(account_info, program_id)?;
+    only_owner(&state, owner_info)?;
+
+    state.stateful_policy = StatefulPolicy::RecoveryRotation as u8;
+    state.recovery_mode = false;
+    msg!(
+        "shrincs-account-event:StatefulPolicySet:policy={}:next_leaf={}",
+        state.stateful_policy,
+        state.next_stateful_leaf_index
+    );
+    store_state(account_info, &state)
+}
+
+/// Accounts: `[account PDA (writable), owner (signer)]`.
+///
+/// Owner-gated. Switches the stateful policy to `LeafBitmap`. Blocked while
+/// `stateful_policy_frozen`, like [`process_set_policy_monotonic`] (not
+/// exempt: unlike `RecoveryRotation`, `LeafBitmap` still accepts stateful
+/// signatures, so switching into it while frozen could bypass the freeze).
+#[allow(dead_code)] // called by this module's tests; wired into dispatch in a later task
+pub(crate) fn process_set_policy_leaf_bitmap(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
+    let accounts_iter = &mut accounts.iter();
+    let account_info = next_account_info(accounts_iter)?;
+    let owner_info = next_account_info(accounts_iter)?;
+
+    let mut state = load_state(account_info, program_id)?;
+    only_owner(&state, owner_info)?;
+    if state.stateful_policy_frozen {
+        return Err(ShrincsAccountError::StatefulPolicyFrozen.into());
+    }
+
+    state.stateful_policy = StatefulPolicy::LeafBitmap as u8;
+    state.recovery_mode = false;
+    msg!(
+        "shrincs-account-event:StatefulPolicySet:policy={}:next_leaf={}",
+        state.stateful_policy,
+        state.next_stateful_leaf_index
+    );
+    store_state(account_info, &state)
+}
+
+/// Accounts: `[account PDA (writable), owner (signer)]`.
+///
+/// Owner-gated. Arms recovery mode, the gate
+/// [`process_verify_stateless_action`] checks before accepting a stateless
+/// signature under `RecoveryRotation` policy. Requires `RecoveryRotation` to
+/// already be the active policy.
+#[allow(dead_code)] // called by this module's tests; wired into dispatch in a later task
+pub(crate) fn process_enter_recovery_mode(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
+    let accounts_iter = &mut accounts.iter();
+    let account_info = next_account_info(accounts_iter)?;
+    let owner_info = next_account_info(accounts_iter)?;
+
+    let mut state = load_state(account_info, program_id)?;
+    only_owner(&state, owner_info)?;
+    if StatefulPolicy::try_from(state.stateful_policy)? != StatefulPolicy::RecoveryRotation {
+        return Err(ShrincsAccountError::RecoveryPolicyRequired.into());
+    }
+
+    state.recovery_mode = true;
+    msg!(
+        "shrincs-account-event:RecoveryModeEntered:key_version={:?}",
+        state.key_version
+    );
+    store_state(account_info, &state)
+}
+
 /// Crate entrypoint. Instruction dispatch (the enum selecting between
 /// `process_init` / `process_verify_stateful_action` /
 /// `process_verify_stateless_action` / the policy-and-rotation handlers still
@@ -422,6 +575,7 @@ mod tests {
     use super::*;
     use borsh::{BorshDeserialize, BorshSerialize};
     use hashsigs_rs::shrincs::signer::ShrincsSigner;
+    use hashsigs_rs::shrincs::Keys;
     use hashsigs_rs::shrincs::verifier::ShrincsVerifier as CoreShrincsVerifier;
     use solana_program_test::*;
     use solana_sdk::{
@@ -436,11 +590,15 @@ mod tests {
     /// task, so tests drive `process_init`/`process_verify_stateful_action`/
     /// `process_verify_stateless_action` through `solana-program-test`'s
     /// BanksClient (for real CPI/runtime behavior) via this local stand-in.
-    #[derive(BorshSerialize, BorshDeserialize)]
+    #[derive(Clone, BorshSerialize, BorshDeserialize)]
     enum TestInstruction {
         Init(InitArgs),
         StatefulAction(StatefulActionArgs),
         StatelessAction(StatelessActionArgs),
+        SetPolicyMonotonic(SetPolicyMonotonicArgs),
+        SetPolicyRecoveryRotation,
+        SetPolicyLeafBitmap,
+        EnterRecoveryMode,
     }
 
     fn test_dispatch(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> ProgramResult {
@@ -454,6 +612,14 @@ mod tests {
             TestInstruction::StatelessAction(args) => {
                 process_verify_stateless_action(program_id, accounts, args)
             }
+            TestInstruction::SetPolicyMonotonic(args) => {
+                process_set_policy_monotonic(program_id, accounts, args)
+            }
+            TestInstruction::SetPolicyRecoveryRotation => {
+                process_set_policy_recovery_rotation(program_id, accounts)
+            }
+            TestInstruction::SetPolicyLeafBitmap => process_set_policy_leaf_bitmap(program_id, accounts),
+            TestInstruction::EnterRecoveryMode => process_enter_recovery_mode(program_id, accounts),
         }
     }
 
@@ -523,6 +689,112 @@ mod tests {
             .unwrap()
             .expect("account exists");
         ShrincsAccountState::try_from_slice(&account.data).expect("valid state")
+    }
+
+    /// Build an owner-gated policy/recovery instruction: every handler in
+    /// this task shares the `[account PDA (writable), owner (signer)]`
+    /// account layout.
+    fn policy_instruction(
+        program_id: &SdkPubkey,
+        account_pda_key: &SdkPubkey,
+        owner_pubkey: &SdkPubkey,
+        instruction: TestInstruction,
+    ) -> Instruction {
+        Instruction {
+            program_id: *program_id,
+            accounts: vec![
+                AccountMeta::new(*account_pda_key, false),
+                AccountMeta::new_readonly(*owner_pubkey, true),
+            ],
+            data: borsh::to_vec(&instruction).unwrap(),
+        }
+    }
+
+    /// Assert the transaction aborted with the given [`ShrincsAccountError`]
+    /// custom code.
+    fn assert_custom_error(
+        result: &Result<(), solana_sdk::transaction::TransactionError>,
+        expected: ShrincsAccountError,
+    ) {
+        match result {
+            Err(solana_sdk::transaction::TransactionError::InstructionError(
+                _,
+                solana_sdk::instruction::InstructionError::Custom(code),
+            )) => {
+                assert_eq!(*code, expected as u32, "unexpected custom error code");
+            }
+            other => panic!("expected custom error {:?}, got {other:?}", expected as u32),
+        }
+    }
+
+    /// Assert the transaction aborted because a required signer was absent.
+    fn assert_missing_signature(result: &Result<(), solana_sdk::transaction::TransactionError>) {
+        match result {
+            Err(solana_sdk::transaction::TransactionError::InstructionError(
+                _,
+                solana_sdk::instruction::InstructionError::MissingRequiredSignature,
+            )) => {}
+            other => panic!("expected MissingRequiredSignature, got {other:?}"),
+        }
+    }
+
+    /// Drive one successful stateful action to flip `stateful_policy_frozen`,
+    /// mirroring `stateful_action_valid_signature_advances_state`'s flow.
+    async fn freeze_stateful_policy(
+        context: &mut ProgramTestContext,
+        program_id: &SdkPubkey,
+        account_pda_key: &SdkPubkey,
+        keys: &mut Keys,
+        public_key: &PublicKey,
+    ) {
+        let domain_separator = messages::domain_separator(program_id, account_pda_key);
+        let action_type = messages::ACTION_STATEFUL;
+        let payload_hash = messages::action_payload(&action_type, b"freeze policy payload");
+        let context_msg = messages::action_context(
+            domain_separator,
+            [0u8; HASH_LEN],
+            [0u8; HASH_LEN],
+            action_type,
+            payload_hash,
+        );
+        let signature =
+            ShrincsSigner::sign_stateful_action(keys, public_key, &context_msg).expect("sign");
+
+        let (bitmap_key, _) = crate::pda::bitmap_word_pda(program_id, account_pda_key, &[0u8; HASH_LEN], 0);
+        let instruction = Instruction {
+            program_id: *program_id,
+            accounts: vec![
+                AccountMeta::new(*account_pda_key, false),
+                AccountMeta::new(bitmap_key, false),
+                AccountMeta::new(context.payer.pubkey(), true),
+                AccountMeta::new_readonly(solana_program::system_program::id(), false),
+            ],
+            data: {
+                let mut data = Vec::new();
+                TestInstruction::StatefulAction(StatefulActionArgs {
+                    public_key: public_key.clone().into(),
+                    action_type,
+                    payload_hash,
+                    signature: signature.into(),
+                })
+                .serialize(&mut data)
+                .unwrap();
+                data
+            },
+        };
+        let transaction = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer],
+            context.last_blockhash,
+        );
+        context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap()
+            .result
+            .expect("freezing stateful action should succeed");
     }
 
     #[tokio::test]
@@ -867,5 +1139,307 @@ mod tests {
         expected_nonce[HASH_LEN - 1] = 1;
         assert_eq!(state.nonce, expected_nonce, "nonce advances by one");
         assert_eq!(state.stateless_signatures_used, 1);
+    }
+
+    #[tokio::test]
+    async fn policy_setters_reject_wrong_owner_or_missing_signer() {
+        let (program_test, program_id) = setup_test().await;
+        let mut context = program_test.start_with_context().await;
+        let program_id = program_id.pubkey();
+        let owner = Keypair::new();
+        let attacker = Keypair::new();
+        let salt = [21u8; HASH_LEN];
+
+        let (_keys, public_key) =
+            ShrincsSigner::keygen(b"shrincs-account-example test policy owner-gate", 1024).expect("keygen");
+        let commitment: [u8; HASH_LEN] = public_key
+            .public_key_commitment
+            .clone()
+            .try_into()
+            .expect("commitment is 32 bytes");
+        let account_pda_key = init_account(&mut context, &program_id, &owner, salt, commitment).await;
+
+        let setters: Vec<TestInstruction> = vec![
+            TestInstruction::SetPolicyMonotonic(SetPolicyMonotonicArgs { initial_leaf_index: 1 }),
+            TestInstruction::SetPolicyRecoveryRotation,
+            TestInstruction::SetPolicyLeafBitmap,
+            TestInstruction::EnterRecoveryMode,
+        ];
+
+        for setter in setters {
+            // Wrong owner: `attacker` genuinely signs, but does not match `state.owner`.
+            context.last_blockhash = context.get_new_latest_blockhash().await.unwrap();
+            let instruction =
+                policy_instruction(&program_id, &account_pda_key, &attacker.pubkey(), setter.clone());
+            let transaction = Transaction::new_signed_with_payer(
+                &[instruction],
+                Some(&context.payer.pubkey()),
+                &[&context.payer, &attacker],
+                context.last_blockhash,
+            );
+            let result = context
+                .banks_client
+                .process_transaction_with_metadata(transaction)
+                .await
+                .unwrap();
+            assert_custom_error(&result.result, ShrincsAccountError::OnlyOwner);
+
+            // Missing signer: the instruction marks `owner` non-signer and the
+            // transaction never signs with it.
+            context.last_blockhash = context.get_new_latest_blockhash().await.unwrap();
+            let instruction = Instruction {
+                program_id,
+                accounts: vec![
+                    AccountMeta::new(account_pda_key, false),
+                    AccountMeta::new_readonly(owner.pubkey(), false),
+                ],
+                data: borsh::to_vec(&setter).unwrap(),
+            };
+            let transaction = Transaction::new_signed_with_payer(
+                &[instruction],
+                Some(&context.payer.pubkey()),
+                &[&context.payer],
+                context.last_blockhash,
+            );
+            let result = context
+                .banks_client
+                .process_transaction_with_metadata(transaction)
+                .await
+                .unwrap();
+            assert_missing_signature(&result.result);
+        }
+    }
+
+    #[tokio::test]
+    async fn policy_frozen_blocks_monotonic_and_bitmap_but_not_recovery_rotation() {
+        let (program_test, program_id) = setup_test().await;
+        let mut context = program_test.start_with_context().await;
+        let program_id = program_id.pubkey();
+        let owner = Keypair::new();
+        let salt = [22u8; HASH_LEN];
+
+        let (mut keys, public_key) =
+            ShrincsSigner::keygen(b"shrincs-account-example test freeze exemption", 1024).expect("keygen");
+        let commitment: [u8; HASH_LEN] = public_key
+            .public_key_commitment
+            .clone()
+            .try_into()
+            .expect("commitment is 32 bytes");
+        let account_pda_key = init_account(&mut context, &program_id, &owner, salt, commitment).await;
+
+        freeze_stateful_policy(&mut context, &program_id, &account_pda_key, &mut keys, &public_key).await;
+        let frozen_state = fetch_state(&mut context, &account_pda_key).await;
+        assert!(frozen_state.stateful_policy_frozen, "one stateful use must freeze the policy");
+
+        // Blocked while frozen: MonotonicIndex.
+        context.last_blockhash = context.get_new_latest_blockhash().await.unwrap();
+        let instruction = policy_instruction(
+            &program_id,
+            &account_pda_key,
+            &owner.pubkey(),
+            TestInstruction::SetPolicyMonotonic(SetPolicyMonotonicArgs { initial_leaf_index: 5 }),
+        );
+        let transaction = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer, &owner],
+            context.last_blockhash,
+        );
+        let result = context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap();
+        assert_custom_error(&result.result, ShrincsAccountError::StatefulPolicyFrozen);
+
+        // Blocked while frozen: LeafBitmap.
+        context.last_blockhash = context.get_new_latest_blockhash().await.unwrap();
+        let instruction = policy_instruction(
+            &program_id,
+            &account_pda_key,
+            &owner.pubkey(),
+            TestInstruction::SetPolicyLeafBitmap,
+        );
+        let transaction = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer, &owner],
+            context.last_blockhash,
+        );
+        let result = context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap();
+        assert_custom_error(&result.result, ShrincsAccountError::StatefulPolicyFrozen);
+
+        // The divergence under test: RecoveryRotation is exempt from the freeze
+        // check (see docs/solidity-parity.md, "Recovery-rotation freeze
+        // exemption (audit F1)").
+        context.last_blockhash = context.get_new_latest_blockhash().await.unwrap();
+        let instruction = policy_instruction(
+            &program_id,
+            &account_pda_key,
+            &owner.pubkey(),
+            TestInstruction::SetPolicyRecoveryRotation,
+        );
+        let transaction = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer, &owner],
+            context.last_blockhash,
+        );
+        context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap()
+            .result
+            .expect("set_policy_recovery_rotation is exempt from the freeze check");
+
+        let state = fetch_state(&mut context, &account_pda_key).await;
+        assert_eq!(state.stateful_policy, StatefulPolicy::RecoveryRotation as u8);
+        assert!(state.stateful_policy_frozen, "the freeze flag itself is untouched by this setter");
+    }
+
+    #[tokio::test]
+    async fn set_policy_monotonic_rejects_rollback_below_cursor() {
+        let (program_test, program_id) = setup_test().await;
+        let mut context = program_test.start_with_context().await;
+        let program_id = program_id.pubkey();
+        let owner = Keypair::new();
+        let salt = [23u8; HASH_LEN];
+
+        let (_keys, public_key) =
+            ShrincsSigner::keygen(b"shrincs-account-example test rollback", 1024).expect("keygen");
+        let commitment: [u8; HASH_LEN] = public_key
+            .public_key_commitment
+            .clone()
+            .try_into()
+            .expect("commitment is 32 bytes");
+        let account_pda_key = init_account(&mut context, &program_id, &owner, salt, commitment).await;
+
+        // Advance the cursor to 5.
+        let instruction = policy_instruction(
+            &program_id,
+            &account_pda_key,
+            &owner.pubkey(),
+            TestInstruction::SetPolicyMonotonic(SetPolicyMonotonicArgs { initial_leaf_index: 5 }),
+        );
+        let transaction = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer, &owner],
+            context.last_blockhash,
+        );
+        context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap()
+            .result
+            .expect("advancing the cursor forward should succeed");
+        let state = fetch_state(&mut context, &account_pda_key).await;
+        assert_eq!(state.next_stateful_leaf_index, 5);
+
+        // Rolling back below 5 must be rejected, and must not mutate state.
+        context.last_blockhash = context.get_new_latest_blockhash().await.unwrap();
+        let instruction = policy_instruction(
+            &program_id,
+            &account_pda_key,
+            &owner.pubkey(),
+            TestInstruction::SetPolicyMonotonic(SetPolicyMonotonicArgs { initial_leaf_index: 3 }),
+        );
+        let transaction = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer, &owner],
+            context.last_blockhash,
+        );
+        let result = context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap();
+        assert_custom_error(&result.result, ShrincsAccountError::StatefulIndexRollback);
+
+        let state = fetch_state(&mut context, &account_pda_key).await;
+        assert_eq!(state.next_stateful_leaf_index, 5, "rejected rollback must not mutate the cursor");
+    }
+
+    #[tokio::test]
+    async fn enter_recovery_mode_requires_recovery_rotation_policy() {
+        let (program_test, program_id) = setup_test().await;
+        let mut context = program_test.start_with_context().await;
+        let program_id = program_id.pubkey();
+        let owner = Keypair::new();
+        let salt = [24u8; HASH_LEN];
+
+        let (_keys, public_key) =
+            ShrincsSigner::keygen(b"shrincs-account-example test enter recovery", 1024).expect("keygen");
+        let commitment: [u8; HASH_LEN] = public_key
+            .public_key_commitment
+            .clone()
+            .try_into()
+            .expect("commitment is 32 bytes");
+        let account_pda_key = init_account(&mut context, &program_id, &owner, salt, commitment).await;
+
+        // Default policy is MonotonicIndex: entering recovery must fail.
+        let instruction =
+            policy_instruction(&program_id, &account_pda_key, &owner.pubkey(), TestInstruction::EnterRecoveryMode);
+        let transaction = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer, &owner],
+            context.last_blockhash,
+        );
+        let result = context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap();
+        assert_custom_error(&result.result, ShrincsAccountError::RecoveryPolicyRequired);
+
+        // Switch to RecoveryRotation, then entering recovery must succeed.
+        context.last_blockhash = context.get_new_latest_blockhash().await.unwrap();
+        let instruction = policy_instruction(
+            &program_id,
+            &account_pda_key,
+            &owner.pubkey(),
+            TestInstruction::SetPolicyRecoveryRotation,
+        );
+        let transaction = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer, &owner],
+            context.last_blockhash,
+        );
+        context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap()
+            .result
+            .expect("set_policy_recovery_rotation should succeed");
+
+        context.last_blockhash = context.get_new_latest_blockhash().await.unwrap();
+        let instruction =
+            policy_instruction(&program_id, &account_pda_key, &owner.pubkey(), TestInstruction::EnterRecoveryMode);
+        let transaction = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer, &owner],
+            context.last_blockhash,
+        );
+        context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap()
+            .result
+            .expect("enter_recovery_mode should succeed once RecoveryRotation is active");
+
+        let state = fetch_state(&mut context, &account_pda_key).await;
+        assert!(state.recovery_mode, "recovery_mode must be armed after enter_recovery_mode");
     }
 }
