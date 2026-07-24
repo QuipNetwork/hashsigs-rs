@@ -121,10 +121,10 @@ impl ShrincsSigner {
             INITIAL_STATEFUL_LEAF_INDEX,
             max_stateful_signatures,
         );
-        let stateless_sk_seed = derive32(b"shrincs-stateless-sk-seed", seed_material, &[]);
-        let stateless_prf_seed = derive32(b"shrincs-stateless-prf-seed", seed_material, &[]);
-        let pk_seed = derive32(b"shrincs-pk-seed", seed_material, &[]);
-        let stateless = sphincs_plus_c::keygen(stateless_sk_seed, stateless_prf_seed, pk_seed);
+        // Stateless half derived through the SPHINCS+C boundary helper — the
+        // same code path the wasm pure-SPHINCS keygen uses, so the shared
+        // master-seed material is structurally identical between the two.
+        let stateless = sphincs_plus_c::keygen_from_master_seed(seed_material);
 
         let stateful = uxmss::Key {
             secret: uxmss::Secret {
@@ -139,6 +139,7 @@ impl ShrincsSigner {
             next_leaf_index: INITIAL_STATEFUL_LEAF_INDEX,
         };
         let hypertree_root = *stateless.public_key.root.as_bytes();
+        let stateless_pk_seed = *stateless.public_key.pk_seed.as_bytes();
         let public_key_commitment = Keys::compute_commitment(&stateful, &stateless);
         let signing_key = Keys {
             stateless,
@@ -147,7 +148,7 @@ impl ShrincsSigner {
         };
         let public_key = public_key_from_components(
             encode_stateful_public_key(stateful_pk_seed, stateful_root, max_stateful_signatures),
-            pk_seed,
+            stateless_pk_seed,
             hypertree_root,
         );
 

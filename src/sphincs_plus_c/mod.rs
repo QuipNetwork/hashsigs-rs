@@ -192,6 +192,16 @@ pub fn keygen(
     }
 }
 
+/// Derive a SPHINCS+C key from a master seed. Domain tags are consensus-fixed
+/// serialized bytes — do NOT rename them. Shared with `ShrincsSigner::keygen`'s
+/// stateless half so the same master seed yields matching key material.
+pub fn keygen_from_master_seed(seed: &[u8]) -> key::Key {
+    let sk = crate::primitives::hash::derive32(b"shrincs-stateless-sk-seed", seed, &[]);
+    let prf = crate::primitives::hash::derive32(b"shrincs-stateless-prf-seed", seed, &[]);
+    let pk = crate::primitives::hash::derive32(b"shrincs-pk-seed", seed, &[]);
+    keygen(sk, prf, pk)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

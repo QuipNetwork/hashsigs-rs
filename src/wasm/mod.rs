@@ -191,12 +191,8 @@ impl WasmSphincsPlusCKeys {
 #[wasm_bindgen(js_name = sphincsPlusCKeygen)]
 pub fn sphincs_plus_c_keygen(seed: &[u8]) -> Result<WasmSphincsPlusCKeys, JsValue> {
     let mut seed = bytes_fixed::<32>(seed).map_err(js_error)?;
-    let stateless_sk_seed = crate::shrincs::derive32(b"shrincs-stateless-sk-seed", &seed, &[]);
-    let stateless_prf_seed = crate::shrincs::derive32(b"shrincs-stateless-prf-seed", &seed, &[]);
-    let pk_seed = crate::shrincs::derive32(b"shrincs-pk-seed", &seed, &[]);
+    let signing_key = crate::sphincs_plus_c::keygen_from_master_seed(&seed);
     seed.zeroize();
-    let signing_key =
-        crate::sphincs_plus_c::keygen(stateless_sk_seed, stateless_prf_seed, pk_seed);
     Ok(WasmSphincsPlusCKeys { signing_key })
 }
 
