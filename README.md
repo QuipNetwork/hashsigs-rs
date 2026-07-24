@@ -543,14 +543,9 @@ cp /path/to/hashsigs-solidity/test/test_vectors/shrincs_account_wrapper_vectors_
   tests/test_vectors/shrincs_account_wrapper_vectors_256s_sha2.json
 ```
 
-Today the committed Rust-side account-wrapper cross-check fixtures exist for:
-
-- `shrincs-256s-keccak`
-- `shrincs-256s-sha2`
-
-The `128s-q18` and `128s-q20` profile legs still ignore
-`tests/solidity_account_vectors.rs` unless matching per-profile Solidity export
-files are generated and copied in under profile-specific filenames.
+Committed Rust-side cross-check fixtures exist for every profile —
+`shrincs-256s-keccak`, `shrincs-256s-sha2`, `shrincs-128s-q18`, and
+`shrincs-128s-q20` — so `tests/solidity_account_vectors.rs` runs on all four.
 
 Then run the Rust-side cross-check:
 
