@@ -31,15 +31,32 @@ use crate::primitives::hash::{base_w16_digit, hash_node, hash_packed, word32};
 use crate::primitives::profiles::{
     WOTS_BASE_STATEFUL, WOTS_CHAINS_STATEFUL, WOTS_TARGET_SUM_STATEFUL,
 };
-use crate::types::{StatefulPublicKey, StatefulSignature};
+use super::signature::Signature;
 use crate::wots_c;
 use crate::primitives::HASH_LEN;
 use crate::wots_c::WOTS_C_MAX_GRIND_COUNTER;
 
+// Encoded stateful public key layout, kept 68 bytes across all profiles:
+// 32-byte pkSeed slot || 32-byte root slot || 4-byte maxSignatures.
+pub const STATEFUL_PUBLIC_KEY_BYTES: usize = 68;
+
+/// The stateful sub-key: `pk_seed || root || max_signatures`, the flat
+/// (non-newtyped) shape carried inside [`super::public_key::PublicKey`]'s
+/// `stateful_public_key` field and consumed by the verifier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PublicKey {
+    /// Public seed used by stateful WOTS-C and the unbalanced XMSS-like tree.
+    pub pk_seed: [u8; HASH_LEN],
+    /// Root of the stateful unbalanced authentication tree.
+    pub root: [u8; HASH_LEN],
+    /// Highest accepted stateful leaf index.
+    pub max_signatures: u32,
+}
+
 pub(crate) fn verify_stateful_unsafe_raw(
-    stateful_key: &StatefulPublicKey,
+    stateful_key: &PublicKey,
     message: &[u8],
-    signature: &StatefulSignature,
+    signature: &Signature,
 ) -> bool {
     let leaf_index = signature.auth_path.len() as u32;
     if leaf_index == 0 || leaf_index > stateful_key.max_signatures {
@@ -98,7 +115,7 @@ fn compact_stateful_wots_public_key_from_signature(
     pk_seed: [u8; HASH_LEN],
     leaf_index: u32,
     message: &[u8],
-    signature: &StatefulSignature,
+    signature: &Signature,
 ) -> Option<[u8; HASH_LEN]> {
     let digest = hash_packed(&[
         b"uxmss-wots-digits".as_ref(),
@@ -174,9 +191,10 @@ fn root_from_unbalanced_path(
 // `sphincs_plus_c` roles by module path, so the two `pk_seed`s / roots of the
 // SHRINCS hybrid cannot be swapped. This `Key` is the stateful half of a
 // `shrincs::Keys`. Flat layout (matching the wasm ABI):
-// `Secret = sk_seed(32) ‖ prf_seed(32)` (64 B), `PublicKey =
-// pk_seed(32) ‖ root(32) ‖ max_signatures(4 BE)` (68 B), `Key = Secret ‖
-// PublicKey ‖ next_leaf_index(4 BE)` (136 B).
+// `Secret = sk_seed(32) ‖ prf_seed(32)` (64 B), `StructuredPublicKey =
+// pk_seed(32) ‖ root(32) ‖ max_signatures(4 BE)` (68 B, bridges to/from the
+// flat `PublicKey` above via `From`), `Key = Secret ‖ StructuredPublicKey ‖
+// next_leaf_index(4 BE)` (136 B).
 
 /// Secret seed deriving stateful WOTS-C chain secrets.
 #[derive(Clone, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]
@@ -285,8 +303,10 @@ impl fmt::Debug for Secret {
 }
 
 /// The public half of a stateful key: `pk_seed ‖ root ‖ max_signatures`.
+/// Newtyped (`PkSeed`/`Root`) counterpart of the flat [`PublicKey`] above;
+/// bridges to/from it via `From`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct PublicKey {
+pub struct StructuredPublicKey {
     /// Public seed used by stateful WOTS-C and the unbalanced tree.
     pub pk_seed: PkSeed,
     /// Root of the stateful unbalanced authentication tree.
@@ -302,7 +322,7 @@ pub struct Key {
     /// Secret seeds.
     pub secret: Secret,
     /// Public seed, root, and budget.
-    pub public_key: PublicKey,
+    pub public_key: StructuredPublicKey,
     /// Next monotonic leaf index; advanced on each stateful signature.
     pub next_leaf_index: u32,
 }
@@ -317,11 +337,11 @@ impl fmt::Debug for Key {
     }
 }
 
-impl PublicKey {
+impl StructuredPublicKey {
     /// Encoded stateful public key `pk_seed(32) ‖ root(32) ‖ max(4 BE)`,
     /// 68 bytes (`STATEFUL_PUBLIC_KEY_BYTES`).
-    pub fn to_bytes(self) -> [u8; crate::types::STATEFUL_PUBLIC_KEY_BYTES] {
-        let mut out = [0u8; crate::types::STATEFUL_PUBLIC_KEY_BYTES];
+    pub fn to_bytes(self) -> [u8; STATEFUL_PUBLIC_KEY_BYTES] {
+        let mut out = [0u8; STATEFUL_PUBLIC_KEY_BYTES];
         out[..HASH_LEN].copy_from_slice(self.pk_seed.as_bytes());
         out[HASH_LEN..HASH_LEN * 2].copy_from_slice(self.root.as_bytes());
         out[HASH_LEN * 2..].copy_from_slice(&self.max_signatures.to_be_bytes());
@@ -329,7 +349,7 @@ impl PublicKey {
     }
     /// Parse the 68-byte encoded stateful public key; `None` on wrong length.
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        if bytes.len() != crate::types::STATEFUL_PUBLIC_KEY_BYTES {
+        if bytes.len() != STATEFUL_PUBLIC_KEY_BYTES {
             return None;
         }
         Some(Self {
@@ -361,12 +381,12 @@ impl Secret {
 }
 
 impl Key {
-    /// Flat layout `Secret(64) ‖ PublicKey(68) ‖ next_leaf_index(4 BE)`,
-    /// 136 bytes.
+    /// Flat layout `Secret(64) ‖ StructuredPublicKey(68) ‖
+    /// next_leaf_index(4 BE)`, 136 bytes.
     pub fn to_bytes(&self) -> [u8; 136] {
         let mut out = [0u8; 136];
         out[..64].copy_from_slice(&self.secret.to_bytes());
-        out[64..64 + crate::types::STATEFUL_PUBLIC_KEY_BYTES]
+        out[64..64 + STATEFUL_PUBLIC_KEY_BYTES]
             .copy_from_slice(&self.public_key.to_bytes());
         out[132..].copy_from_slice(&self.next_leaf_index.to_be_bytes());
         out
@@ -378,14 +398,14 @@ impl Key {
         }
         Some(Self {
             secret: Secret::from_bytes(bytes.get(..64)?)?,
-            public_key: PublicKey::from_bytes(bytes.get(64..132)?)?,
+            public_key: StructuredPublicKey::from_bytes(bytes.get(64..132)?)?,
             next_leaf_index: u32::from_be_bytes(word4(bytes.get(132..)?)?),
         })
     }
 }
 
-impl From<PublicKey> for StatefulPublicKey {
-    fn from(pk: PublicKey) -> Self {
+impl From<StructuredPublicKey> for PublicKey {
+    fn from(pk: StructuredPublicKey) -> Self {
         Self {
             pk_seed: *pk.pk_seed.as_bytes(),
             root: *pk.root.as_bytes(),
@@ -394,8 +414,8 @@ impl From<PublicKey> for StatefulPublicKey {
     }
 }
 
-impl From<StatefulPublicKey> for PublicKey {
-    fn from(pk: StatefulPublicKey) -> Self {
+impl From<PublicKey> for StructuredPublicKey {
+    fn from(pk: PublicKey) -> Self {
         Self {
             pk_seed: PkSeed::new(pk.pk_seed),
             root: Root::new(pk.root),
@@ -413,7 +433,7 @@ fn word4(bytes: &[u8]) -> Option<[u8; 4]> {
     Some(out)
 }
 
-pub(crate) fn sign_stateful_raw(key: &mut Key, message: &[u8]) -> Option<StatefulSignature> {
+pub(crate) fn sign_stateful_raw(key: &mut Key, message: &[u8]) -> Option<Signature> {
     // The verifier derives the stateful leaf index from auth_path.len(), so the
     // signer must advance one leaf at a time and must never reuse a prior leaf.
     let leaf_index = key.next_leaf_index;
@@ -437,7 +457,7 @@ pub(crate) fn sign_stateful_raw_at_leaf(
     key: &Key,
     leaf_index: u32,
     message: &[u8],
-) -> Option<StatefulSignature> {
+) -> Option<Signature> {
     // This deterministic entry point is useful for tests and vector generation.
     // Production signing should use `sign_stateful_raw`, which advances the
     // monotonic `next_stateful_leaf_index` and avoids accidental leaf reuse.
@@ -486,7 +506,7 @@ fn sign_stateful_wots_c(
     pk_seed: &[u8; HASH_LEN],
     leaf_index: u32,
     message: &[u8],
-) -> Option<StatefulSignature> {
+) -> Option<Signature> {
     // WOTS-C replaces checksum chains with a grinding condition. We keep trying
     // counters until the base-16 message digits sum to the verifier's target.
     //
@@ -546,7 +566,7 @@ fn sign_stateful_wots_c(
         },
     )?;
     let (counter, chains) = result;
-    Some(StatefulSignature {
+    Some(Signature {
         randomizer,
         counter,
         chains,
@@ -646,33 +666,33 @@ mod key_tests {
 
     #[test]
     fn public_key_bytes_round_trip() {
-        let pk = PublicKey {
+        let pk = StructuredPublicKey {
             pk_seed: PkSeed::new([7u8; HASH_LEN]),
             root: Root::new([9u8; HASH_LEN]),
             max_signatures: 1024,
         };
         let bytes = pk.to_bytes();
-        assert_eq!(bytes.len(), crate::types::STATEFUL_PUBLIC_KEY_BYTES);
+        assert_eq!(bytes.len(), STATEFUL_PUBLIC_KEY_BYTES);
         // max_signatures is the trailing 4 big-endian bytes.
         assert_eq!(&bytes[HASH_LEN * 2..], &1024u32.to_be_bytes());
-        assert_eq!(PublicKey::from_bytes(&bytes), Some(pk));
+        assert_eq!(StructuredPublicKey::from_bytes(&bytes), Some(pk));
     }
 
     #[test]
     fn public_key_bridges_to_and_from_stateful_public_key() {
-        let pk = PublicKey {
+        let pk = StructuredPublicKey {
             pk_seed: PkSeed::new([1u8; HASH_LEN]),
             root: Root::new([2u8; HASH_LEN]),
             max_signatures: 8,
         };
-        let flat: StatefulPublicKey = pk.into();
+        let flat: PublicKey = pk.into();
         assert_eq!(flat.max_signatures, 8);
-        assert_eq!(PublicKey::from(flat), pk);
+        assert_eq!(StructuredPublicKey::from(flat), pk);
     }
 
     #[test]
     fn from_bytes_rejects_wrong_length() {
-        assert_eq!(PublicKey::from_bytes(&[0u8; 67]), None);
+        assert_eq!(StructuredPublicKey::from_bytes(&[0u8; 67]), None);
     }
 
     #[test]

@@ -29,8 +29,11 @@ use crate::primitives::hash_suite::HASH_SUITE_ID;
 use crate::primitives::HASH_LEN;
 use crate::sphincs_plus_c;
 use crate::sphincs_plus_c::Signature as StatelessSignature;
-use crate::types::{ActionContext, PublicKey, StatefulSignature, STATEFUL_PUBLIC_KEY_BYTES};
+use super::action_context::ActionContext;
+use super::public_key::PublicKey;
+use super::signature::Signature;
 use crate::shrincs::uxmss;
+use super::uxmss::STATEFUL_PUBLIC_KEY_BYTES;
 use super::public_key::{
     decode_stateful_public_key, public_key_commitment as public_key_commitment_from_parts,
 };
@@ -129,7 +132,7 @@ pub(crate) fn verify_stateful(
     expected_public_key_commitment: [u8; HASH_LEN],
     public_key: &PublicKey,
     context: &ActionContext,
-    signature: &StatefulSignature,
+    signature: &Signature,
 ) -> bool {
     if !valid_action_context(context) {
         return false;
@@ -161,7 +164,7 @@ pub(crate) fn verify_stateful_unsafe_raw(
     expected_public_key_commitment: [u8; HASH_LEN],
     public_key: &PublicKey,
     message: &[u8],
-    signature: &StatefulSignature,
+    signature: &Signature,
 ) -> bool {
     if !matches_expected_public_key_commitment(public_key, expected_public_key_commitment) {
         return false;
@@ -201,7 +204,7 @@ pub fn prepare_stateless_delegation(
     expected_public_key_commitment: [u8; HASH_LEN],
     envelope: &[u8],
 ) -> Option<([u8; 64], Vec<u8>)> {
-    let (public_key, signature) = crate::envelope::decode_stateless_envelope(envelope)?;
+    let (public_key, signature) = super::signature::decode_stateless_envelope(envelope)?;
     if !matches_expected_public_key_commitment(&public_key, expected_public_key_commitment)
     {
         return None;

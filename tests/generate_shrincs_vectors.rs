@@ -5,7 +5,7 @@
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use hashsigs_rs::shrincs::{
-    PublicKey, ShrincsSigner, StatefulSignature, StatelessSignature, HASH_LEN,
+    PublicKey, ShrincsSigner, Signature as StatefulSignature, StatelessSignature, HASH_LEN,
 };
 use serde_json::{json, Value};
 use std::fs;

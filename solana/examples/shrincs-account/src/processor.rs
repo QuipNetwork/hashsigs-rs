@@ -397,7 +397,7 @@ pub(crate) fn process_verify_stateful_action(
 
     // Bind the leaf-policy gate to the leaf the SIGNATURE actually used.
     // `auth_path.len()` IS the stateful leaf index -- both
-    // `hashsigs_rs::types::StatefulSignature::auth_path`'s doc comment and
+    // `hashsigs_rs::shrincs::Signature::auth_path`'s doc comment and
     // the core verifier (`uxmss::verify_stateful_unsafe_raw`, which derives
     // `leaf_index` the same way before recomputing the tree root) agree on
     // this. A caller cannot forge it independently of the signature: the

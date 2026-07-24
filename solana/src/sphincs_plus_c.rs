@@ -25,7 +25,8 @@
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use hashsigs_rs::shrincs::{
-    ActionContext, PublicKey as ShrincsPublicKey, StatefulSignature, StatelessSignature,
+    ActionContext, PublicKey as ShrincsPublicKey, Signature as StatefulSignature,
+    StatelessSignature,
 };
 use hashsigs_rs::sphincs_plus_c::fors_c::{Entry as ForsEntry, Signature as ForsSignature};
 use hashsigs_rs::sphincs_plus_c::hypertree::LayerSignature as HypertreeLayerSignature;

@@ -101,7 +101,7 @@ impl From<SigningKeyDto> for Keys {
                 sk_seed: uxmss::SkSeed::new(value.stateful_sk_seed),
                 prf_seed: uxmss::PrfSeed::new(value.stateful_prf_seed),
             },
-            public_key: uxmss::PublicKey {
+            public_key: uxmss::StructuredPublicKey {
                 pk_seed: uxmss::PkSeed::new(value.stateful_pk_seed),
                 root: uxmss::Root::new(value.stateful_root),
                 max_signatures: value.max_stateful_signatures,

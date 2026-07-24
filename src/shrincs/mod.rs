@@ -21,10 +21,26 @@
 //! Wraps independent `sphincs_plus_c` (stateless) and `uxmss` (stateful).
 
 pub(crate) mod uxmss;
+mod action_context;
 mod dispatch;
 /// The composed SHRINCS key: SPHINCS+C ⊕ UXMSS ⊕ commitment.
 pub mod keys;
-mod public_key;
+/// SHRINCS public-key wire type and its ABI codec.
+///
+/// `pub` (rather than `pub(crate)`) because `PublicKey` is part of the
+/// crate's public wire-type surface: the `tests/` integration suite and the
+/// `solana` workspace member reconstruct it from their DTOs, importing it at
+/// the canonical path `crate::shrincs::public_key::PublicKey` (also
+/// re-exported as `crate::shrincs::PublicKey`).
+pub mod public_key;
+/// The primary SHRINCS signature (the stateful UXMSS fast-path signature),
+/// its ABI codec, and the composite envelope codecs.
+///
+/// `pub` (rather than `pub(crate)`) for the same reason as `public_key`
+/// above: `Signature` is part of the crate's public wire-type surface,
+/// canonically `crate::shrincs::signature::Signature` (also re-exported as
+/// `crate::shrincs::Signature`).
+pub mod signature;
 mod signer_types;
 mod signer_utils;
 
@@ -53,9 +69,13 @@ pub use crate::primitives::{
     ADDRESS_TYPE_FORS_TREE, ADDRESS_TYPE_TREE, ADDRESS_TYPE_WOTS_HASH, HASH_LEN,
     HASH_SUITE_KECCAK_256, HASH_SUITE_SHA2_256,
 };
-pub use crate::types::{
-    ActionContext, PublicKey, StatefulPublicKey, StatefulSignature, STATEFUL_PUBLIC_KEY_BYTES,
+pub use action_context::ActionContext;
+pub use public_key::{decode_public_key_commitment, PublicKey};
+pub use signature::{
+    decode_stateful_envelope, decode_stateless_envelope, encode_stateful_envelope,
+    encode_stateless_envelope, Signature,
 };
+pub use uxmss::STATEFUL_PUBLIC_KEY_BYTES;
 // SHRINCS genuinely has a stateless signing path (SPHINCS+C is the stateless
 // half of the hybrid key), so this is a legitimate semantic re-export, not a
 // component shim: `shrincs::StatelessSignature` names that path's wire type

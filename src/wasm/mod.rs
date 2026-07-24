@@ -28,7 +28,8 @@
 #[cfg(any(test, feature = "wasm-bindings"))]
 use crate::verifier::VerifierInterface as _;
 use crate::shrincs::{
-    Keys, PublicKey, ShrincsSigner, ShrincsVerifier, HASH_LEN, STATEFUL_PUBLIC_KEY_BYTES,
+    encode_stateful_envelope, Keys, PublicKey, ShrincsSigner, ShrincsVerifier, HASH_LEN,
+    STATEFUL_PUBLIC_KEY_BYTES,
 };
 // The Uint8Array-native noble-style free functions (sphincsPlusC*/shrincs
 // keygen/sign/verify) work directly with the independent SPHINCS+C layer and
@@ -407,7 +408,7 @@ pub fn shrincs_sign(
     // Return the PublicKey-carrying envelope, not the bare signature:
     // `shrincsVerify` pins only the 32-byte commitment, so the signature
     // itself must carry the public key for the verifier to check against it.
-    Ok(crate::envelope::encode_stateful_envelope(&public_key, &signature))
+    Ok(encode_stateful_envelope(&public_key, &signature))
 }
 
 /// Sign a 32-byte `message` (typically a pre-computed hash) via the

@@ -16,7 +16,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 use hashsigs_rs::shrincs::{
-    ActionContext, PublicKey, ShrincsSigner, ShrincsVerifier, StatefulSignature, HASH_LEN,
+    ActionContext, PublicKey, ShrincsSigner, ShrincsVerifier, Signature as StatefulSignature,
+    HASH_LEN,
 };
 use serde_json::{json, Value};
 use std::fs;

@@ -20,7 +20,7 @@
 
 use crate::shrincs::{derive32, encode_stateful_public_key, public_key_from_components, Keys};
 use crate::sphincs_plus_c;
-use crate::types::PublicKey;
+use crate::shrincs::PublicKey;
 use crate::shrincs::uxmss;
 
 const INITIAL_STATEFUL_LEAF_INDEX: u32 = 1;
@@ -45,7 +45,7 @@ pub(crate) fn stateful_only_key(seed: &[u8], max: u32) -> (Keys, PublicKey) {
             sk_seed: uxmss::SkSeed::new(stateful_sk_seed),
             prf_seed: uxmss::PrfSeed::new(stateful_prf_seed),
         },
-        public_key: uxmss::PublicKey {
+        public_key: uxmss::StructuredPublicKey {
             pk_seed: uxmss::PkSeed::new(stateful_pk_seed),
             root: uxmss::Root::new(stateful_root),
             max_signatures: max,

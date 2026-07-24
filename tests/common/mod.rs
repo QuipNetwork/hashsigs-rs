@@ -20,7 +20,7 @@
 //! (`tests/test_vectors/shrincs_account_wrapper_vectors*.json{,.gz}`).
 //!
 //! `AbiDecoder` is an independent, from-scratch `abi.decode` reader used as
-//! the differential oracle against `hashsigs_rs::envelope`'s
+//! the differential oracle against `hashsigs_rs::shrincs`'s envelope
 //! production codec in `envelope_vectors.rs`, and against the crypto-level
 //! action-verify path in `solidity_account_vectors.rs`. Not `#[path]`-shared
 //! at the binary level: `mod common;` recompiles this file per integration
@@ -39,7 +39,7 @@ use std::path::{Path, PathBuf};
 
 use flate2::read::GzDecoder;
 use hashsigs_rs::shrincs::{
-    ActionContext, PublicKey, StatefulSignature, StatelessSignature, HASH_LEN,
+    ActionContext, PublicKey, Signature as StatefulSignature, StatelessSignature, HASH_LEN,
 };
 use hashsigs_rs::sphincs_plus_c::fors_c::{Entry as ForsEntry, Signature as ForsSignature};
 use hashsigs_rs::sphincs_plus_c::hypertree::LayerSignature as HypertreeLayerSignature;

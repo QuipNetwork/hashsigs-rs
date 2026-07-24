@@ -170,7 +170,7 @@ impl Keys {
                 sk_seed: uxmss::SkSeed::new(sk),
                 prf_seed: uxmss::PrfSeed::new(prf),
             },
-            public_key: uxmss::PublicKey {
+            public_key: uxmss::StructuredPublicKey {
                 pk_seed: uxmss::PkSeed::new(pk),
                 root: uxmss::Root::new(root),
                 max_signatures: max,
@@ -193,7 +193,7 @@ impl Keys {
     /// checked by the caller against a stored commitment. Returns `None` on
     /// a malformed envelope or wrong-length fields.
     pub fn recover_commitment(stateful_envelope: &[u8]) -> Option<Commitment> {
-        let (pk, _sig) = crate::envelope::decode_stateful_envelope(stateful_envelope)?;
+        let (pk, _sig) = crate::shrincs::signature::decode_stateful_envelope(stateful_envelope)?;
         let pk_seed = word32(&pk.pk_seed)?;
         let hypertree_root = word32(&pk.hypertree_root)?;
         Some(Commitment::new(public_key_commitment(
@@ -250,7 +250,7 @@ mod tests {
 
     /// A `Keys` with real, seed-derived roots, plus the `PublicKey` production
     /// `keygen` installs — for cross-checking commitment and import.
-    fn production_keys() -> (Keys, crate::types::PublicKey) {
+    fn production_keys() -> (Keys, crate::shrincs::public_key::PublicKey) {
         use crate::shrincs::signer::ShrincsSigner;
         ShrincsSigner::keygen(b"keys import cross-check", 4).expect("keygen")
     }
@@ -347,7 +347,7 @@ mod tests {
         let sig =
             crate::shrincs::signer::ShrincsSigner::sign_stateful_raw(&mut keys, &[0x11; 32])
                 .expect("sign");
-        let env = crate::envelope::encode_stateful_envelope(&pk, &sig);
+        let env = crate::shrincs::signature::encode_stateful_envelope(&pk, &sig);
 
         let recovered = Keys::recover_commitment(&env).expect("recover");
 
@@ -374,7 +374,7 @@ mod tests {
 
         let mut bad_pk = pk.clone();
         bad_pk.public_key_commitment = alloc::vec![0xFFu8; 32];
-        let env = crate::envelope::encode_stateful_envelope(&bad_pk, &sig);
+        let env = crate::shrincs::signature::encode_stateful_envelope(&bad_pk, &sig);
 
         assert_eq!(Keys::recover_commitment(&env), Some(real));
         assert_ne!(

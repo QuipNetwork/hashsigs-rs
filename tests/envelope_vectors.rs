@@ -15,8 +15,9 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! BYTE-PIN tests: `hashsigs_rs::envelope` against the committed
-//! Solidity-exported vectors (`tests/test_vectors/shrincs_account_wrapper_vectors*`).
+//! BYTE-PIN tests: `hashsigs_rs::shrincs`'s envelope codec against the
+//! committed Solidity-exported vectors
+//! (`tests/test_vectors/shrincs_account_wrapper_vectors*`).
 //!
 //! `common::AbiDecoder` (the same independent `abi.decode` oracle
 //! `solidity_account_vectors.rs` uses for crypto-level verification) decodes
@@ -27,8 +28,9 @@
 mod common;
 
 use common::{hex_to_bytes, load_vectors, AbiDecoder};
-use hashsigs_rs::envelope::{encode_stateful_envelope, encode_stateless_envelope};
-use hashsigs_rs::shrincs::{ShrincsVerifier, VerifyOutcome};
+use hashsigs_rs::shrincs::{
+    encode_stateful_envelope, encode_stateless_envelope, ShrincsVerifier, VerifyOutcome,
+};
 use hashsigs_rs::VerifierInterface as _;
 
 #[test]

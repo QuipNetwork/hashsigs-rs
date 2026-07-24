@@ -15,60 +15,8 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Shared SHRINCS wire types and structural constants.
-
-use alloc::vec::Vec;
-
-use crate::primitives::HASH_LEN;
-
-// Encoded stateful public key layout, kept 68 bytes across all profiles:
-// 32-byte pkSeed slot || 32-byte root slot || 4-byte maxSignatures.
-pub const STATEFUL_PUBLIC_KEY_BYTES: usize = 68;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PublicKey {
-    /// Encoded stateful key: `pk_seed || root || max_signatures`.
-    pub stateful_public_key: Vec<u8>,
-    /// Commitment to the installed hybrid public-key bundle.
-    pub public_key_commitment: Vec<u8>,
-    /// Global stateless public seed used for FORS-C, hypertree, and WOTS-C hashing.
-    pub pk_seed: Vec<u8>,
-    /// Expected final hypertree root.
-    pub hypertree_root: Vec<u8>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct StatefulPublicKey {
-    /// Public seed used by stateful WOTS-C and the unbalanced XMSS-like tree.
-    pub pk_seed: [u8; HASH_LEN],
-    /// Root of the stateful unbalanced authentication tree.
-    pub root: [u8; HASH_LEN],
-    /// Highest accepted stateful leaf index.
-    pub max_signatures: u32,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StatefulSignature {
-    /// Per-signature randomizer mixed into WOTS digit derivation.
-    pub randomizer: [u8; HASH_LEN],
-    /// Counter mixed into WOTS digit derivation.
-    pub counter: u32,
-    /// One WOTS-C chain value per reconstructed digit.
-    pub chains: Vec<[u8; HASH_LEN]>,
-    /// Unbalanced authentication path. Its length is also the leaf index.
-    pub auth_path: Vec<[u8; HASH_LEN]>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ActionContext {
-    /// Caller-controlled domain separation, normally binding account/program identity.
-    pub domain_separator: [u8; HASH_LEN],
-    /// Replay-protection nonce encoded as Solidity-style uint256 bytes.
-    pub nonce: [u8; HASH_LEN],
-    /// Current key version encoded as Solidity-style uint256 bytes.
-    pub key_version: [u8; HASH_LEN],
-    /// Application-specific action identifier.
-    pub action_type: [u8; HASH_LEN],
-    /// Hash of the action payload being authorized.
-    pub payload_hash: [u8; HASH_LEN],
-}
+//! Historical home of the SHRINCS wire types. All of them have relocated to
+//! their byte-neutral homes: `shrincs::PublicKey`, `shrincs::Signature`,
+//! `shrincs::uxmss::PublicKey` (formerly `StatefulPublicKey`),
+//! `shrincs::ActionContext`, and `shrincs::STATEFUL_PUBLIC_KEY_BYTES`. This
+//! module is now empty and kept only as a placeholder pending its removal.

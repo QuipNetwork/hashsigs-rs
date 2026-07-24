@@ -26,7 +26,9 @@ use crate::primitives::hash::word32;
 use crate::sphincs_plus_c::hypertree::hypertree_public_root;
 use crate::sphincs_plus_c::Signature as StatelessSignature;
 use crate::sphincs_plus_c::{self};
-use crate::types::{ActionContext, PublicKey, StatefulSignature};
+use super::action_context::ActionContext;
+use super::public_key::PublicKey;
+use super::signature::Signature;
 use crate::shrincs::uxmss;
 use crate::primitives::HASH_LEN;
 
@@ -73,7 +75,7 @@ impl crate::signer::SignerInterface for ShrincsStatefulSigner {
         // The verifier signs the raw 32-byte hash as the message (matching
         // `ShrincsVerifier::verify_envelope`'s unchecked stateful path).
         let signature = ShrincsSigner::sign_stateful_raw(&mut self.signing_key, hash)?;
-        Some(crate::envelope::encode_stateful_envelope(
+        Some(super::signature::encode_stateful_envelope(
             &self.public_key,
             &signature,
         ))
@@ -142,7 +144,7 @@ impl ShrincsSigner {
                 sk_seed: uxmss::SkSeed::new(stateful_sk_seed),
                 prf_seed: uxmss::PrfSeed::new(stateful_prf_seed),
             },
-            public_key: uxmss::PublicKey {
+            public_key: uxmss::StructuredPublicKey {
                 pk_seed: uxmss::PkSeed::new(stateful_pk_seed),
                 root: uxmss::Root::new(stateful_root),
                 max_signatures: max_stateful_signatures,
@@ -205,7 +207,7 @@ impl ShrincsSigner {
         signing_key: &mut Keys,
         public_key: &PublicKey,
         context: &ActionContext,
-    ) -> ShrincsSignerResult<StatefulSignature> {
+    ) -> ShrincsSignerResult<Signature> {
         let expected = word32(&public_key.public_key_commitment)?;
         let message = stateful_action_message_hash(expected, context);
         uxmss::sign_stateful_raw(&mut signing_key.stateful, &message)
@@ -215,7 +217,7 @@ impl ShrincsSigner {
     pub fn sign_stateful_raw(
         signing_key: &mut Keys,
         message: &[u8],
-    ) -> ShrincsSignerResult<StatefulSignature> {
+    ) -> ShrincsSignerResult<Signature> {
         uxmss::sign_stateful_raw(&mut signing_key.stateful, message)
     }
 
@@ -237,7 +239,7 @@ impl ShrincsSigner {
         signing_key: &Keys,
         leaf_index: u32,
         message: &[u8],
-    ) -> ShrincsSignerResult<StatefulSignature> {
+    ) -> ShrincsSignerResult<Signature> {
         uxmss::sign_stateful_raw_at_leaf(&signing_key.stateful, leaf_index, message)
     }
 
@@ -399,7 +401,7 @@ mod tests {
                 sk_seed: uxmss::SkSeed::new(stateful_sk_seed),
                 prf_seed: uxmss::PrfSeed::new(stateful_prf_seed),
             },
-            public_key: uxmss::PublicKey {
+            public_key: uxmss::StructuredPublicKey {
                 pk_seed: uxmss::PkSeed::new(stateful_pk_seed),
                 root: uxmss::Root::new(stateful_root),
                 max_signatures: max,
@@ -486,7 +488,7 @@ mod tests {
 
         assert_eq!(
             public_key.stateful_public_key.len(),
-            crate::types::STATEFUL_PUBLIC_KEY_BYTES
+            uxmss::STATEFUL_PUBLIC_KEY_BYTES
         );
         assert_eq!(public_key.public_key_commitment.len(), HASH_LEN);
         assert_eq!(public_key.pk_seed.len(), HASH_LEN);
