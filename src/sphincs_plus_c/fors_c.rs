@@ -534,46 +534,9 @@ mod tests {
 
 // ---- signing ----
 
-fn stateless_trace_enabled() -> bool {
-    #[cfg(feature = "std")]
-    {
-        matches!(
-            std::env::var("SHRINCS_TRACE_STATELESS").as_deref(),
-            Ok("1") | Ok("true") | Ok("yes") | Ok("on")
-        )
-    }
-    #[cfg(not(feature = "std"))]
-    {
-        false
-    }
-}
-
+use crate::trace_macros::{stateless_trace, stateless_trace_enabled};
 #[cfg(not(feature = "parallel"))]
-fn stateless_trace_counter_every() -> u32 {
-    #[cfg(feature = "std")]
-    {
-        std::env::var("SHRINCS_TRACE_COUNTER_EVERY")
-            .ok()
-            .and_then(|value| value.parse::<u32>().ok())
-            .filter(|value| *value > 0)
-            .unwrap_or(1 << 20)
-    }
-    #[cfg(not(feature = "std"))]
-    {
-        1 << 20
-    }
-}
-
-fn stateless_trace(message: &str) {
-    #[cfg(feature = "std")]
-    if stateless_trace_enabled() {
-        hashsigs_println!("{message}");
-    }
-    #[cfg(not(feature = "std"))]
-    {
-        let _ = message;
-    }
-}
+use crate::trace_macros::stateless_trace_counter_every;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SignedForsC {

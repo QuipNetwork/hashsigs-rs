@@ -93,19 +93,7 @@ pub struct ShrincsSigner;
 pub(crate) const INITIAL_STATEFUL_LEAF_INDEX: u32 = 1;
 pub(crate) const MAX_STATEFUL_SIGNATURES_LIMIT: u32 = 4096;
 
-fn stateless_trace_enabled() -> bool {
-    #[cfg(feature = "std")]
-    {
-        matches!(
-            std::env::var("SHRINCS_TRACE_STATELESS").as_deref(),
-            Ok("1") | Ok("true") | Ok("yes") | Ok("on")
-        )
-    }
-    #[cfg(not(feature = "std"))]
-    {
-        false
-    }
-}
+use crate::trace_macros::stateless_trace_enabled;
 
 impl ShrincsSigner {
     /// Deterministically derive signing material and a public key from seed material.

@@ -386,19 +386,7 @@ fn hypertree_root_from_path32(
 
 // ---- signing ----
 
-fn stateless_trace_enabled() -> bool {
-    #[cfg(feature = "std")]
-    {
-        matches!(
-            std::env::var("SHRINCS_TRACE_STATELESS").as_deref(),
-            Ok("1") | Ok("true") | Ok("yes") | Ok("on")
-        )
-    }
-    #[cfg(not(feature = "std"))]
-    {
-        false
-    }
-}
+use crate::trace_macros::stateless_trace_enabled;
 
 /// ADRS coordinates identifying one stateless WOTS-C keypair (its Merkle-leaf
 /// position). Grouping `layer`/`tree`/`keypair` keeps the signing entry points
