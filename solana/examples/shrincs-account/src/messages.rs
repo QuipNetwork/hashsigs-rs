@@ -194,6 +194,29 @@ mod tests {
     }
 
     #[test]
+    fn action_tags_match_keccak_of_message() {
+        // Pin each hardcoded tag to its documented keccak preimage: a distinct
+        // tag can still be a wrong tag, which the pairwise-distinct test misses
+        // and which would silently diverge from an off-chain signer.
+        assert_eq!(
+            ACTION_STATEFUL,
+            solana_program::keccak::hash(b"shrincs-account-example/stateful-action").0
+        );
+        assert_eq!(
+            ACTION_STATELESS,
+            solana_program::keccak::hash(b"shrincs-account-example/stateless-action").0
+        );
+        assert_eq!(
+            ACTION_ROTATE_STATEFUL,
+            solana_program::keccak::hash(b"shrincs-account-example/rotate-stateful").0
+        );
+        assert_eq!(
+            ACTION_ROTATE_FULL,
+            solana_program::keccak::hash(b"shrincs-account-example/rotate-full").0
+        );
+    }
+
+    #[test]
     fn action_context_packs_fields_positionally() {
         let context = action_context(
             [1u8; HASH_LEN],
