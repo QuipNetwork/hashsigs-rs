@@ -30,7 +30,6 @@ use crate::primitives::hash::word32;
 use crate::shrincs::signer::{INITIAL_STATEFUL_LEAF_INDEX, MAX_STATEFUL_SIGNATURES_LIMIT};
 use crate::shrincs::uxmss::{self, stateful_subtree_root};
 use crate::sphincs_plus_c;
-use crate::sphincs_plus_c::hypertree::hypertree_public_root;
 use crate::primitives::HASH_LEN;
 
 use super::{derive32, public_key_commitment};
@@ -139,10 +138,14 @@ impl Keys {
             INITIAL_STATEFUL_LEAF_INDEX,
             max,
         );
-        let hypertree_root = hypertree_public_root(
-            keys.stateless.secret.sk_seed.as_bytes(),
-            keys.stateless.public_key.pk_seed.as_bytes(),
-        );
+        let hypertree_root = *sphincs_plus_c::keygen(
+            *keys.stateless.secret.sk_seed.as_bytes(),
+            *keys.stateless.secret.prf_seed.as_bytes(),
+            *keys.stateless.public_key.pk_seed.as_bytes(),
+        )
+        .public_key
+        .root
+        .as_bytes();
         if &stateful_root != keys.stateful.public_key.root.as_bytes()
             || &hypertree_root != keys.stateless.public_key.root.as_bytes()
         {

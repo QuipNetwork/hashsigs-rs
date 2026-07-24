@@ -23,7 +23,6 @@
 //! place that advances signer-side state (`next_leaf_index`).
 
 use crate::primitives::hash::word32;
-use crate::sphincs_plus_c::hypertree::hypertree_public_root;
 use crate::sphincs_plus_c::Signature as StatelessSignature;
 use crate::sphincs_plus_c::{self};
 use super::action_context::ActionContext;
@@ -137,7 +136,7 @@ impl ShrincsSigner {
         let stateless_sk_seed = derive32(b"shrincs-stateless-sk-seed", seed_material, &[]);
         let stateless_prf_seed = derive32(b"shrincs-stateless-prf-seed", seed_material, &[]);
         let pk_seed = derive32(b"shrincs-pk-seed", seed_material, &[]);
-        let hypertree_root = hypertree_public_root(&stateless_sk_seed, &pk_seed);
+        let stateless = sphincs_plus_c::keygen(stateless_sk_seed, stateless_prf_seed, pk_seed);
 
         let stateful = uxmss::Key {
             secret: uxmss::Secret {
@@ -151,16 +150,7 @@ impl ShrincsSigner {
             },
             next_leaf_index: INITIAL_STATEFUL_LEAF_INDEX,
         };
-        let stateless = sphincs_plus_c::Key {
-            secret: sphincs_plus_c::Secret {
-                sk_seed: sphincs_plus_c::SkSeed::new(stateless_sk_seed),
-                prf_seed: sphincs_plus_c::PrfSeed::new(stateless_prf_seed),
-            },
-            public_key: sphincs_plus_c::PublicKey {
-                pk_seed: sphincs_plus_c::PkSeed::new(pk_seed),
-                root: sphincs_plus_c::Root::new(hypertree_root),
-            },
-        };
+        let hypertree_root = *stateless.public_key.root.as_bytes();
         let public_key_commitment = Keys::compute_commitment(&stateful, &stateless);
         let signing_key = Keys {
             stateless,
