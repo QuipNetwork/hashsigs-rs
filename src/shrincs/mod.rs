@@ -56,7 +56,7 @@ pub use crate::verifier::{VerifierInterface, VerifyOutcome};
 pub use keys::{Commitment, Keys};
 pub use signer::{ShrincsSigner, ShrincsSignerResult, ShrincsStatefulSigner};
 pub use dispatch::prepare_stateless_delegation;
-pub use verifier::ShrincsVerifier;
+pub use verifier::{ShrincsVerifier, ShrincsVerifierExt};
 
 pub use crate::primitives::hash_suite::HASH_SUITE_ID;
 pub use crate::primitives::profiles::{

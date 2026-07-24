@@ -160,7 +160,12 @@ impl ShrincsVerifier {
     pub fn version_tag() -> [u8; HASH_LEN] {
         keccak_packed(&[b"quip.shrincs-verifier.v1"])
     }
+}
 
+/// SHRINCS-specific extension of [`crate::verifier::VerifierInterface`]:
+/// the stateless recovery path (ERC-7913's SPHINCS+C-delegated verify),
+/// which has no equivalent on the generic stateful interface.
+pub trait ShrincsVerifierExt {
     /// Stateless verify through the verifier interface shapes, delegated to the pinned SPHINCS+C sibling.
     /// Mirrors `SHRINCSVerifier.verifyStateless`: decode the commitment key,
     /// run `envelope::prepare_stateless_delegation` (mirroring
@@ -168,7 +173,16 @@ impl ShrincsVerifier {
     /// `(pkSeed, hypertreeRoot)` key and re-encoded signature envelope, then
     /// hand both to `SphincsPlusCVerifier::verify`, exactly like the
     /// Solidity adapter's external call to its pinned sibling.
-    pub fn verify_stateless_envelope(
+    fn verify_stateless_envelope(
+        &self,
+        key: &[u8],
+        hash: &[u8; HASH_LEN],
+        stateless_envelope: &[u8],
+    ) -> VerifyOutcome;
+}
+
+impl ShrincsVerifierExt for ShrincsVerifier {
+    fn verify_stateless_envelope(
         &self,
         key: &[u8],
         hash: &[u8; HASH_LEN],

@@ -29,7 +29,8 @@ mod common;
 
 use common::{hex_to_bytes, load_vectors, AbiDecoder};
 use hashsigs_rs::shrincs::{
-    encode_stateful_envelope, encode_stateless_envelope, ShrincsVerifier, VerifyOutcome,
+    encode_stateful_envelope, encode_stateless_envelope, ShrincsVerifier, ShrincsVerifierExt as _,
+    VerifyOutcome,
 };
 use hashsigs_rs::VerifierInterface as _;
 
