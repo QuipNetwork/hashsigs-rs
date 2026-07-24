@@ -215,10 +215,10 @@ where
 /// chain value per WOTS-C digit.
 ///
 /// Kept `pub` (rather than `pub(crate)`, unlike the chain-walk primitives
-/// above) because it is part of the crate's existing public wire-type
-/// surface: re-exported as `WotsCSignature` from `crate::shrincs` and
-/// `crate::shrincs::verifier`, and constructed directly by the `tests/`
-/// integration suite and the `solana` workspace member.
+/// above) because it is part of the crate's public wire-type surface: the
+/// `tests/` integration suite and the `solana` workspace member reconstruct it
+/// from their DTOs, importing it at its canonical path `crate::wots_c::Signature`
+/// (they alias it locally as `WotsCSignature`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Signature {
     /// Randomizer mixed into WOTS-C digest derivation.
