@@ -111,19 +111,34 @@ impl ShrincsSigner {
             return None;
         }
 
-        let stateful_sk_seed = derive32(b"shrincs-stateful-sk-seed", seed_material, &[]);
-        let stateful_prf_seed = derive32(b"shrincs-stateful-prf-seed", seed_material, &[]);
-        let stateful_pk_seed = derive32(b"shrincs-stateful-pk-seed", seed_material, &[]);
-        let stateful_root = uxmss::stateful_subtree_root(
-            &stateful_sk_seed,
-            &stateful_pk_seed,
-            INITIAL_STATEFUL_LEAF_INDEX,
-            max_stateful_signatures,
-        );
         // Stateless half derived through the SPHINCS+C boundary helper — the
         // same code path the wasm pure-SPHINCS keygen uses, so the shared
         // master-seed material is structurally identical between the two.
         let stateless = sphincs_plus_c::keygen_from_master_seed(seed_material);
+
+        Some(Self::build_keys(seed_material, max_stateful_signatures, stateless))
+    }
+
+    /// Derive the stateful half and assemble the full [`Keys`] + `PublicKey`
+    /// pair from already-built stateless key material.
+    ///
+    /// Shared by [`Self::keygen`] (real stateless keygen) and the
+    /// `stateful_only_key` test helper (placeholder stateless key), so the
+    /// stateful derivation and assembly logic exist in exactly one place.
+    pub(crate) fn build_keys(
+        seed: &[u8],
+        max: u32,
+        stateless: sphincs_plus_c::Key,
+    ) -> (Keys, PublicKey) {
+        let stateful_sk_seed = derive32(b"shrincs-stateful-sk-seed", seed, &[]);
+        let stateful_prf_seed = derive32(b"shrincs-stateful-prf-seed", seed, &[]);
+        let stateful_pk_seed = derive32(b"shrincs-stateful-pk-seed", seed, &[]);
+        let stateful_root = uxmss::stateful_subtree_root(
+            &stateful_sk_seed,
+            &stateful_pk_seed,
+            INITIAL_STATEFUL_LEAF_INDEX,
+            max,
+        );
 
         let stateful = uxmss::Key {
             secret: uxmss::Secret {
@@ -133,7 +148,7 @@ impl ShrincsSigner {
             public_key: uxmss::StructuredPublicKey {
                 pk_seed: uxmss::PkSeed::new(stateful_pk_seed),
                 root: uxmss::Root::new(stateful_root),
-                max_signatures: max_stateful_signatures,
+                max_signatures: max,
             },
             next_leaf_index: INITIAL_STATEFUL_LEAF_INDEX,
         };
@@ -146,12 +161,12 @@ impl ShrincsSigner {
             public_key_commitment,
         };
         let public_key = public_key_from_components(
-            encode_stateful_public_key(stateful_pk_seed, stateful_root, max_stateful_signatures),
+            encode_stateful_public_key(stateful_pk_seed, stateful_root, max),
             stateless_pk_seed,
             hypertree_root,
         );
 
-        Some((signing_key, public_key))
+        (signing_key, public_key)
     }
 
     /// Reconstruct a signing key from previously exported fields (the inverse
