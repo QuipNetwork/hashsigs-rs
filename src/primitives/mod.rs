@@ -39,4 +39,3 @@ pub(crate) mod hash_backend;
 pub(crate) mod hash_suite;
 pub(crate) mod profiles;
 pub(crate) mod treehash;
-pub(crate) mod wotsplusc;

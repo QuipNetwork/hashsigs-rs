@@ -55,9 +55,9 @@ pub use crate::primitives::{
 };
 pub use crate::types::{
     ActionContext, ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey,
-    StatefulPublicKey, StatefulSignature, StatelessSignature, WotsCSignature,
-    STATEFUL_PUBLIC_KEY_BYTES,
+    StatefulPublicKey, StatefulSignature, StatelessSignature, STATEFUL_PUBLIC_KEY_BYTES,
 };
+pub use crate::wots_c::Signature as WotsCSignature;
 
 // Re-export commitment helpers used by wasm/tests.
 #[allow(unused_imports)] // used by wasm/test modules under cfg

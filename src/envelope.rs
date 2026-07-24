@@ -67,14 +67,15 @@ use crate::primitives::abi::{
     word_from_u32, AbiReader, Field,
 };
 use crate::primitives::profiles::{
-    FORS_TREE_HEIGHT, HYPERTREE_HEIGHT, NUM_FORS_TREES, NUM_HYPERTREE_LAYERS, NUM_WOTS_CHAINS,
+    FORS_TREE_HEIGHT, HYPERTREE_HEIGHT, NUM_FORS_TREES, NUM_HYPERTREE_LAYERS,
     WOTS_CHAINS_STATEFUL,
 };
 use crate::primitives::HASH_LEN;
 use crate::types::{
     ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey, StatefulSignature,
-    StatelessSignature, WotsCSignature,
+    StatelessSignature,
 };
+use crate::wots_c::Signature as WotsCSignature;
 
 /// Upper bound on a stateful auth-path length (equals the leaf index).
 /// Matches the signer / wasm host cap (`MAX_STATEFUL_SIGNATURES_LIMIT`).
@@ -122,13 +123,7 @@ fn encode_fors_signature_body(signature: &ForsSignature) -> Vec<u8> {
 }
 
 fn encode_wots_c_signature_body(signature: &WotsCSignature) -> Vec<u8> {
-    encode_tuple(alloc::vec![
-        Field::Dynamic(encode_bytes(&signature.randomizer)),
-        Field::Static(word_from_u32(signature.counter)),
-        Field::Dynamic(encode_dynamic_array(
-            signature.chains.iter().map(|node| encode_bytes(node)).collect(),
-        )),
-    ])
+    signature.to_bytes()
 }
 
 fn encode_hypertree_layer_body(layer: &HypertreeLayerSignature) -> Vec<u8> {
@@ -197,15 +192,7 @@ fn decode_fors_signature(reader: &AbiReader, base: usize) -> Option<ForsSignatur
 }
 
 fn decode_wots_c_signature(reader: &AbiReader, base: usize) -> Option<WotsCSignature> {
-    Some(WotsCSignature {
-        randomizer: reader.decode_bytes32_field(base, base)?,
-        counter: reader.read_u32(base.checked_add(32)?)?,
-        chains: collect_hash_words(reader.decode_array_bytes(
-            base,
-            base.checked_add(64)?,
-            NUM_WOTS_CHAINS as usize,
-        )?)?,
-    })
+    WotsCSignature::decode(reader, base)
 }
 
 fn decode_hypertree_layer_signature(

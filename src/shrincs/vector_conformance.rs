@@ -46,8 +46,9 @@ use super::ShrincsVerifier;
 use crate::primitives::HASH_LEN;
 use crate::types::{
     ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey,
-    StatefulSignature, StatelessSignature, WotsCSignature,
+    StatefulSignature, StatelessSignature,
 };
+use crate::wots_c::Signature as WotsCSignature;
 use super::ShrincsSigner;
 
 // Seeds and budgets MUST match `tests/generate_shrincs_vectors.rs`; the

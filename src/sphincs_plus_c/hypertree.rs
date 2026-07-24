@@ -20,7 +20,7 @@
 //!
 //! Carries a FORS-C root up through `NUM_HYPERTREE_LAYERS` WOTS-C-authenticated
 //! subtrees to the pinned hypertree root, mirroring Solidity's `Hypertree.sol`.
-//! Sits above `wotsplusc` and `treehash` in the DAG and is consumed by
+//! Sits above `wots_c` and `treehash` in the DAG and is consumed by
 //! `sphincs_plus_c` to assemble a full stateless signature.
 
 use alloc::vec::Vec;
@@ -34,11 +34,11 @@ use crate::primitives::profiles::{
     HYPERTREE_HEIGHT, NUM_HYPERTREE_LAYERS, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN,
     WOTS_TARGET_SUM_STATELESS,
 };
-use crate::types::{HypertreeLayerSignature, WotsCSignature};
+use crate::types::HypertreeLayerSignature;
 use super::key::Key;
-use crate::primitives::wotsplusc;
+use crate::wots_c;
+use crate::wots_c::{Signature, WOTS_C_MAX_GRIND_COUNTER};
 use crate::primitives::HASH_LEN;
-use crate::primitives::wotsplusc::WOTS_C_MAX_GRIND_COUNTER;
 
 /// Layer-0 seed coordinates selected by the FORS message digest.
 #[derive(Clone, Copy)]
@@ -147,7 +147,7 @@ fn verify_wots_c32(
     coords: WotsKeypair,
     expected_pk_hash: &[u8; HASH_LEN],
     message: [u8; HASH_LEN],
-    signature: &WotsCSignature,
+    signature: &Signature,
 ) -> bool {
     let chain_count = NUM_WOTS_CHAINS as usize;
     if signature.chains.len() != chain_count || wots_digest_bytes() > HASH_LEN {
@@ -190,7 +190,7 @@ fn verify_wots_c32(
         Some(wots_chain32_no_mask_base(
             WOTS_CHAIN_LEN,
             *pk_seed,
-            wotsplusc::AddressBaseChain {
+            wots_c::AddressBaseChain {
                 address_base,
                 chain_index: chain_index as u32,
             },
@@ -234,15 +234,15 @@ fn verify_wots_c32(
 fn wots_chain32_no_mask_base(
     w: u16,
     pk_seed: [u8; HASH_LEN],
-    addr: wotsplusc::AddressBaseChain,
+    addr: wots_c::AddressBaseChain,
     value: [u8; HASH_LEN],
     digit: u32,
 ) -> [u8; HASH_LEN] {
     let steps = u32::from(w - 1) - digit;
-    wotsplusc::stateless_wots_chain_from_address_base(
+    wots_c::stateless_wots_chain_from_address_base(
         &pk_seed,
         addr,
-        wotsplusc::ChainWalk {
+        wots_c::ChainWalk {
             value,
             start: digit,
             steps,
@@ -602,14 +602,14 @@ fn sign_stateless_wots_c(
     coords: &WotsKeypair,
     pk_hash: &[u8; HASH_LEN],
     message: &[u8; HASH_LEN],
-) -> Option<WotsCSignature> {
+) -> Option<Signature> {
     // The WOTS-C challenge signs the current root for this layer. The expected
     // WOTS public-key hash is included in the digest, binding the challenge to
     // the key whose Merkle path is supplied next.
     let randomizer = hash_packed(&[b"wots-c-randomizer", seeds.prf_seed, message]);
     let digest_bytes = wots_digest_bytes();
 
-    let result = crate::primitives::wotsplusc::grind_digit_sum(
+    let result = crate::wots_c::grind_digit_sum(
         WOTS_C_MAX_GRIND_COUNTER,
         WOTS_TARGET_SUM_STATELESS,
         |counter| {
@@ -662,7 +662,7 @@ fn sign_stateless_wots_c(
         },
     )?;
     let (counter, chains) = result;
-    Some(WotsCSignature {
+    Some(Signature {
         randomizer,
         counter,
         chains,
@@ -682,16 +682,16 @@ fn stateless_wots_c_chain(
     start: u32,
     steps: u32,
 ) -> [u8; HASH_LEN] {
-    let ctx = wotsplusc::StatelessWotsChainCtx {
+    let ctx = wots_c::StatelessWotsChainCtx {
         pk_seed,
         layer: coords.layer,
         tree: coords.tree,
         keypair: coords.keypair,
         chain_index: coords.chain,
     };
-    wotsplusc::stateless_wots_chain(
+    wots_c::stateless_wots_chain(
         &ctx,
-        wotsplusc::ChainWalk {
+        wots_c::ChainWalk {
             value,
             start,
             steps,

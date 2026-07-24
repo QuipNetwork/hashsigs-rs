@@ -19,7 +19,7 @@
 //! Stateful UXMSS sign and verify.
 //!
 //! Unbalanced-tree WOTS-C scheme used by the stateful side of SHRINCS,
-//! mirroring Solidity's `UXMSS.sol`. Builds on `wotsplusc`'s shared chain-walk
+//! mirroring Solidity's `UXMSS.sol`. Builds on `wots_c`'s shared chain-walk
 //! and grind helpers; `shrincs` drives it directly (no `sphincs_plus_c`
 //! dependency — the stateful and stateless signers are independent).
 
@@ -32,9 +32,9 @@ use crate::primitives::profiles::{
     WOTS_BASE_STATEFUL, WOTS_CHAINS_STATEFUL, WOTS_TARGET_SUM_STATEFUL,
 };
 use crate::types::{StatefulPublicKey, StatefulSignature};
-use crate::primitives::wotsplusc;
+use crate::wots_c;
 use crate::primitives::HASH_LEN;
-use crate::primitives::wotsplusc::WOTS_C_MAX_GRIND_COUNTER;
+use crate::wots_c::WOTS_C_MAX_GRIND_COUNTER;
 
 pub(crate) fn verify_stateful_unsafe_raw(
     stateful_key: &StatefulPublicKey,
@@ -115,13 +115,13 @@ fn compact_stateful_wots_public_key_from_signature(
         let digit = base_w16_digit(&digest, chain_index);
         digit_sum = digit_sum.checked_add(digit)?;
         let chain_value = *signature.chains.get(chain_index)?;
-        *segment = wotsplusc::stateful_chain_no_mask(
+        *segment = wots_c::stateful_chain_no_mask(
             &pk_seed,
-            wotsplusc::StatefulChainCtx {
+            wots_c::StatefulChainCtx {
                 leaf_index,
                 chain_index: chain_index as u32,
             },
-            wotsplusc::ChainWalk {
+            wots_c::ChainWalk {
                 value: chain_value,
                 start: digit,
                 steps: WOTS_BASE_STATEFUL - 1 - digit,
@@ -500,7 +500,7 @@ fn sign_stateful_wots_c(
         message,
     ]);
 
-    let result = crate::primitives::wotsplusc::grind_digit_sum(
+    let result = crate::wots_c::grind_digit_sum(
         WOTS_C_MAX_GRIND_COUNTER,
         WOTS_TARGET_SUM_STATEFUL,
         |counter| {
@@ -529,13 +529,13 @@ fn sign_stateful_wots_c(
                         leaf_index,
                         chain_index as u32,
                     ));
-                    wotsplusc::stateful_chain_no_mask(
+                    wots_c::stateful_chain_no_mask(
                         pk_seed,
-                        wotsplusc::StatefulChainCtx {
+                        wots_c::StatefulChainCtx {
                             leaf_index,
                             chain_index: chain_index as u32,
                         },
-                        wotsplusc::ChainWalk {
+                        wots_c::ChainWalk {
                             value: *secret,
                             start: 0,
                             steps: *digit,
@@ -588,13 +588,13 @@ fn stateful_wots_pk_hash(
             leaf_index,
             chain_index as u32,
         ));
-        *endpoint = wotsplusc::stateful_chain_no_mask(
+        *endpoint = wots_c::stateful_chain_no_mask(
             pk_seed,
-            wotsplusc::StatefulChainCtx {
+            wots_c::StatefulChainCtx {
                 leaf_index,
                 chain_index: chain_index as u32,
             },
-            wotsplusc::ChainWalk {
+            wots_c::ChainWalk {
                 value: *secret,
                 start: 0,
                 steps: WOTS_BASE_STATEFUL - 1,

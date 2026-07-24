@@ -20,6 +20,7 @@
 use alloc::vec::Vec;
 
 use crate::primitives::HASH_LEN;
+use crate::wots_c::Signature;
 
 // Encoded stateful public key layout, kept 68 bytes across all profiles:
 // 32-byte pkSeed slot || 32-byte root slot || 4-byte maxSignatures.
@@ -78,21 +79,11 @@ pub struct ForsSignature {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WotsCSignature {
-    /// Randomizer mixed into WOTS-C digest derivation.
-    pub randomizer: [u8; HASH_LEN],
-    /// Counter mixed into WOTS-C digest derivation.
-    pub counter: u32,
-    /// One chain value per WOTS-C digit.
-    pub chains: Vec<[u8; HASH_LEN]>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HypertreeLayerSignature {
     /// Expected WOTS-C public-key hash for this layer.
     pub wots_c_pk_hash: [u8; HASH_LEN],
     /// WOTS-C signature proving `current_root -> wots_c_pk_hash`.
-    pub wots_c_signature: WotsCSignature,
+    pub wots_c_signature: Signature,
     /// Merkle path from `wots_c_pk_hash` to the next layer root.
     pub auth_path: Vec<[u8; HASH_LEN]>,
 }

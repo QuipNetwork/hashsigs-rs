@@ -15,16 +15,27 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Shared WOTS-C chain walk and digit-sum grind primitives.
+//! Shared WOTS-C chain walk and digit-sum grind primitives, plus the WOTS-C
+//! signature wire type and its ABI codec.
 //!
 //! Mirrors Solidity `WOTSPlusC.sol`: one parameterized chain walk used by both
 //! the stateless hypertree (`b"wots-c-chain"`) and stateful UXMSS
 //! (`b"uxmss-wots-chain"`). Tags and address layouts are caller parameters —
 //! they must stay byte-identical to the pre-merge constructions.
+//!
+//! `Signature::to_bytes`/`from_bytes` are byte-identical to the historical
+//! `envelope::encode_wots_c_signature_body`/`decode_wots_c_signature`, which
+//! now delegate here (still called by the hypertree codec until a later
+//! refactor task folds them away entirely).
 
 use alloc::vec::Vec;
 
+use crate::primitives::abi::{
+    collect_hash_words, encode_bytes, encode_dynamic_array, encode_tuple, word_from_u32, AbiReader,
+    Field,
+};
 use crate::primitives::hash::{hash_node, wots_chain_address_word};
+use crate::primitives::profiles::NUM_WOTS_CHAINS;
 use crate::primitives::HASH_LEN;
 
 /// Maximum grind counter for WOTS-C target-sum searches (stateless + stateful).
@@ -198,4 +209,102 @@ where
         (digit_sum == target_sum).then_some((counter, digits))
     })?;
     Some((counter, build_chains(&digits)))
+}
+
+/// WOTS-C signature: randomizer, target-sum grind counter, and one revealed
+/// chain value per WOTS-C digit.
+///
+/// Kept `pub` (rather than `pub(crate)`, unlike the chain-walk primitives
+/// above) because it is part of the crate's existing public wire-type
+/// surface: re-exported as `WotsCSignature` from `crate::shrincs` and
+/// `crate::shrincs::verifier`, and constructed directly by the `tests/`
+/// integration suite and the `solana` workspace member.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Signature {
+    /// Randomizer mixed into WOTS-C digest derivation.
+    pub randomizer: [u8; HASH_LEN],
+    /// Counter mixed into WOTS-C digest derivation.
+    pub counter: u32,
+    /// One chain value per WOTS-C digit.
+    pub chains: Vec<[u8; HASH_LEN]>,
+}
+
+impl Signature {
+    /// ABI-encode the WOTS-C signature body. Byte-identical to the historical
+    /// `envelope::encode_wots_c_signature_body`.
+    pub(crate) fn to_bytes(&self) -> Vec<u8> {
+        encode_tuple(alloc::vec![
+            Field::Dynamic(encode_bytes(&self.randomizer)),
+            Field::Static(word_from_u32(self.counter)),
+            Field::Dynamic(encode_dynamic_array(
+                self.chains.iter().map(|node| encode_bytes(node)).collect(),
+            )),
+        ])
+    }
+
+    /// Decode a WOTS-C signature body already located at `base` within a
+    /// shared `AbiReader`. No trailing-bytes check here: `base` commonly
+    /// sits inside a larger encoded envelope, so exhaustion is the calling
+    /// top-level decoder's responsibility (see `from_bytes` for the
+    /// standalone entrypoint that does check).
+    pub(crate) fn decode(reader: &AbiReader, base: usize) -> Option<Self> {
+        Some(Self {
+            randomizer: reader.decode_bytes32_field(base, base)?,
+            counter: reader.read_u32(base.checked_add(32)?)?,
+            chains: collect_hash_words(reader.decode_array_bytes(
+                base,
+                base.checked_add(64)?,
+                NUM_WOTS_CHAINS as usize,
+            )?)?,
+        })
+    }
+
+    /// Decode a standalone byte blob produced by `to_bytes`. Byte-identical
+    /// to the historical `envelope::decode_wots_c_signature`, built as a
+    /// top-level entrypoint: a fresh `AbiReader` at base 0 (mirroring
+    /// `decode_stateless_signature_envelope`), rejecting trailing bytes.
+    ///
+    /// Not yet called from `envelope.rs`: the hypertree codec decodes a
+    /// WOTS-C signature embedded at an offset inside a larger shared
+    /// `AbiReader` (via `decode`, above), where a trailing-bytes check would
+    /// spuriously reject the rest of the envelope. This standalone entrypoint
+    /// is the `to_bytes` round-trip counterpart, provided for later callers
+    /// that hold an isolated WOTS-C signature blob.
+    #[allow(dead_code)]
+    pub(crate) fn from_bytes(data: &[u8]) -> Option<Self> {
+        let reader = AbiReader::new(data);
+        let decoded = Self::decode(&reader, 0)?;
+        reader.finish()?;
+        Some(decoded)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloc::vec;
+
+    fn sample_signature() -> Signature {
+        Signature {
+            randomizer: [0x5A; HASH_LEN],
+            counter: 0x0BAD_F00D,
+            chains: vec![[0x11; HASH_LEN], [0x22; HASH_LEN], [0x33; HASH_LEN]],
+        }
+    }
+
+    #[test]
+    fn to_bytes_from_bytes_round_trips() {
+        let signature = sample_signature();
+        let encoded = signature.to_bytes();
+        let decoded = Signature::from_bytes(&encoded).expect("valid encoding must decode");
+        assert_eq!(decoded, signature);
+        assert_eq!(decoded.to_bytes(), encoded);
+    }
+
+    #[test]
+    fn from_bytes_rejects_trailing_bytes() {
+        let mut encoded = sample_signature().to_bytes();
+        encoded.push(0x00);
+        assert!(Signature::from_bytes(&encoded).is_none());
+    }
 }
