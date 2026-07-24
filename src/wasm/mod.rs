@@ -22,8 +22,9 @@
 //! This module exports a small noble-style API: flat `Uint8Array` free
 //! functions (`sphincsPlusC{Keygen,Sign,Verify}`,
 //! `shrincs{Keygen,Sign,SignStateless,Verify,VerifyStateless,
-//! ImportSigningKey}`) plus `WasmShrincsAccount`, the stateful account
-//! wrapper. The account exposes canonical message-hash methods
+//! ImportSigningKey,Reset,ComputePublicKeyCommitment,
+//! RecoverPublicKeyCommitment}`) plus `WasmShrincsAccount`, the stateful
+//! account wrapper. The account exposes canonical message-hash methods
 //! (`statefulActionMessageHash`, `statelessActionMessageHash`,
 //! `statefulRotationMessageHash`, `fullRotationMessageHash`) that build the
 //! exact message a caller must sign from the account's own state, so callers
@@ -889,7 +890,9 @@ pub fn shrincs_import_signing_key(secret_key: &[u8]) -> Result<WasmShrincsKeys, 
 /// `ShrincsSigner::import_signing_key` and then MUTATED IN PLACE with the
 /// advanced leaf counter — the caller's `keys.secretKey` Uint8Array changes
 /// after this call. Throws `ERR_STATEFUL_LEAVES_EXHAUSTED` once every leaf is
-/// spent.
+/// spent. Returns the commitment-path envelope (`PublicKey ‖ StatefulSignature`)
+/// `shrincsVerify` expects — the signature carries the full public key so a
+/// verifier holding only the 32-byte `publicKeyCommitment` can check it.
 #[cfg(feature = "wasm-bindings")]
 #[wasm_bindgen(js_name = shrincsSign)]
 pub fn shrincs_sign(
@@ -897,7 +900,7 @@ pub fn shrincs_sign(
     secret_key: &mut [u8],
 ) -> Result<alloc::vec::Vec<u8>, JsValue> {
     let candidate = deserialize_shrincs_signing_key(secret_key).map_err(js_error)?;
-    let (mut signing_key, _public_key) =
+    let (mut signing_key, public_key) =
         ShrincsSigner::import_signing_key(candidate).ok_or_else(|| {
             js_error(WasmErr {
                 code: ERR_IMPORT_INVALID,
@@ -923,9 +926,10 @@ pub fn shrincs_sign(
         })
     })?;
     secret_key.copy_from_slice(&serialize_shrincs_signing_key(&signing_key));
-    // Return the stateful signature alone; `shrincsVerify` checks it against
-    // the signer's publicKey, mirroring the stateless path.
-    Ok(crate::envelope::encode_stateful_signature_envelope(&signature))
+    // Return the PublicKey-carrying envelope, not the bare signature:
+    // `shrincsVerify` pins only the 32-byte commitment, so the signature
+    // itself must carry the public key for the verifier to check against it.
+    Ok(crate::envelope::encode_stateful_envelope(&public_key, &signature))
 }
 
 /// Sign a 32-byte `message` (typically a pre-computed hash) via the
@@ -961,28 +965,21 @@ pub fn shrincs_sign_stateless(
     Ok(crate::envelope::encode_stateless_signature_envelope(&signature))
 }
 
-/// Verify a SHRINCS stateful signature (`shrincsSign`'s output) over the
-/// 32-byte `message` against the 164-byte flat `publicKey` a SHRINCS keypair
-/// exposes. Verifies the signature against the supplied key, the same call
-/// shape as `shrincsVerifyStateless`. Never throws — a malformed signature or
-/// wrong-length key is simply `false`.
+/// Verify a SHRINCS stateful signature (`shrincsSign`'s output, which carries
+/// the full public key) over the 32-byte `message` against a 32-byte
+/// `publicKeyCommitment` — the commitment-path shape: the verifier pins only
+/// the commitment, decodes the public key the envelope carries, checks it
+/// hashes to that commitment, then verifies. Never throws — a malformed
+/// signature, wrong-length commitment, or commitment mismatch is simply
+/// `false`.
 #[cfg(feature = "wasm-bindings")]
 #[wasm_bindgen(js_name = shrincsVerify)]
-pub fn shrincs_verify(signature: &[u8], message: &[u8], public_key: &[u8]) -> bool {
+pub fn shrincs_verify(signature: &[u8], message: &[u8], public_key_commitment: &[u8]) -> bool {
     let Ok(hash) = message_hash(message) else {
         return false;
     };
-    let Ok(public_key) = public_key_from_flat(public_key) else {
-        return false;
-    };
-    let Some(signature) = crate::envelope::decode_stateful_signature_envelope(signature) else {
-        return false;
-    };
-    let Ok(commitment) = <[u8; HASH_LEN]>::try_from(public_key.public_key_commitment.as_slice())
-    else {
-        return false;
-    };
-    ShrincsVerifier::new().verify_stateful_unsafe_raw(commitment, &public_key, &hash, &signature)
+    ShrincsVerifier::new().verify_envelope(public_key_commitment, &hash, signature)
+        == crate::verifier::VerifyOutcome::Valid
 }
 
 /// Verify a SHRINCS stateless signature (`shrincsSignStateless`'s output) over
@@ -998,6 +995,70 @@ pub fn shrincs_verify_stateless(
     stateless_public_key: &[u8],
 ) -> bool {
     sphincs_plus_c_verify(signature, message, stateless_public_key)
+}
+
+/// Regenerate a fresh stateful chain for a 264-byte `secretKey`, discarding
+/// any relationship to prior stateful signatures (e.g. after suspected leaf
+/// reuse). `secretKey` is re-validated via `ShrincsSigner::import_signing_key`
+/// and then MUTATED IN PLACE with the new stateful seeds and a reset leaf
+/// counter — the caller's `keys.secretKey` Uint8Array changes after this
+/// call, and its `publicKeyCommitment` changes with it (the stateless half
+/// and `maxSignatures` are untouched). `newSeed` is arbitrary-length seed
+/// material; this wasm build has no RNG, so the caller must supply fresh
+/// entropy.
+#[cfg(feature = "wasm-bindings")]
+#[wasm_bindgen(js_name = shrincsReset)]
+pub fn shrincs_reset(secret_key: &mut [u8], new_seed: &[u8]) -> Result<(), JsValue> {
+    let candidate = deserialize_shrincs_signing_key(secret_key).map_err(js_error)?;
+    let (mut keys, _public_key) = ShrincsSigner::import_signing_key(candidate).ok_or_else(|| {
+        js_error(WasmErr {
+            code: ERR_IMPORT_INVALID,
+            message: "secretKey failed validation: counter out of range or roots do not \
+                      match the seeds"
+                .into(),
+        })
+    })?;
+    keys.reset(new_seed);
+    secret_key.copy_from_slice(&serialize_shrincs_signing_key(&keys));
+    Ok(())
+}
+
+/// Recompute the 32-byte `publicKeyCommitment` a 264-byte `secretKey`
+/// currently implies. `secretKey` is re-validated via
+/// `ShrincsSigner::import_signing_key`; never mutates it. Equivalent to
+/// `shrincsImportSigningKey(secretKey).publicKeyCommitment` without
+/// constructing the intermediate `WasmShrincsKeys`.
+#[cfg(feature = "wasm-bindings")]
+#[wasm_bindgen(js_name = shrincsComputePublicKeyCommitment)]
+pub fn shrincs_compute_public_key_commitment(
+    secret_key: &[u8],
+) -> Result<alloc::vec::Vec<u8>, JsValue> {
+    let candidate = deserialize_shrincs_signing_key(secret_key).map_err(js_error)?;
+    let (keys, _public_key) = ShrincsSigner::import_signing_key(candidate).ok_or_else(|| {
+        js_error(WasmErr {
+            code: ERR_IMPORT_INVALID,
+            message: "secretKey failed validation: counter out of range or roots do not \
+                      match the seeds"
+                .into(),
+        })
+    })?;
+    Ok(keys.recompute_commitment().as_bytes().to_vec())
+}
+
+/// Recover the 32-byte `publicKeyCommitment` a `shrincsSign` envelope
+/// implies, ecrecover-style: decode the envelope's carried public key and
+/// recompute the commitment from it. The envelope's own commitment field is
+/// never trusted — only the recomputed value is returned. Throws
+/// `ERR_ENVELOPE_MALFORMED` if `signature` is not a well-formed
+/// `shrincsSign` envelope.
+#[cfg(feature = "wasm-bindings")]
+#[wasm_bindgen(js_name = shrincsRecoverPublicKeyCommitment)]
+pub fn shrincs_recover_public_key_commitment(
+    signature: &[u8],
+) -> Result<alloc::vec::Vec<u8>, JsValue> {
+    Keys::recover_commitment(signature)
+        .map(|commitment| commitment.as_bytes().to_vec())
+        .ok_or_else(malformed_envelope)
 }
 
 #[cfg(any(test, feature = "wasm-bindings"))]
@@ -1300,17 +1361,18 @@ mod tests {
         let keys = shrincs_keygen(&seed, 4).unwrap();
         let mut secret_key = keys.secret_key();
         let public_key = keys.public_key();
+        let public_key_commitment = keys.public_key_commitment();
         assert_eq!(secret_key.len(), 264);
         assert_eq!(public_key.len(), 164);
 
         let message = [0x03u8; 32].to_vec();
         let signature = shrincs_sign(&message, &mut secret_key).unwrap();
-        assert!(shrincs_verify(&signature, &message, &public_key));
-        assert!(!shrincs_verify(&signature, &[0xEEu8; 32], &public_key));
+        assert!(shrincs_verify(&signature, &message, &public_key_commitment));
+        assert!(!shrincs_verify(&signature, &[0xEEu8; 32], &public_key_commitment));
 
         let mut tampered = signature.clone();
         tampered[0] ^= 1;
-        assert!(!shrincs_verify(&tampered, &message, &public_key));
+        assert!(!shrincs_verify(&tampered, &message, &public_key_commitment));
     }
 
     #[cfg(feature = "wasm-bindings")]
@@ -1319,19 +1381,89 @@ mod tests {
         let seed = [0x44u8; 32];
         let keys = shrincs_keygen(&seed, 4).unwrap();
         let mut secret_key = keys.secret_key();
-        let public_key = keys.public_key();
+        let public_key_commitment = keys.public_key_commitment();
         let before = secret_key.clone();
 
         let message = [0x04u8; 32].to_vec();
         let first = shrincs_sign(&message, &mut secret_key).unwrap();
         assert_ne!(secret_key, before, "secretKey must mutate in place after sign");
-        assert!(shrincs_verify(&first, &message, &public_key));
+        assert!(shrincs_verify(&first, &message, &public_key_commitment));
 
         let after_first = secret_key.clone();
         let second = shrincs_sign(&message, &mut secret_key).unwrap();
         assert_ne!(secret_key, after_first, "secretKey must advance again on the next sign");
         assert_ne!(first, second, "two leaves must yield distinct signatures");
-        assert!(shrincs_verify(&second, &message, &public_key));
+        assert!(shrincs_verify(&second, &message, &public_key_commitment));
+    }
+
+    #[cfg(feature = "wasm-bindings")]
+    #[test]
+    fn shrincs_noble_reset_changes_commitment_keeps_stateless_and_still_signs() {
+        let seed = [0x88u8; 32];
+        let keys = shrincs_keygen(&seed, 4).unwrap();
+        let mut secret_key = keys.secret_key();
+        let stateless_public_key = keys.stateless_public_key();
+        let original_commitment = keys.public_key_commitment();
+
+        shrincs_reset(&mut secret_key, b"a fresh reset seed").unwrap();
+
+        let reset_commitment =
+            shrincs_compute_public_key_commitment(&secret_key).unwrap();
+        assert_ne!(reset_commitment, original_commitment);
+
+        let reimported = shrincs_import_signing_key(&secret_key).unwrap();
+        assert_eq!(reimported.public_key_commitment(), reset_commitment);
+        assert_eq!(
+            reimported.stateless_public_key(),
+            stateless_public_key,
+            "reset must not touch the stateless half"
+        );
+
+        let message = [0x09u8; 32].to_vec();
+        let signature = shrincs_sign(&message, &mut secret_key).unwrap();
+        assert!(shrincs_verify(&signature, &message, &reset_commitment));
+    }
+
+    #[cfg(feature = "wasm-bindings")]
+    #[test]
+    fn shrincs_noble_compute_public_key_commitment_matches_keygen() {
+        let seed = [0x99u8; 32];
+        let keys = shrincs_keygen(&seed, 4).unwrap();
+        let secret_key = keys.secret_key();
+
+        let commitment = shrincs_compute_public_key_commitment(&secret_key).unwrap();
+        assert_eq!(commitment, keys.public_key_commitment());
+    }
+
+    #[cfg(feature = "wasm-bindings")]
+    #[test]
+    fn shrincs_noble_recover_public_key_commitment_matches_signer() {
+        let seed = [0xaau8; 32];
+        let keys = shrincs_keygen(&seed, 4).unwrap();
+        let mut secret_key = keys.secret_key();
+        let expected_commitment = keys.public_key_commitment();
+
+        let message = [0x0au8; 32].to_vec();
+        let signature = shrincs_sign(&message, &mut secret_key).unwrap();
+
+        let recovered = shrincs_recover_public_key_commitment(&signature).unwrap();
+        assert_eq!(recovered, expected_commitment);
+    }
+
+    // `.unwrap_err()`/`error.code` on the rejection path needs a real JS
+    // engine (see the comment on `sphincs_plus_c_noble_keygen_rejects_wrong_length_seed`
+    // above) — wasm32-gated.
+    #[cfg(all(feature = "wasm-bindings", target_arch = "wasm32"))]
+    #[wasm_bindgen_test]
+    fn shrincs_noble_recover_public_key_commitment_rejects_garbage_envelope() {
+        let err = expect_err(shrincs_recover_public_key_commitment(&[0u8; 4]));
+        assert_eq!(
+            js_sys::Reflect::get(&err, &JsValue::from_str("code"))
+                .unwrap()
+                .as_string()
+                .unwrap(),
+            ERR_ENVELOPE_MALFORMED,
+        );
     }
 
     #[cfg(all(feature = "wasm-bindings", target_arch = "wasm32"))]
