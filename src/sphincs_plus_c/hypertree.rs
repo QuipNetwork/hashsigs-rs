@@ -645,6 +645,21 @@ fn hypertree_leaf(
     stateless_wots_c_public_key(pk_seed, &sk_seed, &coords)
 }
 
+/// Builds a `Vec` of length `n` where element `i` is `f(i)`, collected in
+/// index order. Runs the per-element work in parallel via rayon when the
+/// `parallel` feature is enabled, sequentially otherwise; either way the
+/// result order is identical since collection is always by index.
+#[cfg(feature = "parallel")]
+fn map_chains<T: Send>(n: usize, f: impl Fn(usize) -> T + Sync + Send) -> Vec<T> {
+    use rayon::prelude::*;
+    (0..n).into_par_iter().map(f).collect()
+}
+
+#[cfg(not(feature = "parallel"))]
+fn map_chains<T>(n: usize, f: impl Fn(usize) -> T) -> Vec<T> {
+    (0..n).map(f).collect()
+}
+
 fn stateless_wots_c_public_key(
     pk_seed: &[u8; HASH_LEN],
     sk_seed: &[u8; HASH_LEN],
@@ -662,13 +677,7 @@ fn stateless_wots_c_public_key(
         )
     };
 
-    #[cfg(feature = "parallel")]
-    let endpoints: Vec<[u8; HASH_LEN]> = {
-        use rayon::prelude::*;
-        (0..chain_count).into_par_iter().map(endpoint_at).collect()
-    };
-    #[cfg(not(feature = "parallel"))]
-    let endpoints: Vec<[u8; HASH_LEN]> = (0..chain_count).map(endpoint_at).collect();
+    let endpoints: Vec<[u8; HASH_LEN]> = map_chains(chain_count, endpoint_at);
 
     stateless_wots_public_key_hash(pk_seed, &endpoints)
 }
@@ -718,23 +727,7 @@ fn sign_stateless_wots_c(
                 )
             };
 
-            #[cfg(feature = "parallel")]
-            {
-                use rayon::prelude::*;
-                digits
-                    .par_iter()
-                    .enumerate()
-                    .map(|(chain, digit)| chain_at(chain, *digit))
-                    .collect()
-            }
-            #[cfg(not(feature = "parallel"))]
-            {
-                digits
-                    .iter()
-                    .enumerate()
-                    .map(|(chain, digit)| chain_at(chain, *digit))
-                    .collect()
-            }
+            map_chains(digits.len(), |chain| chain_at(chain, digits[chain]))
         },
     )?;
     let (counter, chains) = result;
