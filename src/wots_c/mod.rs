@@ -18,10 +18,10 @@
 //! Shared WOTS-C chain walk and digit-sum grind primitives, plus the WOTS-C
 //! signature wire type and its ABI codec.
 //!
-//! Mirrors Solidity `WOTSPlusC.sol`: one parameterized chain walk used by both
-//! the stateless hypertree (`b"wots-c-chain"`) and stateful UXMSS
-//! (`b"uxmss-wots-chain"`). Tags and address layouts are caller parameters —
-//! they must stay byte-identical to the pre-merge constructions.
+//! Mirrors Solidity `WOTSPlusC.sol`'s generic chain-walk core: `wots_chain_walk`
+//! is one parameterized chain walk that per-tree callers (the stateless
+//! hypertree and stateful UXMSS) bind with their own domain tag and address
+//! layout. Path-specific binders live with their callers, not here.
 //!
 //! `Signature::to_bytes`/`from_bytes` are byte-identical to the pre-refactor
 //! `envelope::encode_wots_c_signature_body`/`decode_wots_c_signature` (that
@@ -34,7 +34,7 @@ use crate::primitives::abi::{
     collect_hash_words, encode_bytes, encode_dynamic_array, encode_tuple, word_from_u32, AbiReader,
     Field,
 };
-use crate::primitives::hash::{hash_node, wots_chain_address_word};
+use crate::primitives::hash::hash_node;
 use crate::primitives::profiles::NUM_WOTS_CHAINS;
 use crate::primitives::HASH_LEN;
 
@@ -48,20 +48,6 @@ pub(crate) struct ChainWalk {
     pub value: [u8; HASH_LEN],
     pub start: u32,
     pub steps: u32,
-}
-
-/// Precomputed address base plus chain index for a stateless chain walk.
-#[derive(Clone, Copy)]
-pub(crate) struct AddressBaseChain {
-    pub address_base: [u8; HASH_LEN],
-    pub chain_index: u32,
-}
-
-/// Leaf/chain coordinates for a stateful UXMSS WOTS-C chain walk.
-#[derive(Clone, Copy)]
-pub(crate) struct StatefulChainCtx {
-    pub leaf_index: u32,
-    pub chain_index: u32,
 }
 
 /// Advance one WOTS-C chain from a revealed value by `walk.steps` hashes.
@@ -82,77 +68,6 @@ pub(crate) fn wots_chain_walk(
         out = hash_node(&[tag, pk_seed.as_ref(), addr.as_ref(), out.as_ref()]);
     }
     out
-}
-
-/// Stateless hypertree WOTS-C chain walk (`b"wots-c-chain"` + ADRS word).
-pub(crate) fn stateless_wots_chain_from_address_base(
-    pk_seed: &[u8; HASH_LEN],
-    addr: AddressBaseChain,
-    walk: ChainWalk,
-) -> [u8; HASH_LEN] {
-    wots_chain_walk(
-        b"wots-c-chain",
-        pk_seed,
-        |step| wots_chain_address_word(addr.address_base, addr.chain_index, step),
-        walk,
-    )
-}
-
-/// ADRS coordinates for one stateless WOTS-C chain step-walk.
-pub(crate) struct StatelessWotsChainCtx<'a> {
-    pub pk_seed: &'a [u8; HASH_LEN],
-    pub layer: u32,
-    pub tree: u64,
-    pub keypair: u32,
-    pub chain_index: u32,
-}
-
-/// Stateless hypertree WOTS-C chain walk with full ADRS coordinates.
-pub(crate) fn stateless_wots_chain(
-    ctx: &StatelessWotsChainCtx<'_>,
-    walk: ChainWalk,
-) -> [u8; HASH_LEN] {
-    use crate::primitives::hash::{address_word32, AddressWord32};
-    wots_chain_walk(
-        b"wots-c-chain",
-        ctx.pk_seed,
-        |step| {
-            address_word32(AddressWord32 {
-                layer: ctx.layer,
-                tree: ctx.tree,
-                address_type: 0,
-                keypair: ctx.keypair,
-                chain: ctx.chain_index,
-                step,
-            })
-        },
-        walk,
-    )
-}
-
-/// Stateful UXMSS WOTS-C chain walk (`b"uxmss-wots-chain"`).
-pub(crate) fn stateful_chain_no_mask(
-    pk_seed: &[u8; HASH_LEN],
-    ctx: StatefulChainCtx,
-    walk: ChainWalk,
-) -> [u8; HASH_LEN] {
-    use crate::primitives::hash::{address_word32, AddressWord32};
-    use crate::primitives::ADDRESS_TYPE_WOTS_HASH;
-    wots_chain_walk(
-        b"uxmss-wots-chain",
-        pk_seed,
-        |step| {
-            address_word32(AddressWord32 {
-                layer: 0,
-                tree: 0,
-                address_type: ADDRESS_TYPE_WOTS_HASH,
-                keypair: ctx.leaf_index,
-                chain: ctx.chain_index,
-                step,
-            })
-        },
-        walk,
-    )
 }
 
 /// Generic digit-sum grind: try counters until digit sum equals `target_sum`.

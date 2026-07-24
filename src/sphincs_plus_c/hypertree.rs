@@ -36,15 +36,14 @@ use crate::primitives::abi::{
 };
 use crate::primitives::hash::{
     base_w_digit, hash_node, hash_packed, hypertree_address_word, word32,
-    wots_address_base, wots_digest_bytes,
+    wots_address_base, wots_chain_address_word, wots_digest_bytes,
 };
 use crate::primitives::profiles::{
     HYPERTREE_HEIGHT, NUM_HYPERTREE_LAYERS, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN,
     WOTS_TARGET_SUM_STATELESS,
 };
 use super::key::Key;
-use crate::wots_c;
-use crate::wots_c::{Signature, WOTS_C_MAX_GRIND_COUNTER};
+use crate::wots_c::{ChainWalk, wots_chain_walk, Signature, WOTS_C_MAX_GRIND_COUNTER};
 use crate::primitives::HASH_LEN;
 
 /// Hypertree subtree height: one auth-path node per level per layer. Matches
@@ -266,7 +265,7 @@ fn verify_wots_c32(
         Some(wots_chain32_no_mask_base(
             WOTS_CHAIN_LEN,
             *pk_seed,
-            wots_c::AddressBaseChain {
+            AddressBaseChain {
                 address_base,
                 chain_index: chain_index as u32,
             },
@@ -307,18 +306,39 @@ fn verify_wots_c32(
     computed_pk_hash == *expected_pk_hash
 }
 
+/// Precomputed address base plus chain index for a stateless chain walk.
+#[derive(Clone, Copy)]
+struct AddressBaseChain {
+    address_base: [u8; HASH_LEN],
+    chain_index: u32,
+}
+
+/// Stateless hypertree WOTS-C chain walk (`b"wots-c-chain"` + ADRS word).
+fn stateless_wots_chain_from_address_base(
+    pk_seed: &[u8; HASH_LEN],
+    addr: AddressBaseChain,
+    walk: ChainWalk,
+) -> [u8; HASH_LEN] {
+    wots_chain_walk(
+        b"wots-c-chain",
+        pk_seed,
+        |step| wots_chain_address_word(addr.address_base, addr.chain_index, step),
+        walk,
+    )
+}
+
 fn wots_chain32_no_mask_base(
     w: u16,
     pk_seed: [u8; HASH_LEN],
-    addr: wots_c::AddressBaseChain,
+    addr: AddressBaseChain,
     value: [u8; HASH_LEN],
     digit: u32,
 ) -> [u8; HASH_LEN] {
     let steps = u32::from(w - 1) - digit;
-    wots_c::stateless_wots_chain_from_address_base(
+    stateless_wots_chain_from_address_base(
         &pk_seed,
         addr,
-        wots_c::ChainWalk {
+        ChainWalk {
             value,
             start: digit,
             steps,
@@ -751,6 +771,35 @@ fn stateless_wots_c_secret(sk_seed: &[u8; HASH_LEN], chain: u32) -> [u8; HASH_LE
     hash_packed(&[b"wots-c-secret", sk_seed, &chain.to_be_bytes()])
 }
 
+/// ADRS coordinates for one stateless WOTS-C chain step-walk.
+struct StatelessWotsChainCtx<'a> {
+    pk_seed: &'a [u8; HASH_LEN],
+    layer: u32,
+    tree: u64,
+    keypair: u32,
+    chain_index: u32,
+}
+
+/// Stateless hypertree WOTS-C chain walk with full ADRS coordinates.
+fn stateless_wots_chain(ctx: &StatelessWotsChainCtx<'_>, walk: ChainWalk) -> [u8; HASH_LEN] {
+    use crate::primitives::hash::{address_word32, AddressWord32};
+    wots_chain_walk(
+        b"wots-c-chain",
+        ctx.pk_seed,
+        |step| {
+            address_word32(AddressWord32 {
+                layer: ctx.layer,
+                tree: ctx.tree,
+                address_type: 0,
+                keypair: ctx.keypair,
+                chain: ctx.chain_index,
+                step,
+            })
+        },
+        walk,
+    )
+}
+
 fn stateless_wots_c_chain(
     pk_seed: &[u8; HASH_LEN],
     coords: &WotsChain,
@@ -758,16 +807,16 @@ fn stateless_wots_c_chain(
     start: u32,
     steps: u32,
 ) -> [u8; HASH_LEN] {
-    let ctx = wots_c::StatelessWotsChainCtx {
+    let ctx = StatelessWotsChainCtx {
         pk_seed,
         layer: coords.layer,
         tree: coords.tree,
         keypair: coords.keypair,
         chain_index: coords.chain,
     };
-    wots_c::stateless_wots_chain(
+    stateless_wots_chain(
         &ctx,
-        wots_c::ChainWalk {
+        ChainWalk {
             value,
             start,
             steps,

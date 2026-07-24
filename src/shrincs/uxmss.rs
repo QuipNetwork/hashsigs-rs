@@ -32,13 +32,44 @@ use crate::primitives::profiles::{
     WOTS_BASE_STATEFUL, WOTS_CHAINS_STATEFUL, WOTS_TARGET_SUM_STATEFUL,
 };
 use super::signature::Signature;
-use crate::wots_c;
 use crate::primitives::HASH_LEN;
-use crate::wots_c::WOTS_C_MAX_GRIND_COUNTER;
+use crate::wots_c::{ChainWalk, wots_chain_walk, WOTS_C_MAX_GRIND_COUNTER};
 
 // Encoded stateful public key layout, kept 68 bytes across all profiles:
 // 32-byte pkSeed slot || 32-byte root slot || 4-byte maxSignatures.
 pub const STATEFUL_PUBLIC_KEY_BYTES: usize = 68;
+
+/// Leaf/chain coordinates for a stateful UXMSS WOTS-C chain walk.
+#[derive(Clone, Copy)]
+struct StatefulChainCtx {
+    leaf_index: u32,
+    chain_index: u32,
+}
+
+/// Stateful UXMSS WOTS-C chain walk (`b"uxmss-wots-chain"`).
+fn stateful_chain_no_mask(
+    pk_seed: &[u8; HASH_LEN],
+    ctx: StatefulChainCtx,
+    walk: ChainWalk,
+) -> [u8; HASH_LEN] {
+    use crate::primitives::hash::{address_word32, AddressWord32};
+    use crate::primitives::ADDRESS_TYPE_WOTS_HASH;
+    wots_chain_walk(
+        b"uxmss-wots-chain",
+        pk_seed,
+        |step| {
+            address_word32(AddressWord32 {
+                layer: 0,
+                tree: 0,
+                address_type: ADDRESS_TYPE_WOTS_HASH,
+                keypair: ctx.leaf_index,
+                chain: ctx.chain_index,
+                step,
+            })
+        },
+        walk,
+    )
+}
 
 /// The stateful sub-key: `pk_seed || root || max_signatures`, the flat
 /// (non-newtyped) shape carried inside [`super::public_key::PublicKey`]'s
@@ -132,13 +163,13 @@ fn compact_stateful_wots_public_key_from_signature(
         let digit = base_w16_digit(&digest, chain_index);
         digit_sum = digit_sum.checked_add(digit)?;
         let chain_value = *signature.chains.get(chain_index)?;
-        *segment = wots_c::stateful_chain_no_mask(
+        *segment = stateful_chain_no_mask(
             &pk_seed,
-            wots_c::StatefulChainCtx {
+            StatefulChainCtx {
                 leaf_index,
                 chain_index: chain_index as u32,
             },
-            wots_c::ChainWalk {
+            ChainWalk {
                 value: chain_value,
                 start: digit,
                 steps: WOTS_BASE_STATEFUL - 1 - digit,
@@ -549,13 +580,13 @@ fn sign_stateful_wots_c(
                         leaf_index,
                         chain_index as u32,
                     ));
-                    wots_c::stateful_chain_no_mask(
+                    stateful_chain_no_mask(
                         pk_seed,
-                        wots_c::StatefulChainCtx {
+                        StatefulChainCtx {
                             leaf_index,
                             chain_index: chain_index as u32,
                         },
-                        wots_c::ChainWalk {
+                        ChainWalk {
                             value: *secret,
                             start: 0,
                             steps: *digit,
@@ -608,13 +639,13 @@ fn stateful_wots_pk_hash(
             leaf_index,
             chain_index as u32,
         ));
-        *endpoint = wots_c::stateful_chain_no_mask(
+        *endpoint = stateful_chain_no_mask(
             pk_seed,
-            wots_c::StatefulChainCtx {
+            StatefulChainCtx {
                 leaf_index,
                 chain_index: chain_index as u32,
             },
-            wots_c::ChainWalk {
+            ChainWalk {
                 value: *secret,
                 start: 0,
                 steps: WOTS_BASE_STATEFUL - 1,
