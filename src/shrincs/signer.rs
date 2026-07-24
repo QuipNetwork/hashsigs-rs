@@ -27,7 +27,7 @@ use crate::primitives::hash::word32;
 use crate::sphincs_plus_c::hypertree::hypertree_public_root;
 use crate::sphincs_plus_c::{self};
 use crate::types::{ActionContext, PublicKey, StatefulSignature, StatelessSignature, HASH_LEN};
-use crate::shrincs::uxmss::{self, StatefulSecret};
+use crate::shrincs::uxmss;
 
 pub use super::signer_types::{ShrincsSignerResult, ShrincsSigningKey};
 use super::messages::stateful_action_message_hash;
@@ -278,15 +278,20 @@ fn sign_stateful_via_uxmss(
     signing_key: &mut ShrincsSigningKey,
     message: &[u8],
 ) -> ShrincsSignerResult<StatefulSignature> {
-    let mut secret = StatefulSecret {
-        sk_seed: signing_key.stateful_sk_seed,
-        prf_seed: signing_key.stateful_prf_seed,
-        pk_seed: signing_key.stateful_pk_seed,
-        max_signatures: signing_key.max_stateful_signatures,
+    let mut key = uxmss::Key {
+        secret: uxmss::Secret {
+            sk_seed: uxmss::SkSeed::new(signing_key.stateful_sk_seed),
+            prf_seed: uxmss::PrfSeed::new(signing_key.stateful_prf_seed),
+        },
+        public_key: uxmss::PublicKey {
+            pk_seed: uxmss::PkSeed::new(signing_key.stateful_pk_seed),
+            root: uxmss::Root::new(signing_key.stateful_root),
+            max_signatures: signing_key.max_stateful_signatures,
+        },
         next_leaf_index: signing_key.next_stateful_leaf_index,
     };
-    let sig = uxmss::sign_stateful_raw(&mut secret, message)?;
-    signing_key.next_stateful_leaf_index = secret.next_leaf_index;
+    let sig = uxmss::sign_stateful_raw(&mut key, message)?;
+    signing_key.next_stateful_leaf_index = key.next_leaf_index;
     Some(sig)
 }
 
@@ -296,14 +301,19 @@ fn sign_stateful_at_leaf_via_uxmss(
     leaf_index: u32,
     message: &[u8],
 ) -> ShrincsSignerResult<StatefulSignature> {
-    let secret = StatefulSecret {
-        sk_seed: signing_key.stateful_sk_seed,
-        prf_seed: signing_key.stateful_prf_seed,
-        pk_seed: signing_key.stateful_pk_seed,
-        max_signatures: signing_key.max_stateful_signatures,
+    let key = uxmss::Key {
+        secret: uxmss::Secret {
+            sk_seed: uxmss::SkSeed::new(signing_key.stateful_sk_seed),
+            prf_seed: uxmss::PrfSeed::new(signing_key.stateful_prf_seed),
+        },
+        public_key: uxmss::PublicKey {
+            pk_seed: uxmss::PkSeed::new(signing_key.stateful_pk_seed),
+            root: uxmss::Root::new(signing_key.stateful_root),
+            max_signatures: signing_key.max_stateful_signatures,
+        },
         next_leaf_index: signing_key.next_stateful_leaf_index,
     };
-    uxmss::sign_stateful_raw_at_leaf(&secret, leaf_index, message)
+    uxmss::sign_stateful_raw_at_leaf(&key, leaf_index, message)
 }
 
 

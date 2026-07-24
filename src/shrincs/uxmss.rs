@@ -167,15 +167,6 @@ fn root_from_unbalanced_path(
 
 // ---- signing ----
 
-/// Stateful secret material needed for UXMSS signing (no SHRINCS coupling).
-pub(crate) struct StatefulSecret {
-    pub sk_seed: [u8; HASH_LEN],
-    pub prf_seed: [u8; HASH_LEN],
-    pub pk_seed: [u8; HASH_LEN],
-    pub max_signatures: u32,
-    pub next_leaf_index: u32,
-}
-
 // ── Structured, newtyped UXMSS key (the SHRINCS stateful fast path) ──────────
 //
 // Each 32-byte role is its own type, distinct from the identically-shaped
@@ -207,10 +198,6 @@ impl SkSeed {
     pub const fn new(bytes: [u8; HASH_LEN]) -> Self {
         Self(bytes)
     }
-    /// Wrap a slice, returning `None` for any length other than 32.
-    pub fn from_slice(bytes: &[u8]) -> Option<Self> {
-        Some(Self(word32(bytes)?))
-    }
     /// Borrow the raw bytes for hashing.
     pub fn as_bytes(&self) -> &[u8; HASH_LEN] {
         &self.0
@@ -221,10 +208,6 @@ impl PrfSeed {
     /// Wrap 32 raw bytes.
     pub const fn new(bytes: [u8; HASH_LEN]) -> Self {
         Self(bytes)
-    }
-    /// Wrap a slice, returning `None` for any length other than 32.
-    pub fn from_slice(bytes: &[u8]) -> Option<Self> {
-        Some(Self(word32(bytes)?))
     }
     /// Borrow the raw bytes for hashing.
     pub fn as_bytes(&self) -> &[u8; HASH_LEN] {
@@ -348,22 +331,6 @@ impl PublicKey {
     }
 }
 
-impl Key {
-    // ── Temporary bridge to the legacy signing struct. Removed once
-    //    the signing path takes `&mut Key` directly. ──
-
-    /// Snapshot the fields the UXMSS signing routines need.
-    pub(crate) fn to_stateful_secret(&self) -> StatefulSecret {
-        StatefulSecret {
-            sk_seed: *self.secret.sk_seed.as_bytes(),
-            prf_seed: *self.secret.prf_seed.as_bytes(),
-            pk_seed: *self.public_key.pk_seed.as_bytes(),
-            max_signatures: self.public_key.max_signatures,
-            next_leaf_index: self.next_leaf_index,
-        }
-    }
-}
-
 impl From<PublicKey> for StatefulPublicKey {
     fn from(pk: PublicKey) -> Self {
         Self {
@@ -393,17 +360,14 @@ fn word4(bytes: &[u8]) -> Option<[u8; 4]> {
     Some(out)
 }
 
-pub(crate) fn sign_stateful_raw(
-    secret: &mut StatefulSecret,
-    message: &[u8],
-) -> Option<StatefulSignature> {
+pub(crate) fn sign_stateful_raw(key: &mut Key, message: &[u8]) -> Option<StatefulSignature> {
     // The verifier derives the stateful leaf index from auth_path.len(), so the
     // signer must advance one leaf at a time and must never reuse a prior leaf.
-    let leaf_index = secret.next_leaf_index;
+    let leaf_index = key.next_leaf_index;
     if leaf_index == 0 {
         return None;
     }
-    if leaf_index > secret.max_signatures {
+    if leaf_index > key.public_key.max_signatures {
         return None;
     }
 
@@ -411,13 +375,13 @@ pub(crate) fn sign_stateful_raw(
     // seeds, leaf_index, and max_signatures), so we must not rebuild it here —
     // stateful_auth_path walks up to max_stateful_signatures nodes and doubled
     // the dominant signing cost.
-    let signature = sign_stateful_raw_at_leaf(secret, leaf_index, message)?;
-    secret.next_leaf_index = leaf_index.saturating_add(1);
+    let signature = sign_stateful_raw_at_leaf(key, leaf_index, message)?;
+    key.next_leaf_index = leaf_index.saturating_add(1);
     Some(signature)
 }
 
 pub(crate) fn sign_stateful_raw_at_leaf(
-    secret: &StatefulSecret,
+    key: &Key,
     leaf_index: u32,
     message: &[u8],
 ) -> Option<StatefulSignature> {
@@ -427,21 +391,21 @@ pub(crate) fn sign_stateful_raw_at_leaf(
     if leaf_index == 0 {
         return None;
     }
-    if leaf_index > secret.max_signatures {
+    if leaf_index > key.public_key.max_signatures {
         return None;
     }
     let mut signature = sign_stateful_wots_c(
-        &secret.sk_seed,
-        &secret.prf_seed,
-        &secret.pk_seed,
+        key.secret.sk_seed.as_bytes(),
+        key.secret.prf_seed.as_bytes(),
+        key.public_key.pk_seed.as_bytes(),
         leaf_index,
         message,
     )?;
     signature.auth_path = stateful_auth_path(
-        &secret.sk_seed,
-        &secret.pk_seed,
+        key.secret.sk_seed.as_bytes(),
+        key.public_key.pk_seed.as_bytes(),
         leaf_index,
-        secret.max_signatures,
+        key.public_key.max_signatures,
     );
     Some(signature)
 }
