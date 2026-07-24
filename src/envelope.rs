@@ -63,26 +63,24 @@
 use alloc::vec::Vec;
 
 use crate::primitives::abi::{
-    collect_hash_words, encode_bytes, encode_bytes32_array, encode_dynamic_array, encode_tuple,
-    word_from_u32, AbiReader, Field,
+    encode_bytes, encode_bytes32_array, encode_dynamic_array, encode_tuple, word_from_u32,
+    AbiReader, Field,
 };
-use crate::primitives::profiles::{HYPERTREE_HEIGHT, NUM_HYPERTREE_LAYERS, WOTS_CHAINS_STATEFUL};
+use crate::primitives::profiles::{NUM_HYPERTREE_LAYERS, WOTS_CHAINS_STATEFUL};
 #[cfg(test)]
 use crate::primitives::profiles::NUM_FORS_TREES;
 use crate::primitives::HASH_LEN;
 #[cfg(test)]
 use crate::sphincs_plus_c::fors_c::Entry;
 use crate::sphincs_plus_c::fors_c::Signature;
-use crate::types::{HypertreeLayerSignature, PublicKey, StatefulSignature, StatelessSignature};
+use crate::sphincs_plus_c::hypertree::LayerSignature;
+use crate::types::{PublicKey, StatefulSignature, StatelessSignature};
+#[cfg(test)]
 use crate::wots_c::Signature as WotsCSignature;
 
 /// Upper bound on a stateful auth-path length (equals the leaf index).
 /// Matches the signer / wasm host cap (`MAX_STATEFUL_SIGNATURES_LIMIT`).
 const MAX_STATEFUL_AUTH_PATH_LEN: usize = 4096;
-
-/// Hypertree subtree height: one auth-path node per level per layer.
-const HYPERTREE_SUBTREE_HEIGHT: usize =
-    (HYPERTREE_HEIGHT as usize) / (NUM_HYPERTREE_LAYERS as usize);
 
 fn encode_public_key_body(public_key: &PublicKey) -> Vec<u8> {
     encode_tuple(alloc::vec![
@@ -106,18 +104,8 @@ fn encode_fors_signature_body(signature: &Signature) -> Vec<u8> {
     signature.to_bytes()
 }
 
-fn encode_wots_c_signature_body(signature: &WotsCSignature) -> Vec<u8> {
-    signature.to_bytes()
-}
-
-fn encode_hypertree_layer_body(layer: &HypertreeLayerSignature) -> Vec<u8> {
-    encode_tuple(alloc::vec![
-        Field::Dynamic(encode_bytes(&layer.wots_c_pk_hash)),
-        Field::Dynamic(encode_wots_c_signature_body(&layer.wots_c_signature)),
-        Field::Dynamic(encode_dynamic_array(
-            layer.auth_path.iter().map(|node| encode_bytes(node)).collect(),
-        )),
-    ])
+fn encode_hypertree_layer_body(layer: &LayerSignature) -> Vec<u8> {
+    layer.to_bytes()
 }
 
 fn encode_stateless_signature_body(signature: &StatelessSignature) -> Vec<u8> {
@@ -155,25 +143,11 @@ fn decode_fors_signature(reader: &AbiReader, base: usize) -> Option<Signature> {
     Signature::decode(reader, base)
 }
 
-fn decode_wots_c_signature(reader: &AbiReader, base: usize) -> Option<WotsCSignature> {
-    WotsCSignature::decode(reader, base)
-}
-
 fn decode_hypertree_layer_signature(
     reader: &AbiReader,
     base: usize,
-) -> Option<HypertreeLayerSignature> {
-    let wots_head = base.checked_add(32)?;
-    let wots_start = reader.decode_offset(base, wots_head)?;
-    Some(HypertreeLayerSignature {
-        wots_c_pk_hash: reader.decode_bytes32_field(base, base)?,
-        wots_c_signature: decode_wots_c_signature(reader, wots_start)?,
-        auth_path: collect_hash_words(reader.decode_array_bytes(
-            base,
-            base.checked_add(64)?,
-            HYPERTREE_SUBTREE_HEIGHT,
-        )?)?,
-    })
+) -> Option<LayerSignature> {
+    LayerSignature::decode(reader, base)
 }
 
 fn decode_stateless_signature(reader: &AbiReader, base: usize) -> Option<StatelessSignature> {
@@ -332,7 +306,7 @@ mod tests {
             // would exceed the decoder's `<= NUM_HYPERTREE_LAYERS` cap on the
             // single-layer 128s profiles.
             hypertree: (0..NUM_HYPERTREE_LAYERS)
-                .map(|layer| HypertreeLayerSignature {
+                .map(|layer| LayerSignature {
                     wots_c_pk_hash: [0xB1 ^ layer; HASH_LEN],
                     wots_c_signature: WotsCSignature {
                         randomizer: [0xB2 ^ layer; HASH_LEN],

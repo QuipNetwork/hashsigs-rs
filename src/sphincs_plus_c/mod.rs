@@ -79,7 +79,15 @@ pub(crate) fn verify_raw(
 /// suite and the `solana` workspace member reconstruct them from their DTOs,
 /// importing them at the canonical path `crate::sphincs_plus_c::fors_c`.
 pub mod fors_c;
-pub(crate) mod hypertree;
+
+/// Hypertree layer signature wire type and its ABI codec, plus internal
+/// sign/verify.
+///
+/// `pub` (rather than `pub(crate)`) because `hypertree::LayerSignature` is
+/// part of the crate's public wire-type surface: the `tests/` integration
+/// suite and the `solana` workspace member reconstruct it from their DTOs,
+/// importing it at the canonical path `crate::sphincs_plus_c::hypertree::LayerSignature`.
+pub mod hypertree;
 
 /// Structured, newtyped SPHINCS+C key: [`key::Key`] = [`key::Secret`] +
 /// [`key::PublicKey`]. Reused as the stateless half of a SHRINCS key.

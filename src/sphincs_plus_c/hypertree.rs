@@ -16,16 +16,24 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 
-//! Stateless hypertree sign and verify.
+//! Stateless hypertree sign and verify, plus the hypertree layer signature
+//! wire type and its ABI codec.
 //!
 //! Carries a FORS-C root up through `NUM_HYPERTREE_LAYERS` WOTS-C-authenticated
 //! subtrees to the pinned hypertree root, mirroring Solidity's `Hypertree.sol`.
 //! Sits above `wots_c` and `treehash` in the DAG and is consumed by
 //! `sphincs_plus_c` to assemble a full stateless signature.
+//!
+//! `LayerSignature::to_bytes`/`from_bytes` are byte-identical to the
+//! historical `envelope::encode_hypertree_layer_body`/
+//! `decode_hypertree_layer_signature`, which now delegate here.
 
 use alloc::vec::Vec;
 
 use zeroize::Zeroizing;
+use crate::primitives::abi::{
+    collect_hash_words, encode_bytes, encode_dynamic_array, encode_tuple, AbiReader, Field,
+};
 use crate::primitives::hash::{
     base_w_digit, hash_node, hash_packed, hypertree_address_word, word32,
     wots_address_base, wots_digest_bytes,
@@ -34,11 +42,79 @@ use crate::primitives::profiles::{
     HYPERTREE_HEIGHT, NUM_HYPERTREE_LAYERS, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN,
     WOTS_TARGET_SUM_STATELESS,
 };
-use crate::types::HypertreeLayerSignature;
 use super::key::Key;
 use crate::wots_c;
 use crate::wots_c::{Signature, WOTS_C_MAX_GRIND_COUNTER};
 use crate::primitives::HASH_LEN;
+
+/// Hypertree subtree height: one auth-path node per level per layer. Matches
+/// the historical `envelope::HYPERTREE_SUBTREE_HEIGHT`, moved here with the
+/// codec it bounds.
+const HYPERTREE_SUBTREE_HEIGHT: usize =
+    (HYPERTREE_HEIGHT as usize) / (NUM_HYPERTREE_LAYERS as usize);
+
+/// One hypertree layer's signature: the WOTS-C signature proving
+/// `current_root -> wots_c_pk_hash`, plus the Merkle auth path from
+/// `wots_c_pk_hash` up to the next layer's root.
+///
+/// Kept `pub` (rather than `pub(crate)`) because it is part of the crate's
+/// public wire-type surface: the `tests/` integration suite and the `solana`
+/// workspace member reconstruct it from their DTOs, importing it at its
+/// canonical path `crate::sphincs_plus_c::hypertree::LayerSignature` (they
+/// alias it locally as `HypertreeLayerSignature`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LayerSignature {
+    /// Expected WOTS-C public-key hash for this layer.
+    pub wots_c_pk_hash: [u8; HASH_LEN],
+    /// WOTS-C signature proving `current_root -> wots_c_pk_hash`.
+    pub wots_c_signature: Signature,
+    /// Merkle path from `wots_c_pk_hash` to the next layer root.
+    pub auth_path: Vec<[u8; HASH_LEN]>,
+}
+
+impl LayerSignature {
+    /// ABI-encode the hypertree layer signature body. Byte-identical to the
+    /// historical `envelope::encode_hypertree_layer_body`.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        encode_tuple(alloc::vec![
+            Field::Dynamic(encode_bytes(&self.wots_c_pk_hash)),
+            Field::Dynamic(self.wots_c_signature.to_bytes()),
+            Field::Dynamic(encode_dynamic_array(
+                self.auth_path.iter().map(|node| encode_bytes(node)).collect(),
+            )),
+        ])
+    }
+
+    /// Decode a hypertree layer signature already located at `base` within a
+    /// shared `AbiReader`. No trailing-bytes check here: `base` commonly sits
+    /// inside a larger encoded envelope, so exhaustion is the calling
+    /// top-level decoder's responsibility (see `from_bytes` for the
+    /// standalone entrypoint that does check).
+    pub(crate) fn decode(reader: &AbiReader, base: usize) -> Option<Self> {
+        let wots_head = base.checked_add(32)?;
+        let wots_start = reader.decode_offset(base, wots_head)?;
+        Some(Self {
+            wots_c_pk_hash: reader.decode_bytes32_field(base, base)?,
+            wots_c_signature: Signature::decode(reader, wots_start)?,
+            auth_path: collect_hash_words(reader.decode_array_bytes(
+                base,
+                base.checked_add(64)?,
+                HYPERTREE_SUBTREE_HEIGHT,
+            )?)?,
+        })
+    }
+
+    /// Decode a standalone byte blob produced by `to_bytes`. Byte-identical
+    /// to the historical `envelope::decode_hypertree_layer_signature`, built
+    /// as a top-level entrypoint: a fresh `AbiReader` at base 0, rejecting
+    /// trailing bytes.
+    pub fn from_bytes(data: &[u8]) -> Option<Self> {
+        let reader = AbiReader::new(data);
+        let decoded = Self::decode(&reader, 0)?;
+        reader.finish()?;
+        Some(decoded)
+    }
+}
 
 /// Layer-0 seed coordinates selected by the FORS message digest.
 #[derive(Clone, Copy)]
@@ -52,7 +128,7 @@ pub(crate) fn verify_hypertree(
     expected_hypertree_root: &[u8; HASH_LEN],
     fors_root: [u8; HASH_LEN],
     seed: HypertreeSeed,
-    layers: &[HypertreeLayerSignature],
+    layers: &[LayerSignature],
 ) -> bool {
     if layers.len() != NUM_HYPERTREE_LAYERS as usize {
         return false;
@@ -365,7 +441,7 @@ pub(crate) fn sign_hypertree(
     fors_root: [u8; HASH_LEN],
     bottom_tree: u64,
     bottom_leaf: u32,
-) -> Option<Vec<HypertreeLayerSignature>> {
+) -> Option<Vec<LayerSignature>> {
     if stateless_trace_enabled() {
         hashsigs_println!(
             "stateless trace: hypertree start bottom_tree={} bottom_leaf={} layers={}",
@@ -434,7 +510,7 @@ pub(crate) fn sign_hypertree(
         // The tree/leaf coordinates are fully derived by the verifier (layer 0
         // from the FORS digest, upper layers by the recurrence below), so they
         // are not serialized into the signature.
-        layers.push(HypertreeLayerSignature {
+        layers.push(LayerSignature {
             wots_c_pk_hash: subtree.selected_leaf_hash,
             wots_c_signature,
             auth_path,

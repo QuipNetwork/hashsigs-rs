@@ -34,8 +34,8 @@ pub use crate::primitives::{
     HASH_SUITE_KECCAK_256,
 };
 pub use crate::types::{
-    ActionContext, HypertreeLayerSignature, PublicKey, StatefulPublicKey, StatefulSignature,
-    StatelessSignature, STATEFUL_PUBLIC_KEY_BYTES,
+    ActionContext, PublicKey, StatefulPublicKey, StatefulSignature, StatelessSignature,
+    STATEFUL_PUBLIC_KEY_BYTES,
 };
 // Profile parameter tuple also lived in main's shrincs_verifier_types (via
 // `pub use profile::*`); re-export from the current profiles module.

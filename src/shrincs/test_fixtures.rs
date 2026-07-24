@@ -25,9 +25,10 @@ use serde::{Deserialize, Serialize};
 
 use super::uxmss;
 use super::Keys;
-use super::{HypertreeLayerSignature, PublicKey, StatelessSignature, HASH_LEN};
+use super::{PublicKey, StatelessSignature, HASH_LEN};
 use crate::sphincs_plus_c;
 use crate::sphincs_plus_c::fors_c::{Entry as ForsEntry, Signature as ForsSignature};
+use crate::sphincs_plus_c::hypertree::LayerSignature as HypertreeLayerSignature;
 use crate::wots_c::Signature as WotsCSignature;
 
 pub(crate) const FIXTURE_PATH_ENV: &str = "SHRINCS_TEST_KEY_FIXTURE_PATH";
