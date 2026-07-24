@@ -361,6 +361,29 @@ mod tests {
         assert!(Keys::recover_commitment(&[0u8; 4]).is_none());
     }
 
+    /// `recover_commitment` must recompute the commitment from the envelope's
+    /// carried `stateful_public_key ‖ pk_seed ‖ hypertree_root`, not trust the
+    /// envelope's own `public_key_commitment` field: an attacker controls the
+    /// envelope bytes and could claim any commitment there.
+    #[test]
+    fn recover_commitment_ignores_tampered_commitment_field() {
+        let (mut keys, pk) = production_keys();
+        let real = keys.public_key_commitment;
+        let sig =
+            crate::shrincs::signer::ShrincsSigner::sign_stateful_raw(&mut keys, &[0x11u8; 32])
+                .expect("sign");
+
+        let mut bad_pk = pk.clone();
+        bad_pk.public_key_commitment = alloc::vec![0xFFu8; 32];
+        let env = crate::envelope::encode_stateful_envelope(&bad_pk, &sig);
+
+        assert_eq!(Keys::recover_commitment(&env), Some(real));
+        assert_ne!(
+            Keys::recover_commitment(&env).unwrap().as_bytes(),
+            &[0xFFu8; 32]
+        );
+    }
+
     #[test]
     fn debug_redacts_secret_seeds() {
         // Distinct secret marker (0xAA -> "170") vs everything else (0x07), so a
