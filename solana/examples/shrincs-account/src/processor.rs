@@ -27,12 +27,13 @@
 //! `process_set_policy_recovery_rotation`, `process_set_policy_leaf_bitmap`,
 //! `process_enter_recovery_mode`, `process_rotate_to_fresh_key`,
 //! `process_rotate_full_key`, `process_is_valid_signature`, and
-//! `process_is_leaf_used` are exposed `pub(crate)` and are not yet wired into
-//! [`process_instruction`]: the instruction dispatch enum/router that picks
-//! between these is a later task. Until then, this module's own tests call
-//! them directly through a test-only dispatcher (see `tests` below), so
-//! `#[allow(dead_code)]` on the handlers is expected and will be removed once
-//! the real router lands.
+//! `process_is_leaf_used` are exposed `pub(crate)` and are dispatched from
+//! [`process_instruction`] through the [`ShrincsAccountInstruction`] enum --
+//! one variant per handler above. This module's own tests still exercise most
+//! handlers through a lighter test-only dispatcher (see `tests` below) for
+//! direct-call convenience, plus one end-to-end test that submits real
+//! `ShrincsAccountInstruction`-encoded instructions through
+//! [`process_instruction`] itself.
 //!
 //! `process_rotate_to_fresh_key`/`process_rotate_full_key` authorize their
 //! rotation through [`crate::rotation`] rather than a dedicated raw-verify
@@ -309,7 +310,6 @@ fn create_account_pda<'info>(
 /// (writable), system_program]`. Installs the initial commitment, default
 /// `MonotonicIndex` policy, `next_stateful_leaf_index = 1`, and zeroed
 /// nonce/key_version.
-#[allow(dead_code)] // called by this module's tests; wired into dispatch in a later task
 pub(crate) fn process_init(program_id: &Pubkey, accounts: &[AccountInfo], args: InitArgs) -> ProgramResult {
     let accounts_iter = &mut accounts.iter();
     let payer = next_account_info(accounts_iter)?;
@@ -373,7 +373,6 @@ pub(crate) fn process_init(program_id: &Pubkey, accounts: &[AccountInfo], args: 
 /// `signature.auth_path.len()`, the leaf the signature itself used (see the
 /// "CRITICAL" note on [`ShrincsAccountError`]'s callers), never a free
 /// caller-declared index.
-#[allow(dead_code)] // called by this module's tests; wired into dispatch in a later task
 pub(crate) fn process_verify_stateful_action(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
@@ -454,7 +453,6 @@ pub(crate) fn process_verify_stateful_action(
 ///
 /// Builds the [`ActionContext`] itself from account STATE, exactly like
 /// [`process_verify_stateful_action`] -- see that function's doc comment.
-#[allow(dead_code)] // called by this module's tests; wired into dispatch in a later task
 pub(crate) fn process_verify_stateless_action(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
@@ -514,7 +512,6 @@ pub(crate) fn process_verify_stateless_action(
 /// [`commit_stateful_leaf_use`] on first stateful use) and rejects any
 /// `initial_leaf_index` below the current cursor -- a rollback would
 /// re-enable leaves already consumed under the prior policy.
-#[allow(dead_code)] // called by this module's tests; wired into dispatch in a later task
 pub(crate) fn process_set_policy_monotonic(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
@@ -556,7 +553,6 @@ pub(crate) fn process_set_policy_monotonic(
 /// therefore can never rotate) again. Skipping the freeze check here cannot
 /// re-enable a spent stateful leaf: [`check_stateful_leaf_use`] rejects all
 /// stateful use outright once the policy is `RecoveryRotation`.
-#[allow(dead_code)] // called by this module's tests; wired into dispatch in a later task
 pub(crate) fn process_set_policy_recovery_rotation(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
@@ -584,7 +580,6 @@ pub(crate) fn process_set_policy_recovery_rotation(
 /// `stateful_policy_frozen`, like [`process_set_policy_monotonic`] (not
 /// exempt: unlike `RecoveryRotation`, `LeafBitmap` still accepts stateful
 /// signatures, so switching into it while frozen could bypass the freeze).
-#[allow(dead_code)] // called by this module's tests; wired into dispatch in a later task
 pub(crate) fn process_set_policy_leaf_bitmap(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
     let accounts_iter = &mut accounts.iter();
     let account_info = next_account_info(accounts_iter)?;
@@ -612,7 +607,6 @@ pub(crate) fn process_set_policy_leaf_bitmap(program_id: &Pubkey, accounts: &[Ac
 /// [`process_verify_stateless_action`] checks before accepting a stateless
 /// signature under `RecoveryRotation` policy. Requires `RecoveryRotation` to
 /// already be the active policy.
-#[allow(dead_code)] // called by this module's tests; wired into dispatch in a later task
 pub(crate) fn process_enter_recovery_mode(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
     let accounts_iter = &mut accounts.iter();
     let account_info = next_account_info(accounts_iter)?;
@@ -683,7 +677,6 @@ fn require_recovery_mode(state: &ShrincsAccountState) -> Result<(), ProgramError
 /// (`solana/src/account.rs` prior to `5e13d35~1`, `process_rotate_to_fresh_key`,
 /// line 699) took only this same single-account layout -- the stateless
 /// recovery signature IS the sole authorization).
-#[allow(dead_code)] // called by this module's tests; wired into dispatch in a later task
 pub(crate) fn process_rotate_to_fresh_key(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
@@ -724,7 +717,6 @@ pub(crate) fn process_rotate_to_fresh_key(
 /// the CURRENT key's stateless recovery signature over an `ACTION_ROTATE_FULL`
 /// action, exactly like [`process_rotate_to_fresh_key`] -- see that
 /// function's doc comment for the account-layout rationale.
-#[allow(dead_code)] // called by this module's tests; wired into dispatch in a later task
 pub(crate) fn process_rotate_full_key(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
@@ -788,7 +780,6 @@ pub(crate) fn process_rotate_full_key(
 /// A malformed envelope (undecodable `signature_bytes`, unknown `mode`) is
 /// still a distinct `Err(ProgramError::InvalidInstructionData)`: that is a
 /// caller/encoding bug, not a "no" answer to the query.
-#[allow(dead_code)] // wired into dispatch in a later task
 pub(crate) fn process_is_valid_signature(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
@@ -848,7 +839,6 @@ pub(crate) fn process_is_valid_signature(
 /// creates the bitmap-word PDA on a miss -- [`is_leaf_used`] already treats
 /// an uncreated word as "every leaf in it is unused" and returns `Ok(false)`
 /// without touching the account.
-#[allow(dead_code)] // wired into dispatch in a later task
 pub(crate) fn process_is_leaf_used(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
@@ -864,18 +854,60 @@ pub(crate) fn process_is_leaf_used(
     Ok(())
 }
 
-/// Crate entrypoint. Instruction dispatch (the enum selecting between
-/// `process_init` / `process_verify_stateful_action` /
-/// `process_verify_stateless_action` / the policy / recovery / rotation
-/// handlers) is a later task; until it lands this always succeeds without
-/// doing anything.
+/// Top-level instruction enum for [`process_instruction`]: one variant per
+/// handler in this module, Borsh-encoded by the caller and decoded here.
+#[derive(Debug, Clone, BorshSerialize, BorshDeserialize)]
+pub(crate) enum ShrincsAccountInstruction {
+    Init(InitArgs),
+    VerifyStatefulAction(StatefulActionArgs),
+    VerifyStatelessAction(StatelessActionArgs),
+    SetPolicyMonotonic(SetPolicyMonotonicArgs),
+    SetPolicyRecoveryRotation,
+    SetPolicyLeafBitmap,
+    EnterRecoveryMode,
+    RotateToFreshKey(RotateToFreshKeyArgs),
+    RotateFullKey(RotateFullKeyArgs),
+    IsValidSignature(IsValidSignatureArgs),
+    IsLeafUsed(IsLeafUsedArgs),
+}
+
+/// Crate entrypoint. Decodes a [`ShrincsAccountInstruction`] from
+/// `instruction_data` and dispatches to the matching handler, threading
+/// `accounts` through unchanged.
 pub fn process_instruction(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
     instruction_data: &[u8],
 ) -> ProgramResult {
-    let _ = (program_id, accounts, instruction_data);
-    Ok(())
+    let instruction = ShrincsAccountInstruction::try_from_slice(instruction_data)
+        .map_err(|_| ProgramError::InvalidInstructionData)?;
+    match instruction {
+        ShrincsAccountInstruction::Init(args) => process_init(program_id, accounts, args),
+        ShrincsAccountInstruction::VerifyStatefulAction(args) => {
+            process_verify_stateful_action(program_id, accounts, args)
+        }
+        ShrincsAccountInstruction::VerifyStatelessAction(args) => {
+            process_verify_stateless_action(program_id, accounts, args)
+        }
+        ShrincsAccountInstruction::SetPolicyMonotonic(args) => {
+            process_set_policy_monotonic(program_id, accounts, args)
+        }
+        ShrincsAccountInstruction::SetPolicyRecoveryRotation => {
+            process_set_policy_recovery_rotation(program_id, accounts)
+        }
+        ShrincsAccountInstruction::SetPolicyLeafBitmap => {
+            process_set_policy_leaf_bitmap(program_id, accounts)
+        }
+        ShrincsAccountInstruction::EnterRecoveryMode => process_enter_recovery_mode(program_id, accounts),
+        ShrincsAccountInstruction::RotateToFreshKey(args) => {
+            process_rotate_to_fresh_key(program_id, accounts, args)
+        }
+        ShrincsAccountInstruction::RotateFullKey(args) => process_rotate_full_key(program_id, accounts, args),
+        ShrincsAccountInstruction::IsValidSignature(args) => {
+            process_is_valid_signature(program_id, accounts, args)
+        }
+        ShrincsAccountInstruction::IsLeafUsed(args) => process_is_leaf_used(program_id, accounts, args),
+    }
 }
 
 #[cfg(test)]
@@ -2436,5 +2468,308 @@ mod tests {
         let return_data =
             query_is_leaf_used(&mut context, &program_id, &account_pda_key, &bitmap_key, 2).await;
         assert_eq!(return_data, vec![0], "leaf 2 (same bitmap word) must remain unused");
+    }
+
+    // --- end-to-end through the real router (Task 8) ------------------------
+
+    /// Full account lifecycle submitted as real [`ShrincsAccountInstruction`]-
+    /// encoded instructions through the real [`process_instruction`] router
+    /// (not the test-only `test_dispatch` stand-in above): init -> a stateful
+    /// action at leaf 1 -> switch to `RecoveryRotation` -> arm recovery mode
+    /// -> a full-key rotation authorized by the current key's stateless
+    /// recovery signature -> a stateful action under the NEW key at leaf 1 of
+    /// the new epoch succeeds, and an ordinary action still carrying the OLD
+    /// commitment/key fails.
+    #[tokio::test]
+    async fn end_to_end_flow_through_real_router() {
+        let program_id = Keypair::new();
+        let mut program_test = ProgramTest::new(
+            "shrincs_account_example",
+            program_id.pubkey(),
+            processor!(process_instruction),
+        );
+        program_test.set_compute_max_units(1_400_000);
+        let mut context = program_test.start_with_context().await;
+        let program_id = program_id.pubkey();
+        let owner = Keypair::new();
+        let salt = [200u8; HASH_LEN];
+
+        // --- init -------------------------------------------------------
+        let (mut keys, public_key) =
+            ShrincsSigner::keygen(b"shrincs-account-example e2e router", 1024).expect("keygen");
+        let commitment = fixed_hash_bytes(&public_key.public_key_commitment);
+        let (account_pda_key, _bump) = account_pda(&program_id, &owner.pubkey(), &salt);
+
+        let init_instruction = Instruction {
+            program_id,
+            accounts: vec![
+                AccountMeta::new(context.payer.pubkey(), true),
+                AccountMeta::new_readonly(owner.pubkey(), true),
+                AccountMeta::new(account_pda_key, false),
+                AccountMeta::new_readonly(solana_program::system_program::id(), false),
+            ],
+            data: borsh::to_vec(&ShrincsAccountInstruction::Init(InitArgs {
+                salt,
+                initial_commitment: commitment,
+            }))
+            .unwrap(),
+        };
+        let transaction = Transaction::new_signed_with_payer(
+            &[init_instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer, &owner],
+            context.last_blockhash,
+        );
+        context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap()
+            .result
+            .expect("init should succeed");
+
+        // --- stateful action at leaf 1 -----------------------------------
+        let domain_separator = messages::domain_separator(&program_id, &account_pda_key);
+        let action_type = messages::ACTION_STATEFUL;
+        let payload_hash = messages::action_payload(&action_type, b"e2e router stateful action");
+        let action_context = messages::action_context(
+            domain_separator,
+            [0u8; HASH_LEN],
+            [0u8; HASH_LEN],
+            action_type,
+            payload_hash,
+        );
+        let signature = ShrincsSigner::sign_stateful_action(&mut keys, &public_key, &action_context)
+            .expect("sign");
+        assert_eq!(signature.auth_path.len(), 1, "first stateful signature uses leaf 1");
+
+        let (bitmap_key, _) = crate::pda::bitmap_word_pda(&program_id, &account_pda_key, &[0u8; HASH_LEN], 0);
+        let stateful_instruction = Instruction {
+            program_id,
+            accounts: vec![
+                AccountMeta::new(account_pda_key, false),
+                AccountMeta::new(bitmap_key, false),
+                AccountMeta::new(context.payer.pubkey(), true),
+                AccountMeta::new_readonly(solana_program::system_program::id(), false),
+            ],
+            data: borsh::to_vec(&ShrincsAccountInstruction::VerifyStatefulAction(StatefulActionArgs {
+                public_key: public_key.clone().into(),
+                action_type,
+                payload_hash,
+                signature: signature.into(),
+            }))
+            .unwrap(),
+        };
+        context.last_blockhash = context.get_new_latest_blockhash().await.unwrap();
+        let transaction = Transaction::new_signed_with_payer(
+            &[stateful_instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer],
+            context.last_blockhash,
+        );
+        let result = context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap();
+        result.result.expect("stateful action at leaf 1 should succeed");
+        assert_eq!(result.metadata.unwrap().return_data.unwrap().data, vec![1]);
+
+        // --- switch to RecoveryRotation and arm recovery mode ------------
+        for instruction_kind in [
+            ShrincsAccountInstruction::SetPolicyRecoveryRotation,
+            ShrincsAccountInstruction::EnterRecoveryMode,
+        ] {
+            context.last_blockhash = context.get_new_latest_blockhash().await.unwrap();
+            let instruction = Instruction {
+                program_id,
+                accounts: vec![
+                    AccountMeta::new(account_pda_key, false),
+                    AccountMeta::new_readonly(owner.pubkey(), true),
+                ],
+                data: borsh::to_vec(&instruction_kind).unwrap(),
+            };
+            let transaction = Transaction::new_signed_with_payer(
+                &[instruction],
+                Some(&context.payer.pubkey()),
+                &[&context.payer, &owner],
+                context.last_blockhash,
+            );
+            context
+                .banks_client
+                .process_transaction_with_metadata(transaction)
+                .await
+                .unwrap()
+                .result
+                .expect("arming recovery mode should succeed");
+        }
+
+        let state_before_rotation = fetch_state(&mut context, &account_pda_key).await;
+        assert!(state_before_rotation.recovery_mode);
+
+        // --- full rotation authorized by the current key's stateless
+        // recovery signature ----------------------------------------------
+        let (next_keys, next_public_key) =
+            ShrincsSigner::keygen(b"shrincs-account-example e2e router next", 1024).expect("keygen");
+        let next_stateful_public_key = fixed_stateful_key_bytes(&next_public_key.stateful_public_key);
+        let next_pk_seed = fixed_hash_bytes(&next_public_key.pk_seed);
+        let next_hypertree_root = fixed_hash_bytes(&next_public_key.hypertree_root);
+        let next_commitment = CoreShrincsVerifier::new().public_key_commitment(
+            &next_stateful_public_key,
+            next_pk_seed,
+            next_hypertree_root,
+        );
+
+        let rotate_payload_hash = messages::rotate_full_payload(
+            &next_stateful_public_key,
+            &next_pk_seed,
+            &next_hypertree_root,
+            &next_commitment,
+        );
+        let rotate_action_context = messages::action_context(
+            domain_separator,
+            state_before_rotation.nonce,
+            state_before_rotation.key_version,
+            messages::ACTION_ROTATE_FULL,
+            rotate_payload_hash,
+        );
+        let rotate_message =
+            CoreShrincsVerifier::new().stateless_action_message_hash(commitment, &rotate_action_context);
+        let recovery_signature = ShrincsSigner::sign_stateless_raw(&keys, &rotate_message).expect("sign");
+        assert!(
+            CoreShrincsVerifier::new().verify_stateless(
+                commitment,
+                &public_key,
+                &rotate_action_context,
+                &recovery_signature
+            ),
+            "recovery signature must verify before submitting the rotation"
+        );
+
+        let rotate_instruction = Instruction {
+            program_id,
+            accounts: vec![AccountMeta::new(account_pda_key, false)],
+            data: borsh::to_vec(&ShrincsAccountInstruction::RotateFullKey(RotateFullKeyArgs {
+                current_public_key: public_key.clone().into(),
+                next_stateful_public_key,
+                next_pk_seed,
+                next_hypertree_root,
+                next_commitment,
+                recovery_signature: recovery_signature.into(),
+            }))
+            .unwrap(),
+        };
+        context.last_blockhash = context.get_new_latest_blockhash().await.unwrap();
+        let transaction = Transaction::new_signed_with_payer(
+            &[rotate_instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer],
+            context.last_blockhash,
+        );
+        context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap()
+            .result
+            .expect("full rotation with a valid recovery signature should succeed");
+
+        let state_after_rotation = fetch_state(&mut context, &account_pda_key).await;
+        assert_eq!(state_after_rotation.current_public_key_commitment, next_commitment);
+        let mut expected_key_version = state_before_rotation.key_version;
+        increment_u256_be(&mut expected_key_version);
+        assert_eq!(state_after_rotation.key_version, expected_key_version, "key_version advances by one");
+        assert_eq!(state_after_rotation.next_stateful_leaf_index, 1, "new epoch resets the leaf cursor");
+
+        // --- the new key's first action (leaf 1 of the new epoch) succeeds
+        let mut next_keys = next_keys;
+        let new_public_key = PublicKey {
+            stateful_public_key: next_stateful_public_key.to_vec(),
+            public_key_commitment: next_commitment.to_vec(),
+            pk_seed: next_pk_seed.to_vec(),
+            hypertree_root: next_hypertree_root.to_vec(),
+        };
+        let new_payload_hash = messages::action_payload(&action_type, b"post-rotation stateful action");
+        let new_action_context = messages::action_context(
+            domain_separator,
+            state_after_rotation.nonce,
+            state_after_rotation.key_version,
+            action_type,
+            new_payload_hash,
+        );
+        let new_signature =
+            ShrincsSigner::sign_stateful_action(&mut next_keys, &new_public_key, &new_action_context)
+                .expect("sign");
+        assert_eq!(new_signature.auth_path.len(), 1, "new epoch's first stateful signature uses leaf 1");
+
+        let (new_bitmap_key, _) =
+            crate::pda::bitmap_word_pda(&program_id, &account_pda_key, &state_after_rotation.key_version, 0);
+        let new_stateful_instruction = Instruction {
+            program_id,
+            accounts: vec![
+                AccountMeta::new(account_pda_key, false),
+                AccountMeta::new(new_bitmap_key, false),
+                AccountMeta::new(context.payer.pubkey(), true),
+                AccountMeta::new_readonly(solana_program::system_program::id(), false),
+            ],
+            data: borsh::to_vec(&ShrincsAccountInstruction::VerifyStatefulAction(StatefulActionArgs {
+                public_key: new_public_key.into(),
+                action_type,
+                payload_hash: new_payload_hash,
+                signature: new_signature.into(),
+            }))
+            .unwrap(),
+        };
+        context.last_blockhash = context.get_new_latest_blockhash().await.unwrap();
+        let transaction = Transaction::new_signed_with_payer(
+            &[new_stateful_instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer],
+            context.last_blockhash,
+        );
+        let result = context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap();
+        result.result.expect("the new key's first action should verify after rotation");
+        assert_eq!(result.metadata.unwrap().return_data.unwrap().data, vec![1]);
+
+        // --- an action still carrying the OLD commitment/key fails --------
+        let old_probe_payload_hash = messages::action_payload(&messages::ACTION_STATELESS, b"stale key probe");
+        let old_probe_context = messages::action_context(
+            domain_separator,
+            state_after_rotation.nonce,
+            state_after_rotation.key_version,
+            messages::ACTION_STATELESS,
+            old_probe_payload_hash,
+        );
+        let old_probe_message =
+            CoreShrincsVerifier::new().stateless_action_message_hash(commitment, &old_probe_context);
+        let old_probe_signature = ShrincsSigner::sign_stateless_raw(&keys, &old_probe_message).expect("sign");
+        let old_probe_instruction = Instruction {
+            program_id,
+            accounts: vec![AccountMeta::new(account_pda_key, false)],
+            data: borsh::to_vec(&ShrincsAccountInstruction::VerifyStatelessAction(StatelessActionArgs {
+                public_key: public_key.into(),
+                action_type: messages::ACTION_STATELESS,
+                payload_hash: old_probe_payload_hash,
+                signature: old_probe_signature.into(),
+            }))
+            .unwrap(),
+        };
+        context.last_blockhash = context.get_new_latest_blockhash().await.unwrap();
+        let transaction = Transaction::new_signed_with_payer(
+            &[old_probe_instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer],
+            context.last_blockhash,
+        );
+        let result = context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap();
+        assert!(result.result.is_err(), "an action carrying the OLD commitment/key must fail after rotation");
     }
 }
