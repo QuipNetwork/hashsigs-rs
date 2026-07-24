@@ -104,7 +104,7 @@ pub use key::{Key, PkSeed, PrfSeed, PublicKey, Root, Secret, SkSeed};
 /// `crate::shrincs::StatelessSignature`, a legitimate semantic alias — SHRINCS
 /// genuinely has a stateless signing path).
 pub mod signature;
-pub use signature::{encode_stateless_key, Signature};
+pub use signature::{encode_public_key, Signature};
 
 /// Verifier-interface facade (opaque key/signature bytes, tri-state verdict).
 pub mod verifier;

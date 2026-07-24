@@ -31,8 +31,8 @@
 //! (`PublicKey ‖ Signature`) still delegates to `encode_body`/`decode` directly,
 //! without the extra envelope-offset layer.
 //!
-//! `encode_stateless_key` is byte-identical to the historical
-//! `envelope::encode_stateless_key` (mirrors `SHRINCS.encodeStatelessKey`).
+//! `encode_public_key` is byte-identical to the historical
+//! `envelope::encode_public_key` (mirrors `SHRINCS.encodeStatelessKey`).
 
 use alloc::vec::Vec;
 
@@ -119,8 +119,8 @@ impl TryFrom<&[u8]> for Signature {
 /// Mirrors `SHRINCS.encodeStatelessKey`. Layout:
 /// `abi.encode(bytes32 pkSeed, bytes32 hypertreeRoot)`, which for two static
 /// words is exactly the 64-byte concatenation with no offsets. Byte-identical
-/// to the historical `envelope::encode_stateless_key`.
-pub fn encode_stateless_key(pk_seed: [u8; HASH_LEN], hypertree_root: [u8; HASH_LEN]) -> [u8; 64] {
+/// to the historical `envelope::encode_public_key`.
+pub fn encode_public_key(pk_seed: [u8; HASH_LEN], hypertree_root: [u8; HASH_LEN]) -> [u8; 64] {
     let mut out = [0u8; 64];
     out[..32].copy_from_slice(&pk_seed);
     out[32..].copy_from_slice(&hypertree_root);
@@ -276,7 +276,7 @@ mod tests {
     fn stateless_key_encodes_to_64_byte_layout() {
         let pk_seed = [0x12; HASH_LEN];
         let hypertree_root = [0x34; HASH_LEN];
-        let encoded = encode_stateless_key(pk_seed, hypertree_root);
+        let encoded = encode_public_key(pk_seed, hypertree_root);
         assert_eq!(encoded.len(), 64);
         assert_eq!(&encoded[..HASH_LEN], &pk_seed); // pkSeed occupies the first word
         assert_eq!(&encoded[HASH_LEN..], &hypertree_root); // hypertreeRoot the second

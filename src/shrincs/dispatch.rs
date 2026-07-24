@@ -218,7 +218,7 @@ pub fn prepare_stateless_delegation(
     let pk_seed: [u8; HASH_LEN] = public_key.pk_seed.try_into().ok()?;
     let hypertree_root: [u8; HASH_LEN] = public_key.hypertree_root.try_into().ok()?;
     Some((
-        sphincs_plus_c::encode_stateless_key(pk_seed, hypertree_root),
+        sphincs_plus_c::encode_public_key(pk_seed, hypertree_root),
         signature.to_bytes(),
     ))
 }
