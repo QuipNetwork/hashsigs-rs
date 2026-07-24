@@ -3862,6 +3862,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
+name = "shrincs-account-example"
+version = "0.0.1"
+dependencies = [
+ "borsh 1.5.7",
+ "hashsigs-rs",
+ "hashsigs-rs-solana",
+ "solana-program",
+ "solana-program-test",
+ "solana-sdk",
+ "solana-system-interface 2.0.0",
+ "tokio",
+]
+
+[[package]]
 name = "signal-hook"
 version = "0.3.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"

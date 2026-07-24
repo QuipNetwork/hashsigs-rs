@@ -22,7 +22,8 @@ crate-type = ["rlib"]
 
 [workspace]
 members = [
-    "solana"
+    "solana",
+    "solana/examples/shrincs-account"
 ]
 resolver = "2"
 
