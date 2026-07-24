@@ -117,36 +117,6 @@ pub struct StatelessSignature {
     pub hypertree: Vec<HypertreeLayerSignature>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StatefulRotationTarget {
-    /// Encoded replacement stateful public key.
-    pub stateful_public_key: Vec<u8>,
-    /// Commitment to the replacement installed public-key bundle.
-    pub public_key_commitment: Vec<u8>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RotationTarget {
-    /// Replacement encoded stateful public key.
-    pub stateful_public_key: Vec<u8>,
-    /// Commitment to the replacement installed public-key bundle.
-    pub public_key_commitment: Vec<u8>,
-    /// Replacement global stateless public seed.
-    pub pk_seed: Vec<u8>,
-    /// Replacement hypertree root.
-    pub hypertree_root: Vec<u8>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RotationContext {
-    /// Caller-controlled domain separation, normally binding account/program identity.
-    pub domain_separator: [u8; HASH_LEN],
-    /// Replay-protection nonce encoded as Solidity-style uint256 bytes.
-    pub nonce: [u8; HASH_LEN],
-    /// Current key version encoded as Solidity-style uint256 bytes.
-    pub key_version: [u8; HASH_LEN],
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ActionContext {
     /// Caller-controlled domain separation, normally binding account/program identity.

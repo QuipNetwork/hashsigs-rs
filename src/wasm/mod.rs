@@ -23,18 +23,12 @@
 //! functions (`sphincsPlusC{Keygen,Sign,Verify}`,
 //! `shrincs{Keygen,Sign,SignStateless,Verify,VerifyStateless,
 //! ImportSigningKey,Reset,ComputePublicKeyCommitment,
-//! RecoverPublicKeyCommitment}`) plus `WasmShrincsAccount`, the stateful
-//! account wrapper. The account exposes canonical message-hash methods
-//! (`statefulActionMessageHash`, `statelessActionMessageHash`,
-//! `statefulRotationMessageHash`, `fullRotationMessageHash`) that build the
-//! exact message a caller must sign from the account's own state, so callers
-//! never assemble that context by hand.
+//! RecoverPublicKeyCommitment}`).
 
 #[cfg(any(test, feature = "wasm-bindings"))]
 use crate::verifier::VerifierInterface as _;
 use crate::shrincs::{
-    ActionContext as CoreActionContext, Keys, PublicKey, RotationContext as CoreRotationContext,
-    ShrincsSigner, ShrincsVerifier, HASH_LEN, STATEFUL_PUBLIC_KEY_BYTES,
+    Keys, PublicKey, ShrincsSigner, ShrincsVerifier, HASH_LEN, STATEFUL_PUBLIC_KEY_BYTES,
 };
 // The Uint8Array-native noble-style free functions (sphincsPlusC*/shrincs
 // keygen/sign/verify) work directly with the independent SPHINCS+C layer and
@@ -53,28 +47,8 @@ use wasm_bindgen::prelude::*;
 // published: additions are safe, renames/removals are breaking.
 #[cfg(any(test, feature = "wasm-bindings"))]
 const ERR_BAD_LENGTH: &str = "ERR_BAD_LENGTH";
-#[cfg(feature = "wasm-bindings")]
-const ERR_ONLY_OWNER: &str = "ERR_ONLY_OWNER";
-#[cfg(feature = "wasm-bindings")]
-const ERR_RECOVERY_POLICY_REQUIRED: &str = "ERR_RECOVERY_POLICY_REQUIRED";
-#[cfg(feature = "wasm-bindings")]
-const ERR_STATEFUL_INDEX_ROLLBACK: &str = "ERR_STATEFUL_INDEX_ROLLBACK";
-#[cfg(feature = "wasm-bindings")]
-const ERR_STATEFUL_POLICY_FROZEN: &str = "ERR_STATEFUL_POLICY_FROZEN";
 #[cfg(any(test, feature = "wasm-bindings"))]
 const ERR_STATEFUL_LEAVES_EXHAUSTED: &str = "ERR_STATEFUL_LEAVES_EXHAUSTED";
-#[cfg(feature = "wasm-bindings")]
-const ERR_INVALID_SIGNATURE: &str = "ERR_INVALID_SIGNATURE";
-#[cfg(feature = "wasm-bindings")]
-const ERR_BUDGET_EXHAUSTED: &str = "ERR_BUDGET_EXHAUSTED";
-#[cfg(feature = "wasm-bindings")]
-const ERR_RECOVERY_NOT_ARMED: &str = "ERR_RECOVERY_NOT_ARMED";
-#[cfg(feature = "wasm-bindings")]
-const ERR_STATEFUL_PATH_DISABLED: &str = "ERR_STATEFUL_PATH_DISABLED";
-#[cfg(feature = "wasm-bindings")]
-const ERR_STATEFUL_LEAF_REJECTED: &str = "ERR_STATEFUL_LEAF_REJECTED";
-#[cfg(feature = "wasm-bindings")]
-const ERR_MALFORMED_SIGNATURE: &str = "ERR_MALFORMED_SIGNATURE";
 #[cfg(any(test, feature = "wasm-bindings"))]
 const ERR_ENVELOPE_MALFORMED: &str = "ERR_ENVELOPE_MALFORMED";
 #[cfg(any(test, feature = "wasm-bindings"))]
@@ -85,8 +59,6 @@ const ERR_KEYGEN_FAILED: &str = "ERR_KEYGEN_FAILED";
 const ERR_INVALID_INPUT: &str = "ERR_INVALID_INPUT";
 #[cfg(any(test, feature = "wasm-bindings"))]
 const ERR_IMPORT_INVALID: &str = "ERR_IMPORT_INVALID";
-#[cfg(any(test, feature = "wasm-bindings"))]
-const MAX_RAW_INPUT_BYTES: usize = 1 << 20;
 #[cfg(any(test, feature = "wasm-bindings"))]
 const MAX_STATEFUL_SIGNATURES_LIMIT: usize = 4096;
 
@@ -104,387 +76,11 @@ struct WasmErr {
 #[wasm_bindgen(typescript_custom_section)]
 const TS_ERROR_CODES: &str = r#"
 export type ShrincsErrorCode =
-  | "ERR_BAD_LENGTH" | "ERR_ONLY_OWNER"
-  | "ERR_RECOVERY_POLICY_REQUIRED" | "ERR_STATEFUL_INDEX_ROLLBACK"
-  | "ERR_STATEFUL_POLICY_FROZEN" | "ERR_STATEFUL_LEAVES_EXHAUSTED"
+  | "ERR_BAD_LENGTH" | "ERR_STATEFUL_LEAVES_EXHAUSTED"
   | "ERR_SIGNING_FAILED" | "ERR_KEYGEN_FAILED" | "ERR_INVALID_INPUT"
   | "ERR_IMPORT_INVALID"
-  | "ERR_INVALID_SIGNATURE" | "ERR_BUDGET_EXHAUSTED"
-  | "ERR_RECOVERY_NOT_ARMED" | "ERR_STATEFUL_PATH_DISABLED"
-  | "ERR_STATEFUL_LEAF_REJECTED" | "ERR_MALFORMED_SIGNATURE"
   | "ERR_ENVELOPE_MALFORMED";
 "#;
-
-#[cfg(feature = "wasm-bindings")]
-/// Reference SHRINCS account verifier mirroring the on-chain state machine
-/// (nonce, key epochs, stateful policy, recovery mode). Malformed input THROWS
-/// an `Error` with a `ShrincsErrorCode` on `error.code` (policy violations
-/// throw e.g. `ERR_ONLY_OWNER`); cryptographic verification failures return
-/// `false`. Call `free()` when done — using a handle after `free()` throws.
-#[wasm_bindgen]
-pub struct WasmShrincsAccount {
-    inner: crate::account::ShrincsAccountVerifierExample,
-}
-
-#[cfg(feature = "wasm-bindings")]
-#[wasm_bindgen]
-impl WasmShrincsAccount {
-    /// Create an account bound to an owner, chain, and contract address, with
-    /// the initial public-key commitment installed.
-    ///
-    /// * `owner` - 32 bytes (bytes32).
-    /// * `chain_id` - 32 bytes (bytes32).
-    /// * `contract_address` - **20 bytes** (EVM address — NOT bytes32).
-    /// * `initial_public_key_commitment` - 32 bytes (bytes32).
-    #[wasm_bindgen(constructor)]
-    pub fn new(
-        owner: &[u8],
-        chain_id: &[u8],
-        contract_address: &[u8],
-        initial_public_key_commitment: &[u8],
-    ) -> Result<WasmShrincsAccount, JsValue> {
-        let owner = bytes_word32(owner).map_err(js_error)?;
-        let chain_id = bytes_word32(chain_id).map_err(js_error)?;
-        let contract_address = bytes_fixed::<20>(contract_address).map_err(js_error)?;
-        let initial_public_key_commitment =
-            bytes_word32(initial_public_key_commitment).map_err(js_error)?;
-        Ok(Self {
-            inner: crate::account::ShrincsAccountVerifierExample::new(
-                owner,
-                chain_id,
-                contract_address,
-                initial_public_key_commitment,
-            ),
-        })
-    }
-
-    /// Read-only snapshot of the account state (all fields public).
-    #[wasm_bindgen(js_name = snapshot, unchecked_return_type = "ShrincsAccountSnapshot")]
-    pub fn snapshot(&self) -> Result<JsValue, JsValue> {
-        js_value_from_serde(&account_snapshot_dto(&self.inner))
-    }
-
-    /// The message a `verifyStatefulAction` signature must cover for the
-    /// given `actionType`/`payloadHash`, built from the account's own domain
-    /// separator, nonce, and key version — the exact value
-    /// `verifyStatefulAction` recomputes internally to check the signature.
-    /// Sign the returned bytes with `shrincs.sign()` and pass the result to
-    /// `verifyStatefulAction`.
-    ///
-    /// * `action_type` - 32 bytes (bytes32).
-    /// * `payload_hash` - 32 bytes (bytes32).
-    #[wasm_bindgen(js_name = statefulActionMessageHash)]
-    pub fn stateful_action_message_hash(
-        &self,
-        action_type: &[u8],
-        payload_hash: &[u8],
-    ) -> Result<alloc::vec::Vec<u8>, JsValue> {
-        let action_type = bytes_word32(action_type).map_err(js_error)?;
-        let payload_hash = bytes_word32(payload_hash).map_err(js_error)?;
-        let context = CoreActionContext {
-            domain_separator: self.inner.domainSeparator(),
-            nonce: self.inner.nonce(),
-            key_version: self.inner.keyVersion(),
-            action_type,
-            payload_hash,
-        };
-        Ok(ShrincsVerifier::new()
-            .stateful_action_message_hash(self.inner.currentShrincsPublicKey(), &context)
-            .to_vec())
-    }
-
-    /// The message a `verifyStatelessAction` signature must cover for the
-    /// given `actionType`/`payloadHash`, built from the account's own state.
-    /// Sign the returned bytes with `shrincs.signStateless()` and pass the
-    /// result to `verifyStatelessAction`.
-    ///
-    /// * `action_type` - 32 bytes (bytes32).
-    /// * `payload_hash` - 32 bytes (bytes32).
-    #[wasm_bindgen(js_name = statelessActionMessageHash)]
-    pub fn stateless_action_message_hash(
-        &self,
-        action_type: &[u8],
-        payload_hash: &[u8],
-    ) -> Result<alloc::vec::Vec<u8>, JsValue> {
-        let action_type = bytes_word32(action_type).map_err(js_error)?;
-        let payload_hash = bytes_word32(payload_hash).map_err(js_error)?;
-        let context = CoreActionContext {
-            domain_separator: self.inner.domainSeparator(),
-            nonce: self.inner.nonce(),
-            key_version: self.inner.keyVersion(),
-            action_type,
-            payload_hash,
-        };
-        Ok(ShrincsVerifier::new()
-            .stateless_action_message_hash(self.inner.currentShrincsPublicKey(), &context)
-            .to_vec())
-    }
-
-    /// The message a `rotateToFreshKey` recovery signature must cover, built
-    /// from the account's own state and the replacement keypair's public
-    /// key. Sign the returned bytes with `shrincs.signStateless()` and pass
-    /// the result to `rotateToFreshKey` alongside the same `next_public_key`.
-    ///
-    /// * `next_public_key` - the replacement keypair's 164-byte flat
-    ///   `publicKey` (as returned by `shrincs.keygen()`); only its leading
-    ///   statefulPublicKey(68) and commitment(32) are used.
-    #[wasm_bindgen(js_name = statefulRotationMessageHash)]
-    pub fn stateful_rotation_message_hash(
-        &self,
-        next_public_key: &[u8],
-    ) -> Result<alloc::vec::Vec<u8>, JsValue> {
-        let next_key = stateful_rotation_target_from_public_key(next_public_key).map_err(js_error)?;
-        let context = CoreRotationContext {
-            domain_separator: self.inner.domainSeparator(),
-            nonce: self.inner.nonce(),
-            key_version: self.inner.keyVersion(),
-        };
-        let current_public_key = current_public_key_stub(&self.inner);
-        Ok(ShrincsVerifier::new()
-            .stateful_rotation_message_hash(
-                self.inner.currentShrincsPublicKey(),
-                &current_public_key,
-                &context,
-                &next_key,
-            )
-            .to_vec())
-    }
-
-    /// The message a `rotateFullKey` recovery signature must cover, built
-    /// from the account's own state and the replacement keypair's public
-    /// key. Sign the returned bytes with `shrincs.signStateless()` and pass
-    /// the result to `rotateFullKey` alongside the same `next_public_key`.
-    ///
-    /// * `next_public_key` - the replacement keypair's 164-byte flat
-    ///   `publicKey` (as returned by `shrincs.keygen()`).
-    #[wasm_bindgen(js_name = fullRotationMessageHash)]
-    pub fn full_rotation_message_hash(
-        &self,
-        next_public_key: &[u8],
-    ) -> Result<alloc::vec::Vec<u8>, JsValue> {
-        let next_key = rotation_target_from_public_key(next_public_key).map_err(js_error)?;
-        let context = CoreRotationContext {
-            domain_separator: self.inner.domainSeparator(),
-            nonce: self.inner.nonce(),
-            key_version: self.inner.keyVersion(),
-        };
-        let current_public_key = current_public_key_stub(&self.inner);
-        Ok(ShrincsVerifier::new()
-            .full_rotation_message_hash(
-                self.inner.currentShrincsPublicKey(),
-                &current_public_key,
-                &context,
-                &next_key,
-            )
-            .to_vec())
-    }
-
-    /// Verify a stateful action signature against the account's canonical
-    /// action hash and enforce the stateful policy. Resolves on success and
-    /// advances account state; THROWS a typed `ShrincsErrorCode` on malformed
-    /// input OR on rejection — e.g. `ERR_INVALID_SIGNATURE` for a bad
-    /// signature, `ERR_STATEFUL_LEAF_REJECTED` / `ERR_STATEFUL_PATH_DISABLED`
-    /// for a policy-blocked leaf.
-    ///
-    /// * `public_key` - the signer's 164-byte flat `publicKey`; the account
-    ///   binds it to its stored commitment.
-    /// * `action_type` - 32 bytes (bytes32).
-    /// * `payload_hash` - 32 bytes (bytes32).
-    /// * `signature` - the signature `shrincs.sign()` returns, over
-    ///   `statefulActionMessageHash(actionType, payloadHash)`.
-    #[wasm_bindgen(js_name = verifyStatefulAction)]
-    pub fn verify_stateful_action(
-        &mut self,
-        public_key: &[u8],
-        action_type: &[u8],
-        payload_hash: &[u8],
-        signature: &[u8],
-    ) -> Result<(), JsValue> {
-        // Take the signer's publicKey (bound to the account's commitment by the
-        // core verifier) and the plain signature `shrincs.sign()` returns.
-        let public_key = public_key_from_flat(public_key).map_err(js_error)?;
-        let signature = crate::envelope::decode_stateful_signature_envelope(signature)
-            .ok_or_else(malformed_envelope)?;
-        let action_type = bytes_word32(action_type).map_err(js_error)?;
-        let payload_hash = bytes_word32(payload_hash).map_err(js_error)?;
-        self.inner
-            .verifyStatefulAction(&public_key, action_type, payload_hash, &signature)
-            .map_err(account_error_to_js)
-    }
-
-    /// Verify a stateless action signature against the account's canonical
-    /// action hash and the per-key stateless budget. Resolves on success and
-    /// advances account state; THROWS a typed `ShrincsErrorCode` on malformed
-    /// input OR on rejection — e.g. `ERR_INVALID_SIGNATURE`,
-    /// `ERR_BUDGET_EXHAUSTED`, `ERR_RECOVERY_NOT_ARMED`.
-    ///
-    /// * `action_type` - 32 bytes (bytes32).
-    /// * `payload_hash` - 32 bytes (bytes32).
-    /// * `signature` - the signature `shrincs.signStateless()` returns, over
-    ///   `statelessActionMessageHash(actionType, payloadHash)`.
-    #[wasm_bindgen(js_name = verifyStatelessAction)]
-    pub fn verify_stateless_action(
-        &mut self,
-        public_key: &[u8],
-        action_type: &[u8],
-        payload_hash: &[u8],
-        signature: &[u8],
-    ) -> Result<(), JsValue> {
-        // A stateless action signature is a SPHINCS+C signature. Take the
-        // signer's 164-byte publicKey (bound to the account's commitment by the
-        // core verifier) and the plain signature `shrincs.signStateless()`
-        // returns; verification bottoms out in the SPHINCS+C verify.
-        let public_key = public_key_from_flat(public_key).map_err(js_error)?;
-        let signature = crate::envelope::decode_stateless_signature_envelope(signature)
-            .ok_or_else(malformed_envelope)?;
-        let action_type = bytes_word32(action_type).map_err(js_error)?;
-        let payload_hash = bytes_word32(payload_hash).map_err(js_error)?;
-        self.inner
-            .verifyStatelessAction(&public_key, action_type, payload_hash, &signature)
-            .map_err(account_error_to_js)
-    }
-
-    /// Rotate to a fresh stateful key (stateless part retained), authorized by
-    /// a stateless recovery signature. Resolves on success; THROWS a typed
-    /// `ShrincsErrorCode` on malformed input OR on rejection — e.g.
-    /// `ERR_INVALID_SIGNATURE`, `ERR_RECOVERY_POLICY_REQUIRED`,
-    /// `ERR_RECOVERY_NOT_ARMED`, `ERR_BUDGET_EXHAUSTED`.
-    ///
-    /// * `recovery_signature` - the signature `shrincs.signStateless()`
-    ///   returns, over `statefulRotationMessageHash(next_public_key)`; it
-    ///   carries the current public key that authorizes the rotation.
-    /// * `next_public_key` - the replacement keypair's 164-byte flat
-    ///   `publicKey`; the stateful rotation target is its leading
-    ///   statefulPublicKey(68) and commitment(32).
-    #[wasm_bindgen(js_name = rotateToFreshKey)]
-    pub fn rotate_to_fresh_key(
-        &mut self,
-        current_public_key: &[u8],
-        recovery_signature: &[u8],
-        next_public_key: &[u8],
-    ) -> Result<(), JsValue> {
-        let current_public_key = public_key_from_flat(current_public_key).map_err(js_error)?;
-        let recovery_signature =
-            crate::envelope::decode_stateless_signature_envelope(recovery_signature)
-                .ok_or_else(malformed_envelope)?;
-        let next_key = stateful_rotation_target_from_public_key(next_public_key).map_err(js_error)?;
-        self.inner
-            .rotateToFreshKey(&current_public_key, &recovery_signature, &next_key)
-            .map_err(account_error_to_js)
-    }
-
-    /// Rotate the full hybrid key bundle, authorized by a stateless recovery
-    /// signature. Resolves on success; THROWS a typed `ShrincsErrorCode` on
-    /// malformed input OR on rejection — e.g. `ERR_INVALID_SIGNATURE`,
-    /// `ERR_RECOVERY_POLICY_REQUIRED`, `ERR_RECOVERY_NOT_ARMED`,
-    /// `ERR_BUDGET_EXHAUSTED`.
-    ///
-    /// * `recovery_signature` - the signature `shrincs.signStateless()`
-    ///   returns, over `fullRotationMessageHash(next_public_key)`; it carries
-    ///   the current public key that authorizes the rotation.
-    /// * `next_public_key` - the replacement keypair's 164-byte flat
-    ///   `publicKey`, which is exactly a RotationTarget
-    ///   (statefulPublicKey(68)‖commitment(32)‖pkSeed(32)‖hypertreeRoot(32)).
-    #[wasm_bindgen(js_name = rotateFullKey)]
-    pub fn rotate_full_key(
-        &mut self,
-        current_public_key: &[u8],
-        recovery_signature: &[u8],
-        next_public_key: &[u8],
-    ) -> Result<(), JsValue> {
-        let current_public_key = public_key_from_flat(current_public_key).map_err(js_error)?;
-        let recovery_signature =
-            crate::envelope::decode_stateless_signature_envelope(recovery_signature)
-                .ok_or_else(malformed_envelope)?;
-        let next_key = rotation_target_from_public_key(next_public_key).map_err(js_error)?;
-        self.inner
-            .rotateFullKey(&current_public_key, &recovery_signature, &next_key)
-            .map_err(account_error_to_js)
-    }
-
-    /// Owner-only: adopt the monotonic-index stateful policy starting at
-    /// `initialLeafIndex`. Throws `ERR_ONLY_OWNER` for any other caller and
-    /// `ERR_STATEFUL_POLICY_FROZEN` after the first stateful use in an epoch.
-    ///
-    /// * `caller` - 32 bytes (bytes32).
-    #[wasm_bindgen(js_name = setStatefulPolicyMonotonicIndex)]
-    pub fn set_stateful_policy_monotonic_index(
-        &mut self,
-        caller: &[u8],
-        initial_leaf_index: u32,
-    ) -> Result<(), JsValue> {
-        let caller = bytes_word32(caller).map_err(js_error)?;
-        self.inner
-            .setStatefulPolicyMonotonicIndex(caller, initial_leaf_index)
-            .map_err(account_error_to_js)
-    }
-
-    /// Owner-only: adopt the recovery-rotation stateful policy. Throws
-    /// `ERR_ONLY_OWNER` / `ERR_STATEFUL_POLICY_FROZEN` like the other setters.
-    ///
-    /// * `caller` - 32 bytes (bytes32).
-    #[wasm_bindgen(js_name = setStatefulPolicyRecoveryRotation)]
-    pub fn set_stateful_policy_recovery_rotation(
-        &mut self,
-        caller: &[u8],
-    ) -> Result<(), JsValue> {
-        let caller = bytes_word32(caller).map_err(js_error)?;
-        self.inner
-            .setStatefulPolicyRecoveryRotation(caller)
-            .map_err(account_error_to_js)
-    }
-
-    /// Owner-only: adopt the leaf-bitmap stateful policy (caller-selected
-    /// leaves, tracked via an on-chain used-leaf bitmap). Throws
-    /// `ERR_ONLY_OWNER` / `ERR_STATEFUL_POLICY_FROZEN` like the other
-    /// setters.
-    ///
-    /// * `caller` - 32 bytes (bytes32).
-    #[wasm_bindgen(js_name = setStatefulPolicyLeafBitmap)]
-    pub fn set_stateful_policy_leaf_bitmap(&mut self, caller: &[u8]) -> Result<(), JsValue> {
-        let caller = bytes_word32(caller).map_err(js_error)?;
-        self.inner
-            .setStatefulPolicyLeafBitmap(caller)
-            .map_err(account_error_to_js)
-    }
-
-    /// Owner-only: enter recovery mode. Requires an active recovery-capable
-    /// policy — throws `ERR_RECOVERY_POLICY_REQUIRED` otherwise.
-    ///
-    /// * `caller` - 32 bytes (bytes32).
-    #[wasm_bindgen(js_name = enterRecoveryMode)]
-    pub fn enter_recovery_mode(&mut self, caller: &[u8]) -> Result<(), JsValue> {
-        let caller = bytes_word32(caller).map_err(js_error)?;
-        self.inner
-            .enterRecoveryMode(caller)
-            .map_err(account_error_to_js)
-    }
-
-    /// ERC-1271 compatibility view: verify a mode-prefixed action signature
-    /// against the account's current state WITHOUT mutating it (no leaf
-    /// commit, no nonce advance, no stateless-budget consumption). Resolves
-    /// on success; THROWS a typed `ShrincsErrorCode` on rejection —
-    /// `ERR_MALFORMED_SIGNATURE` for an empty/unrecognized/malformed
-    /// signature bytes, `ERR_INVALID_SIGNATURE` for a well-formed but invalid
-    /// or mismatched-hash signature, plus the same policy codes as
-    /// `verifyStatefulAction` / `verifyStatelessAction`.
-    ///
-    /// * `hash` - 32 bytes (bytes32); the hash the signature must authorize.
-    /// * `signature` - the mode-prefixed ERC-1271 signature bytes, arbitrary
-    ///   length.
-    #[wasm_bindgen(js_name = isValidSignature)]
-    pub fn is_valid_signature(
-        &self,
-        hash: &[u8],
-        signature: &[u8],
-    ) -> Result<(), JsValue> {
-        require_max_len(signature, MAX_RAW_INPUT_BYTES).map_err(js_error)?;
-        let hash = bytes_word32(hash).map_err(js_error)?;
-        self.inner
-            .isValidSignature(hash, signature)
-            .map_err(account_error_to_js)
-    }
-}
 
 /// The version of this wasm build, frozen in at compile time from the crate
 /// version (`Cargo.toml`). The npm `package.json` version is synced to the
@@ -529,19 +125,6 @@ fn bytes_fixed<const N: usize>(input: &[u8]) -> Result<[u8; N], WasmErr> {
     let mut out = [0u8; N];
     out.copy_from_slice(input);
     Ok(out)
-}
-
-/// Byte version of `parse_hex_bytes_with_max`'s length ceiling; the input is
-/// already raw bytes, so there is nothing to decode.
-#[cfg(any(test, feature = "wasm-bindings"))]
-fn require_max_len(input: &[u8], max_bytes: usize) -> Result<(), WasmErr> {
-    if input.len() > max_bytes {
-        return Err(WasmErr {
-            code: ERR_BAD_LENGTH,
-            message: format!("input exceeds maximum of {max_bytes} bytes"),
-        });
-    }
-    Ok(())
 }
 
 /// The 32-byte message every noble-style sign/verify free function operates
@@ -711,88 +294,6 @@ fn encode_public_key_flat(public_key: &PublicKey) -> alloc::vec::Vec<u8> {
     out
 }
 
-
-/// Build the `malformed envelope` error the account envelope-decode paths
-/// raise when ABI framing cannot be decoded.
-#[cfg(feature = "wasm-bindings")]
-fn malformed_envelope() -> JsValue {
-    js_error(WasmErr {
-        code: ERR_ENVELOPE_MALFORMED,
-        message: "signature envelope could not be decoded".into(),
-    })
-}
-
-/// A `PublicKey` carrying only the account's installed `publicKeyCommitment`
-/// (the other fields are empty). The rotation message-hash formulas only
-/// read `.public_key_commitment` off their `current_public_key` argument
-/// (see `shrincs::messages`), so this stub is exactly as much "current
-/// public key" as those formulas need — the account itself only stores the
-/// commitment, not the full key.
-#[cfg(feature = "wasm-bindings")]
-fn current_public_key_stub(account: &crate::account::ShrincsAccountVerifierExample) -> PublicKey {
-    PublicKey {
-        stateful_public_key: alloc::vec::Vec::new(),
-        public_key_commitment: account.currentShrincsPublicKey().to_vec(),
-        pk_seed: alloc::vec::Vec::new(),
-        hypertree_root: alloc::vec::Vec::new(),
-    }
-}
-
-/// Slice a 164-byte flat publicKey into a `StatefulRotationTarget`
-/// (statefulPublicKey(68) then commitment(32); the trailing stateless seed and
-/// root are unused for a stateful-only rotation). Mirrors `encode_public_key_flat`.
-#[cfg(feature = "wasm-bindings")]
-fn stateful_rotation_target_from_public_key(
-    bytes: &[u8],
-) -> Result<crate::types::StatefulRotationTarget, WasmErr> {
-    require_public_key_len(bytes)?;
-    Ok(crate::types::StatefulRotationTarget {
-        stateful_public_key: bytes[0..STATEFUL_PUBLIC_KEY_BYTES].to_vec(),
-        public_key_commitment: bytes[STATEFUL_PUBLIC_KEY_BYTES..STATEFUL_PUBLIC_KEY_BYTES + 32]
-            .to_vec(),
-    })
-}
-
-/// Slice a 164-byte flat publicKey into a full `RotationTarget`
-/// (statefulPublicKey(68)‖commitment(32)‖pkSeed(32)‖hypertreeRoot(32)) — the
-/// exact `encode_public_key_flat` layout.
-/// Decode a 164-byte flat publicKey into the core `PublicKey`
-/// (statefulPublicKey(68)‖commitment(32)‖pkSeed(32)‖hypertreeRoot(32)).
-#[cfg(feature = "wasm-bindings")]
-fn public_key_from_flat(bytes: &[u8]) -> Result<PublicKey, WasmErr> {
-    require_public_key_len(bytes)?;
-    let c = STATEFUL_PUBLIC_KEY_BYTES;
-    Ok(PublicKey {
-        stateful_public_key: bytes[0..c].to_vec(),
-        public_key_commitment: bytes[c..c + 32].to_vec(),
-        pk_seed: bytes[c + 32..c + 64].to_vec(),
-        hypertree_root: bytes[c + 64..c + 96].to_vec(),
-    })
-}
-
-#[cfg(feature = "wasm-bindings")]
-fn rotation_target_from_public_key(bytes: &[u8]) -> Result<crate::types::RotationTarget, WasmErr> {
-    require_public_key_len(bytes)?;
-    let c = STATEFUL_PUBLIC_KEY_BYTES;
-    Ok(crate::types::RotationTarget {
-        stateful_public_key: bytes[0..c].to_vec(),
-        public_key_commitment: bytes[c..c + 32].to_vec(),
-        pk_seed: bytes[c + 32..c + 64].to_vec(),
-        hypertree_root: bytes[c + 64..c + 96].to_vec(),
-    })
-}
-
-#[cfg(feature = "wasm-bindings")]
-fn require_public_key_len(bytes: &[u8]) -> Result<(), WasmErr> {
-    let want = STATEFUL_PUBLIC_KEY_BYTES + 96;
-    if bytes.len() != want {
-        return Err(WasmErr {
-            code: ERR_BAD_LENGTH,
-            message: format!("publicKey must be {want} bytes, got {}", bytes.len()),
-        });
-    }
-    Ok(())
-}
 
 /// A generated or imported SHRINCS keypair: `secretKey` is the 264-byte flat
 /// serialization above (mutated IN PLACE by `shrincsSign`); `publicKey` is
@@ -1061,72 +562,14 @@ pub fn shrincs_recover_public_key_commitment(
         .ok_or_else(malformed_envelope)
 }
 
-#[cfg(any(test, feature = "wasm-bindings"))]
-#[derive(serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "wasm-bindings", derive(tsify::Tsify))]
-#[serde(rename_all = "camelCase")]
-pub struct ShrincsAccountSnapshot {
-    /// Commitment of the currently installed public-key bundle.
-    current_shrincs_public_key: String,
-    /// Account owner identity (32-byte hex).
-    owner: String,
-    /// Chain id bound into the account's domain separator.
-    chain_id: String,
-    /// Contract address bound into the account's domain separator (20-byte hex).
-    contract_address: String,
-    /// Domain separator mixed into every canonical message hash.
-    domain_separator: String,
-    /// Anti-replay nonce; advances after each successful state-changing verify.
-    nonce: String,
-    /// Installed-key epoch, incremented whenever a fresh key bundle is installed.
-    key_version: String,
-    /// Number of stateless signatures consumed under the current installed key.
-    #[cfg_attr(feature = "wasm-bindings", tsify(type = "bigint"))]
-    stateless_signatures_used: u64,
-    /// Active stateful policy: `"monotonic-index"`, `"recovery-rotation"`, or `"leaf-bitmap"`.
-    stateful_policy: String,
-    /// Next stateful leaf index the account will accept (monotonic-index policy).
-    next_stateful_leaf_index: u32,
-    /// Whether the account is in recovery mode.
-    recovery_mode: bool,
-}
-
-#[cfg(any(test, feature = "wasm-bindings"))]
-fn stateful_policy_name(policy: crate::account::StatefulPolicy) -> String {
-    match policy {
-        crate::account::StatefulPolicy::MonotonicIndex => "monotonic-index".to_string(),
-        crate::account::StatefulPolicy::RecoveryRotation => "recovery-rotation".to_string(),
-        crate::account::StatefulPolicy::LeafBitmap => "leaf-bitmap".to_string(),
-    }
-}
-
-#[cfg(any(test, feature = "wasm-bindings"))]
-fn account_snapshot_dto(
-    account: &crate::account::ShrincsAccountVerifierExample,
-) -> ShrincsAccountSnapshot {
-    ShrincsAccountSnapshot {
-        current_shrincs_public_key: hex_string(&account.currentShrincsPublicKey()),
-        owner: hex_string(&account.owner()),
-        chain_id: hex_string(&account.chainId()),
-        contract_address: hex_string(&account.contractAddress()),
-        domain_separator: hex_string(&account.domainSeparator()),
-        nonce: hex_string(&account.nonce()),
-        key_version: hex_string(&account.keyVersion()),
-        stateless_signatures_used: account.statelessSignaturesUsed(),
-        stateful_policy: stateful_policy_name(account.statefulPolicy()),
-        next_stateful_leaf_index: account.nextStatefulLeafIndex(),
-        recovery_mode: account.recoveryMode(),
-    }
-}
-
-#[cfg(any(test, feature = "wasm-bindings"))]
-fn hex_string(bytes: &[u8]) -> String {
-    let mut out = String::from("0x");
-    for byte in bytes {
-        use core::fmt::Write;
-        let _ = write!(out, "{byte:02x}");
-    }
-    out
+/// Build the `malformed envelope` error `shrincsRecoverPublicKeyCommitment`
+/// raises when ABI framing cannot be decoded.
+#[cfg(feature = "wasm-bindings")]
+fn malformed_envelope() -> JsValue {
+    js_error(WasmErr {
+        code: ERR_ENVELOPE_MALFORMED,
+        message: "signature envelope could not be decoded".into(),
+    })
 }
 
 #[cfg(feature = "wasm-bindings")]
@@ -1139,83 +582,6 @@ fn js_error(err: WasmErr) -> JsValue {
     }
     e.into()
 }
-
-/// Build a serde-boundary error handler tagged with a STATIC argument label
-/// (e.g. `"publicKey"`). The label identifies which argument failed to
-/// deserialize without ever echoing the caller-supplied value (inputs include
-/// secret seeds). Returns a closure so call sites read
-/// `.map_err(js_error_from_serde("publicKey"))`.
-#[cfg(feature = "wasm-bindings")]
-fn js_error_from_serde(label: &'static str) -> impl Fn(serde_wasm_bindgen::Error) -> JsValue {
-    move |_error| {
-        js_error(WasmErr {
-            code: ERR_INVALID_INPUT,
-            message: format!("invalid {label}: argument shape or field encoding"),
-        })
-    }
-}
-
-#[cfg(feature = "wasm-bindings")]
-fn account_error_to_js(error: crate::account::AccountError) -> JsValue {
-    use crate::account::AccountError;
-    // Exhaustive: every AccountError variant maps to its own machine-readable
-    // code so a rejection is never collapsed. Messages are static (no secrets).
-    let (code, message) = match error {
-        AccountError::OnlyOwner => (ERR_ONLY_OWNER, "only owner may perform this action"),
-        AccountError::RecoveryPolicyRequired => (
-            ERR_RECOVERY_POLICY_REQUIRED,
-            "the recovery-rotation policy must be active for this operation",
-        ),
-        AccountError::StatefulIndexRollback => (
-            ERR_STATEFUL_INDEX_ROLLBACK,
-            "stateful monotonic leaf index rollback is not allowed",
-        ),
-        AccountError::StatefulPolicyFrozen => (
-            ERR_STATEFUL_POLICY_FROZEN,
-            "stateful policy changes are frozen after the first successful stateful \
-             use in a key epoch",
-        ),
-        AccountError::InvalidSignature => {
-            (ERR_INVALID_SIGNATURE, "signature verification failed")
-        }
-        AccountError::BudgetExhausted => (
-            ERR_BUDGET_EXHAUSTED,
-            "the stateless signature budget is exhausted for the current key epoch",
-        ),
-        AccountError::RecoveryNotArmed => {
-            (ERR_RECOVERY_NOT_ARMED, "recovery mode is not armed")
-        }
-        AccountError::StatefulPathDisabled => (
-            ERR_STATEFUL_PATH_DISABLED,
-            "the stateful signing path is disabled under the recovery-rotation policy",
-        ),
-        AccountError::StatefulLeafRejected => (
-            ERR_STATEFUL_LEAF_REJECTED,
-            "the stateful leaf is not accepted by the active anti-reuse policy",
-        ),
-        AccountError::MalformedSignature => (
-            ERR_MALFORMED_SIGNATURE,
-            "the ERC-1271 signature envelope could not be decoded",
-        ),
-    };
-    js_error(WasmErr {
-        code,
-        message: message.to_string(),
-    })
-}
-
-#[cfg(feature = "wasm-bindings")]
-fn js_value_from_serde<T: serde::Serialize>(value: &T) -> Result<JsValue, JsValue> {
-    // Emit u64/i64 fields (e.g. the hypertree `treeIndex` and
-    // `statelessSignaturesUsed`) as JS `BigInt` instead of `number`. The default
-    // serializer errors when such a value exceeds 2^53 ("can't be represented as
-    // a JavaScript number"), which otherwise breaks stateless signatures whose
-    // tree index is large. `from_value` already accepts BigInt back into u64.
-    let serializer =
-        serde_wasm_bindgen::Serializer::new().serialize_large_number_types_as_bigints(true);
-    value.serialize(&serializer).map_err(js_error_from_serde("result"))
-}
-
 
 #[cfg(test)]
 mod tests {
@@ -1239,13 +605,6 @@ mod tests {
             Ok(_) => panic!("expected an Err"),
             Err(err) => err,
         }
-    }
-
-    #[cfg(all(feature = "wasm-bindings", target_arch = "wasm32"))]
-    fn one_u256_hex() -> String {
-        let mut out = [0u8; HASH_LEN];
-        out[HASH_LEN - 1] = 1;
-        hex_string(&out)
     }
 
     fn signing_key_and_public_key() -> (Keys, SignerPublicKey) {
@@ -1290,13 +649,6 @@ mod tests {
         assert!(bytes_word32(&[0u8; 33]).is_err());
     }
 
-    #[test]
-    fn require_max_len_enforces_the_ceiling() {
-        assert!(require_max_len(&[0u8; 10], 10).is_ok());
-        let err = require_max_len(&[0u8; 11], 10).unwrap_err();
-        assert_eq!(err.code, ERR_BAD_LENGTH);
-    }
-
     // ── Noble-style Uint8Array API: round trips at the Rust level ──────────
     // The primary conformance coverage lives in ts/test/ (node, against the
     // real compiled wasm); these pin the pure-Rust logic these free functions
@@ -1338,9 +690,8 @@ mod tests {
     // `js_sys::Error`, which only works with an actual JS engine present —
     // it panics ("cannot call wasm-bindgen imported functions on non-wasm
     // targets") under a native `cargo test`. Gated to the wasm32 +
-    // wasm-bindgen-test harness, matching the `wasm_account_binding_*` tests
-    // below; ts/test/'s node conformance suite covers these same error
-    // codes against the real compiled wasm.
+    // wasm-bindgen-test harness; ts/test/'s node conformance suite covers
+    // these same error codes against the real compiled wasm.
     #[cfg(all(feature = "wasm-bindings", target_arch = "wasm32"))]
     #[wasm_bindgen_test]
     fn sphincs_plus_c_noble_keygen_rejects_wrong_length_seed() {
@@ -1606,148 +957,5 @@ mod tests {
 
         let err = deserialize_sphincs_plus_c_signing_key(&bytes[..127]).unwrap_err();
         assert_eq!(err.code, ERR_BAD_LENGTH);
-    }
-
-    // The account-integration tests below build key material via the CORE
-    // `ShrincsSigner` (as the other non-wasm32 tests above do) rather than
-    // the noble-style `shrincsKeygen`/`shrincsSign` free functions, and drive
-    // `WasmShrincsAccount` entirely through its own message-hash methods
-    // (`statefulActionMessageHash`, `statelessActionMessageHash`,
-    // `statefulRotationMessageHash`, `fullRotationMessageHash`) plus the
-    // `envelope` encoders those methods' signatures decode — the same path a
-    // real caller exercises via `shrincs.sign()` / `shrincs.signStateless()`.
-    // The noble free functions themselves are covered by the
-    // `shrincs_noble_*` / `sphincs_plus_c_noble_*` tests above and by
-    // ts/test/'s node conformance suite.
-
-    #[cfg(all(feature = "wasm-bindings", target_arch = "wasm32"))]
-    #[wasm_bindgen_test]
-    fn wasm_account_binding_tracks_policy_changes() {
-        let (_, public_key) = signing_key_and_public_key();
-        let mut account = WasmShrincsAccount::new(
-            &[1u8; HASH_LEN],
-            &[2u8; HASH_LEN],
-            &[7u8; 20],
-            &public_key.public_key_commitment,
-        )
-        .unwrap();
-
-        let snapshot: ShrincsAccountSnapshot =
-            serde_wasm_bindgen::from_value(account.snapshot().unwrap()).unwrap();
-        assert_eq!(snapshot.stateful_policy, "monotonic-index");
-        assert!(!snapshot.recovery_mode);
-
-        account.set_stateful_policy_recovery_rotation(&[1u8; HASH_LEN]).unwrap();
-        account.enter_recovery_mode(&[1u8; HASH_LEN]).unwrap();
-
-        let snapshot: ShrincsAccountSnapshot =
-            serde_wasm_bindgen::from_value(account.snapshot().unwrap()).unwrap();
-        assert_eq!(snapshot.stateful_policy, "recovery-rotation");
-        assert!(snapshot.recovery_mode);
-    }
-
-    #[cfg(all(feature = "wasm-bindings", target_arch = "wasm32"))]
-    #[wasm_bindgen_test]
-    fn wasm_account_binding_verifies_canonical_stateful_action_end_to_end() {
-        let (mut signing_key, public_key) = stateful_signing_key_and_public_key();
-        let mut account = WasmShrincsAccount::new(
-            &[1u8; HASH_LEN],
-            &[2u8; HASH_LEN],
-            &[3u8; 20],
-            &public_key.public_key_commitment,
-        )
-        .unwrap();
-
-        let action_type = [4u8; HASH_LEN];
-        let payload_hash = [5u8; HASH_LEN];
-        let message = account
-            .stateful_action_message_hash(&action_type, &payload_hash)
-            .unwrap();
-        let core_signature = ShrincsSigner::sign_stateful_raw(&mut signing_key, &message).unwrap();
-        let signature = crate::envelope::encode_stateful_signature_envelope(&core_signature);
-        let public_key_flat = encode_public_key_flat(&public_key);
-
-        account
-            .verify_stateful_action(&public_key_flat, &action_type, &payload_hash, &signature)
-            .expect("valid stateful action verifies");
-
-        let snapshot: ShrincsAccountSnapshot =
-            serde_wasm_bindgen::from_value(account.snapshot().unwrap()).unwrap();
-        assert_eq!(snapshot.nonce, one_u256_hex());
-        assert_eq!(snapshot.next_stateful_leaf_index, 2);
-    }
-
-    #[cfg(all(feature = "wasm-bindings", target_arch = "wasm32"))]
-    #[wasm_bindgen_test]
-    fn wasm_account_binding_rotates_full_key_via_canonical_recovery_message() {
-        let (current_signing_key, current_public_key) = signing_key_and_public_key();
-        let (_, next_public_key) = signing_key_and_public_key();
-        let mut account = WasmShrincsAccount::new(
-            &[1u8; HASH_LEN],
-            &[2u8; HASH_LEN],
-            &[3u8; 20],
-            &current_public_key.public_key_commitment,
-        )
-        .unwrap();
-
-        account.set_stateful_policy_recovery_rotation(&[1u8; HASH_LEN]).unwrap();
-        account.enter_recovery_mode(&[1u8; HASH_LEN]).unwrap();
-
-        let next_public_key_flat = encode_public_key_flat(&next_public_key);
-        let recovery_message = account
-            .full_rotation_message_hash(&next_public_key_flat)
-            .unwrap();
-        let core_recovery_signature =
-            ShrincsSigner::sign_stateless_raw(&current_signing_key, &recovery_message).unwrap();
-        let recovery_signature =
-            crate::envelope::encode_stateless_envelope(&current_public_key, &core_recovery_signature);
-
-        account
-            .rotate_full_key(&recovery_signature, &next_public_key_flat)
-            .expect("valid full rotation succeeds");
-
-        let snapshot: ShrincsAccountSnapshot =
-            serde_wasm_bindgen::from_value(account.snapshot().unwrap()).unwrap();
-        assert_eq!(
-            snapshot.current_shrincs_public_key,
-            hex_string(&next_public_key.public_key_commitment)
-        );
-        assert_eq!(snapshot.key_version, one_u256_hex());
-        assert_eq!(snapshot.stateful_policy, "monotonic-index");
-        assert!(!snapshot.recovery_mode);
-    }
-
-    #[cfg_attr(
-        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
-        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
-    )]
-    #[cfg(all(feature = "wasm-bindings", target_arch = "wasm32"))]
-    #[wasm_bindgen_test]
-    fn wasm_account_binding_verifies_canonical_stateless_action_end_to_end() {
-        let (signing_key, public_key) = signing_key_and_public_key();
-        let mut account = WasmShrincsAccount::new(
-            &[1u8; HASH_LEN],
-            &[2u8; HASH_LEN],
-            &[3u8; 20],
-            &public_key.public_key_commitment,
-        )
-        .unwrap();
-
-        let action_type = [6u8; HASH_LEN];
-        let payload_hash = [7u8; HASH_LEN];
-        let message = account
-            .stateless_action_message_hash(&action_type, &payload_hash)
-            .unwrap();
-        let core_signature = ShrincsSigner::sign_stateless_raw(&signing_key, &message).unwrap();
-        let signature = crate::envelope::encode_stateless_envelope(&public_key, &core_signature);
-
-        account
-            .verify_stateless_action(&action_type, &payload_hash, &signature)
-            .expect("valid stateless action verifies");
-
-        let snapshot: ShrincsAccountSnapshot =
-            serde_wasm_bindgen::from_value(account.snapshot().unwrap()).unwrap();
-        assert_eq!(snapshot.nonce, one_u256_hex());
-        assert_eq!(snapshot.stateless_signatures_used, 1);
     }
 }

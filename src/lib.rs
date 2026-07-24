@@ -64,12 +64,10 @@ extern crate alloc;
 #[macro_use]
 mod trace_macros;
 
-#[cfg(feature = "std")]
-pub mod account;
 // Layering: `primitives` and `types` are scheme-neutral; `sphincs_plus_c`
 // is the stateless scheme and is oblivious to `shrincs`; `shrincs` builds
 // its hybrid (stateful UXMSS + stateless recovery) on top of
-// `sphincs_plus_c`. `account` and `wasm` sit above both.
+// `sphincs_plus_c`. `wasm` sits above both.
 /// Internal ABI codec for Solidity/on-chain interop and the cross-repo
 /// vector tests (`tests/envelope_vectors.rs`,
 /// `tests/generate_shrincs_vectors.rs`). Not part of the stable public API —

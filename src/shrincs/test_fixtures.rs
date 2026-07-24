@@ -26,17 +26,15 @@ use serde::{Deserialize, Serialize};
 use super::uxmss;
 use super::Keys;
 use super::{
-    ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey, RotationTarget,
-    StatefulRotationTarget, StatelessSignature, WotsCSignature, HASH_LEN,
+    ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey, StatelessSignature,
+    WotsCSignature, HASH_LEN,
 };
 use crate::sphincs_plus_c;
 
 pub(crate) const FIXTURE_PATH_ENV: &str = "SHRINCS_TEST_KEY_FIXTURE_PATH";
 pub(crate) const KEY_MODE_ENV: &str = "SHRINCS_TEST_KEY_MODE";
 pub(crate) const DEFAULT_FIXTURE_DIR: &str = "tests/test_fixtures";
-pub(crate) const ACCOUNT_CASES_FIXTURE_PATH_ENV: &str = "SHRINCS_TEST_ACCOUNT_CASES_FIXTURE_PATH";
 pub(crate) const KEY_FIXTURE_BASENAME: &str = "account_keys";
-pub(crate) const ACCOUNT_CASES_FIXTURE_BASENAME: &str = "account_signature_cases";
 pub(crate) const STATEFUL_SIGNER_FIXTURE_PATH_ENV: &str =
     "SHRINCS_TEST_STATEFUL_SIGNER_FIXTURE_PATH";
 pub(crate) const STATEFUL_SIGNER_FIXTURE_BASENAME: &str = "stateful_signer_keys";
@@ -320,116 +318,10 @@ impl From<StatelessSignatureDto> for StatelessSignature {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct StatefulRotationTargetDto {
-    pub(crate) stateful_public_key: Vec<u8>,
-    pub(crate) public_key_commitment: Vec<u8>,
-}
-
-impl From<&StatefulRotationTarget> for StatefulRotationTargetDto {
-    fn from(value: &StatefulRotationTarget) -> Self {
-        Self {
-            stateful_public_key: value.stateful_public_key.clone(),
-            public_key_commitment: value.public_key_commitment.clone(),
-        }
-    }
-}
-
-impl From<StatefulRotationTargetDto> for StatefulRotationTarget {
-    fn from(value: StatefulRotationTargetDto) -> Self {
-        Self {
-            stateful_public_key: value.stateful_public_key,
-            public_key_commitment: value.public_key_commitment,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct RotationTargetDto {
-    pub(crate) stateful_public_key: Vec<u8>,
-    pub(crate) public_key_commitment: Vec<u8>,
-    pub(crate) pk_seed: Vec<u8>,
-    pub(crate) hypertree_root: Vec<u8>,
-}
-
-impl From<&RotationTarget> for RotationTargetDto {
-    fn from(value: &RotationTarget) -> Self {
-        Self {
-            stateful_public_key: value.stateful_public_key.clone(),
-            public_key_commitment: value.public_key_commitment.clone(),
-            pk_seed: value.pk_seed.clone(),
-            hypertree_root: value.hypertree_root.clone(),
-        }
-    }
-}
-
-impl From<RotationTargetDto> for RotationTarget {
-    fn from(value: RotationTargetDto) -> Self {
-        Self {
-            stateful_public_key: value.stateful_public_key,
-            public_key_commitment: value.public_key_commitment,
-            pk_seed: value.pk_seed,
-            hypertree_root: value.hypertree_root,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct AccountStatelessActionCaseDto {
-    pub(crate) public_key: PublicKeyDto,
-    pub(crate) action_type: [u8; HASH_LEN],
-    pub(crate) payload_hash: [u8; HASH_LEN],
-    pub(crate) signature: StatelessSignatureDto,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct AccountStatefulRotationCaseDto {
-    pub(crate) public_key: PublicKeyDto,
-    pub(crate) next_target: StatefulRotationTargetDto,
-    pub(crate) next_commitment: [u8; HASH_LEN],
-    pub(crate) signature: StatelessSignatureDto,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct AccountFullRotationCaseDto {
-    pub(crate) public_key: PublicKeyDto,
-    pub(crate) next_target: RotationTargetDto,
-    pub(crate) next_commitment: [u8; HASH_LEN],
-    pub(crate) signature: StatelessSignatureDto,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct AccountWrongKeyStatelessActionCaseDto {
-    pub(crate) installed_public_key: PublicKeyDto,
-    pub(crate) signing_public_key: PublicKeyDto,
-    pub(crate) action_type: [u8; HASH_LEN],
-    pub(crate) payload_hash: [u8; HASH_LEN],
-    pub(crate) signature: StatelessSignatureDto,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct AccountSignatureFixtureFile {
-    pub(crate) profile_name: String,
-    pub(crate) stateless_action: AccountStatelessActionCaseDto,
-    pub(crate) rotate_stateful: AccountStatefulRotationCaseDto,
-    pub(crate) rotate_stateful_boundary: AccountStatefulRotationCaseDto,
-    pub(crate) rotate_stateful_tamper: AccountStatefulRotationCaseDto,
-    pub(crate) rotate_full: AccountFullRotationCaseDto,
-    pub(crate) rotate_full_same_stateless: AccountFullRotationCaseDto,
-    pub(crate) stateless_tamper: AccountStatelessActionCaseDto,
-    pub(crate) stateless_wrong_key: AccountWrongKeyStatelessActionCaseDto,
-}
-
 pub(crate) fn fixture_path() -> PathBuf {
     env::var_os(FIXTURE_PATH_ENV)
         .map(PathBuf::from)
         .unwrap_or_else(|| profile_fixture_path(KEY_FIXTURE_BASENAME))
-}
-
-pub(crate) fn account_cases_fixture_path() -> PathBuf {
-    env::var_os(ACCOUNT_CASES_FIXTURE_PATH_ENV)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| profile_fixture_path(ACCOUNT_CASES_FIXTURE_BASENAME))
 }
 
 pub(crate) fn stateful_signer_fixture_path() -> PathBuf {
@@ -460,43 +352,6 @@ pub(crate) fn write_fixture_file(path: &Path, fixture_file: &KeyFixtureFile) {
         .expect("fixture file must serialize");
     fs::write(path, json).unwrap_or_else(|error| {
         panic!("failed to write fixture file {}: {error}", path.display())
-    });
-}
-
-pub(crate) fn load_account_cases_fixture_file(path: &Path) -> AccountSignatureFixtureFile {
-    let json = fs::read_to_string(path).unwrap_or_else(|error| {
-        panic!(
-            "failed to read account cases fixture file {}: {error}",
-            path.display()
-        )
-    });
-    serde_json::from_str(&json).unwrap_or_else(|error| {
-        panic!(
-            "failed to parse account cases fixture file {}: {error}",
-            path.display()
-        )
-    })
-}
-
-pub(crate) fn write_account_cases_fixture_file(
-    path: &Path,
-    fixture_file: &AccountSignatureFixtureFile,
-) {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).unwrap_or_else(|error| {
-            panic!(
-                "failed to create fixture directory {}: {error}",
-                parent.display()
-            )
-        });
-    }
-    let json = serde_json::to_string(fixture_file)
-        .expect("account cases fixture file must serialize");
-    fs::write(path, json).unwrap_or_else(|error| {
-        panic!(
-            "failed to write account cases fixture file {}: {error}",
-            path.display()
-        )
     });
 }
 
@@ -533,22 +388,6 @@ mod tests {
     #[cfg(not(any(shrincs_profile_128s_q18, shrincs_profile_128s_q20)))]
     fn full_key_fixture_specs() -> Vec<(&'static str, u32)> {
         vec![
-            ("account stateless action seed", 4),
-            ("account rotate stateful current seed", 4),
-            ("account rotate stateful next seed", 8),
-            ("account rotate full current seed", 4),
-            ("account rotate full next seed", 8),
-            ("account recovery after use seed", 4),
-            ("account recovery after use next seed", 8),
-            ("account boundary rotate seed", 4),
-            ("account boundary rotate next seed", 8),
-            ("account same stateless rotate seed", 4),
-            ("account same stateless rotate next seed", 8),
-            ("account rotate tamper current seed", 4),
-            ("account rotate tamper next seed", 8),
-            ("account stateless tamper seed", 4),
-            ("account stateless wrong-key A", 4),
-            ("account stateless wrong-key B", 4),
             ("stateless negative seed", 2),
             ("stateless malformed seed", 2),
             ("stateless empty message seed", 2),
@@ -564,16 +403,6 @@ mod tests {
             ("action negative seed", 4),
             ("public key negative seed", 4),
             ("shrincs solidity vector stateful seed", 4),
-        ]
-    }
-
-    fn account_stateful_only_fixture_specs() -> [(&'static str, u32); 5] {
-        [
-            ("account raw helper seed", 4),
-            ("account stateful action seed", 4),
-            ("account failed stateful freeze seed", 4),
-            ("account wrong-key installed A", 4),
-            ("account wrong-key attacker B", 4),
         ]
     }
 
@@ -595,7 +424,7 @@ mod tests {
     #[test]
     #[ignore = "writes checked-in test fixtures on demand"]
     fn write_account_key_fixture_file() {
-        let full_key_entries = full_key_fixture_specs()
+        let entries = full_key_fixture_specs()
             .into_iter()
             .map(|(seed_label, max_stateful_signatures)| {
                 let (signing_key, public_key) = ShrincsSigner::keygen(
@@ -614,21 +443,6 @@ mod tests {
                 }
             })
             .collect::<Vec<_>>();
-        let stateful_only_entries = account_stateful_only_fixture_specs()
-            .into_iter()
-            .map(|(seed_label, max_stateful_signatures)| {
-                let (signing_key, public_key) =
-                    stateful_only_key(seed_label.as_bytes(), max_stateful_signatures);
-                KeyFixtureEntry {
-                    seed_label: seed_label.to_string(),
-                    signing_key: SigningKeyDto::from(&signing_key),
-                    public_key: PublicKeyDto::from(&public_key),
-                }
-            })
-            .collect::<Vec<_>>();
-        let mut entries = Vec::with_capacity(full_key_entries.len() + stateful_only_entries.len());
-        entries.extend(full_key_entries);
-        entries.extend(stateful_only_entries);
 
         let fixture_file = KeyFixtureFile {
             profile_name: PROFILE_NAME.to_string(),

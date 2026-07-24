@@ -60,10 +60,10 @@ pub(crate) fn keccak256v(parts: &[&[u8]]) -> [u8; HASH_LEN] {
     }
 }
 
-/// Keccak-256 over a single flat slice. All non-test callers are gated on
-/// `std` (`account`), so embedded (`no_std + alloc`) builds see it as dead.
+/// Keccak-256 over a single flat slice. Only used by tests (profile-ID and
+/// golden-vector checks), so non-test builds see it as dead.
 #[inline]
-#[cfg_attr(not(feature = "std"), allow(dead_code))]
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn keccak256(data: &[u8]) -> [u8; HASH_LEN] {
     keccak256v(&[data])
 }

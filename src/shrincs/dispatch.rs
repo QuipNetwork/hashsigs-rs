@@ -17,26 +17,63 @@
 
 //! Hybrid SHRINCS scheme orchestration.
 //!
-//! Owns the crypto-level verify/rotate decision logic shared by `verifier` and
-//! `signer`: validates contexts and encoded public keys, dispatches into
-//! `sphincs_plus_c` (stateless) and `uxmss` (stateful), and computes rotation
-//! commitments. `mod.rs` re-exports the pieces `account`/`wasm` need.
+//! Owns the crypto-level verify decision logic shared by `verifier` and
+//! `signer`: validates contexts and encoded public keys and dispatches into
+//! `sphincs_plus_c` (stateless) and `uxmss` (stateful). `mod.rs` re-exports
+//! the pieces `wasm` needs.
 
 use alloc::vec::Vec;
+use crate::primitives::hash::keccak_packed;
 use crate::primitives::hash::word32;
+use crate::primitives::hash_suite::HASH_SUITE_ID;
 use crate::sphincs_plus_c;
 use crate::types::{
-    ActionContext, PublicKey, RotationContext, RotationTarget, StatefulRotationTarget,
-    StatefulSignature, StatelessSignature, HASH_LEN, STATEFUL_PUBLIC_KEY_BYTES,
+    ActionContext, PublicKey, StatefulSignature, StatelessSignature, HASH_LEN,
+    STATEFUL_PUBLIC_KEY_BYTES,
 };
 use crate::shrincs::uxmss;
-use super::messages::{
-    full_rotation_message_hash, stateful_action_message_hash, stateful_rotation_message_hash,
-    stateless_action_message_hash,
-};
 use super::public_key::{
     decode_stateful_public_key, public_key_commitment as public_key_commitment_from_parts,
 };
+
+/// Canonical message hash for a stateful action verify, binding the
+/// operation tag, active hash-suite ID, and the context's domain separator,
+/// nonce, key version, action type, and payload hash.
+pub(crate) fn stateful_action_message_hash(
+    expected_public_key_commitment: [u8; HASH_LEN],
+    context: &ActionContext,
+) -> [u8; HASH_LEN] {
+    let op = keccak_packed(&[b"shrincs-verify-stateful"]);
+    keccak_packed(&[
+        &op,
+        &HASH_SUITE_ID.to_be_bytes(),
+        &expected_public_key_commitment,
+        &context.domain_separator,
+        &context.nonce,
+        &context.key_version,
+        &context.action_type,
+        &context.payload_hash,
+    ])
+}
+
+/// Canonical message hash for a stateless action verify. See
+/// `stateful_action_message_hash`.
+pub(crate) fn stateless_action_message_hash(
+    expected_public_key_commitment: [u8; HASH_LEN],
+    context: &ActionContext,
+) -> [u8; HASH_LEN] {
+    let op = keccak_packed(&[b"shrincs-verify-stateless"]);
+    keccak_packed(&[
+        &op,
+        &HASH_SUITE_ID.to_be_bytes(),
+        &expected_public_key_commitment,
+        &context.domain_separator,
+        &context.nonce,
+        &context.key_version,
+        &context.action_type,
+        &context.payload_hash,
+    ])
+}
 
 fn verify_stateless_crypto(
     public_key: &PublicKey,
@@ -62,25 +99,11 @@ pub(crate) fn valid_action_context(context: &ActionContext) -> bool {
         && context.payload_hash != [0u8; HASH_LEN]
 }
 
-pub(crate) fn valid_rotation_context(context: &RotationContext) -> bool {
-    context.domain_separator != [0u8; HASH_LEN]
-}
-
 fn recompute_public_key_commitment(public_key: &PublicKey) -> Option<[u8; HASH_LEN]> {
     let pk_seed = word32(&public_key.pk_seed)?;
     let hypertree_root = word32(&public_key.hypertree_root)?;
     Some(public_key_commitment_from_parts(
         &public_key.stateful_public_key,
-        &pk_seed,
-        &hypertree_root,
-    ))
-}
-
-pub(crate) fn rotation_target_commitment(target: &RotationTarget) -> Option<[u8; HASH_LEN]> {
-    let pk_seed = word32(&target.pk_seed)?;
-    let hypertree_root = word32(&target.hypertree_root)?;
-    Some(public_key_commitment_from_parts(
-        &target.stateful_public_key,
         &pk_seed,
         &hypertree_root,
     ))
@@ -135,103 +158,6 @@ pub(crate) fn verify_stateless(
     verify_stateless_crypto(public_key, &message, signature)
 }
 
-pub(crate) fn rotate_stateful_via_stateless(
-    expected_public_key_commitment: [u8; HASH_LEN],
-    current_public_key: &PublicKey,
-    context: &RotationContext,
-    recovery_signature: &StatelessSignature,
-    next_stateful_key: &StatefulRotationTarget,
-) -> Option<[u8; HASH_LEN]> {
-    if !matches_expected_public_key_commitment(
-        current_public_key,
-        expected_public_key_commitment,
-    ) {
-        return None;
-    }
-    if !valid_rotation_context(context) {
-        return None;
-    }
-    if !valid_public_key(current_public_key) {
-        return None;
-    }
-    if next_stateful_key.stateful_public_key.len() != STATEFUL_PUBLIC_KEY_BYTES {
-        return None;
-    }
-    let decoded_next_stateful_key =
-        decode_stateful_public_key(&next_stateful_key.stateful_public_key)?;
-    if decoded_next_stateful_key.max_signatures == 0 {
-        return None;
-    }
-    let current_pk_seed = word32(&current_public_key.pk_seed)?;
-    let current_hypertree_root = word32(&current_public_key.hypertree_root)?;
-    let next_public_key_commitment = public_key_commitment_from_parts(
-        &next_stateful_key.stateful_public_key,
-        &current_pk_seed,
-        &current_hypertree_root,
-    );
-    if word32(&next_stateful_key.public_key_commitment) != Some(next_public_key_commitment) {
-        return None;
-    }
-
-    let recovery_message = stateful_rotation_message_hash(
-        expected_public_key_commitment,
-        current_public_key,
-        context,
-        next_stateful_key,
-    );
-    if !verify_stateless_crypto(current_public_key, &recovery_message, recovery_signature) {
-        return None;
-    }
-
-    Some(next_public_key_commitment)
-}
-
-pub(crate) fn stateless_rotate(
-    expected_public_key_commitment: [u8; HASH_LEN],
-    current_public_key: &PublicKey,
-    context: &RotationContext,
-    recovery_signature: &StatelessSignature,
-    next_key: &RotationTarget,
-) -> Option<[u8; HASH_LEN]> {
-    if !matches_expected_public_key_commitment(
-        current_public_key,
-        expected_public_key_commitment,
-    ) {
-        return None;
-    }
-    if !valid_rotation_context(context) {
-        return None;
-    }
-    if !valid_public_key(current_public_key) {
-        return None;
-    }
-    if next_key.stateful_public_key.len() != STATEFUL_PUBLIC_KEY_BYTES
-        || next_key.pk_seed.len() != HASH_LEN
-        || next_key.hypertree_root.len() != HASH_LEN
-    {
-        return None;
-    }
-    let decoded_next_stateful_key = decode_stateful_public_key(&next_key.stateful_public_key)?;
-    if decoded_next_stateful_key.max_signatures == 0 {
-        return None;
-    }
-    let next_public_key_commitment = rotation_target_commitment(next_key)?;
-    if word32(&next_key.public_key_commitment) != Some(next_public_key_commitment) {
-        return None;
-    }
-
-    let recovery_message = full_rotation_message_hash(
-        expected_public_key_commitment,
-        current_public_key,
-        context,
-        next_key,
-    );
-    if !verify_stateless_crypto(current_public_key, &recovery_message, recovery_signature) {
-        return None;
-    }
-    Some(next_public_key_commitment)
-}
-
 pub(crate) fn verify_stateful_unsafe_raw(
     expected_public_key_commitment: [u8; HASH_LEN],
     public_key: &PublicKey,
@@ -250,12 +176,7 @@ pub(crate) fn verify_stateful_unsafe_raw(
     uxmss::verify_stateful_unsafe_raw(&stateful_key, message, signature)
 }
 
-// Also needed unconditionally under `std` (not just `test`/`wasm-bindings`):
-// the account wrapper's ERC-1271 `isValidSignature` (std-gated) verifies a
-// stateless action signature over an already-built message without
-// consuming the stateless budget, which is exactly this raw-message escape
-// hatch.
-#[cfg(any(test, feature = "wasm-bindings", feature = "std"))]
+#[cfg(test)]
 pub(crate) fn verify_stateless_unsafe_raw(
     expected_public_key_commitment: [u8; HASH_LEN],
     public_key: &PublicKey,

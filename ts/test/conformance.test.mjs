@@ -2,9 +2,6 @@
 // exercises the real signing surface through both loaders. This is the only
 // test of the packaging layer itself (loaders, exports map, ESM/CJS scoping,
 // base64-inline path), so it must run after `npm run build` and gate publish.
-//
-// The account (`WasmShrincsAccount`) is deliberately out of scope here: it is
-// not part of the noble `sphincsPlusC`/`shrincs` surface this file covers.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -133,8 +130,8 @@ const loaders = [
 ];
 
 test("entry: runtime surface is exactly { loadHashSigs, loadShrincsWasm, shrincsKeysToSecretBytes } in node, { loadShrincsWasm } in web", () => {
-  // WasmShrincsAccount / WasmShrincsKeys / WasmSphincsPlusCKeys are exported
-  // TYPE-ONLY from src/index.ts, and that is load-bearing: the `browser`
+  // WasmShrincsKeys / WasmSphincsPlusCKeys are exported TYPE-ONLY from
+  // src/index.ts, and that is load-bearing: the `browser`
   // exports condition maps the package entry to loader.browser.js, so a
   // VALUE export added to index.js would exist in Node and silently be
   // missing in browser bundles. `shrincsKeysToSecretBytes` is pure byte
@@ -166,10 +163,7 @@ for (const [name, load] of loaders) {
     ]) {
       assert.equal(typeof w[fn], "function", `missing ${fn}`);
     }
-    // The account class stays reachable off the raw wasm module (it is NOT
-    // part of the noble `sphincsPlusC`/`shrincs` namespaces `loadHashSigs()`
-    // returns), and the old hex-based, live-handle keypair surface is gone.
-    assert.equal(typeof w.WasmShrincsAccount, "function");
+    // The old hex-based, live-handle keypair surface is gone.
     assert.equal(w.WasmShrincsKeypair, undefined);
   });
 }

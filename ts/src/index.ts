@@ -3,20 +3,16 @@
 // `loadShrincsWasm()` returns the raw wasm module with a uniform,
 // env-agnostic interface: the `"browser"` field in package.json swaps the
 // Node loader for the browser loader at bundle time, so consumers write the
-// same code either way. It stays the low-level escape hatch used by
-// `WasmShrincsAccount`.
+// same code either way.
 //
 // `loadHashSigs()` is the noble-style entry point: it awaits the same wasm
 // module once and returns `{ sphincsPlusC, shrincs, shrincsImportSigningKey }`
 // — two plain namespace objects plus one standalone function, all working
 // directly with `Uint8Array` — mirroring `@noble/post-quantum`'s call shape
-// (`sign(message, ...)`, `verify(signature, message, publicKey)`). The
-// account is deliberately NOT part of this surface — `WasmShrincsAccount` is
-// a separate, lower-level handle reached through `loadShrincsWasm()`
-// directly. The async boundary here is unavoidable (a `.wasm` module has to
-// be instantiated before any of this runs), so unlike noble's fully
-// synchronous API, callers await `loadHashSigs()` once and then call every
-// method synchronously.
+// (`sign(message, ...)`, `verify(signature, message, publicKey)`). The async
+// boundary here is unavoidable (a `.wasm` module has to be instantiated
+// before any of this runs), so unlike noble's fully synchronous API, callers
+// await `loadHashSigs()` once and then call every method synchronously.
 import { loadShrincsWasm } from "./loader.node.js";
 export { loadShrincsWasm };
 
@@ -25,10 +21,9 @@ export { loadShrincsWasm };
 // their own variables. The generated `.d.ts` is the single source of truth.
 export type ShrincsWasmModule = typeof import("./nodejs/hashsigs_rs.js");
 
-// The serde DTO interfaces generated from the Rust structs (via Tsify), so
-// consumers can name the object shapes `WasmShrincsAccount.snapshot()`
-// returns and the error codes it (and every other function here) throws.
-export type { ShrincsAccountSnapshot, ShrincsErrorCode } from "./nodejs/hashsigs_rs.js";
+// The serde DTO interface generated from the Rust error codes (via Tsify),
+// so consumers can name the error codes every function here throws.
+export type { ShrincsErrorCode } from "./nodejs/hashsigs_rs.js";
 
 // The live handle classes, exported TYPE-ONLY. Consumers never construct
 // these directly (private constructors — instances come from
@@ -39,11 +34,7 @@ export type { ShrincsAccountSnapshot, ShrincsErrorCode } from "./nodejs/hashsigs
 // exports condition maps the package entry to loader.browser.js, which has
 // no runtime class bindings — a VALUE export here would exist in Node and
 // silently not exist in browser bundles.
-export type {
-  WasmShrincsKeys,
-  WasmSphincsPlusCKeys,
-  WasmShrincsAccount,
-} from "./nodejs/hashsigs_rs.js";
+export type { WasmShrincsKeys, WasmSphincsPlusCKeys } from "./nodejs/hashsigs_rs.js";
 
 // ── noble-style Uint8Array API ──────────────────────────────────────────
 //

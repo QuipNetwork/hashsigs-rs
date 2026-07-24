@@ -19,19 +19,15 @@
 //! SHRINCS wire shapes, matching the codec surface folded into
 //! `hashsigs-solidity`'s `SHRINCS.sol` / `SPHINCSPlusC.sol` (encoders
 //! `encodeStatefulEnvelope`, `encodeStatelessEnvelope`, `encodeStatelessKey`,
-//! `sliceStatelessSignatureEnvelope` / `encodeStatelessSignatureEnvelope`,
-//! `statefulActionEnvelope`, `statelessActionEnvelope`; decoders
-//! `decodePublicKeyCommitment`, `decodeStatefulEnvelope`,
-//! `prepareStatelessDelegation`) plus the ERC-1271 mode-prefixed action
-//! envelope defined by `SHRINCSAccountVerifierExample.isValidSignature` /
-//! `SHRINCSAccountSigningFacade.encodeStateful1271Envelope` /
-//! `encodeStateless1271Envelope`.
+//! `sliceStatelessSignatureEnvelope` / `encodeStatelessSignatureEnvelope`;
+//! decoders `decodePublicKeyCommitment`, `decodeStatefulEnvelope`,
+//! `prepareStatelessDelegation`).
 //!
 //! # Strictness divergence from the Solidity re-tag functions
 //!
-//! `SHRINCS.statefulEnvelope`, `statelessEnvelope`, `statefulActionEnvelope`,
-//! `statelessActionEnvelope`, and `SPHINCSPlusC.statelessSignatureEnvelope`
-//! are zero-copy calldata re-tags: they read offset words without bounds- or
+//! `SHRINCS.statefulEnvelope`, `statelessEnvelope`, and
+//! `SPHINCSPlusC.statelessSignatureEnvelope` are zero-copy calldata re-tags:
+//! they read offset words without bounds- or
 //! canonicity-checking them, so malformed or truncated framing is rejected
 //! only downstream (by a Solidity member-access revert or a verify-time
 //! shape/commitment check), and some non-canonical framings that read past
@@ -83,13 +79,6 @@ const MAX_STATEFUL_AUTH_PATH_LEN: usize = 4096;
 /// Hypertree subtree height: one auth-path node per level per layer.
 const HYPERTREE_SUBTREE_HEIGHT: usize =
     (HYPERTREE_HEIGHT as usize) / (NUM_HYPERTREE_LAYERS as usize);
-
-/// Envelope mode selecting canonical stateful account-action validation.
-/// Mirrors `SHRINCSAccountVerifierExample.ERC1271_MODE_STATEFUL_ACTION`.
-pub const ERC1271_MODE_STATEFUL_ACTION: u8 = 1;
-/// Envelope mode selecting canonical stateless account-action validation.
-/// Mirrors `SHRINCSAccountVerifierExample.ERC1271_MODE_STATELESS_ACTION`.
-pub const ERC1271_MODE_STATELESS_ACTION: u8 = 2;
 
 // ---------------------------------------------------------------------
 // ABI primitives (encode side)
@@ -636,174 +625,6 @@ pub fn decode_stateless_signature_envelope(data: &[u8]) -> Option<StatelessSigna
     Some(decoded)
 }
 
-/// Mirrors `SHRINCS.statefulActionEnvelope`. Layout:
-/// `abi.encode(PublicKey, bytes32 actionType, bytes32 payloadHash,
-/// SHRINCS.Signature)`.
-pub fn encode_stateful_action_envelope(
-    public_key: &PublicKey,
-    action_type: [u8; HASH_LEN],
-    payload_hash: [u8; HASH_LEN],
-    signature: &StatefulSignature,
-) -> Vec<u8> {
-    encode_tuple(alloc::vec![
-        Field::Dynamic(encode_public_key_body(public_key)),
-        Field::Static(action_type),
-        Field::Static(payload_hash),
-        Field::Dynamic(encode_stateful_signature_body(signature)),
-    ])
-}
-
-/// Strict decoder for the layout `encode_stateful_action_envelope` produces.
-pub fn decode_stateful_action_envelope(
-    data: &[u8],
-) -> Option<(PublicKey, [u8; HASH_LEN], [u8; HASH_LEN], StatefulSignature)> {
-    let reader = AbiReader::new(data);
-    let public_key_start = reader.decode_offset(0, 0)?;
-    let action_type = reader.read_bytes32(32)?;
-    let payload_hash = reader.read_bytes32(64)?;
-    let signature_start = reader.decode_offset(0, 96)?;
-    let decoded = (
-        decode_public_key(&reader, public_key_start)?,
-        action_type,
-        payload_hash,
-        decode_stateful_signature(&reader, signature_start)?,
-    );
-    reader.finish()?;
-    Some(decoded)
-}
-
-/// Mirrors `SHRINCS.statelessActionEnvelope`. Layout:
-/// `abi.encode(PublicKey, bytes32 actionType, bytes32 payloadHash,
-/// SPHINCSPlusC.Signature)`.
-pub fn encode_stateless_action_envelope(
-    public_key: &PublicKey,
-    action_type: [u8; HASH_LEN],
-    payload_hash: [u8; HASH_LEN],
-    signature: &StatelessSignature,
-) -> Vec<u8> {
-    encode_tuple(alloc::vec![
-        Field::Dynamic(encode_public_key_body(public_key)),
-        Field::Static(action_type),
-        Field::Static(payload_hash),
-        Field::Dynamic(encode_stateless_signature_body(signature)),
-    ])
-}
-
-/// Strict decoder for the layout `encode_stateless_action_envelope`
-/// produces.
-pub fn decode_stateless_action_envelope(
-    data: &[u8],
-) -> Option<(PublicKey, [u8; HASH_LEN], [u8; HASH_LEN], StatelessSignature)> {
-    let reader = AbiReader::new(data);
-    let public_key_start = reader.decode_offset(0, 0)?;
-    let action_type = reader.read_bytes32(32)?;
-    let payload_hash = reader.read_bytes32(64)?;
-    let signature_start = reader.decode_offset(0, 96)?;
-    let decoded = (
-        decode_public_key(&reader, public_key_start)?,
-        action_type,
-        payload_hash,
-        decode_stateless_signature(&reader, signature_start)?,
-    );
-    reader.finish()?;
-    Some(decoded)
-}
-
-/// Mirrors `SHRINCSAccountSigningFacade.encodeStateful1271Envelope`. Layout:
-/// `bytes1(ERC1271_MODE_STATEFUL_ACTION) ||
-/// abi.encode(PublicKey, actionType, payloadHash, SHRINCS.Signature)`.
-pub fn encode_stateful_1271_envelope(
-    public_key: &PublicKey,
-    action_type: [u8; HASH_LEN],
-    payload_hash: [u8; HASH_LEN],
-    signature: &StatefulSignature,
-) -> Vec<u8> {
-    let mut out = Vec::with_capacity(1);
-    out.push(ERC1271_MODE_STATEFUL_ACTION);
-    out.extend_from_slice(&encode_stateful_action_envelope(
-        public_key,
-        action_type,
-        payload_hash,
-        signature,
-    ));
-    out
-}
-
-/// Mirrors `SHRINCSAccountSigningFacade.encodeStateless1271Envelope`.
-/// Layout: `bytes1(ERC1271_MODE_STATELESS_ACTION) ||
-/// abi.encode(PublicKey, actionType, payloadHash, SPHINCSPlusC.Signature)`.
-pub fn encode_stateless_1271_envelope(
-    public_key: &PublicKey,
-    action_type: [u8; HASH_LEN],
-    payload_hash: [u8; HASH_LEN],
-    signature: &StatelessSignature,
-) -> Vec<u8> {
-    let mut out = Vec::with_capacity(1);
-    out.push(ERC1271_MODE_STATELESS_ACTION);
-    out.extend_from_slice(&encode_stateless_action_envelope(
-        public_key,
-        action_type,
-        payload_hash,
-        signature,
-    ));
-    out
-}
-
-/// Decoded ERC-1271 mode-prefixed action envelope; see
-/// `SHRINCSAccountVerifierExample.isValidSignature`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Erc1271Envelope {
-    Stateful {
-        public_key: PublicKey,
-        action_type: [u8; HASH_LEN],
-        payload_hash: [u8; HASH_LEN],
-        signature: StatefulSignature,
-    },
-    Stateless {
-        public_key: PublicKey,
-        action_type: [u8; HASH_LEN],
-        payload_hash: [u8; HASH_LEN],
-        signature: StatelessSignature,
-    },
-}
-
-/// Mode-dispatch decoder mirroring `SHRINCSAccountVerifierExample.
-/// isValidSignature`'s leading `uint8 mode = uint8(signature[0])` read
-/// followed by `SHRINCS.statefulActionEnvelope` /
-/// `SHRINCS.statelessActionEnvelope` on the remainder. Returns `None` for an
-/// empty envelope, an unknown mode byte, or a malformed payload; unlike the
-/// Solidity re-tag (which reverts on a malformed payload and returns
-/// `0xffffffff` only for an unknown mode or a well-formed-but-invalid
-/// signature), both failure classes collapse to `None` here — callers that
-/// need to distinguish "reject with revert" from "reject as invalid" must
-/// check the mode byte themselves before calling this.
-pub fn decode_1271_envelope(data: &[u8]) -> Option<Erc1271Envelope> {
-    let (&mode, payload) = data.split_first()?;
-    match mode {
-        ERC1271_MODE_STATEFUL_ACTION => {
-            let (public_key, action_type, payload_hash, signature) =
-                decode_stateful_action_envelope(payload)?;
-            Some(Erc1271Envelope::Stateful {
-                public_key,
-                action_type,
-                payload_hash,
-                signature,
-            })
-        }
-        ERC1271_MODE_STATELESS_ACTION => {
-            let (public_key, action_type, payload_hash, signature) =
-                decode_stateless_action_envelope(payload)?;
-            Some(Erc1271Envelope::Stateless {
-                public_key,
-                action_type,
-                payload_hash,
-                signature,
-            })
-        }
-        _ => None,
-    }
-}
-
 /// Mirrors `SHRINCS.decodePublicKeyCommitment`: the verifier `key` bytes are
 /// exactly one 32-byte commitment word, nothing else.
 pub fn decode_public_key_commitment(key: &[u8]) -> Option<[u8; HASH_LEN]> {
@@ -934,106 +755,6 @@ mod tests {
     }
 
     #[test]
-    fn stateful_action_envelope_round_trips() {
-        let public_key = sample_public_key();
-        let signature = sample_stateful_signature();
-        let action_type = [0xD1; HASH_LEN];
-        let payload_hash = [0xD2; HASH_LEN];
-        let encoded =
-            encode_stateful_action_envelope(&public_key, action_type, payload_hash, &signature);
-        let (decoded_key, decoded_action, decoded_payload, decoded_sig) =
-            decode_stateful_action_envelope(&encoded).expect("valid envelope must decode");
-        assert_eq!(decoded_key, public_key);
-        assert_eq!(decoded_action, action_type);
-        assert_eq!(decoded_payload, payload_hash);
-        assert_eq!(decoded_sig, signature);
-        assert_eq!(
-            encode_stateful_action_envelope(
-                &decoded_key,
-                decoded_action,
-                decoded_payload,
-                &decoded_sig
-            ),
-            encoded
-        );
-    }
-
-    #[test]
-    fn stateless_action_envelope_round_trips() {
-        let public_key = sample_public_key();
-        let signature = sample_stateless_signature();
-        let action_type = [0xE1; HASH_LEN];
-        let payload_hash = [0xE2; HASH_LEN];
-        let encoded =
-            encode_stateless_action_envelope(&public_key, action_type, payload_hash, &signature);
-        let (decoded_key, decoded_action, decoded_payload, decoded_sig) =
-            decode_stateless_action_envelope(&encoded).expect("valid envelope must decode");
-        assert_eq!(decoded_key, public_key);
-        assert_eq!(decoded_action, action_type);
-        assert_eq!(decoded_payload, payload_hash);
-        assert_eq!(decoded_sig, signature);
-        assert_eq!(
-            encode_stateless_action_envelope(
-                &decoded_key,
-                decoded_action,
-                decoded_payload,
-                &decoded_sig
-            ),
-            encoded
-        );
-    }
-
-    #[test]
-    fn stateful_1271_envelope_round_trips_through_mode_dispatch() {
-        let public_key = sample_public_key();
-        let signature = sample_stateful_signature();
-        let action_type = [0xF1; HASH_LEN];
-        let payload_hash = [0xF2; HASH_LEN];
-        let encoded =
-            encode_stateful_1271_envelope(&public_key, action_type, payload_hash, &signature);
-        assert_eq!(encoded[0], ERC1271_MODE_STATEFUL_ACTION);
-        match decode_1271_envelope(&encoded).expect("valid envelope must decode") {
-            Erc1271Envelope::Stateful {
-                public_key: decoded_key,
-                action_type: decoded_action,
-                payload_hash: decoded_payload,
-                signature: decoded_sig,
-            } => {
-                assert_eq!(decoded_key, public_key);
-                assert_eq!(decoded_action, action_type);
-                assert_eq!(decoded_payload, payload_hash);
-                assert_eq!(decoded_sig, signature);
-            }
-            other => panic!("expected Stateful variant, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn stateless_1271_envelope_round_trips_through_mode_dispatch() {
-        let public_key = sample_public_key();
-        let signature = sample_stateless_signature();
-        let action_type = [0x01; HASH_LEN];
-        let payload_hash = [0x02; HASH_LEN];
-        let encoded =
-            encode_stateless_1271_envelope(&public_key, action_type, payload_hash, &signature);
-        assert_eq!(encoded[0], ERC1271_MODE_STATELESS_ACTION);
-        match decode_1271_envelope(&encoded).expect("valid envelope must decode") {
-            Erc1271Envelope::Stateless {
-                public_key: decoded_key,
-                action_type: decoded_action,
-                payload_hash: decoded_payload,
-                signature: decoded_sig,
-            } => {
-                assert_eq!(decoded_key, public_key);
-                assert_eq!(decoded_action, action_type);
-                assert_eq!(decoded_payload, payload_hash);
-                assert_eq!(decoded_sig, signature);
-            }
-            other => panic!("expected Stateless variant, got {other:?}"),
-        }
-    }
-
-    #[test]
     fn public_key_commitment_round_trips() {
         let commitment = [0x42; HASH_LEN];
         assert_eq!(decode_public_key_commitment(&commitment), Some(commitment));
@@ -1155,19 +876,6 @@ mod tests {
     fn public_key_commitment_wrong_length_is_rejected() {
         assert!(decode_public_key_commitment(&[0u8; 31]).is_none());
         assert!(decode_public_key_commitment(&[0u8; 33]).is_none());
-    }
-
-    #[test]
-    fn mode_dispatch_rejects_empty_and_unknown_mode() {
-        assert!(decode_1271_envelope(&[]).is_none());
-        let mut encoded = encode_stateful_1271_envelope(
-            &sample_public_key(),
-            [0; HASH_LEN],
-            [0; HASH_LEN],
-            &sample_stateful_signature(),
-        );
-        encoded[0] = 0x03;
-        assert!(decode_1271_envelope(&encoded).is_none());
     }
 
     #[test]

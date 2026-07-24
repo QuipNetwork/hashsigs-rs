@@ -20,10 +20,6 @@ mod common;
 use common::{hex_to_bytes, load_vectors, AbiDecoder};
 use hashsigs_rs::shrincs::ShrincsVerifier;
 
-fn bytes32_from_vec(bytes: &[u8]) -> [u8; hashsigs_rs::shrincs::HASH_LEN] {
-    bytes.try_into().expect("value must be exactly 32 bytes")
-}
-
 #[test]
 fn solidity_exported_stateful_action_vector_verifies_in_rust() {
     let vectors = load_vectors();
@@ -92,101 +88,4 @@ fn solidity_exported_stateless_action_vector_verifies_in_rust() {
         &vector.context,
         &vector.signature,
     ));
-}
-
-#[test]
-fn solidity_exported_stateful_only_rotation_vector_verifies_in_rust() {
-    let vectors = load_vectors();
-    let encoded = vectors["testExportStatefulOnlyRotationBundle"]["stateful_rotation_vector_abi"]
-        .as_str()
-        .expect("missing stateful-only rotation vector blob");
-    let mut vector =
-        AbiDecoder::new(&hex_to_bytes(encoded)).decode_root_stateful_only_rotation_vector();
-    let verifier = ShrincsVerifier::new();
-
-    assert_eq!(
-        vector.message,
-        verifier
-            .stateful_rotation_message_hash(
-                vector.current_shrincs_public_key,
-                &vector.current_public_key,
-                &vector.context,
-                &vector.next_key,
-            )
-            .to_vec(),
-    );
-    let next_commitment = verifier
-        .rotate_stateful_via_stateless(
-            vector.current_shrincs_public_key,
-            &vector.current_public_key,
-            &vector.context,
-            &vector.recovery_signature,
-            &vector.next_key,
-        )
-        .expect("stateful-only rotation vector must verify in Rust");
-    assert_eq!(
-        next_commitment,
-        bytes32_from_vec(&vector.next_key.public_key_commitment),
-    );
-
-    // A tampered recovery signature must fail the cryptographic verification,
-    // not just the structural commitment checks.
-    vector.recovery_signature.fors.randomizer[0] ^= 0x01;
-    assert!(verifier
-        .rotate_stateful_via_stateless(
-            vector.current_shrincs_public_key,
-            &vector.current_public_key,
-            &vector.context,
-            &vector.recovery_signature,
-            &vector.next_key,
-        )
-        .is_none());
-}
-
-#[test]
-fn solidity_exported_full_rotation_vector_verifies_in_rust() {
-    let vectors = load_vectors();
-    let encoded = vectors["testExportFullRotationBundle"]["full_rotation_vector_abi"]
-        .as_str()
-        .expect("missing full rotation vector blob");
-    let mut vector = AbiDecoder::new(&hex_to_bytes(encoded)).decode_root_full_rotation_vector();
-    let verifier = ShrincsVerifier::new();
-
-    assert_eq!(
-        vector.message,
-        verifier
-            .full_rotation_message_hash(
-                vector.current_shrincs_public_key,
-                &vector.current_public_key,
-                &vector.context,
-                &vector.next_key,
-            )
-            .to_vec(),
-    );
-    let next_commitment = verifier
-        .stateless_rotate(
-            vector.current_shrincs_public_key,
-            &vector.current_public_key,
-            &vector.context,
-            &vector.recovery_signature,
-            &vector.next_key,
-        )
-        .expect("full rotation vector must verify in Rust");
-    assert_eq!(
-        next_commitment,
-        bytes32_from_vec(&vector.next_key.public_key_commitment),
-    );
-
-    // A tampered recovery signature must fail the cryptographic verification,
-    // not just the structural commitment checks.
-    vector.recovery_signature.fors.randomizer[0] ^= 0x01;
-    assert!(verifier
-        .stateless_rotate(
-            vector.current_shrincs_public_key,
-            &vector.current_public_key,
-            &vector.context,
-            &vector.recovery_signature,
-            &vector.next_key,
-        )
-        .is_none());
 }

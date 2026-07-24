@@ -16,23 +16,21 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Shared test-only support for integration tests that consume the
-//! Solidity-exported SHRINCS account-wrapper vectors
+//! Solidity-exported SHRINCS action vectors
 //! (`tests/test_vectors/shrincs_account_wrapper_vectors*.json{,.gz}`).
 //!
 //! `AbiDecoder` is an independent, from-scratch `abi.decode` reader used as
 //! the differential oracle against `hashsigs_rs::envelope`'s
 //! production codec in `envelope_vectors.rs`, and against the crypto-level
-//! verify/rotate paths in `solidity_account_vectors.rs`. Not `#[path]`-shared
+//! action-verify path in `solidity_account_vectors.rs`. Not `#[path]`-shared
 //! at the binary level: `mod common;` recompiles this file per integration
 //! test binary, which is the normal Cargo idiom for `tests/common/mod.rs`
 //! (a directory-based module is not itself auto-discovered as a test target).
 //!
 //! Each vector struct below is a superset DTO: different consuming binaries
-//! read different subsets of its fields (e.g. `envelope_vectors.rs` decodes
-//! rotation-bundle vectors only for their `current_public_key` /
-//! `recovery_signature`, not `context`/`next_key`/`message`), so this module
-//! is compiled with dead-code analysis relaxed rather than pared down to
-//! whatever any one binary currently uses.
+//! read different subsets of its fields, so this module is compiled with
+//! dead-code analysis relaxed rather than pared down to whatever any one
+//! binary currently uses.
 #![allow(dead_code)]
 
 use std::fs;
@@ -41,9 +39,8 @@ use std::path::{Path, PathBuf};
 
 use flate2::read::GzDecoder;
 use hashsigs_rs::shrincs::{
-    ActionContext, ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey, RotationContext,
-    RotationTarget, StatefulRotationTarget, StatefulSignature, StatelessSignature, WotsCSignature,
-    HASH_LEN,
+    ActionContext, ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey,
+    StatefulSignature, StatelessSignature, WotsCSignature, HASH_LEN,
 };
 use serde_json::Value;
 
@@ -73,26 +70,6 @@ pub(crate) struct StatelessActionVector {
     pub(crate) message: Vec<u8>,
 }
 
-#[derive(Debug)]
-pub(crate) struct StatefulOnlyRotationVector {
-    pub(crate) current_shrincs_public_key: [u8; HASH_LEN],
-    pub(crate) current_public_key: PublicKey,
-    pub(crate) context: RotationContext,
-    pub(crate) next_key: StatefulRotationTarget,
-    pub(crate) recovery_signature: StatelessSignature,
-    pub(crate) message: Vec<u8>,
-}
-
-#[derive(Debug)]
-pub(crate) struct FullRotationVector {
-    pub(crate) current_shrincs_public_key: [u8; HASH_LEN],
-    pub(crate) current_public_key: PublicKey,
-    pub(crate) context: RotationContext,
-    pub(crate) next_key: RotationTarget,
-    pub(crate) recovery_signature: StatelessSignature,
-    pub(crate) message: Vec<u8>,
-}
-
 impl<'a> AbiDecoder<'a> {
     pub(crate) fn new(data: &'a [u8]) -> Self {
         Self { data }
@@ -106,16 +83,6 @@ impl<'a> AbiDecoder<'a> {
     pub(crate) fn decode_root_stateless_action_vector(&self) -> StatelessActionVector {
         let start = self.read_usize(0);
         self.decode_stateless_action_vector(start)
-    }
-
-    pub(crate) fn decode_root_stateful_only_rotation_vector(&self) -> StatefulOnlyRotationVector {
-        let start = self.read_usize(0);
-        self.decode_stateful_only_rotation_vector(start)
-    }
-
-    pub(crate) fn decode_root_full_rotation_vector(&self) -> FullRotationVector {
-        let start = self.read_usize(0);
-        self.decode_full_rotation_vector(start)
     }
 
     fn decode_stateful_action_vector(&self, start: usize) -> StatefulActionVector {
@@ -142,28 +109,6 @@ impl<'a> AbiDecoder<'a> {
         }
     }
 
-    fn decode_stateful_only_rotation_vector(&self, start: usize) -> StatefulOnlyRotationVector {
-        StatefulOnlyRotationVector {
-            current_shrincs_public_key: self.read_bytes32(start),
-            current_public_key: self.decode_public_key(start, start + 32),
-            context: self.decode_rotation_context(start + 64),
-            next_key: self.decode_stateful_rotation_target(start, start + 160),
-            recovery_signature: self.decode_stateless_signature(start, start + 192),
-            message: self.decode_bytes(start, start + 224),
-        }
-    }
-
-    fn decode_full_rotation_vector(&self, start: usize) -> FullRotationVector {
-        FullRotationVector {
-            current_shrincs_public_key: self.read_bytes32(start),
-            current_public_key: self.decode_public_key(start, start + 32),
-            context: self.decode_rotation_context(start + 64),
-            next_key: self.decode_rotation_target(start, start + 160),
-            recovery_signature: self.decode_stateless_signature(start, start + 192),
-            message: self.decode_bytes(start, start + 224),
-        }
-    }
-
     fn decode_public_key(&self, base: usize, head: usize) -> PublicKey {
         let start = base + self.read_usize(head);
         PublicKey {
@@ -181,14 +126,6 @@ impl<'a> AbiDecoder<'a> {
             key_version: self.read_bytes32(start + 64),
             action_type: self.read_bytes32(start + 96),
             payload_hash: self.read_bytes32(start + 128),
-        }
-    }
-
-    fn decode_rotation_context(&self, start: usize) -> RotationContext {
-        RotationContext {
-            domain_separator: self.read_bytes32(start),
-            nonce: self.read_bytes32(start + 32),
-            key_version: self.read_bytes32(start + 64),
         }
     }
 
@@ -247,28 +184,6 @@ impl<'a> AbiDecoder<'a> {
             randomizer: bytes32_from_vec(&self.decode_bytes(start, start)),
             counter: self.read_u32(start + 32),
             chains: nodes_from_vecs(self.decode_array_bytes(start, start + 64)),
-        }
-    }
-
-    fn decode_stateful_rotation_target(
-        &self,
-        base: usize,
-        head: usize,
-    ) -> StatefulRotationTarget {
-        let start = base + self.read_usize(head);
-        StatefulRotationTarget {
-            stateful_public_key: self.decode_bytes(start, start),
-            public_key_commitment: self.decode_bytes(start, start + 32),
-        }
-    }
-
-    fn decode_rotation_target(&self, base: usize, head: usize) -> RotationTarget {
-        let start = base + self.read_usize(head);
-        RotationTarget {
-            stateful_public_key: self.decode_bytes(start, start),
-            public_key_commitment: self.decode_bytes(start, start + 32),
-            pk_seed: self.decode_bytes(start, start + 64),
-            hypertree_root: self.decode_bytes(start, start + 96),
         }
     }
 

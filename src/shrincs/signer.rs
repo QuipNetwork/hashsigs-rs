@@ -19,8 +19,8 @@
 //!
 //! `ShrincsSigner` derives seed material into a [`Keys`] + `PublicKey` pair
 //! and drives both signing paths: `uxmss` for the stateful fast path,
-//! `sphincs_plus_c` for stateless recovery. Consumed by `account` and `wasm`
-//! as the only place that advances signer-side state (`next_leaf_index`).
+//! `sphincs_plus_c` for stateless recovery. Consumed by `wasm` as the only
+//! place that advances signer-side state (`next_leaf_index`).
 
 use crate::primitives::hash::word32;
 use crate::sphincs_plus_c::hypertree::hypertree_public_root;
@@ -29,8 +29,8 @@ use crate::types::{ActionContext, PublicKey, StatefulSignature, StatelessSignatu
 use crate::shrincs::uxmss;
 
 pub use super::signer_types::ShrincsSignerResult;
+use super::dispatch::stateful_action_message_hash;
 use super::keys::Keys;
-use super::messages::stateful_action_message_hash;
 use super::public_key::encode_stateful_public_key;
 use super::signer_utils::{derive32, public_key_from_components};
 

@@ -17,10 +17,10 @@
 
 //! Public hybrid SHRINCS verifier surface.
 //!
-//! Thin, stateless facade (`ShrincsVerifier`) over `dispatch` and `messages`:
-//! every method forwards directly, giving external callers (`account`,
-//! `wasm`, the `solana` workspace member) one struct-shaped entry point
-//! instead of free functions.
+//! Thin, stateless facade (`ShrincsVerifier`) over `dispatch`: every method
+//! forwards directly, giving external callers (`wasm`, the `solana`
+//! workspace member) one struct-shaped entry point instead of free
+//! functions.
 
 use crate::envelope;
 use crate::primitives::hash::keccak_packed;
@@ -30,10 +30,10 @@ use crate::verifier::VerifyOutcome;
 // them here so the historical path `hashsigs_rs::shrincs::verifier::*` still
 // resolves (main used `pub use self::shrincs_verifier_types::*`).
 pub use crate::types::{
-    ActionContext, ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey, RotationContext,
-    RotationTarget, StatefulPublicKey, StatefulRotationTarget, StatefulSignature,
-    StatelessSignature, WotsCSignature, ADDRESS_TYPE_FORS_TREE, ADDRESS_TYPE_TREE,
-    ADDRESS_TYPE_WOTS_HASH, HASH_LEN, HASH_SUITE_KECCAK_256, STATEFUL_PUBLIC_KEY_BYTES,
+    ActionContext, ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey,
+    StatefulPublicKey, StatefulSignature, StatelessSignature, WotsCSignature,
+    ADDRESS_TYPE_FORS_TREE, ADDRESS_TYPE_TREE, ADDRESS_TYPE_WOTS_HASH, HASH_LEN,
+    HASH_SUITE_KECCAK_256, STATEFUL_PUBLIC_KEY_BYTES,
 };
 // Profile parameter tuple also lived in main's shrincs_verifier_types (via
 // `pub use profile::*`); re-export from the current profiles module.
@@ -43,10 +43,7 @@ pub use crate::primitives::profiles::{
     WOTS_CHAINS_STATEFUL, WOTS_TARGET_SUM_STATEFUL,
 };
 use super::dispatch as core_shrincs;
-use super::messages::{
-    full_rotation_message_hash, stateful_action_message_hash, stateful_rotation_message_hash,
-    stateless_action_message_hash,
-};
+use super::dispatch::{stateful_action_message_hash, stateless_action_message_hash};
 use super::public_key::public_key_commitment as public_key_commitment_from_parts;
 
 pub struct ShrincsVerifier;
@@ -80,40 +77,6 @@ impl ShrincsVerifier {
         signature: &StatelessSignature,
     ) -> bool {
         core_shrincs::verify_stateless(expected_public_key_commitment, public_key, context, signature)
-    }
-
-    pub fn rotate_stateful_via_stateless(
-        &self,
-        expected_public_key_commitment: [u8; HASH_LEN],
-        current_public_key: &PublicKey,
-        context: &RotationContext,
-        recovery_signature: &StatelessSignature,
-        next_stateful_key: &StatefulRotationTarget,
-    ) -> Option<[u8; HASH_LEN]> {
-        core_shrincs::rotate_stateful_via_stateless(
-            expected_public_key_commitment,
-            current_public_key,
-            context,
-            recovery_signature,
-            next_stateful_key,
-        )
-    }
-
-    pub fn stateless_rotate(
-        &self,
-        expected_public_key_commitment: [u8; HASH_LEN],
-        current_public_key: &PublicKey,
-        context: &RotationContext,
-        recovery_signature: &StatelessSignature,
-        next_key: &RotationTarget,
-    ) -> Option<[u8; HASH_LEN]> {
-        core_shrincs::stateless_rotate(
-            expected_public_key_commitment,
-            current_public_key,
-            context,
-            recovery_signature,
-            next_key,
-        )
     }
 
     #[cfg(test)]
@@ -164,43 +127,10 @@ impl ShrincsVerifier {
         stateless_action_message_hash(expected_public_key_commitment, context)
     }
 
-    pub fn stateful_rotation_message_hash(
-        &self,
-        expected_public_key_commitment: [u8; HASH_LEN],
-        current_public_key: &PublicKey,
-        context: &RotationContext,
-        next_stateful_key: &StatefulRotationTarget,
-    ) -> [u8; HASH_LEN] {
-        stateful_rotation_message_hash(
-            expected_public_key_commitment,
-            current_public_key,
-            context,
-            next_stateful_key,
-        )
-    }
-
-    pub fn full_rotation_message_hash(
-        &self,
-        expected_public_key_commitment: [u8; HASH_LEN],
-        current_public_key: &PublicKey,
-        context: &RotationContext,
-        next_key: &RotationTarget,
-    ) -> [u8; HASH_LEN] {
-        full_rotation_message_hash(
-            expected_public_key_commitment,
-            current_public_key,
-            context,
-            next_key,
-        )
-    }
-
     /// Commitment binding an encoded stateful public key with a stateless
     /// `pk_seed`/`hypertree_root` pair, mirroring
     /// `SHRINCS.publicKeyCommitmentFromParts`. Exposed for callers that need
-    /// to derive a candidate bundle's commitment before it is installed
-    /// (e.g. building a `StatefulRotationTarget`, whose commitment mixes a
-    /// replacement stateful key with the *current* key's stateless
-    /// components rather than its own).
+    /// to derive a candidate bundle's commitment before it is installed.
     pub fn public_key_commitment(
         &self,
         stateful_public_key: &[u8],

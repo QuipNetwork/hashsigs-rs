@@ -16,7 +16,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 
-//! SHRINCS hybrid scheme: commitments, action/rotation hashes, dispatch.
+//! SHRINCS hybrid scheme: commitments, action hashes, dispatch.
 //!
 //! Wraps independent `sphincs_plus_c` (stateless) and `uxmss` (stateful).
 
@@ -24,7 +24,6 @@ pub(crate) mod uxmss;
 mod dispatch;
 /// The composed SHRINCS key: SPHINCS+C ⊕ UXMSS ⊕ commitment.
 pub mod keys;
-mod messages;
 mod public_key;
 mod signer_types;
 mod signer_utils;
@@ -51,28 +50,21 @@ pub use crate::primitives::profiles::{
     WOTS_TARGET_SUM_STATEFUL, WOTS_TARGET_SUM_STATELESS,
 };
 pub use crate::types::{
-    ActionContext, ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey, RotationContext,
-    RotationTarget, StatefulPublicKey, StatefulRotationTarget, StatefulSignature,
-    StatelessSignature, WotsCSignature, ADDRESS_TYPE_FORS_TREE, ADDRESS_TYPE_TREE,
-    ADDRESS_TYPE_WOTS_HASH, HASH_LEN, HASH_SUITE_KECCAK_256, HASH_SUITE_SHA2_256,
-    STATEFUL_PUBLIC_KEY_BYTES,
+    ActionContext, ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey,
+    StatefulPublicKey, StatefulSignature, StatelessSignature, WotsCSignature,
+    ADDRESS_TYPE_FORS_TREE, ADDRESS_TYPE_TREE, ADDRESS_TYPE_WOTS_HASH, HASH_LEN,
+    HASH_SUITE_KECCAK_256, HASH_SUITE_SHA2_256, STATEFUL_PUBLIC_KEY_BYTES,
 };
 
-// Re-export commitment/message helpers used by account/wasm/tests.
-#[allow(unused_imports)] // used by account/wasm/test modules under cfg
+// Re-export commitment helpers used by wasm/tests.
+#[allow(unused_imports)] // used by wasm/test modules under cfg
 pub(crate) use dispatch::{
-    matches_expected_public_key_commitment, rotate_stateful_via_stateless, stateless_rotate,
-    valid_action_context, valid_public_key, valid_rotation_context, verify_stateful,
+    matches_expected_public_key_commitment, valid_public_key, verify_stateful,
     verify_stateful_unsafe_raw, verify_stateless,
 };
 #[allow(unused_imports)]
-#[cfg(any(test, feature = "wasm-bindings", feature = "std"))]
+#[cfg(test)]
 pub(crate) use dispatch::verify_stateless_unsafe_raw;
-#[allow(unused_imports)]
-pub(crate) use messages::{
-    full_rotation_message_hash, stateful_action_message_hash, stateful_rotation_message_hash,
-    stateless_action_message_hash,
-};
 #[allow(unused_imports)]
 pub(crate) use public_key::{
     decode_stateful_public_key, encode_stateful_public_key, public_key_commitment,
