@@ -27,7 +27,7 @@
 // check-cfg allow-list for host builds.
 #![allow(unexpected_cfgs)]
 
-use crate::types::HASH_LEN;
+use crate::primitives::HASH_LEN;
 
 /// Keccak-256 (not NIST SHA3-256) over the concatenation of `parts`.
 ///

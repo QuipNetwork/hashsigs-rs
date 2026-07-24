@@ -25,7 +25,7 @@
 //! instead, which `cargo-build-sbf` verifies at compile time (stack-offset
 //! overflows are build warnings treated as findings).
 
-use crate::types::HASH_LEN;
+use crate::primitives::HASH_LEN;
 
 pub(crate) type NodeBuf<const N: usize> = [[u8; HASH_LEN]; N];
 

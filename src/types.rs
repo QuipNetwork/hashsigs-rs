@@ -17,23 +17,13 @@
 
 //! Shared SHRINCS wire types and structural constants.
 
-// HASH_LEN is the 32-byte hash *slot* width shared by every profile: every
-// hash-valued wire field is a 32-byte slot (Solidity `bytes32`) regardless of
-// the parameter set. A truncated profile emits high-aligned, zero-padded node
-// values inside this slot (see HASH_TRUNC_LEN and `mask_hash`).
 use alloc::vec::Vec;
 
-pub const HASH_LEN: usize = 32;
-pub const HASH_SUITE_KECCAK_256: u32 = 1;
-pub const HASH_SUITE_SHA2_256: u32 = 2;
+use crate::primitives::HASH_LEN;
 
 // Encoded stateful public key layout, kept 68 bytes across all profiles:
 // 32-byte pkSeed slot || 32-byte root slot || 4-byte maxSignatures.
 pub const STATEFUL_PUBLIC_KEY_BYTES: usize = 68;
-
-pub const ADDRESS_TYPE_WOTS_HASH: u32 = 0;
-pub const ADDRESS_TYPE_TREE: u32 = 2;
-pub const ADDRESS_TYPE_FORS_TREE: u32 = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicKey {

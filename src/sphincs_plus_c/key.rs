@@ -37,7 +37,7 @@ use core::fmt;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::primitives::hash::word32;
-use crate::types::HASH_LEN;
+use crate::primitives::HASH_LEN;
 
 /// Secret `SK.seed` material: derives FORS-C and hypertree WOTS-C secrets.
 #[derive(Clone, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]

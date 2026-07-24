@@ -25,7 +25,7 @@
 use alloc::vec::Vec;
 
 use crate::primitives::hash::{hash_node, wots_chain_address_word};
-use crate::types::HASH_LEN;
+use crate::primitives::HASH_LEN;
 
 /// Maximum grind counter for WOTS-C target-sum searches (stateless + stateful).
 /// Distinct from `profiles::FORS_C_MAX_GRIND_COUNTER` (FORS-only).
@@ -126,7 +126,7 @@ pub(crate) fn stateful_chain_no_mask(
     walk: ChainWalk,
 ) -> [u8; HASH_LEN] {
     use crate::primitives::hash::{address_word32, AddressWord32};
-    use crate::types::ADDRESS_TYPE_WOTS_HASH;
+    use crate::primitives::ADDRESS_TYPE_WOTS_HASH;
     wots_chain_walk(
         b"uxmss-wots-chain",
         pk_seed,

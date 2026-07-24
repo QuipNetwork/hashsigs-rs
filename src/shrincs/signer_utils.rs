@@ -28,7 +28,8 @@ use alloc::vec::Vec;
 
 pub(crate) use crate::primitives::hash::hash_packed;
 
-use crate::types::{PublicKey, HASH_LEN};
+use crate::primitives::HASH_LEN;
+use crate::types::PublicKey;
 use super::public_key::public_key_commitment;
 
 pub(crate) fn public_key_from_components(

@@ -25,7 +25,7 @@
 //! consume, so a verifier built to this interface interoperates with them;
 //! the name here stays scheme-neutral because the interface is portable.
 
-use crate::types::HASH_LEN;
+use crate::primitives::HASH_LEN;
 
 /// Outcome of a verifier-interface call: a valid signature, a well-formed
 /// but rejected one, or an envelope that could not be decoded.

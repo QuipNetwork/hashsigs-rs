@@ -17,8 +17,8 @@
 
 //! SHA-256 scheme-hash suite (HASH_SUITE_ID = 2).
 
-use crate::types::HASH_LEN;
-use crate::types::HASH_SUITE_SHA2_256;
+use crate::primitives::HASH_LEN;
+use crate::primitives::HASH_SUITE_SHA2_256;
 
 pub const HASH_SUITE_ID: u32 = HASH_SUITE_SHA2_256;
 

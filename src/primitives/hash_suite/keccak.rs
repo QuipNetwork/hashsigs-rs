@@ -17,8 +17,8 @@
 
 //! Keccak-256 scheme-hash suite (HASH_SUITE_ID = 1).
 
-use crate::types::HASH_LEN;
-use crate::types::HASH_SUITE_KECCAK_256;
+use crate::primitives::HASH_LEN;
+use crate::primitives::HASH_SUITE_KECCAK_256;
 
 pub const HASH_SUITE_ID: u32 = HASH_SUITE_KECCAK_256;
 

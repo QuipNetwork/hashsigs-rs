@@ -25,7 +25,7 @@
 use alloc::vec;
 use alloc::vec::Vec;
 
-use crate::types::HASH_LEN;
+use crate::primitives::HASH_LEN;
 
 /// Compute the Merkle root and auth path for `selected_leaf` without storing
 /// the full leaf level.

@@ -31,8 +31,9 @@ use crate::primitives::hash::{base_w16_digit, hash_node, hash_packed, word32};
 use crate::primitives::profiles::{
     WOTS_BASE_STATEFUL, WOTS_CHAINS_STATEFUL, WOTS_TARGET_SUM_STATEFUL,
 };
-use crate::types::{StatefulPublicKey, StatefulSignature, HASH_LEN};
+use crate::types::{StatefulPublicKey, StatefulSignature};
 use crate::primitives::wotsplusc;
+use crate::primitives::HASH_LEN;
 use crate::primitives::wotsplusc::WOTS_C_MAX_GRIND_COUNTER;
 
 pub(crate) fn verify_stateful_unsafe_raw(

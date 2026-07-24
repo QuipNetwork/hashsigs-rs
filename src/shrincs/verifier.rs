@@ -29,11 +29,14 @@ use crate::verifier::VerifyOutcome;
 // Wire types/constants live in `crate::types` after the restructure. Re-export
 // them here so the historical path `hashsigs_rs::shrincs::verifier::*` still
 // resolves (main used `pub use self::shrincs_verifier_types::*`).
+pub use crate::primitives::{
+    ADDRESS_TYPE_FORS_TREE, ADDRESS_TYPE_TREE, ADDRESS_TYPE_WOTS_HASH, HASH_LEN,
+    HASH_SUITE_KECCAK_256,
+};
 pub use crate::types::{
     ActionContext, ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey,
     StatefulPublicKey, StatefulSignature, StatelessSignature, WotsCSignature,
-    ADDRESS_TYPE_FORS_TREE, ADDRESS_TYPE_TREE, ADDRESS_TYPE_WOTS_HASH, HASH_LEN,
-    HASH_SUITE_KECCAK_256, STATEFUL_PUBLIC_KEY_BYTES,
+    STATEFUL_PUBLIC_KEY_BYTES,
 };
 // Profile parameter tuple also lived in main's shrincs_verifier_types (via
 // `pub use profile::*`); re-export from the current profiles module.

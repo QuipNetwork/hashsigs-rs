@@ -25,8 +25,9 @@
 use crate::primitives::hash::word32;
 use crate::sphincs_plus_c::hypertree::hypertree_public_root;
 use crate::sphincs_plus_c::{self};
-use crate::types::{ActionContext, PublicKey, StatefulSignature, StatelessSignature, HASH_LEN};
+use crate::types::{ActionContext, PublicKey, StatefulSignature, StatelessSignature};
 use crate::shrincs::uxmss;
+use crate::primitives::HASH_LEN;
 
 pub use super::signer_types::ShrincsSignerResult;
 use super::dispatch::stateful_action_message_hash;
@@ -264,7 +265,7 @@ impl ShrincsSigner {
 
 #[cfg(test)]
 mod tests {
-    use crate::types::HASH_LEN;
+    use crate::primitives::HASH_LEN;
     use crate::shrincs::test_fixtures::{
         fixture_entry_opt, fixture_pair, fixture_path, load_fixture_file,
         stateful_signer_fixture_path, TestKeyMode,

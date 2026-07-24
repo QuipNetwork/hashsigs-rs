@@ -22,7 +22,8 @@
 //! is arbitrary bytes (or raw 32-byte hash via `to_message` / `verify_hash`).
 //! No SHRINCS public-key-bundle commitment and no action envelope.
 
-use crate::types::{StatelessSignature, HASH_LEN};
+use crate::primitives::HASH_LEN;
+use crate::types::StatelessSignature;
 
 /// Convert a 32-byte hash into the signed message bytes.
 /// The hash IS the message: exactly its 32 bytes.

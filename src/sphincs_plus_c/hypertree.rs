@@ -34,9 +34,10 @@ use crate::primitives::profiles::{
     HYPERTREE_HEIGHT, NUM_HYPERTREE_LAYERS, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN,
     WOTS_TARGET_SUM_STATELESS,
 };
-use crate::types::{HypertreeLayerSignature, WotsCSignature, HASH_LEN};
+use crate::types::{HypertreeLayerSignature, WotsCSignature};
 use super::key::Key;
 use crate::primitives::wotsplusc;
+use crate::primitives::HASH_LEN;
 use crate::primitives::wotsplusc::WOTS_C_MAX_GRIND_COUNTER;
 
 /// Layer-0 seed coordinates selected by the FORS message digest.

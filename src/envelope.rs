@@ -70,9 +70,10 @@ use crate::primitives::profiles::{
     FORS_TREE_HEIGHT, HYPERTREE_HEIGHT, NUM_FORS_TREES, NUM_HYPERTREE_LAYERS, NUM_WOTS_CHAINS,
     WOTS_CHAINS_STATEFUL,
 };
+use crate::primitives::HASH_LEN;
 use crate::types::{
     ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey, StatefulSignature,
-    StatelessSignature, WotsCSignature, HASH_LEN,
+    StatelessSignature, WotsCSignature,
 };
 
 /// Upper bound on a stateful auth-path length (equals the leaf index).

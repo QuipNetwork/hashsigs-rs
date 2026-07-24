@@ -26,9 +26,10 @@ use alloc::vec::Vec;
 use crate::primitives::hash::keccak_packed;
 use crate::primitives::hash::word32;
 use crate::primitives::hash_suite::HASH_SUITE_ID;
+use crate::primitives::HASH_LEN;
 use crate::sphincs_plus_c;
 use crate::types::{
-    ActionContext, PublicKey, StatefulSignature, StatelessSignature, HASH_LEN,
+    ActionContext, PublicKey, StatefulSignature, StatelessSignature,
     STATEFUL_PUBLIC_KEY_BYTES,
 };
 use crate::shrincs::uxmss;

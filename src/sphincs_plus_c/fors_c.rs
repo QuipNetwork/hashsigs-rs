@@ -34,7 +34,8 @@ use crate::primitives::profiles::{
     NUM_HYPERTREE_LAYERS,
 };
 use super::key::Key;
-use crate::types::{ForsEntry, ForsSignature, HASH_LEN};
+use crate::primitives::HASH_LEN;
+use crate::types::{ForsEntry, ForsSignature};
 
 /// Signed FORS trees per signature: the final tree is omitted (FORS-C).
 const SIGNED_TREES: usize = NUM_FORS_TREES as usize - 1;
@@ -644,7 +645,7 @@ mod measurement_tests {
     use super::{signer_fors_digest, SigningForsDigest};
     use crate::primitives::hash::hash_packed;
     use crate::primitives::profiles::FORS_C_MAX_GRIND_COUNTER;
-    use crate::types::HASH_LEN;
+    use crate::primitives::HASH_LEN;
 
     fn measurement_key(seed: &[u8], _max: u32) -> Key {
         hashsigs_println!(

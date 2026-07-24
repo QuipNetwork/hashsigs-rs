@@ -22,7 +22,8 @@
 //! 32-byte hash. No SHRINCS commitment or action envelope.
 
 use crate::sphincs_plus_c::{self, PublicKey};
-use crate::types::{StatelessSignature, HASH_LEN};
+use crate::primitives::HASH_LEN;
+use crate::types::StatelessSignature;
 
 /// Independent stateless-only verifier (Solidity `SPHINCSPlusCVerifier` shape).
 pub struct SphincsPlusCVerifier;
