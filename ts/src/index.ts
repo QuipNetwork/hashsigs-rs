@@ -100,7 +100,7 @@ function readU32BE(bytes: Uint8Array, offset: number): number {
 }
 
 // ── SphincsPlusCKeys ser/de: 128-byte secret = skSeed(32) ‖ prfSeed(32) ‖
-// pkSeed(32) ‖ root(32) (`SphincsPlusCSigningKey`'s field order). The
+// pkSeed(32) ‖ root(32) (the flat SPHINCS+C secret's field order). The
 // 64-byte publicKey is exactly the secret's trailing pkSeed ‖ root, so it is
 // always re-derived from the secret, never carried separately.
 
