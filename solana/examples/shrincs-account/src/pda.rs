@@ -200,30 +200,39 @@ fn create_or_adopt_pda(init: &PdaInit, signer_seeds: &[&[u8]]) -> ProgramResult 
     Ok(())
 }
 
+/// Accounts required to touch a leaf-bitmap word PDA, bundled to keep
+/// [`mark_leaf_used`] within the positional-argument budget.
+pub struct LeafBitmapAccounts<'a, 'info> {
+    /// The 32-byte bitmap-word PDA for the leaf's word (created on first use).
+    pub bitmap_account: &'a AccountInfo<'info>,
+    /// Signer funding the word PDA's rent on first use.
+    pub payer: &'a AccountInfo<'info>,
+    /// System program, required by the create-or-adopt CPIs.
+    pub system_program: &'a AccountInfo<'info>,
+}
+
 /// Mark a stateful leaf used under bitmap tracking, creating the 32-byte word
-/// PDA on first use in that word. Rent for that account is paid by `payer`.
-#[allow(clippy::too_many_arguments)]
-pub fn mark_leaf_used<'a>(
+/// PDA on first use in that word. Rent for that account is paid by
+/// `accounts.payer`.
+pub fn mark_leaf_used(
     program_id: &Pubkey,
     account_key: &Pubkey,
     key_version: &[u8; HASH_LEN],
     leaf_index: u32,
-    bitmap_account: &AccountInfo<'a>,
-    payer: &AccountInfo<'a>,
-    system_program: &AccountInfo<'a>,
+    accounts: &LeafBitmapAccounts,
 ) -> ProgramResult {
     let word_index = bitmap_word_index(leaf_index);
     let (expected_pda, bump) = bitmap_word_pda(program_id, account_key, key_version, word_index);
-    if expected_pda != *bitmap_account.key {
+    if expected_pda != *accounts.bitmap_account.key {
         return Err(ProgramError::InvalidSeeds);
     }
-    if bitmap_account.data_is_empty() {
+    if accounts.bitmap_account.data_is_empty() {
         let word_index_le = word_index.to_le_bytes();
         create_or_adopt_pda(
             &PdaInit {
-                payer,
-                target: bitmap_account,
-                system_program,
+                payer: accounts.payer,
+                target: accounts.bitmap_account,
+                system_program: accounts.system_program,
                 program_id,
                 space: HASH_LEN,
             },
@@ -236,7 +245,7 @@ pub fn mark_leaf_used<'a>(
             ],
         )?;
     }
-    let mut data = bitmap_account.try_borrow_mut_data()?;
+    let mut data = accounts.bitmap_account.try_borrow_mut_data()?;
     // Mirror is_leaf_used's length check: never index a short account.
     if data.len() != HASH_LEN {
         return Err(ProgramError::InvalidAccountData);
@@ -356,9 +365,11 @@ mod tests {
             &account_key,
             &key_version,
             leaf_index,
-            &bitmap_account,
-            &payer,
-            &system_program,
+            &LeafBitmapAccounts {
+                bitmap_account: &bitmap_account,
+                payer: &payer,
+                system_program: &system_program,
+            },
         );
         assert_eq!(result, Err(ProgramError::InvalidAccountData));
     }
