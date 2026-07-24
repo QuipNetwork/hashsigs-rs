@@ -27,7 +27,7 @@
 //! This same [`Key`] is embedded as the stateless half of a
 //! `shrincs::Keys` (composition, not duplication).
 //!
-//! Flat byte layout (matching the wasm ABI and the legacy serialization):
+//! Flat byte layout (matching the wasm ABI):
 //! `Secret` = `sk_seed(32) ‖ prf_seed(32)` (64 bytes), `PublicKey` =
 //! `pk_seed(32) ‖ root(32)` (64 bytes), `Key` = `Secret ‖ PublicKey`
 //! (128 bytes).
@@ -37,7 +37,7 @@ use core::fmt;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::primitives::hash::word32;
-use crate::types::{SphincsPlusCSigningKey, HASH_LEN};
+use crate::types::HASH_LEN;
 
 /// Secret `SK.seed` material: derives FORS-C and hypertree WOTS-C secrets.
 #[derive(Clone, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]
@@ -224,8 +224,8 @@ impl PublicKey {
 }
 
 impl Key {
-    /// Flat layout `Secret(64) ‖ PublicKey(64)`, 128 bytes — the legacy
-    /// SPHINCS+C `secretKey` bytes exactly.
+    /// Flat layout `Secret(64) ‖ PublicKey(64)`, 128 bytes — the SPHINCS+C
+    /// `secretKey` bytes exactly.
     pub fn to_bytes(&self) -> [u8; 128] {
         let mut out = [0u8; 128];
         out[..64].copy_from_slice(&self.secret.to_bytes());
@@ -241,34 +241,6 @@ impl Key {
             secret: Secret::from_bytes(bytes.get(..64)?)?,
             public_key: PublicKey::from_bytes(bytes.get(64..)?)?,
         })
-    }
-
-    // ── Temporary bridges to the legacy flat types. Removed once every
-    //    consumer (`fors_c`, `hypertree`, `wasm`) is migrated to `Key`. ──
-
-    /// Reconstruct the legacy signing-key struct still consumed by the
-    /// crypto internals during migration.
-    pub(crate) fn to_legacy_signing_key(&self) -> SphincsPlusCSigningKey {
-        SphincsPlusCSigningKey {
-            stateless_sk_seed: *self.secret.sk_seed.as_bytes(),
-            stateless_prf_seed: *self.secret.prf_seed.as_bytes(),
-            pk_seed: *self.public_key.pk_seed.as_bytes(),
-            hypertree_root: *self.public_key.root.as_bytes(),
-        }
-    }
-
-    /// Build a `Key` from the legacy signing-key struct.
-    pub(crate) fn from_legacy_signing_key(key: &SphincsPlusCSigningKey) -> Self {
-        Self {
-            secret: Secret {
-                sk_seed: SkSeed::new(key.stateless_sk_seed),
-                prf_seed: PrfSeed::new(key.stateless_prf_seed),
-            },
-            public_key: PublicKey {
-                pk_seed: PkSeed::new(key.pk_seed),
-                root: Root::new(key.hypertree_root),
-            },
-        }
     }
 }
 
@@ -302,16 +274,6 @@ mod tests {
         let bytes = key.to_bytes();
         assert_eq!(&key.secret.to_bytes(), &bytes[..64]);
         assert_eq!(&key.public_key.to_bytes(), &bytes[64..]);
-    }
-
-    #[test]
-    fn legacy_bridge_round_trips() {
-        let key = sample_key();
-        let legacy = key.to_legacy_signing_key();
-        assert_eq!(Key::from_legacy_signing_key(&legacy).secret, key.secret);
-        // The legacy signing key's 128-byte order matches Key::to_bytes.
-        assert_eq!(legacy.stateless_sk_seed, *key.secret.sk_seed.as_bytes());
-        assert_eq!(legacy.hypertree_root, *key.public_key.root.as_bytes());
     }
 
     #[test]

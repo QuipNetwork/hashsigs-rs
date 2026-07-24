@@ -24,8 +24,7 @@
 //!
 //! The commitment is derivable from the two public keys, so it is never part
 //! of the 264-byte secret serialization; [`Keys::from_bytes`] recomputes it.
-//! Flat layout: `stateful(136) ‖ stateless(128)` = 264 bytes, byte-identical
-//! to the legacy `ShrincsSigningKey` order.
+//! Flat layout: `stateful(136) ‖ stateless(128)` = 264 bytes.
 
 use crate::primitives::hash::word32;
 use crate::shrincs::signer::{INITIAL_STATEFUL_LEAF_INDEX, MAX_STATEFUL_SIGNATURES_LIMIT};

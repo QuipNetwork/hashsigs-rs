@@ -35,9 +35,6 @@ use crate::shrincs::{
 // the shared scheme-hash, rather than going through the hex DTO plumbing
 // above.
 #[cfg(any(test, feature = "wasm-bindings"))]
-#[cfg(any(test, feature = "wasm-bindings"))]
-use crate::types::SphincsPlusCSigningKey;
-#[cfg(any(test, feature = "wasm-bindings"))]
 use zeroize::Zeroize;
 
 #[cfg(feature = "wasm-bindings")]
@@ -140,34 +137,16 @@ fn message_hash(message: &[u8]) -> Result<[u8; HASH_LEN], WasmErr> {
     })
 }
 
-/// SPHINCS+C secret key: `statelessSkSeed(32) ‖ statelessPrfSeed(32) ‖
-/// pkSeed(32) ‖ hypertreeRoot(32)`, 128 bytes total (the field order of
-/// `SphincsPlusCSigningKey`).
-#[cfg(any(test, feature = "wasm-bindings"))]
-fn serialize_sphincs_plus_c_signing_key(key: &SphincsPlusCSigningKey) -> alloc::vec::Vec<u8> {
-    let mut out = alloc::vec::Vec::with_capacity(128);
-    out.extend_from_slice(&key.stateless_sk_seed);
-    out.extend_from_slice(&key.stateless_prf_seed);
-    out.extend_from_slice(&key.pk_seed);
-    out.extend_from_slice(&key.hypertree_root);
-    out
-}
-
+/// Parse a SPHINCS+C secret key: `statelessSkSeed(32) ‖ statelessPrfSeed(32)
+/// ‖ pkSeed(32) ‖ hypertreeRoot(32)`, 128 bytes total (the field order of
+/// `sphincs_plus_c::Key::to_bytes`).
 #[cfg(any(test, feature = "wasm-bindings"))]
 fn deserialize_sphincs_plus_c_signing_key(
     bytes: &[u8],
-) -> Result<SphincsPlusCSigningKey, WasmErr> {
-    if bytes.len() != 128 {
-        return Err(WasmErr {
-            code: ERR_BAD_LENGTH,
-            message: format!("SPHINCS+C secretKey must be 128 bytes, got {}", bytes.len()),
-        });
-    }
-    Ok(SphincsPlusCSigningKey {
-        stateless_sk_seed: bytes_word32(&bytes[0..32])?,
-        stateless_prf_seed: bytes_word32(&bytes[32..64])?,
-        pk_seed: bytes_word32(&bytes[64..96])?,
-        hypertree_root: bytes_word32(&bytes[96..128])?,
+) -> Result<crate::sphincs_plus_c::Key, WasmErr> {
+    crate::sphincs_plus_c::Key::from_bytes(bytes).ok_or_else(|| WasmErr {
+        code: ERR_BAD_LENGTH,
+        message: format!("SPHINCS+C secretKey must be 128 bytes, got {}", bytes.len()),
     })
 }
 
@@ -177,7 +156,7 @@ fn deserialize_sphincs_plus_c_signing_key(
 #[cfg(feature = "wasm-bindings")]
 #[wasm_bindgen]
 pub struct WasmSphincsPlusCKeys {
-    signing_key: SphincsPlusCSigningKey,
+    signing_key: crate::sphincs_plus_c::Key,
 }
 
 #[cfg(feature = "wasm-bindings")]
@@ -185,14 +164,14 @@ pub struct WasmSphincsPlusCKeys {
 impl WasmSphincsPlusCKeys {
     #[wasm_bindgen(getter, js_name = secretKey)]
     pub fn secret_key(&self) -> alloc::vec::Vec<u8> {
-        serialize_sphincs_plus_c_signing_key(&self.signing_key)
+        self.signing_key.to_bytes().to_vec()
     }
 
     #[wasm_bindgen(getter, js_name = publicKey)]
     pub fn public_key(&self) -> alloc::vec::Vec<u8> {
         let mut out = alloc::vec::Vec::with_capacity(64);
-        out.extend_from_slice(&self.signing_key.pk_seed);
-        out.extend_from_slice(&self.signing_key.hypertree_root);
+        out.extend_from_slice(self.signing_key.public_key.pk_seed.as_bytes());
+        out.extend_from_slice(self.signing_key.public_key.root.as_bytes());
         out
     }
 }
@@ -215,8 +194,8 @@ pub fn sphincs_plus_c_keygen(seed: &[u8]) -> Result<WasmSphincsPlusCKeys, JsValu
     let stateless_prf_seed = crate::shrincs::derive32(b"shrincs-stateless-prf-seed", &seed, &[]);
     let pk_seed = crate::shrincs::derive32(b"shrincs-pk-seed", &seed, &[]);
     seed.zeroize();
-    let signing_key = crate::sphincs_plus_c::keygen(stateless_sk_seed, stateless_prf_seed, pk_seed)
-        .to_legacy_signing_key();
+    let signing_key =
+        crate::sphincs_plus_c::keygen(stateless_sk_seed, stateless_prf_seed, pk_seed);
     Ok(WasmSphincsPlusCKeys { signing_key })
 }
 
@@ -230,8 +209,7 @@ pub fn sphincs_plus_c_sign(
     message: &[u8],
     secret_key: &[u8],
 ) -> Result<alloc::vec::Vec<u8>, JsValue> {
-    let signing_key = deserialize_sphincs_plus_c_signing_key(secret_key).map_err(js_error)?;
-    let full_key = crate::sphincs_plus_c::key::Key::from_legacy_signing_key(&signing_key);
+    let full_key = deserialize_sphincs_plus_c_signing_key(secret_key).map_err(js_error)?;
     let hash = message_hash(message).map_err(js_error)?;
     let signature = crate::sphincs_plus_c::sign(&full_key, &hash).ok_or_else(|| {
         js_error(WasmErr {
@@ -262,8 +240,7 @@ pub fn sphincs_plus_c_verify(signature: &[u8], message: &[u8], public_key: &[u8]
 /// statefulPkSeed(32) ‖ statefulRoot(32) ‖ maxStatefulSignatures(u32 BE) ‖
 /// nextStatefulLeafIndex(u32 BE) ‖ statelessSkSeed(32) ‖ statelessPrfSeed(32)
 /// ‖ pkSeed(32) ‖ hypertreeRoot(32)`, 264 bytes total — `Keys::to_bytes`'s
-/// flat layout (`stateful(136) ‖ stateless(128)`), the same field order the
-/// legacy `ShrincsSigningKey` used.
+/// flat layout (`stateful(136) ‖ stateless(128)`).
 #[cfg(any(test, feature = "wasm-bindings"))]
 fn serialize_shrincs_signing_key(key: &Keys) -> alloc::vec::Vec<u8> {
     key.to_bytes().to_vec()
@@ -944,13 +921,8 @@ mod tests {
     #[test]
     fn sphincs_plus_c_signing_key_flat_serialization_round_trips() {
         let (key, _) = signing_key_and_public_key();
-        let spk = SphincsPlusCSigningKey {
-            stateless_sk_seed: *key.stateless.secret.sk_seed.as_bytes(),
-            stateless_prf_seed: *key.stateless.secret.prf_seed.as_bytes(),
-            pk_seed: *key.stateless.public_key.pk_seed.as_bytes(),
-            hypertree_root: *key.stateless.public_key.root.as_bytes(),
-        };
-        let bytes = serialize_sphincs_plus_c_signing_key(&spk);
+        let spk = key.stateless.clone();
+        let bytes = spk.to_bytes();
         assert_eq!(bytes.len(), 128);
         let parsed = deserialize_sphincs_plus_c_signing_key(&bytes).unwrap();
         assert_eq!(parsed, spk);

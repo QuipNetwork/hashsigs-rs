@@ -640,13 +640,13 @@ fn winning_fors_counter_and_digest(
 
 #[cfg(all(test, any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
 mod measurement_tests {
+    use super::super::key::{Key, PkSeed, PrfSeed, PublicKey, Root, Secret, SkSeed};
     use super::{signer_fors_digest, SigningForsDigest};
     use crate::primitives::hash::hash_packed;
     use crate::primitives::profiles::FORS_C_MAX_GRIND_COUNTER;
-    use crate::types::SphincsPlusCSigningKey;
     use crate::types::HASH_LEN;
 
-    fn measurement_key(seed: &[u8], _max: u32) -> SphincsPlusCSigningKey {
+    fn measurement_key(seed: &[u8], _max: u32) -> Key {
         hashsigs_println!(
             "measurement setup: deriving stateless key profile={}",
             crate::primitives::profiles::PROFILE_NAME
@@ -654,11 +654,15 @@ mod measurement_tests {
         fn d(domain: &[u8], seed: &[u8]) -> [u8; HASH_LEN] {
             hash_packed(&[domain, seed, &[]])
         }
-        let key = SphincsPlusCSigningKey {
-            stateless_sk_seed: d(b"shrincs-stateless-sk-seed", seed),
-            stateless_prf_seed: d(b"shrincs-stateless-prf-seed", seed),
-            pk_seed: d(b"shrincs-pk-seed", seed),
-            hypertree_root: d(b"placeholder-hypertree-root", seed),
+        let key = Key {
+            secret: Secret {
+                sk_seed: SkSeed::new(d(b"shrincs-stateless-sk-seed", seed)),
+                prf_seed: PrfSeed::new(d(b"shrincs-stateless-prf-seed", seed)),
+            },
+            public_key: PublicKey {
+                pk_seed: PkSeed::new(d(b"shrincs-pk-seed", seed)),
+                root: Root::new(d(b"placeholder-hypertree-root", seed)),
+            },
         };
         hashsigs_println!("measurement setup: key material ready");
         key
@@ -688,7 +692,7 @@ mod measurement_tests {
     }
 
     fn measured_winning_fors_counter_and_digest(
-        signing_key: &SphincsPlusCSigningKey,
+        signing_key: &Key,
         message: &[u8],
         randomizer: &[u8; HASH_LEN],
         limit: u32,
@@ -703,8 +707,8 @@ mod measurement_tests {
                 );
             }
             let Some(digest) = signer_fors_digest(
-                &signing_key.pk_seed,
-                &signing_key.hypertree_root,
+                signing_key.public_key.pk_seed.as_bytes(),
+                signing_key.public_key.root.as_bytes(),
                 message,
                 randomizer,
                 counter,
@@ -745,7 +749,7 @@ mod measurement_tests {
             ]);
             let randomizer = hash_packed(&[
                 b"fors-randomizer".as_ref(),
-                signing_key.stateless_prf_seed.as_ref(),
+                signing_key.secret.prf_seed.as_bytes().as_ref(),
                 message.as_ref(),
             ]);
             match measured_winning_fors_counter_and_digest(

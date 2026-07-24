@@ -172,7 +172,7 @@ fn root_from_unbalanced_path(
 // Each 32-byte role is its own type, distinct from the identically-shaped
 // `sphincs_plus_c` roles by module path, so the two `pk_seed`s / roots of the
 // SHRINCS hybrid cannot be swapped. This `Key` is the stateful half of a
-// `shrincs::Keys`. Flat layout (matching the wasm ABI / legacy serialization):
+// `shrincs::Keys`. Flat layout (matching the wasm ABI):
 // `Secret = sk_seed(32) ‖ prf_seed(32)` (64 B), `PublicKey =
 // pk_seed(32) ‖ root(32) ‖ max_signatures(4 BE)` (68 B), `Key = Secret ‖
 // PublicKey ‖ next_leaf_index(4 BE)` (136 B).
@@ -658,15 +658,15 @@ mod key_tests {
     }
 
     #[test]
-    fn public_key_bridges_to_and_from_legacy() {
+    fn public_key_bridges_to_and_from_stateful_public_key() {
         let pk = PublicKey {
             pk_seed: PkSeed::new([1u8; HASH_LEN]),
             root: Root::new([2u8; HASH_LEN]),
             max_signatures: 8,
         };
-        let legacy: StatefulPublicKey = pk.into();
-        assert_eq!(legacy.max_signatures, 8);
-        assert_eq!(PublicKey::from(legacy), pk);
+        let flat: StatefulPublicKey = pk.into();
+        assert_eq!(flat.max_signatures, 8);
+        assert_eq!(PublicKey::from(flat), pk);
     }
 
     #[test]
