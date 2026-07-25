@@ -2,9 +2,11 @@
 name = "hashsigs-rs-solana"
 version = "0.0.1"
 edition = "2021"
+rust-version = "1.89"
 authors = ["Richard T. Carback III <rick.carback@gmail.com>"]
 description = "Solana program for WOTS+"
 license = "AGPL-3.0-or-later"
+repository = "https://github.com/quipnetwork/hashsigs-rs"
 
 [lib]
 crate-type = ["cdylib", "lib"]

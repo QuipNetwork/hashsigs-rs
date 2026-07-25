@@ -47,6 +47,26 @@ pub enum VerifyOutcome {
 
 /// A verifier that checks an opaque signature envelope by an opaque key over
 /// a 32-byte message hash.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// # fn main() -> Result<(), ()> {
+/// use hashsigs_rs::shrincs::{sign, ShrincsSigner, ShrincsVerifier};
+/// use hashsigs_rs::{VerifierInterface, VerifyOutcome};
+///
+/// let (mut keys, public_key) = ShrincsSigner::keygen(b"iface-seed", 4).ok_or(())?;
+/// let hash = [3u8; 32];
+/// let envelope = sign(&mut keys, &hash).ok_or(())?;
+/// let outcome = ShrincsVerifier::new().verify(
+///     &public_key.public_key_commitment,
+///     &hash,
+///     &envelope,
+/// );
+/// assert_eq!(outcome, VerifyOutcome::Valid);
+/// # Ok(())
+/// # }
+/// ```
 pub trait VerifierInterface {
     fn verify(&self, key: &[u8], hash: &[u8; HASH_LEN], signature: &[u8]) -> VerifyOutcome;
 }

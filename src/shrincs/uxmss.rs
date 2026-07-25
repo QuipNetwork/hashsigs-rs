@@ -255,6 +255,14 @@ impl SkSeed {
     }
 }
 
+impl TryFrom<&[u8]> for SkSeed {
+    type Error = ();
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        Self::from_slice(value).ok_or(())
+    }
+}
+
 impl PrfSeed {
     /// Wrap 32 raw bytes.
     pub const fn new(bytes: [u8; HASH_LEN]) -> Self {
@@ -267,6 +275,14 @@ impl PrfSeed {
     /// Borrow the raw bytes for hashing.
     pub fn as_bytes(&self) -> &[u8; HASH_LEN] {
         &self.0
+    }
+}
+
+impl TryFrom<&[u8]> for PrfSeed {
+    type Error = ();
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        Self::from_slice(value).ok_or(())
     }
 }
 
@@ -285,6 +301,14 @@ impl PkSeed {
     }
 }
 
+impl TryFrom<&[u8]> for PkSeed {
+    type Error = ();
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        Self::from_slice(value).ok_or(())
+    }
+}
+
 impl Root {
     /// Wrap 32 raw bytes.
     pub const fn new(bytes: [u8; HASH_LEN]) -> Self {
@@ -297,6 +321,14 @@ impl Root {
     /// Borrow the raw bytes for hashing.
     pub fn as_bytes(&self) -> &[u8; HASH_LEN] {
         &self.0
+    }
+}
+
+impl TryFrom<&[u8]> for Root {
+    type Error = ();
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        Self::from_slice(value).ok_or(())
     }
 }
 
@@ -313,12 +345,15 @@ impl fmt::Debug for PrfSeed {
 }
 
 /// The secret half of a stateful key: the 64 bytes that are actually secret.
+///
+/// Fields are private; construct via [`Self::new`] / [`Self::from_bytes`] and
+/// read via [`Self::as_sk_seed`] / [`Self::as_prf_seed`].
 #[derive(Clone, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]
 pub struct PrivateKey {
     /// Derives stateful WOTS-C chain secrets.
-    pub sk_seed: SkSeed,
+    sk_seed: SkSeed,
     /// Derives stateful WOTS-C message randomizers.
-    pub prf_seed: PrfSeed,
+    prf_seed: PrfSeed,
 }
 
 impl fmt::Debug for PrivateKey {
@@ -345,14 +380,19 @@ pub struct StructuredPublicKey {
 
 /// A stateful UXMSS key: secret seeds, public bundle, and the monotonic
 /// leaf counter that `sign` advances.
+///
+/// All fields are private so external callers cannot rewind the one-time leaf
+/// counter or splice secret seeds. Construct via [`Self::new`] /
+/// [`Self::from_bytes`]; advance the counter only through the sign path
+/// ([`advance_next_leaf_index`](Self::advance_next_leaf_index)).
 #[derive(Clone, PartialEq, Eq)]
 pub struct Key {
     /// PrivateKey seeds.
-    pub secret: PrivateKey,
+    secret: PrivateKey,
     /// Public seed, root, and budget.
-    pub public_key: StructuredPublicKey,
+    public_key: StructuredPublicKey,
     /// Next monotonic leaf index; advanced on each stateful signature.
-    pub next_leaf_index: u32,
+    next_leaf_index: u32,
 }
 
 impl fmt::Debug for Key {
@@ -388,7 +428,30 @@ impl StructuredPublicKey {
     }
 }
 
+impl TryFrom<&[u8]> for StructuredPublicKey {
+    type Error = ();
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        Self::from_bytes(value).ok_or(())
+    }
+}
+
 impl PrivateKey {
+    /// Assemble from the two seed newtypes.
+    pub const fn new(sk_seed: SkSeed, prf_seed: PrfSeed) -> Self {
+        Self { sk_seed, prf_seed }
+    }
+
+    /// Borrow the secret seed that derives WOTS-C chain secrets.
+    pub fn as_sk_seed(&self) -> &SkSeed {
+        &self.sk_seed
+    }
+
+    /// Borrow the secret seed that derives message randomizers.
+    pub fn as_prf_seed(&self) -> &PrfSeed {
+        &self.prf_seed
+    }
+
     /// Flat layout `sk_seed(32) ‖ prf_seed(32)`, 64 bytes.
     pub fn to_bytes(&self) -> [u8; 64] {
         let mut out = [0u8; 64];
@@ -408,7 +471,49 @@ impl PrivateKey {
     }
 }
 
+impl TryFrom<&[u8]> for PrivateKey {
+    type Error = ();
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        Self::from_bytes(value).ok_or(())
+    }
+}
+
 impl Key {
+    /// Assemble a stateful key from its secret, public half, and leaf counter.
+    pub const fn new(
+        secret: PrivateKey,
+        public_key: StructuredPublicKey,
+        next_leaf_index: u32,
+    ) -> Self {
+        Self {
+            secret,
+            public_key,
+            next_leaf_index,
+        }
+    }
+
+    /// Borrow the secret half (seeds only).
+    pub fn secret(&self) -> &PrivateKey {
+        &self.secret
+    }
+
+    /// Borrow the public seed, root, and signature budget.
+    pub fn public_key(&self) -> &StructuredPublicKey {
+        &self.public_key
+    }
+
+    /// Next one-time leaf the signer will consume.
+    pub fn next_leaf_index(&self) -> u32 {
+        self.next_leaf_index
+    }
+
+    /// Monotonically advance the leaf counter after a successful sign.
+    /// Saturates at `u32::MAX` rather than wrapping.
+    pub(crate) fn advance_next_leaf_index(&mut self) {
+        self.next_leaf_index = self.next_leaf_index.saturating_add(1);
+    }
+
     /// Flat layout `PrivateKey(64) ‖ StructuredPublicKey(68) ‖
     /// next_leaf_index(4 BE)`, 136 bytes.
     pub fn to_bytes(&self) -> [u8; 136] {
@@ -428,6 +533,14 @@ impl Key {
             public_key: StructuredPublicKey::from_bytes(bytes.get(64..132)?)?,
             next_leaf_index: u32::from_be_bytes(word4(bytes.get(132..)?)?),
         })
+    }
+}
+
+impl TryFrom<&[u8]> for Key {
+    type Error = ();
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        Self::from_bytes(value).ok_or(())
     }
 }
 
@@ -463,11 +576,11 @@ fn word4(bytes: &[u8]) -> Option<[u8; 4]> {
 pub(crate) fn sign_stateful_raw(key: &mut Key, message: &[u8]) -> Option<Signature> {
     // The verifier derives the stateful leaf index from auth_path.len(), so the
     // signer must advance one leaf at a time and must never reuse a prior leaf.
-    let leaf_index = key.next_leaf_index;
+    let leaf_index = key.next_leaf_index();
     if leaf_index == 0 {
         return None;
     }
-    if leaf_index > key.public_key.max_signatures {
+    if leaf_index > key.public_key().max_signatures {
         return None;
     }
 
@@ -476,7 +589,7 @@ pub(crate) fn sign_stateful_raw(key: &mut Key, message: &[u8]) -> Option<Signatu
     // stateful_auth_path walks up to max_stateful_signatures nodes and doubled
     // the dominant signing cost.
     let signature = sign_stateful_raw_at_leaf(key, leaf_index, message)?;
-    key.next_leaf_index = leaf_index.saturating_add(1);
+    key.advance_next_leaf_index();
     Some(signature)
 }
 
@@ -491,21 +604,21 @@ pub(crate) fn sign_stateful_raw_at_leaf(
     if leaf_index == 0 {
         return None;
     }
-    if leaf_index > key.public_key.max_signatures {
+    if leaf_index > key.public_key().max_signatures {
         return None;
     }
     let mut signature = sign_stateful_wots_c(
-        key.secret.sk_seed.as_bytes(),
-        key.secret.prf_seed.as_bytes(),
-        key.public_key.pk_seed.as_bytes(),
+        key.secret().as_sk_seed().as_bytes(),
+        key.secret().as_prf_seed().as_bytes(),
+        key.public_key().pk_seed.as_bytes(),
         leaf_index,
         message,
     )?;
     signature.auth_path = stateful_auth_path(
-        key.secret.sk_seed.as_bytes(),
-        key.public_key.pk_seed.as_bytes(),
+        key.secret().as_sk_seed().as_bytes(),
+        key.public_key().pk_seed.as_bytes(),
         leaf_index,
-        key.public_key.max_signatures,
+        key.public_key().max_signatures,
     );
     Some(signature)
 }

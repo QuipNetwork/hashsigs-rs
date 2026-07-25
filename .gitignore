@@ -32,3 +32,5 @@ CLAUDE.md
 
 # Writable cargo home used by CI (must not collide with committed .cargo/)
 .cargo-home/
+.rustcheck/
+.serena/

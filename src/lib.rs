@@ -26,7 +26,7 @@
 //!
 //! # Features
 //!
-//! - **`std`** (default): host surface, thiserror, env traces, serde std.
+//! - **`std`** (default): host surface, env traces, serde std.
 //! - **`alloc`**: `Vec`-based signature wire types (required for crypto APIs).
 //! - **`solana`**: optional `solana-program` + syscall hash routing.
 //! - Profile selectors and `wasm-bindings` as before.
@@ -35,6 +35,10 @@
 //! `no_std + alloc` is the embedded baseline.
 
 #![cfg_attr(not(feature = "std"), no_std)]
+// The core crate contains no `unsafe`. Lock that in — except under
+// `wasm-bindings`, where wasm-bindgen's generated glue emits `unsafe` the crate
+// does not author.
+#![cfg_attr(not(feature = "wasm-bindings"), deny(unsafe_code))]
 // Panic-prevention lints (review bead qg4): library code must not panic on
 // untrusted input. Scoped to non-test builds so `#[cfg(test)]` modules may use
 // unwrap/expect freely. The broader `indexing-slicing` and full `pedantic`

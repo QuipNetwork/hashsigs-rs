@@ -149,6 +149,15 @@ impl PublicKey {
     }
 }
 
+impl TryFrom<&[u8]> for PublicKey {
+    type Error = ();
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        Self::from_bytes(value).ok_or(())
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct WOTSPlus {
     hash_fn: HashFn,
 }

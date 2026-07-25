@@ -223,6 +223,14 @@ impl Signature {
     }
 }
 
+impl TryFrom<&[u8]> for Signature {
+    type Error = ();
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        Self::from_bytes(value).ok_or(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

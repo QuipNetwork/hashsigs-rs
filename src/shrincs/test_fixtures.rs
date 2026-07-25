@@ -77,50 +77,45 @@ pub(crate) struct SigningKeyDto {
 impl From<&Keys> for SigningKeyDto {
     fn from(value: &Keys) -> Self {
         Self {
-            stateful_sk_seed: *value.stateful.secret.sk_seed.as_bytes(),
-            stateful_prf_seed: *value.stateful.secret.prf_seed.as_bytes(),
-            stateful_pk_seed: *value.stateful.public_key.pk_seed.as_bytes(),
-            stateful_root: *value.stateful.public_key.root.as_bytes(),
-            max_stateful_signatures: value.stateful.public_key.max_signatures,
-            next_stateful_leaf_index: value.stateful.next_leaf_index,
-            stateless_sk_seed: *value.stateless.secret.sk_seed.as_bytes(),
-            stateless_prf_seed: *value.stateless.secret.prf_seed.as_bytes(),
-            pk_seed: *value.stateless.public_key.pk_seed.as_bytes(),
-            hypertree_root: *value.stateless.public_key.root.as_bytes(),
+            stateful_sk_seed: *value.stateful().secret().as_sk_seed().as_bytes(),
+            stateful_prf_seed: *value.stateful().secret().as_prf_seed().as_bytes(),
+            stateful_pk_seed: *value.stateful().public_key().pk_seed.as_bytes(),
+            stateful_root: *value.stateful().public_key().root.as_bytes(),
+            max_stateful_signatures: value.stateful().public_key().max_signatures,
+            next_stateful_leaf_index: value.stateful().next_leaf_index(),
+            stateless_sk_seed: *value.stateless().secret().as_sk_seed().as_bytes(),
+            stateless_prf_seed: *value.stateless().secret().as_prf_seed().as_bytes(),
+            pk_seed: *value.stateless().public_key.pk_seed.as_bytes(),
+            hypertree_root: *value.stateless().public_key.root.as_bytes(),
         }
     }
 }
 
 impl From<SigningKeyDto> for Keys {
     fn from(value: SigningKeyDto) -> Self {
-        let stateful = uxmss::Key {
-            secret: uxmss::PrivateKey {
-                sk_seed: uxmss::SkSeed::new(value.stateful_sk_seed),
-                prf_seed: uxmss::PrfSeed::new(value.stateful_prf_seed),
-            },
-            public_key: uxmss::StructuredPublicKey {
+        let stateful = uxmss::Key::new(
+            uxmss::PrivateKey::new(
+                uxmss::SkSeed::new(value.stateful_sk_seed),
+                uxmss::PrfSeed::new(value.stateful_prf_seed),
+            ),
+            uxmss::StructuredPublicKey {
                 pk_seed: uxmss::PkSeed::new(value.stateful_pk_seed),
                 root: uxmss::Root::new(value.stateful_root),
                 max_signatures: value.max_stateful_signatures,
             },
-            next_leaf_index: value.next_stateful_leaf_index,
-        };
-        let stateless = sphincs_plus_c::Key {
-            secret: sphincs_plus_c::PrivateKey {
-                sk_seed: sphincs_plus_c::SkSeed::new(value.stateless_sk_seed),
-                prf_seed: sphincs_plus_c::PrfSeed::new(value.stateless_prf_seed),
-            },
-            public_key: sphincs_plus_c::PublicKey {
+            value.next_stateful_leaf_index,
+        );
+        let stateless = sphincs_plus_c::Key::new(
+            sphincs_plus_c::PrivateKey::new(
+                sphincs_plus_c::SkSeed::new(value.stateless_sk_seed),
+                sphincs_plus_c::PrfSeed::new(value.stateless_prf_seed),
+            ),
+            sphincs_plus_c::PublicKey {
                 pk_seed: sphincs_plus_c::PkSeed::new(value.pk_seed),
                 root: sphincs_plus_c::Root::new(value.hypertree_root),
             },
-        };
-        let public_key_commitment = Keys::compute_commitment(&stateful, &stateless);
-        Self {
-            stateless,
-            stateful,
-            public_key_commitment,
-        }
+        );
+        Keys::new(stateless, stateful)
     }
 }
 

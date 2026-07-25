@@ -95,7 +95,7 @@ impl borsh::de::BorshDeserialize for PublicKeyWrapper {
     }
 }
 
-#[derive(BorshSerialize, BorshDeserialize)]
+#[derive(BorshSerialize, BorshDeserialize, Debug)]
 pub struct SignatureAccount {
     pub is_initialized: bool,
     pub signature: Vec<[u8; constants::HASH_LEN]>,
@@ -351,6 +351,21 @@ fn process_shrincs_verify_stateless(
     Ok(())
 }
 
+/// Program entrypoint: deserialize a `WOTSPlusInstruction` and dispatch.
+///
+/// # Errors
+///
+/// Returns:
+/// - [`ProgramError::InvalidInstructionData`] when `instruction_data` is empty
+///   or fails Borsh deserialization
+/// - [`ProgramError::NotEnoughAccountKeys`] when a handler needs more accounts
+///   than provided
+/// - [`ProgramError::InvalidAccountData`] / [`ProgramError::UninitializedAccount`]
+///   on account layout or ownership failures
+/// - [`ProgramError::InvalidArgument`] when a cryptographic verify path rejects
+///   the signature
+/// - Other [`ProgramError`] variants from system/rent CPI and account ops used
+///   by individual instruction handlers
 pub fn process_instruction(
     program_id: &Pubkey,
     accounts: &[AccountInfo],

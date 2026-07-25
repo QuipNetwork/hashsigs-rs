@@ -114,6 +114,14 @@ impl LayerSignature {
     }
 }
 
+impl TryFrom<&[u8]> for LayerSignature {
+    type Error = ();
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        Self::from_bytes(value).ok_or(())
+    }
+}
+
 /// Layer-0 seed coordinates selected by the FORS message digest.
 #[derive(Clone, Copy)]
 pub(crate) struct HypertreeSeed {
@@ -462,7 +470,7 @@ pub(crate) fn sign_hypertree(
     // `stateless_sk_seed` is the shared SK.seed-style master for FORS-C and
     // hypertree WOTS-C signing secrets.
     // `pk_seed` is the global public seed used for stateless hashing.
-    let layer_seeds = hypertree_layer_seeds(signing_key.secret.sk_seed.as_bytes());
+    let layer_seeds = hypertree_layer_seeds(signing_key.secret().as_sk_seed().as_bytes());
     let mut layers = Vec::with_capacity(NUM_HYPERTREE_LAYERS as usize);
 
     // `current` is the value being authenticated by the current layer. At layer
@@ -500,7 +508,7 @@ pub(crate) fn sign_hypertree(
         let seeds = WotsSeeds {
             pk_seed: signing_key.public_key.pk_seed.as_bytes(),
             sk_seed: &sk_seed,
-            prf_seed: signing_key.secret.prf_seed.as_bytes(),
+            prf_seed: signing_key.secret().as_prf_seed().as_bytes(),
         };
         let wots_c_signature =
             sign_stateless_wots_c(&seeds, &coords, &subtree.selected_leaf_hash, &current)?;
@@ -800,4 +808,134 @@ fn stateless_wots_c_chain(
             steps,
         },
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::wots_c::Signature as WotsCSignature;
+    use alloc::vec;
+
+    fn sample_layer_signature() -> LayerSignature {
+        LayerSignature {
+            wots_c_pk_hash: [0xA1; HASH_LEN],
+            wots_c_signature: WotsCSignature {
+                randomizer: [0xA2; HASH_LEN],
+                counter: 0x0C0F_FEEDu32,
+                chains: vec![[0xA3; HASH_LEN], [0xA4; HASH_LEN], [0xA5; HASH_LEN]],
+            },
+            // Any length up to HYPERTREE_SUBTREE_HEIGHT is accepted by the
+            // standalone codec; keep it short for a cheap unit fixture.
+            auth_path: vec![[0xA6; HASH_LEN], [0xA7; HASH_LEN]],
+        }
+    }
+
+    #[test]
+    fn layer_signature_to_bytes_from_bytes_round_trips() {
+        let layer = sample_layer_signature();
+        let encoded = layer.to_bytes();
+        let decoded = LayerSignature::from_bytes(&encoded).expect("valid encoding must decode");
+        assert_eq!(decoded, layer);
+        assert_eq!(decoded.to_bytes(), encoded);
+    }
+
+    #[test]
+    fn layer_signature_from_bytes_rejects_trailing_bytes() {
+        let mut encoded = sample_layer_signature().to_bytes();
+        encoded.push(0x00);
+        assert!(
+            LayerSignature::from_bytes(&encoded).is_none(),
+            "trailing junk on a standalone layer body must be rejected"
+        );
+        encoded.pop();
+        encoded.extend_from_slice(&[0xAA, 0xBB]);
+        assert!(LayerSignature::from_bytes(&encoded).is_none());
+    }
+
+    #[test]
+    fn layer_signature_from_bytes_rejects_truncated() {
+        let encoded = sample_layer_signature().to_bytes();
+        assert!(LayerSignature::from_bytes(&encoded[..encoded.len() - 1]).is_none());
+        assert!(LayerSignature::from_bytes(&[]).is_none());
+    }
+
+    #[test]
+    fn layer_signature_try_from_delegates_to_from_bytes() {
+        let layer = sample_layer_signature();
+        let encoded = layer.to_bytes();
+        let decoded =
+            LayerSignature::try_from(encoded.as_slice()).expect("valid encoding must decode");
+        assert_eq!(decoded, layer);
+        assert!(LayerSignature::try_from(&encoded[..encoded.len() - 1]).is_err());
+    }
+
+    /// Full hypertree sign→verify round-trip at a non-zero bottom leaf.
+    /// Gated off the 128s profiles: a single-layer height-18 subtree is too
+    /// large for a unit-test budget (same gate as `sphincs_plus_c` round-trip).
+    #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
+    #[test]
+    fn hypertree_sign_verify_round_trip() {
+        let key =
+            crate::sphincs_plus_c::keygen([0x11; HASH_LEN], [0x22; HASH_LEN], [0x33; HASH_LEN]);
+        let fors_root = [0xABu8; HASH_LEN];
+        let seed = HypertreeSeed {
+            tree_index: 0,
+            leaf_index: 3,
+        };
+        let layers = sign_hypertree(&key, fors_root, seed.tree_index, seed.leaf_index)
+            .expect("hypertree sign must succeed");
+        assert_eq!(layers.len(), NUM_HYPERTREE_LAYERS as usize);
+        for layer in &layers {
+            assert_eq!(layer.auth_path.len(), HYPERTREE_SUBTREE_HEIGHT);
+            // Each layer body must be a self-contained, trailing-clean blob.
+            let encoded = layer.to_bytes();
+            let decoded = LayerSignature::from_bytes(&encoded).expect("layer codec");
+            assert_eq!(decoded, *layer);
+        }
+        assert!(
+            verify_hypertree(
+                key.public_key.pk_seed.as_bytes(),
+                key.public_key.root.as_bytes(),
+                fors_root,
+                seed,
+                &layers,
+            ),
+            "fresh hypertree signature must verify against keygen root"
+        );
+        // Wrong FORS root must not verify.
+        assert!(!verify_hypertree(
+            key.public_key.pk_seed.as_bytes(),
+            key.public_key.root.as_bytes(),
+            [0xCDu8; HASH_LEN],
+            seed,
+            &layers,
+        ));
+        // Wrong leaf index must not verify (auth path is leaf-bound).
+        assert!(!verify_hypertree(
+            key.public_key.pk_seed.as_bytes(),
+            key.public_key.root.as_bytes(),
+            fors_root,
+            HypertreeSeed {
+                tree_index: seed.tree_index,
+                leaf_index: seed.leaf_index ^ 1,
+            },
+            &layers,
+        ));
+    }
+
+    #[test]
+    fn verify_hypertree_rejects_wrong_layer_count() {
+        let pk_seed = [0x01u8; HASH_LEN];
+        let root = [0x02u8; HASH_LEN];
+        let fors_root = [0x03u8; HASH_LEN];
+        let seed = HypertreeSeed {
+            tree_index: 0,
+            leaf_index: 0,
+        };
+        // Empty layers: always wrong count for every profile.
+        assert!(!verify_hypertree(&pk_seed, &root, fors_root, seed, &[]));
+        // One too many synthetic layers.
+        let extra = vec![sample_layer_signature(); NUM_HYPERTREE_LAYERS as usize + 1];
+        assert!(!verify_hypertree(&pk_seed, &root, fors_root, seed, &extra));
+    }
 }

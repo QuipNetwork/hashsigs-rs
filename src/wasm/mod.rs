@@ -158,6 +158,7 @@ fn deserialize_sphincs_plus_c_signing_key(
 /// serialization above; `publicKey` is `pkSeed ‖ hypertreeRoot` (64 bytes,
 /// the verifier-interface key shape `sphincsPlusCVerify` expects).
 #[cfg(feature = "wasm-bindings")]
+#[derive(Debug)]
 #[wasm_bindgen]
 pub struct WasmSphincsPlusCKeys {
     signing_key: crate::sphincs_plus_c::Key,
@@ -190,6 +191,11 @@ impl WasmSphincsPlusCKeys {
 /// Divergence from `@noble/post-quantum`: `seed` is REQUIRED (exactly 32
 /// bytes) — no RNG dependency is pulled into this wasm build, so there is no
 /// "generate a random seed for me" fallback.
+///
+/// # Errors
+///
+/// Returns a `JsValue` error with `code` `ERR_BAD_LENGTH` when `seed` is not
+/// exactly 32 bytes.
 #[cfg(feature = "wasm-bindings")]
 #[wasm_bindgen(js_name = sphincsPlusCKeygen)]
 pub fn sphincs_plus_c_keygen(seed: &[u8]) -> Result<WasmSphincsPlusCKeys, JsValue> {
@@ -203,6 +209,14 @@ pub fn sphincs_plus_c_keygen(seed: &[u8]) -> Result<WasmSphincsPlusCKeys, JsValu
 /// 128-byte SPHINCS+C `secretKey`. Stateless: never mutates `secretKey` and
 /// never fails except on malformed input. Returns the stateless signature
 /// envelope `sphincsPlusCVerify` accepts.
+///
+/// # Errors
+///
+/// Returns a `JsValue` error with:
+/// - `ERR_BAD_LENGTH` when `secretKey` is not 128 bytes or `message` is not
+///   32 bytes
+/// - `ERR_SIGNING_FAILED` when FORS-C/hypertree grinding fails for the
+///   supplied key and message
 #[cfg(feature = "wasm-bindings")]
 #[wasm_bindgen(js_name = sphincsPlusCSign)]
 pub fn sphincs_plus_c_sign(
@@ -276,6 +290,7 @@ fn encode_public_key_flat(public_key: &PublicKey) -> alloc::vec::Vec<u8> {
 /// the 164-byte flat bundle above; `publicKeyCommitment` is the 32-byte
 /// value `shrincsVerify` / `shrincsVerifyStateless` pin.
 #[cfg(feature = "wasm-bindings")]
+#[derive(Debug)]
 #[wasm_bindgen]
 pub struct WasmShrincsKeys {
     signing_key: Keys,
@@ -319,6 +334,13 @@ impl WasmShrincsKeys {
 /// dependency is pulled into this wasm build) and `maxSignatures` has no
 /// scheme-level default — the TS `shrincs.keygen` wrapper supplies 1024 when
 /// the caller omits it.
+///
+/// # Errors
+///
+/// Returns a `JsValue` error with:
+/// - `ERR_BAD_LENGTH` when `seed` is not exactly 32 bytes
+/// - `ERR_INVALID_INPUT` when `maxSignatures` is 0 or greater than 4096
+/// - `ERR_KEYGEN_FAILED` when key derivation fails for the supplied inputs
 #[cfg(feature = "wasm-bindings")]
 #[wasm_bindgen(js_name = shrincsKeygen)]
 pub fn shrincs_keygen(seed: &[u8], max_signatures: u32) -> Result<WasmShrincsKeys, JsValue> {
@@ -350,6 +372,13 @@ pub fn shrincs_keygen(seed: &[u8], max_signatures: u32) -> Result<WasmShrincsKey
 /// performs on every call. Accepts the exhausted state
 /// (`nextStatefulLeafIndex == maxSignatures + 1`): stateful signing then
 /// throws `ERR_STATEFUL_LEAVES_EXHAUSTED`, stateless still works.
+///
+/// # Errors
+///
+/// Returns a `JsValue` error with:
+/// - `ERR_BAD_LENGTH` when `secretKey` is not 264 bytes
+/// - `ERR_IMPORT_INVALID` when the counter is out of range or recomputed
+///   roots do not match the seeds
 #[cfg(feature = "wasm-bindings")]
 #[wasm_bindgen(js_name = shrincsImportSigningKey)]
 pub fn shrincs_import_signing_key(secret_key: &[u8]) -> Result<WasmShrincsKeys, JsValue> {
@@ -377,6 +406,15 @@ pub fn shrincs_import_signing_key(secret_key: &[u8]) -> Result<WasmShrincsKeys, 
 /// spent. Returns the commitment-path envelope (`PublicKey ‖ StatefulSignature`)
 /// `shrincsVerify` expects — the signature carries the full public key so a
 /// verifier holding only the 32-byte `publicKeyCommitment` can check it.
+///
+/// # Errors
+///
+/// Returns a `JsValue` error with:
+/// - `ERR_BAD_LENGTH` when `secretKey` is not 264 bytes or `message` is not
+///   32 bytes
+/// - `ERR_IMPORT_INVALID` when the secret fails root/counter validation
+/// - `ERR_STATEFUL_LEAVES_EXHAUSTED` when no unused stateful leaf remains
+/// - `ERR_SIGNING_FAILED` when WOTS-C grinding fails for the leaf/message
 #[cfg(feature = "wasm-bindings")]
 #[wasm_bindgen(js_name = shrincsSign)]
 pub fn shrincs_sign(message: &[u8], secret_key: &mut [u8]) -> Result<alloc::vec::Vec<u8>, JsValue> {
@@ -393,7 +431,8 @@ pub fn shrincs_sign(message: &[u8], secret_key: &mut [u8]) -> Result<alloc::vec:
     // Pre-check exhaustion explicitly. Core signals BOTH exhaustion and
     // (astronomically rare) WOTS-C grinding failure as `None`; without this
     // check the two are conflated under one misleading error code.
-    if signing_key.stateful.next_leaf_index > signing_key.stateful.public_key.max_signatures {
+    if signing_key.stateful().next_leaf_index() > signing_key.stateful().public_key().max_signatures
+    {
         return Err(js_error(WasmErr {
             code: ERR_STATEFUL_LEAVES_EXHAUSTED,
             message: "no unused stateful leaf available for this key".into(),
@@ -416,6 +455,14 @@ pub fn shrincs_sign(message: &[u8], secret_key: &mut [u8]) -> Result<alloc::vec:
 /// Sign a 32-byte `message` (typically a pre-computed hash) via the
 /// stateless recovery path: consumes no leaf and never mutates `secretKey`,
 /// safe to repeat indefinitely.
+///
+/// # Errors
+///
+/// Returns a `JsValue` error with:
+/// - `ERR_BAD_LENGTH` when `secretKey` is not 264 bytes or `message` is not
+///   32 bytes
+/// - `ERR_IMPORT_INVALID` when the secret fails root/counter validation
+/// - `ERR_SIGNING_FAILED` when FORS-C/hypertree grinding fails
 #[cfg(feature = "wasm-bindings")]
 #[wasm_bindgen(js_name = shrincsSignStateless)]
 pub fn shrincs_sign_stateless(
@@ -487,6 +534,12 @@ pub fn shrincs_verify_stateless(
 /// and `maxSignatures` are untouched). `newSeed` is arbitrary-length seed
 /// material; this wasm build has no RNG, so the caller must supply fresh
 /// entropy.
+///
+/// # Errors
+///
+/// Returns a `JsValue` error with:
+/// - `ERR_BAD_LENGTH` when `secretKey` is not 264 bytes
+/// - `ERR_IMPORT_INVALID` when the secret fails root/counter validation
 #[cfg(feature = "wasm-bindings")]
 #[wasm_bindgen(js_name = shrincsReset)]
 pub fn shrincs_reset(secret_key: &mut [u8], new_seed: &[u8]) -> Result<(), JsValue> {
@@ -510,6 +563,12 @@ pub fn shrincs_reset(secret_key: &mut [u8], new_seed: &[u8]) -> Result<(), JsVal
 /// `ShrincsSigner::import_signing_key`; never mutates it. Equivalent to
 /// `shrincsImportSigningKey(secretKey).publicKeyCommitment` without
 /// constructing the intermediate `WasmShrincsKeys`.
+///
+/// # Errors
+///
+/// Returns a `JsValue` error with:
+/// - `ERR_BAD_LENGTH` when `secretKey` is not 264 bytes
+/// - `ERR_IMPORT_INVALID` when the secret fails root/counter validation
 #[cfg(feature = "wasm-bindings")]
 #[wasm_bindgen(js_name = shrincsComputePublicKeyCommitment)]
 pub fn shrincs_compute_public_key_commitment(
@@ -533,6 +592,11 @@ pub fn shrincs_compute_public_key_commitment(
 /// never trusted — only the recomputed value is returned. Throws
 /// `ERR_ENVELOPE_MALFORMED` if `signature` is not a well-formed
 /// `shrincsSign` envelope.
+///
+/// # Errors
+///
+/// Returns a `JsValue` error with `code` `ERR_ENVELOPE_MALFORMED` when
+/// `signature` cannot be decoded as a stateful `shrincsSign` envelope.
 #[cfg(feature = "wasm-bindings")]
 #[wasm_bindgen(js_name = shrincsRecoverPublicKeyCommitment)]
 pub fn shrincs_recover_public_key_commitment(
@@ -952,7 +1016,7 @@ mod tests {
     #[test]
     fn sphincs_plus_c_signing_key_flat_serialization_round_trips() {
         let (key, _) = signing_key_and_public_key();
-        let spk = key.stateless.clone();
+        let spk = key.stateless().clone();
         let bytes = spk.to_bytes();
         assert_eq!(bytes.len(), 128);
         let parsed = deserialize_sphincs_plus_c_signing_key(&bytes).unwrap();

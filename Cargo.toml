@@ -2,6 +2,7 @@
 name = "hashsigs-rs"
 version = "0.2.0-rc.2"
 edition = "2021"
+rust-version = "1.89"
 authors = ["Richard T. Carback III <rick.rust.cargo.383d5@passmail.net>"]
 description = "Hash-based signatures core library with WOTS+ and SHRINCS primitives"
 license = "AGPL-3.0-or-later"
@@ -32,8 +33,8 @@ resolver = "2"
 # works as expected: `--features profile-128s-q18` should override the default
 # 256s selection instead of conflicting with it.
 default = ["std", "default-profile-256s"]
-# Host/runtime surface: thiserror Error, serde std, env-based debug traces.
-std = ["alloc", "serde/std", "thiserror/std"]
+# Host/runtime surface: serde std, env-based debug traces.
+std = ["alloc", "serde/std"]
 # Heap types (Vec/Box/String) used by signature wire types and pack helpers.
 alloc = []
 # Optional Solana program dependency + syscall hash routing (also auto-selected
@@ -74,7 +75,6 @@ solana-program = { version = "2.3", optional = true }
 sha3 = { version = "0.10", default-features = false }
 sha2 = { version = "0.10", default-features = false }
 serde = { version = "1.0.219", default-features = false, features = ["derive"] }
-thiserror = { version = "2.0", default-features = false }
 js-sys = { version = "0.3", optional = true }
 serde-wasm-bindgen = { version = "0.6.5", optional = true }
 zeroize = { version = "1.8", default-features = false, features = ["derive"] }

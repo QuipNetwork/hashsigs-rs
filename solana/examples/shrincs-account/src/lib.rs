@@ -16,6 +16,20 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #![allow(unexpected_cfgs)]
+// Panic-prevention lints, mirroring the core `hashsigs-rs` crate root: program
+// code must not panic on untrusted input. Scoped to non-test builds so
+// `#[cfg(test)]` modules may use unwrap/expect freely.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::todo,
+        clippy::unimplemented,
+        clippy::panic_in_result_fn
+    )
+)]
 
 pub mod messages;
 pub mod pda;
@@ -47,7 +61,16 @@ mod heap {
     // First 8 bytes of the heap region hold the bump cursor.
     const HEAP_START: usize = solana_program::entrypoint::HEAP_START_ADDRESS as usize;
 
+    // SAFETY: `GlobalAlloc` requires `alloc` to return a block satisfying the
+    // requested `Layout` (or null) and the allocator to be sound under the
+    // platform's concurrency model. A Solana program runs single-threaded in
+    // one VM invocation (no data race on the bump cursor), and `HEAP_START`
+    // addresses the VM-provided, program-exclusive heap region.
     unsafe impl GlobalAlloc for UnboundedBump {
+        // SAFETY: `cursor` points at `HEAP_START`, the first word of the
+        // VM-owned heap this program alone accesses; the single-threaded
+        // invocation makes the `*cursor` read/write race-free. Aligned-bump
+        // overflow is caught by `checked_add`, returning null per contract.
         unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
             let cursor = HEAP_START as *mut usize;
             let mut position = *cursor;
@@ -67,6 +90,10 @@ mod heap {
             aligned as *mut u8
         }
 
+        // SAFETY: a bump allocator never reclaims individual allocations; the
+        // whole heap region is released by the VM at transaction end, so an
+        // empty `dealloc` upholds `GlobalAlloc`'s contract (introduces no
+        // double-free or use-after-free).
         unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {
             // Bump allocator: freed memory is reclaimed at transaction end.
         }

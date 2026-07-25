@@ -928,6 +928,15 @@ pub(crate) enum ShrincsAccountInstruction {
 /// Crate entrypoint. Decodes a [`ShrincsAccountInstruction`] from
 /// `instruction_data` and dispatches to the matching handler, threading
 /// `accounts` through unchanged.
+///
+/// # Errors
+///
+/// Returns:
+/// - [`ProgramError::InvalidInstructionData`] when Borsh decode of
+///   `instruction_data` fails
+/// - Handler-specific [`ProgramError`] / custom program errors for account
+///   checks, policy violations, signature verification failure, leaf reuse,
+///   recovery/rotation guards, and PDA creation failures
 pub fn process_instruction(
     program_id: &Pubkey,
     accounts: &[AccountInfo],

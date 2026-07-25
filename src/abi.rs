@@ -291,3 +291,362 @@ impl<'a> AbiReader<'a> {
 pub(crate) fn collect_hash_words(items: Vec<Vec<u8>>) -> Option<Vec<[u8; HASH_LEN]>> {
     items.into_iter().map(|item| item.try_into().ok()).collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloc::vec;
+    use alloc::vec::Vec;
+
+    /// Two-field dynamic-bytes tuple used as a minimal structured wire type.
+    fn encode_pair(a: &[u8], b: &[u8]) -> Vec<u8> {
+        encode_tuple(vec![
+            Field::Dynamic(encode_bytes(a)),
+            Field::Dynamic(encode_bytes(b)),
+        ])
+    }
+
+    fn decode_pair(data: &[u8]) -> Option<(Vec<u8>, Vec<u8>)> {
+        let reader = AbiReader::new(data);
+        let a = reader.decode_bytes(0, 0)?;
+        let b = reader.decode_bytes(0, HASH_LEN)?;
+        reader.finish()?;
+        Some((a, b))
+    }
+
+    #[test]
+    fn encode_bytes_round_trips_through_reader() {
+        for payload in [
+            &[][..],
+            &[0xabu8][..],
+            &[0x11u8; 31][..],
+            &[0x22u8; 32][..],
+            &[0x33u8; 33][..],
+            &[0x44u8; 64][..],
+        ] {
+            let encoded = encode_bytes(payload);
+            let reader = AbiReader::new(&encoded);
+            let decoded = reader.read_bytes_at(0).expect("valid bytes must decode");
+            assert_eq!(decoded, payload);
+            reader.finish().expect("full payload must exhaust");
+        }
+    }
+
+    #[test]
+    fn encode_bytes32_array_round_trips() {
+        let items = [[0xAAu8; HASH_LEN], [0xBBu8; HASH_LEN], [0xCCu8; HASH_LEN]];
+        let encoded = encode_bytes32_array(&items);
+        // Wrap as a single-field dynamic tuple so the array lives at an offset.
+        let wrapped = encode_tuple(vec![Field::Dynamic(encoded)]);
+        let reader = AbiReader::new(&wrapped);
+        let decoded = reader
+            .decode_array_bytes32(0, 0, items.len())
+            .expect("valid array must decode");
+        assert_eq!(decoded, items);
+        reader.finish().expect("full payload must exhaust");
+    }
+
+    #[test]
+    fn encode_dynamic_array_of_bytes_round_trips() {
+        let elements = [b"alpha".as_slice(), b"bravo".as_slice(), b"".as_slice()];
+        let encoded = encode_dynamic_array(elements.iter().map(|e| encode_bytes(e)).collect());
+        let wrapped = encode_tuple(vec![Field::Dynamic(encoded)]);
+        let reader = AbiReader::new(&wrapped);
+        let decoded = reader
+            .decode_array_bytes(0, 0, elements.len())
+            .expect("valid dynamic array must decode");
+        assert_eq!(decoded, elements);
+        reader.finish().expect("full payload must exhaust");
+    }
+
+    #[test]
+    fn encode_tuple_static_and_dynamic_round_trips() {
+        let static_word = word_from_u32(0x0BAD_F00D);
+        let payload = b"hello-abi";
+        let encoded = encode_tuple(vec![
+            Field::Static(static_word),
+            Field::Dynamic(encode_bytes(payload)),
+            Field::Static([0xEEu8; HASH_LEN]),
+        ]);
+        let reader = AbiReader::new(&encoded);
+        assert_eq!(reader.read_u32(0), Some(0x0BAD_F00D));
+        let dynamic = reader
+            .decode_bytes(0, HASH_LEN)
+            .expect("dynamic field must decode");
+        assert_eq!(dynamic, payload);
+        assert_eq!(reader.read_bytes32(HASH_LEN * 2), Some([0xEEu8; HASH_LEN]));
+        reader.finish().expect("full payload must exhaust");
+    }
+
+    #[test]
+    fn pair_encode_decode_round_trip() {
+        let a = b"left-payload";
+        let b = b"right-payload-longer";
+        let encoded = encode_pair(a, b);
+        let (da, db) = decode_pair(&encoded).expect("valid pair must decode");
+        assert_eq!(da, a);
+        assert_eq!(db, b);
+        assert_eq!(encode_pair(&da, &db), encoded);
+    }
+
+    #[test]
+    fn read_bytes_at_rejects_truncated_buffer() {
+        let encoded = encode_bytes(&[0x55u8; 40]);
+        for cut in [0usize, 1, 31, 32, encoded.len() - 1] {
+            let truncated = &encoded[..cut];
+            let reader = AbiReader::new(truncated);
+            assert!(
+                reader.read_bytes_at(0).is_none(),
+                "truncated at {cut} of {} must fail closed",
+                encoded.len()
+            );
+        }
+    }
+
+    #[test]
+    fn read_u32_rejects_truncated_and_dirty_high_bits() {
+        assert!(AbiReader::new(&[0u8; 31]).read_u32(0).is_none());
+        let mut dirty = word_from_u32(7);
+        dirty[0] = 0x01;
+        assert!(AbiReader::new(&dirty).read_u32(0).is_none());
+        dirty = word_from_u32(7);
+        dirty[27] = 0x01;
+        assert!(AbiReader::new(&dirty).read_u32(0).is_none());
+        assert_eq!(AbiReader::new(&word_from_u32(7)).read_u32(0), Some(7));
+    }
+
+    #[test]
+    fn read_usize_rejects_dirty_high_bits() {
+        let mut dirty = word_from_usize(42);
+        dirty[0] = 0x01;
+        assert!(AbiReader::new(&dirty).read_usize(0).is_none());
+        dirty = word_from_usize(42);
+        dirty[23] = 0x01;
+        assert!(AbiReader::new(&dirty).read_usize(0).is_none());
+        assert_eq!(AbiReader::new(&word_from_usize(42)).read_usize(0), Some(42));
+    }
+
+    #[test]
+    fn read_bytes_at_rejects_dirty_padding() {
+        // Non-multiple-of-32 payload so pad_len > 0.
+        let mut encoded = encode_bytes(&[1, 2, 3]);
+        // Layout: length word (32) + 3 data + 29 zero pad.
+        let pad_index = HASH_LEN + 3;
+        assert_eq!(encoded[pad_index], 0);
+        encoded[pad_index] = 0xFF;
+        let reader = AbiReader::new(&encoded);
+        assert!(
+            reader.read_bytes_at(0).is_none(),
+            "non-zero padding must fail closed"
+        );
+        // Last pad byte also counts.
+        encoded[pad_index] = 0;
+        let last = encoded.len() - 1;
+        encoded[last] = 0x01;
+        let reader = AbiReader::new(&encoded);
+        assert!(reader.read_bytes_at(0).is_none());
+    }
+
+    #[test]
+    fn decode_array_bytes32_rejects_oversize_length() {
+        let items = [[1u8; HASH_LEN], [2u8; HASH_LEN]];
+        let wrapped = encode_tuple(vec![Field::Dynamic(encode_bytes32_array(&items))]);
+        let reader = AbiReader::new(&wrapped);
+        assert!(
+            reader.decode_array_bytes32(0, 0, 1).is_none(),
+            "declared length above max_len must fail closed"
+        );
+        let reader = AbiReader::new(&wrapped);
+        assert_eq!(
+            reader.decode_array_bytes32(0, 0, 2).expect("len==max ok"),
+            items
+        );
+    }
+
+    #[test]
+    fn decode_array_bytes_rejects_oversize_declared_length() {
+        let elements = [b"one".as_slice(), b"two".as_slice()];
+        let encoded = encode_dynamic_array(elements.iter().map(|e| encode_bytes(e)).collect());
+        let wrapped = encode_tuple(vec![Field::Dynamic(encoded)]);
+        let reader = AbiReader::new(&wrapped);
+        assert!(reader.decode_array_bytes(0, 0, 1).is_none());
+        // Inflate the length word inside the array body beyond any reasonable max.
+        let mut mangled = wrapped.clone();
+        // Outer head is one offset word; array length word sits at offset head_len.
+        let array_start = HASH_LEN; // single dynamic field offset points at head_len==32
+                                    // Overwrite array length with a huge value (still clean high bits).
+        mangled[array_start..array_start + HASH_LEN]
+            .copy_from_slice(&word_from_usize(usize::MAX / 2));
+        let reader = AbiReader::new(&mangled);
+        assert!(reader.decode_array_bytes(0, 0, 1024).is_none());
+    }
+
+    #[test]
+    fn decode_dynamic_array_rejects_aliased_element_offsets() {
+        // Two equal-length elements so swapping offsets is a pure alias, not a gap.
+        let e0 = encode_bytes(b"aaaa");
+        let e1 = encode_bytes(b"bbbb");
+        let mut body = encode_dynamic_array(vec![e0.clone(), e1]);
+        // body layout: len | off0 | off1 | e0 | e1
+        // off0 and off1 are relative to elements_base (= start of off0).
+        // Point both offsets at the first element payload (alias).
+        let elements_base = HASH_LEN; // after length word
+        let offset_table_end = elements_base + 2 * HASH_LEN;
+        // off0 stays at offset_table_end; force off1 to the same absolute start.
+        body[elements_base + HASH_LEN..elements_base + 2 * HASH_LEN]
+            .copy_from_slice(&word_from_usize(offset_table_end - elements_base));
+        let wrapped = encode_tuple(vec![Field::Dynamic(body)]);
+        let reader = AbiReader::new(&wrapped);
+        assert!(
+            reader.decode_array_bytes(0, 0, 8).is_none(),
+            "aliased element offsets must fail closed"
+        );
+        // Sanity: unmodified encoding still works.
+        let clean = encode_tuple(vec![Field::Dynamic(encode_dynamic_array(vec![
+            encode_bytes(b"aaaa"),
+            encode_bytes(b"bbbb"),
+        ]))]);
+        let reader = AbiReader::new(&clean);
+        let decoded = reader.decode_array_bytes(0, 0, 8).expect("clean array");
+        assert_eq!(decoded, [b"aaaa".as_slice(), b"bbbb".as_slice()]);
+    }
+
+    #[test]
+    fn decode_dynamic_array_rejects_gapped_element_offsets() {
+        let e0 = encode_bytes(b"aaaa");
+        let e1 = encode_bytes(b"bbbb");
+        let mut body = encode_dynamic_array(vec![e0, e1]);
+        let elements_base = HASH_LEN;
+        // Bump second element offset by one word (gap / non-sequential).
+        let off1 = {
+            let word = &body[elements_base + HASH_LEN..elements_base + 2 * HASH_LEN];
+            let mut buf = [0u8; 8];
+            buf.copy_from_slice(&word[24..]);
+            u64::from_be_bytes(buf) as usize
+        };
+        body[elements_base + HASH_LEN..elements_base + 2 * HASH_LEN]
+            .copy_from_slice(&word_from_usize(off1 + HASH_LEN));
+        let wrapped = encode_tuple(vec![Field::Dynamic(body)]);
+        let reader = AbiReader::new(&wrapped);
+        assert!(
+            reader.decode_array_bytes(0, 0, 8).is_none(),
+            "gapped element offsets must fail closed"
+        );
+    }
+
+    #[test]
+    fn finish_rejects_trailing_bytes_after_successful_read() {
+        let mut encoded = encode_bytes(b"payload");
+        encoded.push(0x00);
+        let reader = AbiReader::new(&encoded);
+        assert!(reader.read_bytes_at(0).is_some());
+        assert!(
+            reader.finish().is_none(),
+            "trailing byte after covered range must fail closed"
+        );
+        // Empty input: high-water 0 == len 0, finish accepts without reads.
+        assert_eq!(AbiReader::new(&[]).finish(), Some(()));
+        // Non-empty unread input fails finish.
+        assert!(AbiReader::new(&[0u8; 32]).finish().is_none());
+    }
+
+    #[test]
+    fn decode_offset_rejects_out_of_range() {
+        // Offset word claims base+huge, beyond buffer.
+        let mut buf = word_from_usize(1_000_000);
+        // Use as head at 0 with base 0; then try to read bytes there.
+        let reader = AbiReader::new(&buf);
+        assert!(reader.decode_bytes(0, 0).is_none());
+        // Truncated head word itself.
+        buf = word_from_usize(0);
+        assert!(AbiReader::new(&buf[..31]).decode_offset(0, 0).is_none());
+    }
+
+    #[test]
+    fn collect_hash_words_requires_exact_hash_len() {
+        assert_eq!(
+            collect_hash_words(vec![vec![0u8; HASH_LEN]]),
+            Some(vec![[0u8; HASH_LEN]])
+        );
+        assert!(collect_hash_words(vec![vec![0u8; HASH_LEN - 1]]).is_none());
+        assert!(collect_hash_words(vec![vec![0u8; HASH_LEN + 1]]).is_none());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    mod prop {
+        use super::*;
+        use proptest::prelude::*;
+
+        /// Drive every public AbiReader entrypoint over arbitrary input.
+        /// Success or None is fine; the property is that nothing panics.
+        fn exercise_reader(data: &[u8]) {
+            let reader = AbiReader::new(data);
+            let _ = reader.finish();
+            let _ = reader.slice(0, data.len().min(64));
+            let _ = reader.read_bytes32(0);
+            let _ = reader.read_u32(0);
+            let _ = reader.read_usize(0);
+            let _ = reader.decode_offset(0, 0);
+            let _ = reader.read_bytes_at(0);
+            let _ = reader.decode_bytes(0, 0);
+            let _ = reader.decode_bytes32_field(0, 0);
+            let _ = reader.decode_array_bytes32(0, 0, 8);
+            let _ = reader.decode_array_bytes(0, 0, 8);
+            let _ = reader.decode_dynamic_array(0, 0, 4, |r, start| r.read_bytes_at(start));
+            // Also try a non-zero base/head so offset math is exercised.
+            if data.len() >= HASH_LEN * 2 {
+                let _ = reader.decode_bytes(0, HASH_LEN);
+                let _ = reader.decode_array_bytes32(0, HASH_LEN, 4);
+                let _ = reader.decode_array_bytes(HASH_LEN, 0, 4);
+            }
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(256))]
+
+            #[test]
+            fn abi_reader_never_panics_on_arbitrary_bytes(
+                data in proptest::collection::vec(any::<u8>(), 0..512),
+            ) {
+                // Must not panic: accept or return None on every path.
+                exercise_reader(&data);
+            }
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(64))]
+
+            #[test]
+            fn pair_to_bytes_from_bytes_identity(
+                a in proptest::collection::vec(any::<u8>(), 0..96),
+                b in proptest::collection::vec(any::<u8>(), 0..96),
+            ) {
+                let encoded = encode_pair(&a, &b);
+                let (da, db) = decode_pair(&encoded)
+                    .expect("encoder output must decode");
+                prop_assert_eq!(&da, &a);
+                prop_assert_eq!(&db, &b);
+                prop_assert_eq!(encode_pair(&da, &db), encoded);
+            }
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(48))]
+
+            #[test]
+            fn bytes32_array_round_trip_identity(
+                // Cap length so max_len checks stay honest but cheap.
+                items in proptest::collection::vec(any::<[u8; HASH_LEN]>(), 0..12),
+            ) {
+                let encoded = encode_bytes32_array(&items);
+                let wrapped = encode_tuple(vec![Field::Dynamic(encoded)]);
+                let reader = AbiReader::new(&wrapped);
+                let decoded = reader
+                    .decode_array_bytes32(0, 0, items.len())
+                    .expect("encoder output must decode");
+                prop_assert_eq!(decoded, items);
+                prop_assert_eq!(reader.finish(), Some(()));
+            }
+        }
+    }
+}

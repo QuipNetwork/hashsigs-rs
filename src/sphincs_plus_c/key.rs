@@ -70,6 +70,14 @@ impl SkSeed {
     }
 }
 
+impl TryFrom<&[u8]> for SkSeed {
+    type Error = ();
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        Self::from_slice(value).ok_or(())
+    }
+}
+
 impl PrfSeed {
     /// Wrap 32 raw bytes.
     pub const fn new(bytes: [u8; HASH_LEN]) -> Self {
@@ -82,6 +90,14 @@ impl PrfSeed {
     /// Borrow the raw bytes for hashing.
     pub fn as_bytes(&self) -> &[u8; HASH_LEN] {
         &self.0
+    }
+}
+
+impl TryFrom<&[u8]> for PrfSeed {
+    type Error = ();
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        Self::from_slice(value).ok_or(())
     }
 }
 
@@ -100,6 +116,14 @@ impl PkSeed {
     }
 }
 
+impl TryFrom<&[u8]> for PkSeed {
+    type Error = ();
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        Self::from_slice(value).ok_or(())
+    }
+}
+
 impl Root {
     /// Wrap 32 raw bytes.
     pub const fn new(bytes: [u8; HASH_LEN]) -> Self {
@@ -112,6 +136,14 @@ impl Root {
     /// Borrow the raw bytes for hashing.
     pub fn as_bytes(&self) -> &[u8; HASH_LEN] {
         &self.0
+    }
+}
+
+impl TryFrom<&[u8]> for Root {
+    type Error = ();
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        Self::from_slice(value).ok_or(())
     }
 }
 
@@ -129,12 +161,16 @@ impl fmt::Debug for PrfSeed {
 }
 
 /// The secret half of a SPHINCS+C key: the 64 bytes that are actually secret.
+///
+/// Fields are private so callers cannot splice seed material; construct via
+/// [`Self::new`] / [`Self::from_bytes`] and read via [`Self::as_sk_seed`] /
+/// [`Self::as_prf_seed`].
 #[derive(Clone, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]
 pub struct PrivateKey {
     /// Derives FORS-C and hypertree WOTS-C secrets.
-    pub sk_seed: SkSeed,
+    sk_seed: SkSeed,
     /// Derives stateless message randomizers.
-    pub prf_seed: PrfSeed,
+    prf_seed: PrfSeed,
 }
 
 impl fmt::Debug for PrivateKey {
@@ -157,10 +193,13 @@ pub struct PublicKey {
 
 /// A full SPHINCS+C keypair: the stateless scheme, and the stateless half of
 /// a SHRINCS key.
+///
+/// The secret half is private (read via [`Self::secret`]); public-key material
+/// remains a public field for verifier ergonomics.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Key {
     /// PrivateKey seeds.
-    pub secret: PrivateKey,
+    secret: PrivateKey,
     /// Public seed and root.
     pub public_key: PublicKey,
 }
@@ -175,6 +214,21 @@ impl fmt::Debug for Key {
 }
 
 impl PrivateKey {
+    /// Assemble from the two seed newtypes.
+    pub const fn new(sk_seed: SkSeed, prf_seed: PrfSeed) -> Self {
+        Self { sk_seed, prf_seed }
+    }
+
+    /// Borrow the secret seed that derives FORS-C / hypertree WOTS-C secrets.
+    pub fn as_sk_seed(&self) -> &SkSeed {
+        &self.sk_seed
+    }
+
+    /// Borrow the secret seed that derives message randomizers.
+    pub fn as_prf_seed(&self) -> &PrfSeed {
+        &self.prf_seed
+    }
+
     /// Flat layout `sk_seed(32) ‖ prf_seed(32)`, 64 bytes.
     pub fn to_bytes(&self) -> [u8; 64] {
         let mut out = [0u8; 64];
@@ -191,6 +245,14 @@ impl PrivateKey {
             sk_seed: SkSeed::from_slice(bytes.get(..HASH_LEN)?)?,
             prf_seed: PrfSeed::from_slice(bytes.get(HASH_LEN..)?)?,
         })
+    }
+}
+
+impl TryFrom<&[u8]> for PrivateKey {
+    type Error = ();
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        Self::from_bytes(value).ok_or(())
     }
 }
 
@@ -223,7 +285,25 @@ impl PublicKey {
     }
 }
 
+impl TryFrom<&[u8]> for PublicKey {
+    type Error = ();
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        Self::from_bytes(value).ok_or(())
+    }
+}
+
 impl Key {
+    /// Assemble a keypair from its secret and public halves.
+    pub const fn new(secret: PrivateKey, public_key: PublicKey) -> Self {
+        Self { secret, public_key }
+    }
+
+    /// Borrow the secret half (seeds only).
+    pub fn secret(&self) -> &PrivateKey {
+        &self.secret
+    }
+
     /// Flat layout `PrivateKey(64) ‖ PublicKey(64)`, 128 bytes — the SPHINCS+C
     /// `secretKey` bytes exactly.
     pub fn to_bytes(&self) -> [u8; 128] {
@@ -244,21 +324,26 @@ impl Key {
     }
 }
 
+impl TryFrom<&[u8]> for Key {
+    type Error = ();
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        Self::from_bytes(value).ok_or(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn sample_key() -> Key {
-        Key {
-            secret: PrivateKey {
-                sk_seed: SkSeed::new([1u8; HASH_LEN]),
-                prf_seed: PrfSeed::new([2u8; HASH_LEN]),
-            },
-            public_key: PublicKey {
+        Key::new(
+            PrivateKey::new(SkSeed::new([1u8; HASH_LEN]), PrfSeed::new([2u8; HASH_LEN])),
+            PublicKey {
                 pk_seed: PkSeed::new([3u8; HASH_LEN]),
                 root: Root::new([4u8; HASH_LEN]),
             },
-        }
+        )
     }
 
     #[test]
@@ -272,7 +357,7 @@ mod tests {
     fn secret_and_public_split_at_64() {
         let key = sample_key();
         let bytes = key.to_bytes();
-        assert_eq!(&key.secret.to_bytes(), &bytes[..64]);
+        assert_eq!(&key.secret().to_bytes(), &bytes[..64]);
         assert_eq!(&key.public_key.to_bytes(), &bytes[64..]);
     }
 
@@ -286,7 +371,7 @@ mod tests {
     #[test]
     fn secret_debug_is_redacted() {
         let key = sample_key();
-        let shown = alloc::format!("{:?}", key.secret);
+        let shown = alloc::format!("{:?}", key.secret());
         assert!(!shown.contains("01"));
         assert!(shown.contains("redacted"));
     }

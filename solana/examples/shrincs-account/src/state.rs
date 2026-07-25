@@ -57,6 +57,13 @@ impl TryFrom<u8> for StatefulPolicy {
 
 /// PDA-resident SHRINCS account state. Field order fixes the Borsh layout;
 /// append-only if the layout ever needs to grow.
+///
+/// # Borsh exception
+///
+/// Fields are `pub` because Borsh serialization requires public fields on
+/// account state. Callers (and on-chain instruction handlers) must preserve
+/// the state-machine invariants among policy, recovery mode, leaf index, and
+/// frozen flags — do not treat this as a free bag of independent values.
 #[derive(Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub struct ShrincsAccountState {
     /// Installed bundle commitment currently trusted by the wrapper.

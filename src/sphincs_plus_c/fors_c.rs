@@ -112,6 +112,14 @@ impl Entry {
     }
 }
 
+impl TryFrom<&[u8]> for Entry {
+    type Error = ();
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        Self::from_bytes(value).ok_or(())
+    }
+}
+
 /// FORS-C signature: randomizer, target-sum grind counter, and one revealed
 /// entry per signed FORS tree.
 ///
@@ -170,6 +178,14 @@ impl Signature {
         let decoded = Self::decode(&reader, 0)?;
         reader.finish()?;
         Some(decoded)
+    }
+}
+
+impl TryFrom<&[u8]> for Signature {
+    type Error = ();
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        Self::from_bytes(value).ok_or(())
     }
 }
 
@@ -566,7 +582,7 @@ pub(crate) fn sign_fors_c(signing_key: &Key, message: &[u8]) -> Option<SignedFor
     // between SK.seed-derived signing secrets and SK.prf-derived randomness.
     let randomizer = hash_packed(&[
         b"fors-randomizer",
-        signing_key.secret.prf_seed.as_bytes(),
+        signing_key.secret().as_prf_seed().as_bytes(),
         message,
     ]);
     stateless_trace("stateless trace: FORS randomizer ready");
@@ -596,7 +612,7 @@ pub(crate) fn sign_fors_c(signing_key: &Key, message: &[u8]) -> Option<SignedFor
             let leaf = digest.signed_tree_indices[fors_tree];
             let (root, secret_leaf, auth_path) = fors_tree_root_and_auth_path(
                 signing_key.public_key.pk_seed.as_bytes(),
-                signing_key.secret.sk_seed.as_bytes(),
+                signing_key.secret().as_sk_seed().as_bytes(),
                 ForsLeafCoords {
                     tree_index: digest.tree_index,
                     leaf_index: digest.leaf_index,
@@ -725,16 +741,16 @@ mod measurement_tests {
         fn d(domain: &[u8], seed: &[u8]) -> [u8; HASH_LEN] {
             hash_packed(&[domain, seed, &[]])
         }
-        let key = Key {
-            secret: PrivateKey {
-                sk_seed: SkSeed::new(d(b"shrincs-stateless-sk-seed", seed)),
-                prf_seed: PrfSeed::new(d(b"shrincs-stateless-prf-seed", seed)),
-            },
-            public_key: PublicKey {
+        let key = Key::new(
+            PrivateKey::new(
+                SkSeed::new(d(b"shrincs-stateless-sk-seed", seed)),
+                PrfSeed::new(d(b"shrincs-stateless-prf-seed", seed)),
+            ),
+            PublicKey {
                 pk_seed: PkSeed::new(d(b"shrincs-pk-seed", seed)),
                 root: Root::new(d(b"placeholder-hypertree-root", seed)),
             },
-        };
+        );
         hashsigs_println!("measurement setup: key material ready");
         key
     }
@@ -819,7 +835,7 @@ mod measurement_tests {
             ]);
             let randomizer = hash_packed(&[
                 b"fors-randomizer".as_ref(),
-                signing_key.secret.prf_seed.as_bytes().as_ref(),
+                signing_key.secret().as_prf_seed().as_bytes().as_ref(),
                 message.as_ref(),
             ]);
             match measured_winning_fors_counter_and_digest(

@@ -83,28 +83,70 @@ impl Commitment {
     }
 }
 
+impl TryFrom<&[u8]> for Commitment {
+    type Error = ();
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        Self::from_bytes(value).ok_or(())
+    }
+}
+
 /// A SHRINCS key: a SPHINCS+C recovery key, a UXMSS fast-path key, and the
 /// commitment that binds them.
+///
+/// Fields are private so callers cannot desynchronize the commitment from the
+/// two public halves or tamper with the one-time leaf counter. Construct via
+/// keygen / [`Self::from_bytes`] / [`Self::import`] / [`Self::new`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Keys {
     /// Durable stateless recovery identity (a SPHINCS+C keypair).
-    pub stateless: sphincs_plus_c::Key,
+    stateless: sphincs_plus_c::Key,
     /// Rotatable stateful fast-path chain (a UXMSS key); its counter advances
     /// on each stateful signature.
-    pub stateful: uxmss::Key,
+    stateful: uxmss::Key,
     /// Fingerprint binding both public keys; fixed until the stateful chain is
     /// reset.
-    pub public_key_commitment: Commitment,
+    public_key_commitment: Commitment,
 }
 
 impl Keys {
+    /// Assemble from the two scheme keys and recompute the commitment.
+    pub fn new(stateless: sphincs_plus_c::Key, stateful: uxmss::Key) -> Self {
+        let public_key_commitment = Self::compute_commitment(&stateful, &stateless);
+        Self {
+            stateless,
+            stateful,
+            public_key_commitment,
+        }
+    }
+
+    /// Borrow the durable SPHINCS+C recovery half.
+    pub fn stateless(&self) -> &sphincs_plus_c::Key {
+        &self.stateless
+    }
+
+    /// Borrow the UXMSS fast-path half (including the leaf counter).
+    pub fn stateful(&self) -> &uxmss::Key {
+        &self.stateful
+    }
+
+    /// Mutable access to the stateful half for the in-crate sign/advance path.
+    pub(crate) fn stateful_mut(&mut self) -> &mut uxmss::Key {
+        &mut self.stateful
+    }
+
+    /// Borrow the commitment fingerprint binding both public keys.
+    pub fn public_key_commitment(&self) -> &Commitment {
+        &self.public_key_commitment
+    }
+
     /// Recompute the commitment from the two public keys. Deterministic; the
     /// authoritative definition of a SHRINCS identity.
     pub fn compute_commitment(
         stateful: &uxmss::Key,
         stateless: &sphincs_plus_c::Key,
     ) -> Commitment {
-        let stateful_public_key = stateful.public_key.to_bytes();
+        let stateful_public_key = stateful.public_key().to_bytes();
         Commitment::of(
             &stateful_public_key,
             stateless.public_key.pk_seed.as_bytes(),
@@ -134,12 +176,7 @@ impl Keys {
         }
         let stateful = uxmss::Key::from_bytes(bytes.get(..136)?)?;
         let stateless = sphincs_plus_c::Key::from_bytes(bytes.get(136..)?)?;
-        let public_key_commitment = Self::compute_commitment(&stateful, &stateless);
-        Some(Self {
-            stateless,
-            stateful,
-            public_key_commitment,
-        })
+        Some(Self::new(stateless, stateful))
     }
 
     /// Parse and validate a persisted 264-byte secret.
@@ -152,31 +189,31 @@ impl Keys {
     /// recomputed, never trusted from the input.
     pub fn import(bytes: &[u8]) -> Option<Self> {
         let keys = Self::from_bytes(bytes)?;
-        let max = keys.stateful.public_key.max_signatures;
+        let max = keys.stateful.public_key().max_signatures;
         if max == 0 || max > MAX_STATEFUL_SIGNATURES_LIMIT {
             return None;
         }
-        let next = keys.stateful.next_leaf_index;
+        let next = keys.stateful.next_leaf_index();
         if next < INITIAL_STATEFUL_LEAF_INDEX || next > max.saturating_add(1) {
             return None;
         }
         // The stateful root always covers the whole tree from leaf 1,
         // independent of `next`.
         let stateful_root = stateful_subtree_root(
-            keys.stateful.secret.sk_seed.as_bytes(),
-            keys.stateful.public_key.pk_seed.as_bytes(),
+            keys.stateful.secret().as_sk_seed().as_bytes(),
+            keys.stateful.public_key().pk_seed.as_bytes(),
             INITIAL_STATEFUL_LEAF_INDEX,
             max,
         );
         let hypertree_root = *sphincs_plus_c::keygen(
-            *keys.stateless.secret.sk_seed.as_bytes(),
-            *keys.stateless.secret.prf_seed.as_bytes(),
+            *keys.stateless.secret().as_sk_seed().as_bytes(),
+            *keys.stateless.secret().as_prf_seed().as_bytes(),
             *keys.stateless.public_key.pk_seed.as_bytes(),
         )
         .public_key
         .root
         .as_bytes();
-        if &stateful_root != keys.stateful.public_key.root.as_bytes()
+        if &stateful_root != keys.stateful.public_key().root.as_bytes()
             || &hypertree_root != keys.stateless.public_key.root.as_bytes()
         {
             return None;
@@ -193,23 +230,20 @@ impl Keys {
     /// [`derive32`]; this library has no RNG, so the caller must supply
     /// fresh entropy.
     pub fn reset(&mut self, new_seed: &[u8]) {
-        let max = self.stateful.public_key.max_signatures;
+        let max = self.stateful.public_key().max_signatures;
         let sk = derive32(b"shrincs-stateful-sk-seed", new_seed, &[]);
         let prf = derive32(b"shrincs-stateful-prf-seed", new_seed, &[]);
         let pk = derive32(b"shrincs-stateful-pk-seed", new_seed, &[]);
         let root = stateful_subtree_root(&sk, &pk, INITIAL_STATEFUL_LEAF_INDEX, max);
-        self.stateful = uxmss::Key {
-            secret: uxmss::PrivateKey {
-                sk_seed: uxmss::SkSeed::new(sk),
-                prf_seed: uxmss::PrfSeed::new(prf),
-            },
-            public_key: uxmss::StructuredPublicKey {
+        self.stateful = uxmss::Key::new(
+            uxmss::PrivateKey::new(uxmss::SkSeed::new(sk), uxmss::PrfSeed::new(prf)),
+            uxmss::StructuredPublicKey {
                 pk_seed: uxmss::PkSeed::new(pk),
                 root: uxmss::Root::new(root),
                 max_signatures: max,
             },
-            next_leaf_index: INITIAL_STATEFUL_LEAF_INDEX,
-        };
+            INITIAL_STATEFUL_LEAF_INDEX,
+        );
         self.public_key_commitment = Self::compute_commitment(&self.stateful, &self.stateless);
     }
 
@@ -228,6 +262,14 @@ impl Keys {
     pub fn recover_commitment(stateful_envelope: &[u8]) -> Option<Commitment> {
         let (pk, _sig) = crate::shrincs::signature::decode_stateful_envelope(stateful_envelope)?;
         pk.commitment()
+    }
+}
+
+impl TryFrom<&[u8]> for Keys {
+    type Error = ();
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        Self::from_bytes(value).ok_or(())
     }
 }
 
@@ -436,8 +478,8 @@ mod tests {
     fn commitment_recomputed_on_parse() {
         let keys = sample();
         assert_eq!(
-            keys.public_key_commitment,
-            Keys::compute_commitment(&keys.stateful, &keys.stateless)
+            *keys.public_key_commitment(),
+            Keys::compute_commitment(keys.stateful(), keys.stateless())
         );
     }
 
@@ -460,7 +502,7 @@ mod tests {
     fn commitment_matches_production_keygen() {
         let (keys, pk) = production_keys();
         assert_eq!(
-            keys.public_key_commitment.as_bytes().as_slice(),
+            keys.public_key_commitment().as_bytes().as_slice(),
             pk.public_key_commitment.as_slice()
         );
     }
@@ -500,7 +542,7 @@ mod tests {
         let (keys, _) = production_keys();
         let mut bytes = keys.to_bytes();
         // next_leaf_index (bytes 132..136) = max + 1 (exhausted but legal).
-        let exhausted = keys.stateful.public_key.max_signatures + 1;
+        let exhausted = keys.stateful().public_key().max_signatures + 1;
         bytes[132..136].copy_from_slice(&exhausted.to_be_bytes());
         assert!(Keys::import(&bytes).is_some());
     }
@@ -508,16 +550,19 @@ mod tests {
     #[test]
     fn reset_generates_fresh_stateful_chain() {
         let (mut keys, _pk) = production_keys();
-        let original_stateless = keys.stateless.clone();
-        let original_commitment = keys.public_key_commitment;
-        let original_max = keys.stateful.public_key.max_signatures;
+        let original_stateless = keys.stateless().clone();
+        let original_commitment = *keys.public_key_commitment();
+        let original_max = keys.stateful().public_key().max_signatures;
 
         keys.reset(b"a completely different reset seed");
 
-        assert_ne!(keys.public_key_commitment, original_commitment);
-        assert_eq!(keys.stateless, original_stateless);
-        assert_eq!(keys.stateful.next_leaf_index, INITIAL_STATEFUL_LEAF_INDEX);
-        assert_eq!(keys.stateful.public_key.max_signatures, original_max);
+        assert_ne!(*keys.public_key_commitment(), original_commitment);
+        assert_eq!(keys.stateless(), &original_stateless);
+        assert_eq!(
+            keys.stateful().next_leaf_index(),
+            INITIAL_STATEFUL_LEAF_INDEX
+        );
+        assert_eq!(keys.stateful().public_key().max_signatures, original_max);
         assert!(Keys::import(&keys.to_bytes()).is_some());
     }
 
@@ -529,20 +574,23 @@ mod tests {
         keys_a.reset(b"same reset seed");
         keys_b.reset(b"same reset seed");
 
-        assert_eq!(keys_a.stateful, keys_b.stateful);
-        assert_eq!(keys_a.public_key_commitment, keys_b.public_key_commitment);
+        assert_eq!(keys_a.stateful(), keys_b.stateful());
+        assert_eq!(
+            keys_a.public_key_commitment(),
+            keys_b.public_key_commitment()
+        );
     }
 
     #[test]
     fn recompute_commitment_matches_current_commitment() {
         let (keys, _pk) = production_keys();
-        assert_eq!(keys.recompute_commitment(), keys.public_key_commitment);
+        assert_eq!(keys.recompute_commitment(), *keys.public_key_commitment());
     }
 
     #[test]
     fn recover_commitment_from_envelope_matches_keygen_commitment() {
         let (mut keys, pk) = production_keys();
-        let pre_sign_commitment = keys.public_key_commitment;
+        let pre_sign_commitment = *keys.public_key_commitment();
         let sig = crate::shrincs::signer::ShrincsSigner::sign_stateful_raw(&mut keys, &[0x11; 32])
             .expect("sign");
         let env = crate::shrincs::signature::encode_stateful_envelope(&pk, &sig);
@@ -550,7 +598,7 @@ mod tests {
         let recovered = Keys::recover_commitment(&env).expect("recover");
 
         assert_eq!(recovered, pre_sign_commitment);
-        assert_eq!(recovered, production_keys().0.public_key_commitment);
+        assert_eq!(recovered, *production_keys().0.public_key_commitment());
     }
 
     #[test]
@@ -565,7 +613,7 @@ mod tests {
     #[test]
     fn recover_commitment_ignores_tampered_commitment_field() {
         let (mut keys, pk) = production_keys();
-        let real = keys.public_key_commitment;
+        let real = *keys.public_key_commitment();
         let sig =
             crate::shrincs::signer::ShrincsSigner::sign_stateful_raw(&mut keys, &[0x11u8; 32])
                 .expect("sign");

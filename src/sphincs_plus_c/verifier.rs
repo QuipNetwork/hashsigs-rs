@@ -24,6 +24,7 @@ use crate::sphincs_plus_c::{self, PublicKey, Signature};
 use crate::HASH_LEN;
 
 /// Independent stateless-only verifier (Solidity `SPHINCSPlusCVerifier` shape).
+#[derive(Debug, Clone, Copy)]
 pub struct SphincsPlusCVerifier;
 
 impl Default for SphincsPlusCVerifier {

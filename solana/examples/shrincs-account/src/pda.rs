@@ -91,6 +91,15 @@ pub fn leaf_bit_is_set(word: &[u8; HASH_LEN], leaf_index: u32) -> bool {
 
 /// Read bitmap-based stateful leaf usage. An uncreated word PDA means every
 /// leaf in that word is unused.
+///
+/// # Errors
+///
+/// Returns:
+/// - [`ProgramError::InvalidSeeds`] when `bitmap_account` is not the PDA for
+///   this program, account key, key version, and leaf word index
+/// - [`ProgramError::InvalidAccountData`] when the PDA exists but is not
+///   exactly 32 bytes
+/// - [`ProgramError`] from [`AccountInfo::try_borrow_data`] on borrow failure
 pub fn is_leaf_used(
     program_id: &Pubkey,
     account_key: &Pubkey,
@@ -202,6 +211,7 @@ pub(crate) fn create_or_adopt_pda(init: &PdaInit, signer_seeds: &[&[u8]]) -> Pro
 
 /// Accounts required to touch a leaf-bitmap word PDA, bundled to keep
 /// [`mark_leaf_used`] within the positional-argument budget.
+#[derive(Debug)]
 pub struct LeafBitmapAccounts<'a, 'info> {
     /// The 32-byte bitmap-word PDA for the leaf's word (created on first use).
     pub bitmap_account: &'a AccountInfo<'info>,
@@ -214,6 +224,15 @@ pub struct LeafBitmapAccounts<'a, 'info> {
 /// Mark a stateful leaf used under bitmap tracking, creating the 32-byte word
 /// PDA on first use in that word. Rent for that account is paid by
 /// `accounts.payer`.
+///
+/// # Errors
+///
+/// Returns:
+/// - [`ProgramError::InvalidSeeds`] when `accounts.bitmap_account` is not the
+///   expected word PDA
+/// - [`ProgramError`] from create-or-adopt CPI (`create_account` / `transfer` /
+///   `allocate` / `assign`) when the word PDA must be initialized
+/// - [`ProgramError`] from borrowing or writing the bitmap account data
 pub fn mark_leaf_used(
     program_id: &Pubkey,
     account_key: &Pubkey,

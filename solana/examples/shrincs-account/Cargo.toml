@@ -2,9 +2,11 @@
 name = "shrincs-account-example"
 version = "0.0.1"
 edition = "2021"
+rust-version = "1.89"
 authors = ["Richard T. Carback III <rick.carback@gmail.com>"]
 description = "Solana example program demonstrating the SHRINCS account pattern"
 license = "AGPL-3.0-or-later"
+repository = "https://github.com/quipnetwork/hashsigs-rs"
 
 [lib]
 name = "shrincs_account_example"

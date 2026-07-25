@@ -55,6 +55,27 @@ pub use crate::profiles::{
     NUM_WOTS_CHAINS, PROFILE_NAME, STATELESS_SIGNATURE_LIMIT, WOTS_CHAIN_LEN,
 };
 
+/// Stateless hybrid SHRINCS verifier facade.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// # fn main() -> Result<(), ()> {
+/// use hashsigs_rs::shrincs::{sign, ShrincsSigner, ShrincsVerifier, VerifierInterface};
+///
+/// let (mut keys, public_key) = ShrincsSigner::keygen(b"verify-seed", 4).ok_or(())?;
+/// let hash = [9u8; 32];
+/// let envelope = sign(&mut keys, &hash).ok_or(())?;
+/// let ok = ShrincsVerifier::new().verify(
+///     &public_key.public_key_commitment,
+///     &hash,
+///     &envelope,
+/// );
+/// assert_eq!(ok, hashsigs_rs::VerifyOutcome::Valid);
+/// # Ok(())
+/// # }
+/// ```
+#[derive(Debug, Clone, Copy)]
 pub struct ShrincsVerifier;
 
 impl Default for ShrincsVerifier {

@@ -76,11 +76,15 @@ pub(crate) struct RotationAuthorization<'a> {
 /// construction (`STATEFUL_PUBLIC_KEY_BYTES - 64 == 4`), so the `try_into`
 /// cannot fail.
 fn next_max_signatures(next_stateful_public_key: &[u8; STATEFUL_PUBLIC_KEY_BYTES]) -> u32 {
-    u32::from_be_bytes(
-        next_stateful_public_key[64..68]
-            .try_into()
-            .expect("slice [64..68] of a 68-byte array is exactly 4 bytes"),
-    )
+    // Direct byte construction: indices 64..68 are compile-time in-bounds for a
+    // [u8; STATEFUL_PUBLIC_KEY_BYTES] (= 68), so this cannot panic and needs no
+    // fallible conversion.
+    u32::from_be_bytes([
+        next_stateful_public_key[64],
+        next_stateful_public_key[65],
+        next_stateful_public_key[66],
+        next_stateful_public_key[67],
+    ])
 }
 
 /// Read a `Vec<u8>` public-key component (`pk_seed`/`hypertree_root`) as a

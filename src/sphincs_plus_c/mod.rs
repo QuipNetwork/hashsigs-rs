@@ -30,6 +30,20 @@ pub fn to_message(hash: &[u8; HASH_LEN]) -> [u8; HASH_LEN] {
 }
 
 /// Verify a SPHINCS+C signature over an arbitrary message.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// # fn main() -> Result<(), ()> {
+/// use hashsigs_rs::sphincs_plus_c::{keygen, sign, verify};
+///
+/// let key = keygen([1u8; 32], [2u8; 32], [3u8; 32]);
+/// let message = b"hello";
+/// let sig = sign(&key, message).ok_or(())?;
+/// assert!(verify(&key.public_key, message, &sig));
+/// # Ok(())
+/// # }
+/// ```
 pub fn verify(pk: &key::PublicKey, message: &[u8], sig: &Signature) -> bool {
     verify_raw(pk.pk_seed.as_bytes(), pk.root.as_bytes(), message, sig)
 }
@@ -110,6 +124,19 @@ pub mod verifier;
 pub use verifier::SphincsPlusCVerifier;
 
 /// Sign an arbitrary message at the SPHINCS+C layer.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// # fn main() -> Result<(), ()> {
+/// use hashsigs_rs::sphincs_plus_c::{keygen, sign};
+///
+/// let key = keygen([1u8; 32], [2u8; 32], [3u8; 32]);
+/// let sig = sign(&key, b"hello").ok_or(())?;
+/// assert!(!sig.to_bytes().is_empty());
+/// # Ok(())
+/// # }
+/// ```
 pub fn sign(signing_key: &key::Key, message: &[u8]) -> Option<Signature> {
     let signed_fors = fors_c::sign_fors_c(signing_key, message)?;
     let hypertree_layers = hypertree::sign_hypertree(
@@ -138,22 +165,28 @@ pub fn sign_hash(signing_key: &key::Key, hash: &[u8; HASH_LEN]) -> Option<Signat
 /// so downstream consumers (tests, on-chain fixtures) do not need crate-
 /// internal access to build a fully independent SPHINCS+C keypair.
 /// `stateless_prf_seed` only affects signing randomness, not the public key.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// use hashsigs_rs::sphincs_plus_c::keygen;
+///
+/// let key = keygen([1u8; 32], [2u8; 32], [3u8; 32]);
+/// assert_eq!(key.to_bytes().len(), 128);
+/// ```
 pub fn keygen(
     sk_seed: [u8; HASH_LEN],
     prf_seed: [u8; HASH_LEN],
     pk_seed: [u8; HASH_LEN],
 ) -> key::Key {
     let hypertree_root = hypertree::hypertree_public_root(&sk_seed, &pk_seed);
-    key::Key {
-        secret: key::PrivateKey {
-            sk_seed: key::SkSeed::new(sk_seed),
-            prf_seed: key::PrfSeed::new(prf_seed),
-        },
-        public_key: key::PublicKey {
+    key::Key::new(
+        key::PrivateKey::new(key::SkSeed::new(sk_seed), key::PrfSeed::new(prf_seed)),
+        key::PublicKey {
             pk_seed: key::PkSeed::new(pk_seed),
             root: key::Root::new(hypertree_root),
         },
-    }
+    )
 }
 
 /// Derive a SPHINCS+C key from a master seed. Domain tags are consensus-fixed
