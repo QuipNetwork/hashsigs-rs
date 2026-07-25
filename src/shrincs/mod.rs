@@ -77,10 +77,12 @@ pub use uxmss::STATEFUL_PUBLIC_KEY_BYTES;
 // at its canonical home, `sphincs_plus_c::Signature`.
 pub use crate::sphincs_plus_c::Signature as StatelessSignature;
 
-// Re-export commitment helpers used by wasm/tests.
-#[allow(unused_imports)]
+// Re-export commitment helpers used by wasm/tests. Each re-export is consumed
+// only by the wasm-bindings and/or test modules under `cfg`, so it is unused
+// in a plain library build — hence the per-item `unused_imports` allows.
+#[allow(unused_imports)] // consumed by test_support/wasm under cfg
 pub(crate) use crate::hash::derive32;
-#[allow(unused_imports)]
+#[allow(unused_imports)] // consumed by dispatch tests under cfg(test)
 #[cfg(test)]
 pub(crate) use dispatch::verify_stateless_unsafe_raw;
 #[allow(unused_imports)] // used by wasm/test modules under cfg
@@ -88,9 +90,9 @@ pub(crate) use dispatch::{
     matches_expected_public_key_commitment, valid_public_key, verify_stateful,
     verify_stateful_unsafe_raw, verify_stateless,
 };
-#[allow(unused_imports)]
+#[allow(unused_imports)] // consumed by wasm/test modules under cfg
 pub(crate) use key::{decode_stateful_public_key, encode_stateful_public_key};
-#[allow(unused_imports)]
+#[allow(unused_imports)] // consumed by wasm/test modules under cfg
 pub(crate) use signer::public_key_from_components;
 
 #[cfg(test)]

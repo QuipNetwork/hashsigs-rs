@@ -201,7 +201,10 @@ pub(crate) fn naive_tree_root_and_auth_path(
     let mut auth_path = Vec::with_capacity(height as usize);
 
     for node_height in 1..=height {
-        let sibling = level.get(index ^ 1).copied().unwrap_or([0u8; HASH_LEN]);
+        let sibling = level
+            .get(index ^ 1)
+            .copied()
+            .expect("full power-of-two level has a sibling at index^1");
         auth_path.push(sibling);
         let mut parents = Vec::with_capacity(level.len() / 2);
         for (parent_index, pair) in level.chunks_exact(2).enumerate() {
@@ -211,7 +214,10 @@ pub(crate) fn naive_tree_root_and_auth_path(
         index >>= 1;
     }
 
-    let root = level.first().copied().unwrap_or([0u8; HASH_LEN]);
+    let root = level
+        .first()
+        .copied()
+        .expect("levels collapse to a single root node");
     (root, auth_path)
 }
 

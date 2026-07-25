@@ -99,8 +99,8 @@ pub fn version() -> String {
 // of Uint8Array getters, `sign`/`verify` take and return Uint8Array
 // directly — mirroring the @noble/post-quantum surface shape.
 //
-// Every sign/verify pair below hashes the caller's arbitrary-length
-// the 32-byte `message` directly (the message IS the hash) —
+// Every sign/verify pair below uses the 32-byte `message` directly
+// (the message IS the hash; callers pre-hash arbitrary-length data) —
 // the ONE message-hashing choice shared across this whole section, so
 // `verify(sign(m, keys), m, pk)` round-trips regardless of which function
 // produced the signature.
@@ -234,8 +234,9 @@ pub fn sphincs_plus_c_sign(
     Ok(signature.to_bytes())
 }
 
-/// Verify a SPHINCS+C stateless signature envelope over `message` (hashed
-/// with keccak256, matching `sphincsPlusCSign`) against a 64-byte
+/// Verify a SPHINCS+C stateless signature envelope over the 32-byte
+/// `message` (the pre-computed digest, used directly — not re-hashed;
+/// matching `sphincsPlusCSign`) against a 64-byte
 /// `pkSeed ‖ hypertreeRoot` public key. Never throws — a malformed envelope
 /// or wrong-length key is simply `false`, matching noble's plain boolean
 /// `verify`.

@@ -472,9 +472,10 @@ mod tests {
         assert!(reader.decode_array_bytes(0, 0, 1).is_none());
         // Inflate the length word inside the array body beyond any reasonable max.
         let mut mangled = wrapped.clone();
-        // Outer head is one offset word; array length word sits at offset head_len.
-        let array_start = HASH_LEN; // single dynamic field offset points at head_len==32
-                                    // Overwrite array length with a huge value (still clean high bits).
+        // Outer head is one offset word; the single dynamic field offset points
+        // at head_len (==32), where the array length word sits. Overwrite that
+        // length with a huge value that still has clean high bits.
+        let array_start = HASH_LEN;
         mangled[array_start..array_start + HASH_LEN]
             .copy_from_slice(&word_from_usize(usize::MAX / 2));
         let reader = AbiReader::new(&mangled);

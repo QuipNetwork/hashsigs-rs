@@ -167,9 +167,12 @@ Thrown errors carry a stable `error.code` (typed as `ShrincsErrorCode`):
 
 | Code | Cause |
 |---|---|
-| `ERR_INVALID_INPUT` | Wrong-length seed/message, or `maxSignatures` out of range. |
+| `ERR_BAD_LENGTH` | Wrong-length seed, message, or secret key (the most common caller mistake). |
+| `ERR_INVALID_INPUT` | `maxSignatures` out of range (0 or greater than 4096). |
 | `ERR_STATEFUL_LEAVES_EXHAUSTED` | The stateful budget is spent; use `signStateless` or `reset`. |
 | `ERR_IMPORT_INVALID` | Imported secret bytes fail root/commitment recomputation. |
+| `ERR_KEYGEN_FAILED` | Key derivation failed for the supplied inputs. |
+| `ERR_SIGNING_FAILED` | WOTS-C / FORS-C / hypertree grinding failed for the leaf/message. |
 
 ## Security
 

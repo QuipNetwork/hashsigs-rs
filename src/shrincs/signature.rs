@@ -39,8 +39,9 @@ use crate::sphincs_plus_c::Signature as StatelessSignature;
 use crate::HASH_LEN;
 
 /// Upper bound on a stateful auth-path length (equals the leaf index).
-/// Matches the signer / wasm host cap (`MAX_STATEFUL_SIGNATURES_LIMIT`).
-const MAX_STATEFUL_AUTH_PATH_LEN: usize = 4096;
+/// Single source of truth: the signer / wasm host cap in `uxmss`.
+const MAX_STATEFUL_AUTH_PATH_LEN: usize =
+    crate::shrincs::uxmss::MAX_STATEFUL_SIGNATURES_LIMIT as usize;
 
 /// The primary SHRINCS signature: the stateful UXMSS fast-path signature.
 #[derive(Debug, Clone, PartialEq, Eq)]

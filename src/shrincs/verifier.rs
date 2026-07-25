@@ -85,10 +85,16 @@ impl Default for ShrincsVerifier {
 }
 
 impl ShrincsVerifier {
+    /// Construct a verifier handle. The type carries no state; the handle
+    /// exists so both schemes share the `VerifierInterface` shape.
     pub fn new() -> Self {
         Self
     }
 
+    /// Verify a stateful (UXMSS fast-path) SHRINCS signature: recompute the
+    /// action message from `expected_public_key_commitment` and `context`,
+    /// then check `signature` against it and `public_key`. Returns `true` only
+    /// for a valid signature bound to that exact context.
     pub fn verify_stateful(
         &self,
         expected_public_key_commitment: [u8; HASH_LEN],
@@ -104,6 +110,9 @@ impl ShrincsVerifier {
         )
     }
 
+    /// Verify a stateless (SPHINCS+C) SHRINCS signature over the action
+    /// message derived from `expected_public_key_commitment` and `context`.
+    /// Returns `true` only for a valid signature bound to that exact context.
     pub fn verify_stateless(
         &self,
         expected_public_key_commitment: [u8; HASH_LEN],
@@ -151,6 +160,9 @@ impl ShrincsVerifier {
         )
     }
 
+    /// The 32-byte message a stateful signature must sign: binds the public-key
+    /// commitment to the action `context` (nonce, key version, domain,
+    /// action type, payload hash).
     pub fn stateful_action_message_hash(
         &self,
         expected_public_key_commitment: [u8; HASH_LEN],
@@ -159,6 +171,8 @@ impl ShrincsVerifier {
         stateful_action_message_hash(expected_public_key_commitment, context)
     }
 
+    /// The 32-byte message a stateless signature must sign: the same
+    /// commitment-to-`context` binding under the stateless domain tag.
     pub fn stateless_action_message_hash(
         &self,
         expected_public_key_commitment: [u8; HASH_LEN],

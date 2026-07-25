@@ -99,6 +99,10 @@ pub(crate) enum ShrincsAccountError {
     /// A rotation's caller-declared `next_commitment` doesn't match the
     /// recomputed `ShrincsVerifier::public_key_commitment`.
     CommitmentMismatch = 10,
+    /// `process_init` was given an all-zero `initial_commitment`, which the
+    /// core verifier always rejects — installing it would permanently brick
+    /// verification for the account.
+    InvalidInitialCommitment = 11,
 }
 
 impl From<ShrincsAccountError> for ProgramError {
@@ -353,6 +357,9 @@ pub(crate) fn process_init(
     if !account_info.data_is_empty() {
         return Err(ProgramError::AccountAlreadyInitialized);
     }
+    if args.initial_commitment == [0u8; HASH_LEN] {
+        return Err(ShrincsAccountError::InvalidInitialCommitment.into());
+    }
 
     let state = ShrincsAccountState {
         current_public_key_commitment: args.initial_commitment,
@@ -530,7 +537,7 @@ pub(crate) fn process_verify_stateless_action(
     }
 
     increment_u256_be(&mut state.nonce);
-    state.stateless_signatures_used += 1;
+    state.stateless_signatures_used = state.stateless_signatures_used.saturating_add(1);
     msg!(
         "shrincs-account-event:StatelessSignatureVerified:used_count={}:nonce={:?}:key_version={:?}",
         state.stateless_signatures_used,

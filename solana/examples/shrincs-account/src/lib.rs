@@ -37,6 +37,7 @@ pub mod processor;
 pub mod rotation;
 pub mod state;
 
+#[cfg(not(feature = "no-entrypoint"))]
 use crate::processor::process_instruction;
 
 #[cfg(not(feature = "no-entrypoint"))]
