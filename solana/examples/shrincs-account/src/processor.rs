@@ -1170,6 +1170,242 @@ mod tests {
         }
     }
 
+    /// Assert the transaction aborted with the given non-custom
+    /// [`solana_sdk::instruction::InstructionError`] variant (e.g.
+    /// `InvalidSeeds`, `AccountAlreadyInitialized`).
+    fn assert_instruction_error(
+        result: &Result<(), solana_sdk::transaction::TransactionError>,
+        expected: solana_sdk::instruction::InstructionError,
+    ) {
+        match result {
+            Err(solana_sdk::transaction::TransactionError::InstructionError(_, err)) => {
+                assert_eq!(err, &expected, "unexpected instruction error");
+            }
+            other => panic!("expected instruction error {expected:?}, got {other:?}"),
+        }
+    }
+
+    /// Build a raw `Init` instruction, letting each `process_init` negative
+    /// test deliberately break exactly one precondition (owner signer flag,
+    /// PDA/seed match, or the destination account).
+    fn init_instruction(
+        program_id: &SdkPubkey,
+        payer: &SdkPubkey,
+        owner: &SdkPubkey,
+        owner_is_signer: bool,
+        account_pda_key: &SdkPubkey,
+        args: InitArgs,
+    ) -> Instruction {
+        Instruction {
+            program_id: *program_id,
+            accounts: vec![
+                AccountMeta::new(*payer, true),
+                AccountMeta::new_readonly(*owner, owner_is_signer),
+                AccountMeta::new(*account_pda_key, false),
+                AccountMeta::new_readonly(solana_program::system_program::id(), false),
+            ],
+            data: borsh::to_vec(&TestInstruction::Init(args)).unwrap(),
+        }
+    }
+
+    #[tokio::test]
+    async fn process_init_rejects_non_signer_owner() {
+        let (program_test, program_id) = setup_test().await;
+        let context = program_test.start_with_context().await;
+        let program_id = program_id.pubkey();
+        let owner = Keypair::new();
+        let salt = [40u8; HASH_LEN];
+        let (account_pda_key, _bump) = account_pda(&program_id, &owner.pubkey(), &salt);
+
+        let instruction = init_instruction(
+            &program_id,
+            &context.payer.pubkey(),
+            &owner.pubkey(),
+            false,
+            &account_pda_key,
+            InitArgs {
+                salt,
+                initial_commitment: [1u8; HASH_LEN],
+            },
+        );
+        // `owner` never signs, matching the instruction's own non-signer meta.
+        let transaction = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer],
+            context.last_blockhash,
+        );
+        let result = context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap();
+        assert_missing_signature(&result.result);
+    }
+
+    #[tokio::test]
+    async fn process_init_rejects_mismatched_seed() {
+        let (program_test, program_id) = setup_test().await;
+        let context = program_test.start_with_context().await;
+        let program_id = program_id.pubkey();
+        let owner = Keypair::new();
+        let salt = [41u8; HASH_LEN];
+        let wrong_salt = [42u8; HASH_LEN];
+        // The PDA passed in is derived from a DIFFERENT salt than the one
+        // carried in `InitArgs`, so `expected_pda != *account_info.key`.
+        let (wrong_pda_key, _bump) = account_pda(&program_id, &owner.pubkey(), &wrong_salt);
+
+        let instruction = init_instruction(
+            &program_id,
+            &context.payer.pubkey(),
+            &owner.pubkey(),
+            true,
+            &wrong_pda_key,
+            InitArgs {
+                salt,
+                initial_commitment: [1u8; HASH_LEN],
+            },
+        );
+        let transaction = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer, &owner],
+            context.last_blockhash,
+        );
+        let result = context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap();
+        assert_instruction_error(
+            &result.result,
+            solana_sdk::instruction::InstructionError::InvalidSeeds,
+        );
+    }
+
+    #[tokio::test]
+    async fn process_init_rejects_reinitialization() {
+        let (program_test, program_id) = setup_test().await;
+        let mut context = program_test.start_with_context().await;
+        let program_id = program_id.pubkey();
+        let owner = Keypair::new();
+        let salt = [43u8; HASH_LEN];
+        let account_pda_key =
+            init_account(&mut context, &program_id, &owner, salt, [1u8; HASH_LEN]).await;
+
+        // Re-init the same (owner, salt) PDA: `data_is_empty()` is now false,
+        // so the griefing guard must fire before anything is rewritten.
+        context.last_blockhash = context.get_new_latest_blockhash().await.unwrap();
+        let instruction = init_instruction(
+            &program_id,
+            &context.payer.pubkey(),
+            &owner.pubkey(),
+            true,
+            &account_pda_key,
+            InitArgs {
+                salt,
+                initial_commitment: [2u8; HASH_LEN],
+            },
+        );
+        let transaction = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer, &owner],
+            context.last_blockhash,
+        );
+        let result = context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap();
+        assert_instruction_error(
+            &result.result,
+            solana_sdk::instruction::InstructionError::AccountAlreadyInitialized,
+        );
+    }
+
+    #[tokio::test]
+    async fn process_init_rejects_all_zero_commitment() {
+        let (program_test, program_id) = setup_test().await;
+        let context = program_test.start_with_context().await;
+        let program_id = program_id.pubkey();
+        let owner = Keypair::new();
+        let salt = [44u8; HASH_LEN];
+        let (account_pda_key, _bump) = account_pda(&program_id, &owner.pubkey(), &salt);
+
+        let instruction = init_instruction(
+            &program_id,
+            &context.payer.pubkey(),
+            &owner.pubkey(),
+            true,
+            &account_pda_key,
+            InitArgs {
+                salt,
+                initial_commitment: [0u8; HASH_LEN],
+            },
+        );
+        let transaction = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer, &owner],
+            context.last_blockhash,
+        );
+        let result = context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap();
+        assert_custom_error(
+            &result.result,
+            ShrincsAccountError::InvalidInitialCommitment,
+        );
+    }
+
+    #[tokio::test]
+    async fn process_init_adopts_prefunded_pda() {
+        let (program_test, program_id) = setup_test().await;
+        let mut context = program_test.start_with_context().await;
+        let program_id = program_id.pubkey();
+        let owner = Keypair::new();
+        let salt = [45u8; HASH_LEN];
+        let (account_pda_key, _bump) = account_pda(&program_id, &owner.pubkey(), &salt);
+
+        // Grief the PDA before init: fund it with 1 lamport while it is still
+        // system-owned and empty -- exactly the attack `create_or_adopt_pda`'s
+        // docstring defends against (a plain `create_account` CPI would fail
+        // `AccountAlreadyInUse` here). The runtime rejects a real transfer
+        // transaction that would leave a destination below the rent-exempt
+        // minimum, so this uses `set_account` (an explicit "state not
+        // reachable by sending transactions" escape hatch, per its own
+        // docstring) to land the account in that exact 1-lamport state.
+        context.set_account(
+            &account_pda_key,
+            &solana_sdk::account::AccountSharedData::new(
+                1,
+                0,
+                &solana_program::system_program::id(),
+            ),
+        );
+
+        let prefunded = context
+            .banks_client
+            .get_account(account_pda_key)
+            .await
+            .unwrap()
+            .expect("prefunded account exists");
+        assert_eq!(prefunded.lamports, 1);
+        assert_eq!(prefunded.owner, solana_program::system_program::id());
+
+        let commitment = [3u8; HASH_LEN];
+        let returned_pda_key =
+            init_account(&mut context, &program_id, &owner, salt, commitment).await;
+        assert_eq!(returned_pda_key, account_pda_key);
+
+        let state = fetch_state(&mut context, &account_pda_key).await;
+        assert_eq!(state.current_public_key_commitment, commitment);
+        assert_eq!(state.owner, owner.pubkey());
+    }
+
     /// Drive one successful stateful action to flip `stateful_policy_frozen`,
     /// mirroring `stateful_action_valid_signature_advances_state`'s flow.
     async fn freeze_stateful_policy(
