@@ -394,6 +394,23 @@ mod interface_tests {
         assert_eq!(outcome, VerifyOutcome::Malformed);
     }
 
+    #[test]
+    fn verify_reports_a_mismatched_commitment_as_invalid_not_malformed() {
+        let (mut signing_key, public_key) = keypair(b"verifier stateful wrong commitment seed");
+        let hash = [0x5du8; HASH_LEN];
+        let signature = ShrincsSigner::sign_stateful_raw(&mut signing_key, &hash)
+            .expect("signing must succeed for a fresh key");
+        let envelope = encode_stateful_envelope(&public_key, &signature);
+
+        // Structurally well-formed (correct-length, well-decoded) but wrong
+        // commitment: must be Invalid, not Malformed -- the stateless analog
+        // is `verify_stateless_reports_a_mismatched_commitment_as_invalid_not_malformed`.
+        let mut wrong_commitment = commitment_of(&public_key);
+        wrong_commitment[0] ^= 0x01;
+        let outcome = ShrincsVerifier::new().verify(&wrong_commitment, &hash, &envelope);
+        assert_eq!(outcome, VerifyOutcome::Invalid);
+    }
+
     // --- stateless verify ------------------------------------------------
 
     #[test]
