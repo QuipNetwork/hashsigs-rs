@@ -62,7 +62,7 @@ fn stateful_erc7913_adapter_byte_pins_against_solidity_vector() {
         .expect("stateful action message must be exactly 32 bytes");
     let envelope_bytes = encode_stateful_envelope(&oracle.public_key, &oracle.signature);
 
-    let outcome = ShrincsVerifier::new().verify_envelope(
+    let outcome = ShrincsVerifier::new().verify(
         &oracle.current_shrincs_public_key,
         &hash,
         &envelope_bytes,
@@ -74,13 +74,13 @@ fn stateful_erc7913_adapter_byte_pins_against_solidity_vector() {
     let mut short_key = oracle.current_shrincs_public_key.to_vec();
     short_key.pop();
     assert_eq!(
-        ShrincsVerifier::new().verify_envelope(&short_key, &hash, &envelope_bytes),
+        ShrincsVerifier::new().verify(&short_key, &hash, &envelope_bytes),
         VerifyOutcome::Invalid
     );
 
     // A truncated envelope is reported Malformed (Solidity: revert).
     assert_eq!(
-        ShrincsVerifier::new().verify_envelope(
+        ShrincsVerifier::new().verify(
             &oracle.current_shrincs_public_key,
             &hash,
             &envelope_bytes[..envelope_bytes.len() - 1],
@@ -111,7 +111,7 @@ fn stateless_erc7913_adapter_byte_pins_against_solidity_vector() {
         .expect("stateless action message must be exactly 32 bytes");
     let envelope_bytes = encode_stateless_envelope(&oracle.public_key, &oracle.signature);
 
-    let outcome = ShrincsVerifier::new().verify_stateless_envelope(
+    let outcome = ShrincsVerifier::new().verify_stateless_signature(
         &oracle.current_shrincs_public_key,
         &hash,
         &envelope_bytes,
@@ -121,12 +121,12 @@ fn stateless_erc7913_adapter_byte_pins_against_solidity_vector() {
     let mut short_key = oracle.current_shrincs_public_key.to_vec();
     short_key.pop();
     assert_eq!(
-        ShrincsVerifier::new().verify_stateless_envelope(&short_key, &hash, &envelope_bytes),
+        ShrincsVerifier::new().verify_stateless_signature(&short_key, &hash, &envelope_bytes),
         VerifyOutcome::Invalid
     );
 
     assert_eq!(
-        ShrincsVerifier::new().verify_stateless_envelope(
+        ShrincsVerifier::new().verify_stateless_signature(
             &oracle.current_shrincs_public_key,
             &hash,
             &envelope_bytes[..envelope_bytes.len() - 1],

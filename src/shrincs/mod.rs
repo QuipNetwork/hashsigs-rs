@@ -23,16 +23,16 @@
 pub(crate) mod uxmss;
 mod action_context;
 mod dispatch;
-/// The composed SHRINCS key: SPHINCS+C ⊕ UXMSS ⊕ commitment.
-pub mod keys;
-/// SHRINCS public-key wire type and its ABI codec.
+/// The composed SHRINCS key (SPHINCS+C ⊕ UXMSS ⊕ commitment), the public-key
+/// wire type, and the [`key::Commitment`].
 ///
-/// `pub` (rather than `pub(crate)`) because `PublicKey` is part of the
-/// crate's public wire-type surface: the `tests/` integration suite and the
-/// `solana` workspace member reconstruct it from their DTOs, importing it at
-/// the canonical path `crate::shrincs::public_key::PublicKey` (also
-/// re-exported as `crate::shrincs::PublicKey`).
-pub mod public_key;
+/// `pub` because `Keys` and `PublicKey` are part of the crate's public
+/// wire-type surface: the `tests/` integration suite and the `solana`
+/// workspace member reconstruct them from their DTOs at the canonical path
+/// `crate::shrincs::key::{Keys, PublicKey}` (also re-exported as
+/// `crate::shrincs::{Keys, PublicKey}`). Consolidated from the former `keys` +
+/// `public_key` modules to mirror `sphincs_plus_c::key`.
+pub mod key;
 /// The primary SHRINCS signature (the stateful UXMSS fast-path signature),
 /// its ABI codec, and the composite envelope codecs.
 ///
@@ -41,8 +41,6 @@ pub mod public_key;
 /// canonically `crate::shrincs::signature::Signature` (also re-exported as
 /// `crate::shrincs::Signature`).
 pub mod signature;
-mod signer_types;
-mod signer_utils;
 
 pub mod signer;
 pub mod verifier;
@@ -53,8 +51,8 @@ mod vector_conformance;
 pub(crate) mod test_fixtures;
 
 pub use crate::verifier::{VerifierInterface, VerifyOutcome};
-pub use keys::{Commitment, Keys};
-pub use signer::{ShrincsSigner, ShrincsSignerResult, ShrincsStatefulSigner};
+pub use key::{Commitment, Keys};
+pub use signer::{sign, ShrincsSigner, ShrincsSignerResult};
 pub use dispatch::prepare_stateless_delegation;
 pub use verifier::{ShrincsVerifier, ShrincsVerifierExt};
 
@@ -68,7 +66,7 @@ pub use crate::hash::{ADDRESS_TYPE_FORS_TREE, ADDRESS_TYPE_TREE, ADDRESS_TYPE_WO
 pub use crate::hash::suite::{HASH_SUITE_KECCAK_256, HASH_SUITE_SHA2_256};
 pub use crate::HASH_LEN;
 pub use action_context::ActionContext;
-pub use public_key::{decode_public_key_commitment, PublicKey};
+pub use key::PublicKey;
 pub use signature::{
     decode_stateful_envelope, decode_stateless_envelope, encode_stateful_envelope,
     encode_stateless_envelope, Signature,
@@ -90,11 +88,11 @@ pub(crate) use dispatch::{
 #[cfg(test)]
 pub(crate) use dispatch::verify_stateless_unsafe_raw;
 #[allow(unused_imports)]
-pub(crate) use public_key::{
-    decode_stateful_public_key, encode_stateful_public_key, public_key_commitment,
-};
+pub(crate) use key::{decode_stateful_public_key, encode_stateful_public_key};
 #[allow(unused_imports)]
-pub(crate) use signer_utils::{derive32, public_key_from_components};
+pub(crate) use crate::hash::derive32;
+#[allow(unused_imports)]
+pub(crate) use signer::public_key_from_components;
 
 #[cfg(test)]
 mod profile_tests {

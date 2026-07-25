@@ -71,7 +71,7 @@ pub(crate) struct RotationAuthorization<'a> {
 
 /// Read `max_signatures` from the last 4 bytes of a 68-byte encoded stateful
 /// public key (`pk_seed(32) || root(32) || max_signatures_be(4)`). Mirrors
-/// the crate-private `hashsigs_rs::shrincs::public_key::decode_stateful_public_key`,
+/// the crate-private `hashsigs_rs::shrincs::key::decode_stateful_public_key`,
 /// which this wrapper cannot call; the slice is exactly 4 bytes by
 /// construction (`STATEFUL_PUBLIC_KEY_BYTES - 64 == 4`), so the `try_into`
 /// cannot fail.

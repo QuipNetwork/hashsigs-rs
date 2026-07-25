@@ -28,8 +28,8 @@
 //! `shrincs::Keys` (composition, not duplication).
 //!
 //! Flat byte layout (matching the wasm ABI):
-//! `Secret` = `sk_seed(32) ‖ prf_seed(32)` (64 bytes), `PublicKey` =
-//! `pk_seed(32) ‖ root(32)` (64 bytes), `Key` = `Secret ‖ PublicKey`
+//! `PrivateKey` = `sk_seed(32) ‖ prf_seed(32)` (64 bytes), `PublicKey` =
+//! `pk_seed(32) ‖ root(32)` (64 bytes), `Key` = `PrivateKey ‖ PublicKey`
 //! (128 bytes).
 
 use core::fmt;
@@ -39,11 +39,11 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 use crate::hash::word32;
 use crate::HASH_LEN;
 
-/// Secret `SK.seed` material: derives FORS-C and hypertree WOTS-C secrets.
+/// PrivateKey `SK.seed` material: derives FORS-C and hypertree WOTS-C secrets.
 #[derive(Clone, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]
 pub struct SkSeed([u8; HASH_LEN]);
 
-/// Secret `SK.prf` material: derives stateless message randomizers.
+/// PrivateKey `SK.prf` material: derives stateless message randomizers.
 #[derive(Clone, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]
 pub struct PrfSeed([u8; HASH_LEN]);
 
@@ -115,7 +115,7 @@ impl Root {
     }
 }
 
-// Secret newtypes redact their bytes so seeds never reach logs or telemetry.
+// PrivateKey newtypes redact their bytes so seeds never reach logs or telemetry.
 impl fmt::Debug for SkSeed {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("SkSeed(<redacted>)")
@@ -130,16 +130,16 @@ impl fmt::Debug for PrfSeed {
 
 /// The secret half of a SPHINCS+C key: the 64 bytes that are actually secret.
 #[derive(Clone, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]
-pub struct Secret {
+pub struct PrivateKey {
     /// Derives FORS-C and hypertree WOTS-C secrets.
     pub sk_seed: SkSeed,
     /// Derives stateless message randomizers.
     pub prf_seed: PrfSeed,
 }
 
-impl fmt::Debug for Secret {
+impl fmt::Debug for PrivateKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Secret")
+        f.debug_struct("PrivateKey")
             .field("sk_seed", &"<redacted>")
             .field("prf_seed", &"<redacted>")
             .finish()
@@ -159,8 +159,8 @@ pub struct PublicKey {
 /// a SHRINCS key.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Key {
-    /// Secret seeds.
-    pub secret: Secret,
+    /// PrivateKey seeds.
+    pub secret: PrivateKey,
     /// Public seed and root.
     pub public_key: PublicKey,
 }
@@ -174,7 +174,7 @@ impl fmt::Debug for Key {
     }
 }
 
-impl Secret {
+impl PrivateKey {
     /// Flat layout `sk_seed(32) ‖ prf_seed(32)`, 64 bytes.
     pub fn to_bytes(&self) -> [u8; 64] {
         let mut out = [0u8; 64];
@@ -224,7 +224,7 @@ impl PublicKey {
 }
 
 impl Key {
-    /// Flat layout `Secret(64) ‖ PublicKey(64)`, 128 bytes — the SPHINCS+C
+    /// Flat layout `PrivateKey(64) ‖ PublicKey(64)`, 128 bytes — the SPHINCS+C
     /// `secretKey` bytes exactly.
     pub fn to_bytes(&self) -> [u8; 128] {
         let mut out = [0u8; 128];
@@ -238,7 +238,7 @@ impl Key {
             return None;
         }
         Some(Self {
-            secret: Secret::from_bytes(bytes.get(..64)?)?,
+            secret: PrivateKey::from_bytes(bytes.get(..64)?)?,
             public_key: PublicKey::from_bytes(bytes.get(64..)?)?,
         })
     }
@@ -250,7 +250,7 @@ mod tests {
 
     fn sample_key() -> Key {
         Key {
-            secret: Secret {
+            secret: PrivateKey {
                 sk_seed: SkSeed::new([1u8; HASH_LEN]),
                 prf_seed: PrfSeed::new([2u8; HASH_LEN]),
             },
@@ -279,7 +279,7 @@ mod tests {
     #[test]
     fn from_bytes_rejects_wrong_length() {
         assert_eq!(Key::from_bytes(&[0u8; 127]), None);
-        assert_eq!(Secret::from_bytes(&[0u8; 63]), None);
+        assert_eq!(PrivateKey::from_bytes(&[0u8; 63]), None);
         assert_eq!(PublicKey::from_bytes(&[0u8; 65]), None);
     }
 

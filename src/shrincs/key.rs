@@ -26,14 +26,17 @@
 //! of the 264-byte secret serialization; [`Keys::from_bytes`] recomputes it.
 //! Flat layout: `stateful(136) ‖ stateless(128)` = 264 bytes.
 
-use crate::hash::word32;
+use alloc::vec::Vec;
+
+use crate::abi::{encode_bytes, encode_tuple, AbiReader, Field};
+use crate::hash::{derive32, keccak_packed, word32};
+use crate::profiles::PROFILE_NAME;
 use crate::shrincs::uxmss::{
-    self, stateful_subtree_root, INITIAL_STATEFUL_LEAF_INDEX, MAX_STATEFUL_SIGNATURES_LIMIT,
+    self, stateful_subtree_root, PublicKey as StatefulPublicKey, INITIAL_STATEFUL_LEAF_INDEX,
+    MAX_STATEFUL_SIGNATURES_LIMIT, STATEFUL_PUBLIC_KEY_BYTES,
 };
 use crate::sphincs_plus_c;
 use crate::HASH_LEN;
-
-use super::{derive32, public_key_commitment};
 
 /// Number of bytes in the flat secret serialization of a [`Keys`].
 pub const KEYS_BYTES: usize = 264;
@@ -51,6 +54,32 @@ impl Commitment {
     /// Borrow the raw bytes.
     pub fn as_bytes(&self) -> &[u8; HASH_LEN] {
         &self.0
+    }
+
+    /// Derive the commitment binding an encoded stateful public key with a
+    /// stateless `pk_seed`/`hypertree_root`:
+    /// `keccak256("shrincs-public-key/" || profile || stateful_public_key ||
+    /// pk_seed || hypertree_root)`. Mirrors
+    /// `SHRINCS.publicKeyCommitmentFromParts`.
+    pub fn of(
+        stateful_public_key: &[u8],
+        pk_seed: &[u8; HASH_LEN],
+        hypertree_root: &[u8; HASH_LEN],
+    ) -> Self {
+        Self(keccak_packed(&[
+            b"shrincs-public-key/",
+            PROFILE_NAME.as_bytes(),
+            stateful_public_key,
+            pk_seed,
+            hypertree_root,
+        ]))
+    }
+
+    /// Parse the verifier `key` bytes, which are exactly one 32-byte
+    /// commitment word. Mirrors `SHRINCS.decodePublicKeyCommitment`; `None`
+    /// for any length other than 32.
+    pub fn from_bytes(key: &[u8]) -> Option<Self> {
+        Some(Self(word32(key)?))
     }
 }
 
@@ -76,11 +105,11 @@ impl Keys {
         stateless: &sphincs_plus_c::Key,
     ) -> Commitment {
         let stateful_public_key = stateful.public_key.to_bytes();
-        Commitment::new(public_key_commitment(
+        Commitment::of(
             &stateful_public_key,
             stateless.public_key.pk_seed.as_bytes(),
             stateless.public_key.root.as_bytes(),
-        ))
+        )
     }
 
     /// Flat secret layout `stateful(136) ‖ stateless(128)`, 264 bytes. The
@@ -170,7 +199,7 @@ impl Keys {
         let pk = derive32(b"shrincs-stateful-pk-seed", new_seed, &[]);
         let root = stateful_subtree_root(&sk, &pk, INITIAL_STATEFUL_LEAF_INDEX, max);
         self.stateful = uxmss::Key {
-            secret: uxmss::Secret {
+            secret: uxmss::PrivateKey {
                 sk_seed: uxmss::SkSeed::new(sk),
                 prf_seed: uxmss::PrfSeed::new(prf),
             },
@@ -198,21 +227,184 @@ impl Keys {
     /// a malformed envelope or wrong-length fields.
     pub fn recover_commitment(stateful_envelope: &[u8]) -> Option<Commitment> {
         let (pk, _sig) = crate::shrincs::signature::decode_stateful_envelope(stateful_envelope)?;
-        let pk_seed = word32(&pk.pk_seed)?;
-        let hypertree_root = word32(&pk.hypertree_root)?;
-        Some(Commitment::new(public_key_commitment(
-            &pk.stateful_public_key,
-            &pk_seed,
-            &hypertree_root,
-        )))
+        pk.commitment()
     }
 }
 
 // `Keys` intentionally does not derive `Zeroize`: its secret halves
-// (`sphincs_plus_c::Secret`, `uxmss::Secret`) are `ZeroizeOnDrop`, so their
+// (`sphincs_plus_c::PrivateKey`, `uxmss::PrivateKey`) are `ZeroizeOnDrop`, so their
 // seeds are wiped when a `Keys` drops, and its derived `Debug` delegates to
 // those redacting component impls. A blanket derive would also require the
 // public `Commitment` to be zeroizable for no benefit.
+
+// ---------------------------------------------------------------------
+// SHRINCS public-key wire type and commitment helpers
+// (consolidated from the former `public_key` module to mirror
+// `sphincs_plus_c::key`, which holds its scheme's key types in one file).
+// ---------------------------------------------------------------------
+
+/// The SHRINCS hybrid public-key bundle: the encoded stateful sub-key, the
+/// commitment binding it to the stateless half, and the stateless
+/// `pk_seed`/`hypertree_root` pair.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PublicKey {
+    /// Encoded stateful key: `pk_seed || root || max_signatures`.
+    pub stateful_public_key: Vec<u8>,
+    /// Commitment to the installed hybrid public-key bundle.
+    pub public_key_commitment: Vec<u8>,
+    /// Global stateless public seed used for FORS-C, hypertree, and WOTS-C hashing.
+    pub pk_seed: Vec<u8>,
+    /// Expected final hypertree root.
+    pub hypertree_root: Vec<u8>,
+}
+
+impl PublicKey {
+    /// ABI-encode the public-key body (four `bytes` fields), without a
+    /// further outer offset. Used both by `to_bytes` (wrapped one level
+    /// further, below) and directly by the composite
+    /// `signature::encode_stateful_envelope`/`encode_stateless_envelope`.
+    pub(crate) fn encode_body(&self) -> Vec<u8> {
+        encode_tuple(alloc::vec![
+            Field::Dynamic(encode_bytes(&self.stateful_public_key)),
+            Field::Dynamic(encode_bytes(&self.public_key_commitment)),
+            Field::Dynamic(encode_bytes(&self.pk_seed)),
+            Field::Dynamic(encode_bytes(&self.hypertree_root)),
+        ])
+    }
+
+    /// ABI-encode the public-key envelope: `abi.encode(SHRINCS.PublicKey)`.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        encode_tuple(alloc::vec![Field::Dynamic(self.encode_body())])
+    }
+
+    /// Decode a public-key body already located at `base` within a shared
+    /// `AbiReader`. No trailing-bytes check here: `base` commonly sits inside
+    /// a larger encoded envelope, so exhaustion is the calling top-level
+    /// decoder's responsibility.
+    pub(crate) fn decode(reader: &AbiReader, base: usize) -> Option<Self> {
+        Some(Self {
+            stateful_public_key: reader.decode_bytes(base, base)?,
+            public_key_commitment: reader.decode_bytes(base, base.checked_add(32)?)?,
+            pk_seed: reader.decode_bytes(base, base.checked_add(64)?)?,
+            hypertree_root: reader.decode_bytes(base, base.checked_add(96)?)?,
+        })
+    }
+
+    /// Decode a standalone byte blob produced by `to_bytes`.
+    pub fn from_bytes(data: &[u8]) -> Option<Self> {
+        let reader = AbiReader::new(data);
+        let public_key_start = reader.decode_offset(0, 0)?;
+        let decoded = Self::decode(&reader, public_key_start)?;
+        reader.finish()?;
+        Some(decoded)
+    }
+
+    /// Recompute the [`Commitment`] binding this bundle's parts. The stored
+    /// `public_key_commitment` field is only a claim (an attacker controls
+    /// decoded bytes); this recomputation is authoritative. `None` if any
+    /// part is not exactly 32 bytes.
+    pub fn commitment(&self) -> Option<Commitment> {
+        Some(Commitment::of(
+            &self.stateful_public_key,
+            &word32(&self.pk_seed)?,
+            &word32(&self.hypertree_root)?,
+        ))
+    }
+}
+
+impl TryFrom<&[u8]> for PublicKey {
+    type Error = ();
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        Self::from_bytes(value).ok_or(())
+    }
+}
+
+pub(crate) fn encode_stateful_public_key(
+    pk_seed: [u8; HASH_LEN],
+    root: [u8; HASH_LEN],
+    max_signatures: u32,
+) -> Vec<u8> {
+    let mut out = Vec::with_capacity(STATEFUL_PUBLIC_KEY_BYTES);
+    out.extend_from_slice(&pk_seed);
+    out.extend_from_slice(&root);
+    out.extend_from_slice(&max_signatures.to_be_bytes());
+    out
+}
+
+pub(crate) fn decode_stateful_public_key(encoded: &[u8]) -> Option<StatefulPublicKey> {
+    if encoded.len() != STATEFUL_PUBLIC_KEY_BYTES {
+        return None;
+    }
+    let pk_seed = word32(&encoded[..32])?;
+    let root = word32(&encoded[32..64])?;
+    let max_signatures = u32::from_be_bytes(encoded[64..68].try_into().ok()?);
+    Some(StatefulPublicKey {
+        pk_seed,
+        root,
+        max_signatures,
+    })
+}
+
+#[cfg(test)]
+mod public_key_tests {
+    use super::*;
+    use alloc::vec;
+
+    fn sample_public_key() -> PublicKey {
+        let mut stateful_public_key = vec![0u8; 68];
+        for (index, byte) in stateful_public_key.iter_mut().enumerate() {
+            *byte = index as u8;
+        }
+        PublicKey {
+            stateful_public_key,
+            public_key_commitment: vec![0xAA; 32],
+            pk_seed: vec![0xBB; 32],
+            hypertree_root: vec![0xCC; 32],
+        }
+    }
+
+    #[test]
+    fn to_bytes_from_bytes_round_trips() {
+        let public_key = sample_public_key();
+        let encoded = public_key.to_bytes();
+        let decoded = PublicKey::from_bytes(&encoded).expect("valid encoding must decode");
+        assert_eq!(decoded, public_key);
+        assert_eq!(decoded.to_bytes(), encoded);
+    }
+
+    #[test]
+    fn from_bytes_rejects_trailing_bytes() {
+        let mut encoded = sample_public_key().to_bytes();
+        encoded.extend_from_slice(&[0xAA, 0xBB]);
+        assert!(
+            PublicKey::from_bytes(&encoded).is_none(),
+            "trailing junk on the public-key envelope must be rejected"
+        );
+    }
+
+    #[test]
+    fn try_from_delegates_to_from_bytes() {
+        let public_key = sample_public_key();
+        let encoded = public_key.to_bytes();
+        let decoded = PublicKey::try_from(encoded.as_slice()).expect("valid encoding must decode");
+        assert_eq!(decoded, public_key);
+        let truncated = &encoded[..encoded.len() - 1];
+        assert!(PublicKey::try_from(truncated).is_err());
+    }
+
+    #[test]
+    fn commitment_from_bytes_round_trips() {
+        let commitment = Commitment::new([0x42; HASH_LEN]);
+        assert_eq!(Commitment::from_bytes(commitment.as_bytes()), Some(commitment));
+    }
+
+    #[test]
+    fn commitment_from_bytes_wrong_length_is_rejected() {
+        assert!(Commitment::from_bytes(&[0u8; 31]).is_none());
+        assert!(Commitment::from_bytes(&[0u8; 33]).is_none());
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -254,7 +446,7 @@ mod tests {
 
     /// A `Keys` with real, seed-derived roots, plus the `PublicKey` production
     /// `keygen` installs — for cross-checking commitment and import.
-    fn production_keys() -> (Keys, crate::shrincs::public_key::PublicKey) {
+    fn production_keys() -> (Keys, crate::shrincs::key::PublicKey) {
         use crate::shrincs::signer::ShrincsSigner;
         ShrincsSigner::keygen(b"keys import cross-check", 4).expect("keygen")
     }

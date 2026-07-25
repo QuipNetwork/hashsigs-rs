@@ -45,10 +45,12 @@ impl SphincsPlusCVerifier {
         crate::hash::keccak_packed(&[b"quip.sphincsplusc-verifier.v1"])
     }
 
-    /// Verify a SPHINCS+C signature over a 32-byte hash.
+    /// Verify a decoded SPHINCS+C signature over a 32-byte hash.
     ///
-    /// `key` is `pk_seed || hypertree_root` (exactly 64 bytes).
-    pub fn verify(
+    /// `key` is `pk_seed || hypertree_root` (exactly 64 bytes). Named
+    /// `verify_signature` (not `verify`) so it does not shadow the opaque-bytes
+    /// [`VerifierInterface::verify`](crate::verifier::VerifierInterface::verify).
+    pub fn verify_signature(
         &self,
         key: &[u8],
         hash: &[u8; HASH_LEN],
@@ -87,7 +89,7 @@ impl SphincsPlusCVerifier {
 impl crate::verifier::VerifierInterface for SphincsPlusCVerifier {
     /// `key` is the 64-byte `pkSeed || hypertreeRoot`; `signature` is the
     /// stateless signature envelope (`abi.encode(SPHINCSPlusC.Signature)`).
-    fn verify_envelope(
+    fn verify(
         &self,
         key: &[u8],
         hash: &[u8; 32],
@@ -102,7 +104,7 @@ impl crate::verifier::VerifierInterface for SphincsPlusCVerifier {
         };
         let mut hash32 = [0u8; 32];
         hash32.copy_from_slice(hash);
-        if self.verify(key, &hash32, &decoded) {
+        if self.verify_signature(key, &hash32, &decoded) {
             VerifyOutcome::Valid
         } else {
             VerifyOutcome::Invalid
@@ -160,43 +162,43 @@ mod tests {
 
     #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
     #[test]
-    fn verify_envelope_accepts_valid_64_byte_key_and_stateless_envelope() {
+    fn verify_accepts_valid_64_byte_key_and_stateless_envelope() {
         let hash = [0x42u8; HASH_LEN];
         let (key, envelope) = signed_stateless_envelope(b"verify-envelope valid", hash);
 
-        let outcome = SphincsPlusCVerifier::new().verify_envelope(&key, &hash, &envelope);
+        let outcome = SphincsPlusCVerifier::new().verify(&key, &hash, &envelope);
         assert_eq!(outcome, VerifyOutcome::Valid);
     }
 
     #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
     #[test]
-    fn verify_envelope_rejects_wrong_length_key() {
+    fn verify_rejects_wrong_length_key() {
         let hash = [0x43u8; HASH_LEN];
         let (key, envelope) = signed_stateless_envelope(b"verify-envelope wrong key", hash);
 
         let short_key = &key[..63];
-        let outcome = SphincsPlusCVerifier::new().verify_envelope(short_key, &hash, &envelope);
+        let outcome = SphincsPlusCVerifier::new().verify(short_key, &hash, &envelope);
         assert_eq!(outcome, VerifyOutcome::Invalid);
 
         let long_key = [&key[..], &[0u8]].concat();
-        let outcome = SphincsPlusCVerifier::new().verify_envelope(&long_key, &hash, &envelope);
+        let outcome = SphincsPlusCVerifier::new().verify(&long_key, &hash, &envelope);
         assert_eq!(outcome, VerifyOutcome::Invalid);
     }
 
     #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
     #[test]
-    fn verify_envelope_reports_malformed_envelope() {
+    fn verify_reports_malformed_envelope() {
         let hash = [0x44u8; HASH_LEN];
         let (key, envelope) = signed_stateless_envelope(b"verify-envelope malformed", hash);
 
-        let outcome = SphincsPlusCVerifier::new().verify_envelope(
+        let outcome = SphincsPlusCVerifier::new().verify(
             &key,
             &hash,
             &envelope[..envelope.len().saturating_sub(1)],
         );
         assert_eq!(outcome, VerifyOutcome::Malformed);
 
-        let outcome = SphincsPlusCVerifier::new().verify_envelope(&key, &hash, &[]);
+        let outcome = SphincsPlusCVerifier::new().verify(&key, &hash, &[]);
         assert_eq!(outcome, VerifyOutcome::Malformed);
     }
 }

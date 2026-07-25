@@ -30,13 +30,11 @@ use crate::HASH_LEN;
 use crate::sphincs_plus_c;
 use crate::sphincs_plus_c::Signature as StatelessSignature;
 use super::action_context::ActionContext;
-use super::public_key::PublicKey;
+use super::key::PublicKey;
 use super::signature::Signature;
 use crate::shrincs::uxmss;
 use super::uxmss::STATEFUL_PUBLIC_KEY_BYTES;
-use super::public_key::{
-    decode_stateful_public_key, public_key_commitment as public_key_commitment_from_parts,
-};
+use super::key::decode_stateful_public_key;
 
 /// Canonical action-verify message hash, binding the operation tag, active
 /// hash-suite ID, and the context's domain separator, nonce, key version,
@@ -104,13 +102,7 @@ pub(crate) fn valid_action_context(context: &ActionContext) -> bool {
 }
 
 fn recompute_public_key_commitment(public_key: &PublicKey) -> Option<[u8; HASH_LEN]> {
-    let pk_seed = word32(&public_key.pk_seed)?;
-    let hypertree_root = word32(&public_key.hypertree_root)?;
-    Some(public_key_commitment_from_parts(
-        &public_key.stateful_public_key,
-        &pk_seed,
-        &hypertree_root,
-    ))
+    Some(*public_key.commitment()?.as_bytes())
 }
 
 pub(crate) fn matches_expected_public_key_commitment(

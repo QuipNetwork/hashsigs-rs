@@ -708,7 +708,7 @@ fn winning_fors_counter_and_digest(
 
 #[cfg(all(test, any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
 mod measurement_tests {
-    use super::super::key::{Key, PkSeed, PrfSeed, PublicKey, Root, Secret, SkSeed};
+    use super::super::key::{Key, PkSeed, PrfSeed, PublicKey, Root, PrivateKey, SkSeed};
     use super::{signer_fors_digest, SigningForsDigest};
     use crate::hash::hash_packed;
     use crate::profiles::FORS_C_MAX_GRIND_COUNTER;
@@ -723,7 +723,7 @@ mod measurement_tests {
             hash_packed(&[domain, seed, &[]])
         }
         let key = Key {
-            secret: Secret {
+            secret: PrivateKey {
                 sk_seed: SkSeed::new(d(b"shrincs-stateless-sk-seed", seed)),
                 prf_seed: PrfSeed::new(d(b"shrincs-stateless-prf-seed", seed)),
             },

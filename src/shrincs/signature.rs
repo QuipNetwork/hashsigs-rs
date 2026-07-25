@@ -17,7 +17,7 @@
 
 //! The primary SHRINCS signature (the stateful UXMSS fast-path signature),
 //! its ABI codec, and the composite envelope codecs that pair a
-//! [`super::public_key::PublicKey`] with a signature.
+//! [`super::key::PublicKey`] with a signature.
 //!
 //! `Signature::to_bytes`/`from_bytes` are byte-identical to the historical
 //! `envelope::encode_stateful_signature_body`/`decode_stateful_signature`,
@@ -33,7 +33,7 @@
 
 use alloc::vec::Vec;
 
-use super::public_key::PublicKey;
+use super::key::PublicKey;
 use crate::abi::{
     encode_bytes32_array, encode_tuple, word_from_u32, AbiReader, Field,
 };
@@ -295,14 +295,14 @@ mod tests {
     #[test]
     fn prepare_stateless_delegation_extracts_pinned_sibling_shapes() {
         let mut public_key = sample_public_key();
-        // Recompute a self-consistent commitment isn't in scope here (that's
-        // `dispatch::public_key_commitment`'s job); use the crate helper to
-        // build a matching bundle instead of hand-rolling the keccak call.
-        let commitment = crate::shrincs::public_key_commitment(
+        // Build a self-consistent commitment via the `Commitment::of` helper
+        // instead of hand-rolling the keccak call.
+        let commitment = *crate::shrincs::key::Commitment::of(
             &public_key.stateful_public_key,
             &public_key.pk_seed.clone().try_into().unwrap(),
             &public_key.hypertree_root.clone().try_into().unwrap(),
-        );
+        )
+        .as_bytes();
         public_key.public_key_commitment = commitment.to_vec();
         let signature = sample_stateless_signature();
         let envelope = encode_stateless_envelope(&public_key, &signature);

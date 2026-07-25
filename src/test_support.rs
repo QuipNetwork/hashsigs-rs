@@ -29,7 +29,7 @@ pub(crate) fn stateful_only_key(seed: &[u8], max: u32) -> (Keys, PublicKey) {
     let pk_seed = derive32(b"shrincs-pk-seed", seed, &[]);
     let hypertree_root = derive32(b"placeholder-hypertree-root", seed, &[]);
     let stateless = sphincs_plus_c::Key {
-        secret: sphincs_plus_c::Secret {
+        secret: sphincs_plus_c::PrivateKey {
             sk_seed: sphincs_plus_c::SkSeed::new(derive32(b"shrincs-stateless-sk-seed", seed, &[])),
             prf_seed: sphincs_plus_c::PrfSeed::new(derive32(
                 b"shrincs-stateless-prf-seed",

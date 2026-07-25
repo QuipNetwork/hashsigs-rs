@@ -304,7 +304,7 @@ fn process_sphincs_plus_c_verify(
     signature: StatelessSignatureDto,
 ) -> ProgramResult {
     let signature = signature.into();
-    let is_valid = SphincsPlusCVerifier::new().verify(&key, &hash, &signature);
+    let is_valid = SphincsPlusCVerifier::new().verify_signature(&key, &hash, &signature);
     // Fail closed: a CPI caller that checks only instruction success must not
     // treat an invalid signature as accepted. Write the boolean first for
     // callers that inspect return data, then abort the transaction on invalid.

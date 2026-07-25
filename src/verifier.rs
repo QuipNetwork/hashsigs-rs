@@ -21,7 +21,7 @@
 //! `pkSeed || hypertreeRoot` key, stateless signature envelope) and
 //! [`crate::shrincs::ShrincsVerifier`] (32-byte public-key commitment,
 //! stateful envelope; its stateless delegation path is the inherent
-//! `verify_stateless_envelope`). The same byte-level shape is what EVM signature-verifier contracts
+//! `verify_stateless_signature`). The same byte-level shape is what EVM signature-verifier contracts
 //! consume, so a verifier built to this interface interoperates with them;
 //! the name here stays scheme-neutral because the interface is portable.
 
@@ -48,6 +48,6 @@ pub enum VerifyOutcome {
 /// A verifier that checks an opaque signature envelope by an opaque key over
 /// a 32-byte message hash.
 pub trait VerifierInterface {
-    fn verify_envelope(&self, key: &[u8], hash: &[u8; HASH_LEN], signature: &[u8])
+    fn verify(&self, key: &[u8], hash: &[u8; HASH_LEN], signature: &[u8])
         -> VerifyOutcome;
 }

@@ -96,7 +96,7 @@ impl From<&Keys> for SigningKeyDto {
 impl From<SigningKeyDto> for Keys {
     fn from(value: SigningKeyDto) -> Self {
         let stateful = uxmss::Key {
-            secret: uxmss::Secret {
+            secret: uxmss::PrivateKey {
                 sk_seed: uxmss::SkSeed::new(value.stateful_sk_seed),
                 prf_seed: uxmss::PrfSeed::new(value.stateful_prf_seed),
             },
@@ -108,7 +108,7 @@ impl From<SigningKeyDto> for Keys {
             next_leaf_index: value.next_stateful_leaf_index,
         };
         let stateless = sphincs_plus_c::Key {
-            secret: sphincs_plus_c::Secret {
+            secret: sphincs_plus_c::PrivateKey {
                 sk_seed: sphincs_plus_c::SkSeed::new(value.stateless_sk_seed),
                 prf_seed: sphincs_plus_c::PrfSeed::new(value.stateless_prf_seed),
             },

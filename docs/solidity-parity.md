@@ -25,7 +25,7 @@ audit. Module paths refreshed 2026-07-24 for the `hash/` split and
   `sphincs_plus_c::{fors_c, hypertree, signature}`). Byte-pinned against
   the Solidity-exported vector blobs.
 - `shrincs::ShrincsVerifier` implementing `verifier::VerifierInterface`
-  (`verify_envelope`) mirrors `SHRINCSVerifier.sol` (32-byte commitment key,
+  (`verify`) mirrors `SHRINCSVerifier.sol` (32-byte commitment key,
   stateful envelope, tri-state outcome, `version_tag()` pins);
   `SphincsPlusCVerifier` (also `VerifierInterface`) mirrors
   `SPHINCSPlusCVerifier.sol`.

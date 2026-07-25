@@ -22,67 +22,68 @@
 //! `sphincs_plus_c` for stateless recovery. Consumed by `wasm` as the only
 //! place that advances signer-side state (`next_leaf_index`).
 
-use crate::hash::word32;
+use alloc::vec::Vec;
+
+use crate::hash::{derive32, word32};
 use crate::sphincs_plus_c::Signature as StatelessSignature;
 use crate::sphincs_plus_c::{self};
 use super::action_context::ActionContext;
-use super::public_key::PublicKey;
+use super::key::{encode_stateful_public_key, Commitment, PublicKey};
 use super::signature::Signature;
 use crate::shrincs::uxmss;
 use crate::HASH_LEN;
 
-pub use super::signer_types::ShrincsSignerResult;
 use super::dispatch::stateful_action_message_hash;
-use super::keys::Keys;
-use super::public_key::encode_stateful_public_key;
-use super::signer_utils::{derive32, public_key_from_components};
+use super::key::Keys;
 
-/// Stateful SHRINCS signer implementing [`crate::signer::SignerInterface`].
+/// Signer operations return `None` when stateful leaves are exhausted or
+/// WOTS-C/FORS-C grinding fails within the configured counter budget. (Folded
+/// in from the former `signer_types` module.)
+pub type ShrincsSignerResult<T> = Option<T>;
+
+/// Assemble the SHRINCS public-key bundle from an encoded stateful sub-key, a
+/// stateless `pk_seed`, and a hypertree root, recomputing the commitment.
+/// (Folded in from the former `signer_utils` module.)
+pub(crate) fn public_key_from_components(
+    stateful_public_key: Vec<u8>,
+    pk_seed: [u8; HASH_LEN],
+    hypertree_root: [u8; HASH_LEN],
+) -> PublicKey {
+    let commitment = Commitment::of(&stateful_public_key, &pk_seed, &hypertree_root);
+    PublicKey {
+        stateful_public_key,
+        public_key_commitment: commitment.as_bytes().to_vec(),
+        pk_seed: pk_seed.to_vec(),
+        hypertree_root: hypertree_root.to_vec(),
+    }
+}
+
+/// Derive the public-key bundle implied by a signing key's two public halves.
+/// The stateful/stateless seeds and roots fully determine it, so a caller
+/// holding only a [`Keys`] can recover the `PublicKey` a verifier needs.
+fn public_key_of(keys: &Keys) -> PublicKey {
+    public_key_from_components(
+        encode_stateful_public_key(
+            *keys.stateful.public_key.pk_seed.as_bytes(),
+            *keys.stateful.public_key.root.as_bytes(),
+            keys.stateful.public_key.max_signatures,
+        ),
+        *keys.stateless.public_key.pk_seed.as_bytes(),
+        *keys.stateless.public_key.root.as_bytes(),
+    )
+}
+
+/// Sign a 32-byte hash on the stateful fast path and return the signature
+/// bytes a [`ShrincsVerifier`](crate::shrincs::ShrincsVerifier) accepts.
 ///
-/// Each [`sign_envelope`](crate::signer::SignerInterface::sign_envelope)
-/// consumes a one-time UXMSS leaf and advances the key; it returns `None`
-/// once the leaf budget is exhausted. Built via
-/// [`ShrincsSigner::into_stateful_signer`].
-pub struct ShrincsStatefulSigner {
-    signing_key: Keys,
-    public_key: PublicKey,
-}
-
-impl ShrincsStatefulSigner {
-    /// The hybrid public-key bundle.
-    pub fn public_key(&self) -> &PublicKey {
-        &self.public_key
-    }
-
-    /// The signing key (leaf state advances as signatures are produced).
-    pub fn signing_key(&self) -> &Keys {
-        &self.signing_key
-    }
-
-    /// Leaves remaining before the stateful budget is exhausted.
-    pub fn remaining_stateful_signatures(&self) -> u32 {
-        self.signing_key
-            .stateful
-            .public_key
-            .max_signatures
-            .saturating_sub(self.signing_key.stateful.next_leaf_index.saturating_sub(1))
-    }
-}
-
-impl crate::signer::SignerInterface for ShrincsStatefulSigner {
-    fn sign_envelope(&mut self, hash: &[u8; HASH_LEN]) -> Option<alloc::vec::Vec<u8>> {
-        // The verifier signs the raw 32-byte hash as the message (matching
-        // `ShrincsVerifier::verify_envelope`'s unchecked stateful path).
-        let signature = ShrincsSigner::sign_stateful_raw(&mut self.signing_key, hash)?;
-        Some(super::signature::encode_stateful_envelope(
-            &self.public_key,
-            &signature,
-        ))
-    }
-
-    fn verifying_key(&self) -> alloc::vec::Vec<u8> {
-        self.public_key.public_key_commitment.clone()
-    }
+/// The one-time UXMSS leaf is consumed and the counter advances **in `keys`**,
+/// not in any signer object — that is why `keys` is `&mut` and no signer
+/// struct exists. Returns `None` once the leaf budget is exhausted. The signed
+/// message is the raw 32-byte hash, matching the verifier's stateful path.
+pub fn sign(keys: &mut Keys, hash: &[u8; HASH_LEN]) -> Option<Vec<u8>> {
+    let public_key = public_key_of(keys);
+    let signature = ShrincsSigner::sign_stateful_raw(keys, hash)?;
+    Some(super::signature::encode_stateful_envelope(&public_key, &signature))
 }
 
 #[cfg(test)]
@@ -141,7 +142,7 @@ impl ShrincsSigner {
         );
 
         let stateful = uxmss::Key {
-            secret: uxmss::Secret {
+            secret: uxmss::PrivateKey {
                 sk_seed: uxmss::SkSeed::new(stateful_sk_seed),
                 prf_seed: uxmss::PrfSeed::new(stateful_prf_seed),
             },
@@ -212,15 +213,6 @@ impl ShrincsSigner {
         message: &[u8],
     ) -> ShrincsSignerResult<Signature> {
         uxmss::sign_stateful_raw(&mut signing_key.stateful, message)
-    }
-
-    /// Bundle a signing key with its public key into a stateful signer that
-    /// implements [`crate::signer::SignerInterface`].
-    pub fn into_stateful_signer(signing_key: Keys, public_key: PublicKey) -> ShrincsStatefulSigner {
-        ShrincsStatefulSigner {
-            signing_key,
-            public_key,
-        }
     }
 
     /// Sign raw bytes with a caller-supplied stateful leaf; does NOT advance the
@@ -390,7 +382,7 @@ mod tests {
         let hypertree_root = derive32(b"placeholder-hypertree-root", seed, &[]);
 
         let stateful = uxmss::Key {
-            secret: uxmss::Secret {
+            secret: uxmss::PrivateKey {
                 sk_seed: uxmss::SkSeed::new(stateful_sk_seed),
                 prf_seed: uxmss::PrfSeed::new(stateful_prf_seed),
             },
@@ -402,7 +394,7 @@ mod tests {
             next_leaf_index: INITIAL_STATEFUL_LEAF_INDEX,
         };
         let stateless = sphincs_plus_c::Key {
-            secret: sphincs_plus_c::Secret {
+            secret: sphincs_plus_c::PrivateKey {
                 sk_seed: sphincs_plus_c::SkSeed::new(derive32(
                     b"shrincs-stateless-sk-seed",
                     seed,
@@ -600,6 +592,39 @@ mod tests {
     fn keygen_rejects_empty_or_excessive_stateful_budget() {
         assert!(ShrincsSigner::keygen(b"seed", 0).is_none());
         assert!(ShrincsSigner::keygen(b"seed", MAX_STATEFUL_SIGNATURES_LIMIT + 1).is_none());
+    }
+
+    // Relocated from the removed `crate::signer` interface module. The
+    // free-function `sign` advances the leaf counter in `keys` (not in any
+    // signer object) and its output round-trips through the opaque
+    // `VerifierInterface::verify`.
+    #[cfg_attr(
+        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        ignore = "128s full keygen remains manual; covered by stateful fixtures"
+    )]
+    #[test]
+    fn sign_round_trips_and_advances_the_key() {
+        use crate::verifier::{VerifierInterface, VerifyOutcome};
+        let (mut keys, public_key) =
+            ShrincsSigner::keygen(b"signer iface shrincs seed", 4).expect("keygen");
+        let hash = hash_packed(&[b"signer-interface-round-trip"]);
+        let key = public_key.public_key_commitment.clone();
+
+        assert_eq!(keys.stateful.next_leaf_index, INITIAL_STATEFUL_LEAF_INDEX);
+        let sig1 = sign(&mut keys, &hash).expect("first sign");
+        assert_eq!(
+            ShrincsVerifier::new().verify(&key, &hash, &sig1),
+            VerifyOutcome::Valid
+        );
+        // The leaf advanced in the key itself.
+        assert_eq!(keys.stateful.next_leaf_index, INITIAL_STATEFUL_LEAF_INDEX + 1);
+
+        let sig2 = sign(&mut keys, &hash).expect("second sign");
+        assert_ne!(sig1, sig2, "distinct leaves yield distinct signatures");
+        assert_eq!(
+            ShrincsVerifier::new().verify(&key, &hash, &sig2),
+            VerifyOutcome::Valid
+        );
     }
 
     #[test]

@@ -229,7 +229,7 @@ pub fn sphincs_plus_c_verify(signature: &[u8], message: &[u8], public_key: &[u8]
         return false;
     };
     crate::sphincs_plus_c::verifier::SphincsPlusCVerifier::new()
-        .verify_envelope(public_key, &hash, signature)
+        .verify(public_key, &hash, signature)
         == crate::verifier::VerifyOutcome::Valid
 }
 
@@ -453,7 +453,7 @@ pub fn shrincs_verify(signature: &[u8], message: &[u8], public_key_commitment: &
     let Ok(hash) = message_hash(message) else {
         return false;
     };
-    ShrincsVerifier::new().verify_envelope(public_key_commitment, &hash, signature)
+    ShrincsVerifier::new().verify(public_key_commitment, &hash, signature)
         == crate::verifier::VerifyOutcome::Valid
 }
 

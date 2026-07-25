@@ -46,7 +46,7 @@ use super::ShrincsVerifier;
 use crate::HASH_LEN;
 use crate::sphincs_plus_c::{ForsEntry, ForsSignature, LayerSignature as HypertreeLayerSignature};
 use crate::sphincs_plus_c::Signature as StatelessSignature;
-use super::public_key::PublicKey;
+use super::key::PublicKey;
 use super::signature::Signature as StatefulSignature;
 use crate::wots_c::Signature as WotsCSignature;
 use super::ShrincsSigner;

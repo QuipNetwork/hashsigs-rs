@@ -72,7 +72,7 @@ fn stateful_chain_no_mask(
 }
 
 /// The stateful sub-key: `pk_seed || root || max_signatures`, the flat
-/// (non-newtyped) shape carried inside [`super::public_key::PublicKey`]'s
+/// (non-newtyped) shape carried inside [`super::key::PublicKey`]'s
 /// `stateful_public_key` field and consumed by the verifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PublicKey {
@@ -223,16 +223,16 @@ fn root_from_unbalanced_path(
 // `sphincs_plus_c` roles by module path, so the two `pk_seed`s / roots of the
 // SHRINCS hybrid cannot be swapped. This `Key` is the stateful half of a
 // `shrincs::Keys`. Flat layout (matching the wasm ABI):
-// `Secret = sk_seed(32) ‖ prf_seed(32)` (64 B), `StructuredPublicKey =
+// `PrivateKey = sk_seed(32) ‖ prf_seed(32)` (64 B), `StructuredPublicKey =
 // pk_seed(32) ‖ root(32) ‖ max_signatures(4 BE)` (68 B, bridges to/from the
-// flat `PublicKey` above via `From`), `Key = Secret ‖ StructuredPublicKey ‖
+// flat `PublicKey` above via `From`), `Key = PrivateKey ‖ StructuredPublicKey ‖
 // next_leaf_index(4 BE)` (136 B).
 
-/// Secret seed deriving stateful WOTS-C chain secrets.
+/// PrivateKey seed deriving stateful WOTS-C chain secrets.
 #[derive(Clone, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]
 pub struct SkSeed([u8; HASH_LEN]);
 
-/// Secret PRF seed deriving stateful WOTS-C message randomizers.
+/// PrivateKey PRF seed deriving stateful WOTS-C message randomizers.
 #[derive(Clone, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]
 pub struct PrfSeed([u8; HASH_LEN]);
 
@@ -318,16 +318,16 @@ impl fmt::Debug for PrfSeed {
 
 /// The secret half of a stateful key: the 64 bytes that are actually secret.
 #[derive(Clone, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]
-pub struct Secret {
+pub struct PrivateKey {
     /// Derives stateful WOTS-C chain secrets.
     pub sk_seed: SkSeed,
     /// Derives stateful WOTS-C message randomizers.
     pub prf_seed: PrfSeed,
 }
 
-impl fmt::Debug for Secret {
+impl fmt::Debug for PrivateKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Secret")
+        f.debug_struct("PrivateKey")
             .field("sk_seed", &"<redacted>")
             .field("prf_seed", &"<redacted>")
             .finish()
@@ -351,8 +351,8 @@ pub struct StructuredPublicKey {
 /// leaf counter that `sign` advances.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Key {
-    /// Secret seeds.
-    pub secret: Secret,
+    /// PrivateKey seeds.
+    pub secret: PrivateKey,
     /// Public seed, root, and budget.
     pub public_key: StructuredPublicKey,
     /// Next monotonic leaf index; advanced on each stateful signature.
@@ -392,7 +392,7 @@ impl StructuredPublicKey {
     }
 }
 
-impl Secret {
+impl PrivateKey {
     /// Flat layout `sk_seed(32) ‖ prf_seed(32)`, 64 bytes.
     pub fn to_bytes(&self) -> [u8; 64] {
         let mut out = [0u8; 64];
@@ -413,7 +413,7 @@ impl Secret {
 }
 
 impl Key {
-    /// Flat layout `Secret(64) ‖ StructuredPublicKey(68) ‖
+    /// Flat layout `PrivateKey(64) ‖ StructuredPublicKey(68) ‖
     /// next_leaf_index(4 BE)`, 136 bytes.
     pub fn to_bytes(&self) -> [u8; 136] {
         let mut out = [0u8; 136];
@@ -429,7 +429,7 @@ impl Key {
             return None;
         }
         Some(Self {
-            secret: Secret::from_bytes(bytes.get(..64)?)?,
+            secret: PrivateKey::from_bytes(bytes.get(..64)?)?,
             public_key: StructuredPublicKey::from_bytes(bytes.get(64..132)?)?,
             next_leaf_index: u32::from_be_bytes(word4(bytes.get(132..)?)?),
         })
@@ -730,7 +730,7 @@ mod key_tests {
 
     #[test]
     fn secret_debug_is_redacted() {
-        let secret = Secret {
+        let secret = PrivateKey {
             sk_seed: SkSeed::new([3u8; HASH_LEN]),
             prf_seed: PrfSeed::new([4u8; HASH_LEN]),
         };

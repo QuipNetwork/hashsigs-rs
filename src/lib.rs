@@ -69,7 +69,6 @@ mod trace_macros;
 // stateless scheme and is oblivious to `shrincs`; `shrincs` builds its
 // hybrid (stateful UXMSS + stateless recovery) on top of `sphincs_plus_c`.
 // `wasm` sits above both.
-pub mod signer;
 pub mod verifier;
 pub(crate) mod abi;
 pub(crate) mod buf;
@@ -92,10 +91,10 @@ pub(crate) mod test_support;
 // values inside this slot (see HASH_TRUNC_LEN and `mask_hash`).
 pub const HASH_LEN: usize = 32;
 
-pub use signer::SignerInterface;
 pub use verifier::{VerifierInterface, VerifyOutcome};
 pub use sphincs_plus_c::{
-    keygen as sphincs_plus_c_keygen, sign as sphincs_plus_c_sign, to_message as sphincs_plus_c_to_message,
+    keygen as sphincs_plus_c_keygen, sign as sphincs_plus_c_sign,
+    sign_hash as sphincs_plus_c_sign_hash, to_message as sphincs_plus_c_to_message,
     verify as sphincs_plus_c_verify, verify_hash as sphincs_plus_c_verify_hash,
 };
 pub use sphincs_plus_c::SphincsPlusCVerifier;
