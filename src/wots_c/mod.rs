@@ -259,4 +259,109 @@ mod tests {
         encoded.push(0x00);
         assert!(Signature::from_bytes(&encoded).is_none());
     }
+
+    fn test_address_word(step: u32) -> [u8; HASH_LEN] {
+        let mut word = [0u8; HASH_LEN];
+        word[..4].copy_from_slice(&step.to_be_bytes());
+        word
+    }
+
+    #[test]
+    fn chain_walk_is_deterministic() {
+        let pk_seed = [0x11u8; HASH_LEN];
+        let walk = ChainWalk {
+            value: [0x22u8; HASH_LEN],
+            start: 0,
+            steps: 5,
+        };
+        let a = wots_chain_walk(b"test-chain", &pk_seed, test_address_word, walk);
+        let b = wots_chain_walk(b"test-chain", &pk_seed, test_address_word, walk);
+        assert_eq!(a, b);
+    }
+
+    /// The chain-walk endpoint is what makes signing (walk `digit` steps from
+    /// the secret) and verifying (walk the remaining `BASE - 1 - digit` steps
+    /// from the revealed value) land on the same public value: walking
+    /// `steps` in one call must equal walking to a midpoint and continuing
+    /// from there.
+    #[test]
+    fn chain_walk_composes_across_a_midpoint() {
+        let pk_seed = [0x33u8; HASH_LEN];
+        let value = [0x44u8; HASH_LEN];
+
+        let direct = wots_chain_walk(
+            b"test-chain",
+            &pk_seed,
+            test_address_word,
+            ChainWalk {
+                value,
+                start: 0,
+                steps: 7,
+            },
+        );
+        let midpoint = wots_chain_walk(
+            b"test-chain",
+            &pk_seed,
+            test_address_word,
+            ChainWalk {
+                value,
+                start: 0,
+                steps: 3,
+            },
+        );
+        let composed = wots_chain_walk(
+            b"test-chain",
+            &pk_seed,
+            test_address_word,
+            ChainWalk {
+                value: midpoint,
+                start: 3,
+                steps: 4,
+            },
+        );
+        assert_eq!(direct, composed);
+    }
+
+    #[test]
+    fn chain_walk_endpoint_differs_by_step_count_and_is_a_no_op_at_zero() {
+        let pk_seed = [0x55u8; HASH_LEN];
+        let value = [0x66u8; HASH_LEN];
+
+        let none = wots_chain_walk(
+            b"test-chain",
+            &pk_seed,
+            test_address_word,
+            ChainWalk {
+                value,
+                start: 0,
+                steps: 0,
+            },
+        );
+        assert_eq!(none, value, "zero steps must return the input unchanged");
+
+        let short = wots_chain_walk(
+            b"test-chain",
+            &pk_seed,
+            test_address_word,
+            ChainWalk {
+                value,
+                start: 0,
+                steps: 4,
+            },
+        );
+        let full = wots_chain_walk(
+            b"test-chain",
+            &pk_seed,
+            test_address_word,
+            ChainWalk {
+                value,
+                start: 0,
+                steps: 5,
+            },
+        );
+        assert_ne!(
+            short, full,
+            "a different step count must reach a different endpoint"
+        );
+    }
 }
