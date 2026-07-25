@@ -304,11 +304,14 @@ fn commit_stateful_leaf_use(
 /// account-state PDA itself, using the same griefing-resistant create-or-adopt
 /// pattern as the bitmap word PDAs. The account PDA address is deterministic
 /// (`account_pda(program_id, owner, salt)`), so a plain `create_account` CPI
-/// would let anyone permanently block `Init` for that `(owner, salt)` by
-/// sending the address a single lamport before the owner calls it
-/// (`create_account` then fails `AccountAlreadyInUse`). Delegating to
-/// [`crate::pda::create_or_adopt_pda`] tops up a pre-funded, still-empty
-/// destination instead of failing. `process_init` has already confirmed
+/// would let anyone block `Init` for that `(owner, salt)` by pre-funding the
+/// address before the owner calls it (`create_account` then fails
+/// `AccountAlreadyInUse`). A plain `transfer` cannot leave the destination
+/// below the rent-exempt minimum, so the smallest such pre-fund is the
+/// rent-exempt balance rather than a single lamport, but any non-zero balance
+/// is enough. Delegating to [`crate::pda::create_or_adopt_pda`] tops up a
+/// pre-funded, still-empty destination instead of failing. `process_init` has
+/// already confirmed
 /// `target.data_is_empty()` (rejecting re-init), satisfying that function's
 /// precondition.
 fn create_account_pda<'info>(

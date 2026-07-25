@@ -146,14 +146,18 @@ pub(crate) struct PdaInit<'a, 'info> {
 /// tolerating a pre-funded destination.
 ///
 /// `create_account` fails with `AccountAlreadyInUse` when the destination
-/// already holds lamports, which lets anyone permanently block a not-yet-used
-/// PDA by sending it a single lamport. When the (still system-owned,
-/// data-empty) destination already holds lamports, this instead tops up any
-/// rent shortfall via `transfer`, then `allocate`s and `assign`s it -- the
-/// standard Solana create-or-adopt pattern -- so a griefing pre-fund cannot
-/// deny the leaf or the account. Callers must confirm `target.data_is_empty()`
-/// before calling. `signer_seeds` are the PDA seeds (including bump)
-/// authorizing the CPIs.
+/// already holds lamports, which lets anyone block a not-yet-used PDA by
+/// pre-funding its deterministic address before the program creates it. A
+/// plain `transfer` cannot leave the destination below the rent-exempt
+/// minimum, so the smallest pre-fund reachable that way is the rent-exempt
+/// balance for a `space`-byte account, not a single lamport -- but any
+/// non-zero pre-fund is enough to break a naive `create_account`. When the
+/// (still system-owned, data-empty) destination already holds lamports, this
+/// instead tops up any remaining rent shortfall via `transfer`, then
+/// `allocate`s and `assign`s it -- the standard Solana create-or-adopt
+/// pattern -- so a griefing pre-fund of any size cannot deny the leaf or the
+/// account. Callers must confirm `target.data_is_empty()` before calling.
+/// `signer_seeds` are the PDA seeds (including bump) authorizing the CPIs.
 pub(crate) fn create_or_adopt_pda(init: &PdaInit, signer_seeds: &[&[u8]]) -> ProgramResult {
     let rent = Rent::get()?;
     let required_lamports = rent.minimum_balance(init.space);
