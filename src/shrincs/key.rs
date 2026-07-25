@@ -17,8 +17,8 @@
 
 //! The composed SHRINCS key.
 //!
-//! A SHRINCS key is a [`sphincs_plus_c::Key`] (the stateless recovery
-//! identity), a [`uxmss::Key`] (the stateful fast-path chain), and the
+//! A SHRINCS key is a [`crate::sphincs_plus_c::Key`] (the stateless recovery
+//! identity), a `uxmss::Key` (the stateful fast-path chain), and the
 //! [`Commitment`] that binds both public keys into one on-chain identity —
 //! composition, not a flat concatenation of seeds.
 //!
@@ -227,7 +227,7 @@ impl Keys {
     /// are untouched; the commitment is recomputed. Same derivation as
     /// [`ShrincsSigner::keygen`](crate::shrincs::signer::ShrincsSigner::keygen)'s
     /// stateful half. `new_seed` is arbitrary-length seed material hashed by
-    /// [`derive32`]; this library has no RNG, so the caller must supply
+    /// `derive32`; this library has no RNG, so the caller must supply
     /// fresh entropy.
     pub fn reset(&mut self, new_seed: &[u8]) {
         let max = self.stateful.public_key().max_signatures;

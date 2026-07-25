@@ -17,7 +17,7 @@
 
 //! The primary SHRINCS signature (the stateful UXMSS fast-path signature),
 //! its ABI codec, and the composite envelope codecs that pair a
-//! [`super::key::PublicKey`] with a signature.
+//! [`crate::shrincs::key::PublicKey`] with a signature.
 //!
 //! `Signature::to_bytes`/`from_bytes` are byte-identical to the historical
 //! `envelope::encode_stateful_signature_body`/`decode_stateful_signature`,

@@ -81,6 +81,13 @@ default:
       - .cargo-home/bin/
       - target/
 
+# Shared rules: run on merge requests and on the default branch. Extended by the
+# static-analysis/standards jobs so the trigger set lives in one place.
+.mr-default-rules:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
 # Shared before_script fragments via GitLab !reference (not YAML list anchors,
 # which nest incorrectly when expanded under another list).
 .install-node-pinned:
@@ -177,10 +184,8 @@ test-solana:
 
 # Static clippy gate. Profile features are mutually exclusive, so lint each
 # feature set CI tests in a separate invocation (not --all-features). Also lint
-# the non-default Solana workspace member. NOTE: `cargo fmt --check` is
-# intentionally not wired in yet — the tree is not fully rustfmt-clean; add it
-# in a dedicated formatting pass so this gate does not fail on pre-existing
-# style drift.
+# the non-default Solana workspace member. Formatting is enforced separately by
+# the `fmt` job below.
 clippy:
   stage: test
   image: rust:1.89.0
@@ -195,6 +200,67 @@ clippy:
     - cargo clippy --all-targets -p hashsigs-rs-solana --locked -- -D warnings
     - cargo clippy --all-targets --features profile-128s-q18 --locked -- -D warnings
     - cargo clippy --all-targets --features profile-256s-sha2 --locked -- -D warnings
+
+# Formatting gate. rustfmt only parses (no compile), so this is fast and needs
+# no build cache. The tree is fully rustfmt-clean; this keeps it that way.
+fmt:
+  stage: test
+  image: rust:1.89.0
+  extends: .mr-default-rules
+  before_script:
+    - rustup component add rustfmt
+  script:
+    - cargo fmt --all --check
+
+# Rustdoc lint gate: broken intra-doc links and rustdoc warnings fail CI,
+# guarding the public-API docs and the runnable doc examples.
+rustdoc:
+  stage: test
+  image: rust:1.89.0
+  extends: [.rust-cache, .mr-default-rules]
+  variables:
+    RUSTDOCFLAGS: "-D warnings"
+  script:
+    - cargo doc --no-deps --locked
+
+# Minimum-supported-Rust-version floor. Pinned to the declared rust-version
+# (Cargo.toml `rust-version = "1.89"`) independently of any future bump to the
+# other jobs' image, so an accidental MSRV increase fails here first.
+msrv:
+  stage: test
+  image: rust:1.89.0
+  extends: [.rust-cache, .mr-default-rules]
+  script:
+    - cargo build --locked --features wasm-bindings
+
+# Supply-chain gate: RustSec advisories, license allow-list, banned/duplicate
+# crates, and source allow-list, per deny.toml. cargo-deny is cached in
+# .cargo-home/bin across runs (first cold run compiles it).
+supply-chain:
+  stage: test
+  image: rust:1.89.0
+  extends: [.rust-cache, .mr-default-rules]
+  before_script:
+    - export PATH="${CARGO_HOME}/bin:${PATH}"
+    - command -v cargo-deny >/dev/null || cargo install --locked cargo-deny
+  script:
+    - cargo deny check
+
+# Semver advisory: report public-API breaking changes against the last
+# published release. Advisory only (allow_failure) — this crate makes
+# intentional breaking changes pre-1.0, so the job surfaces them for release
+# notes without blocking the pipeline. Baselines against the crates.io release;
+# a not-yet-published crate simply yields an allowed failure.
+semver:
+  stage: test
+  image: rust:1.89.0
+  extends: [.rust-cache, .mr-default-rules]
+  allow_failure: true
+  before_script:
+    - export PATH="${CARGO_HOME}/bin:${PATH}"
+    - command -v cargo-semver-checks >/dev/null || cargo install --locked cargo-semver-checks
+  script:
+    - cargo semver-checks check-release
 
 # Conformance test against the BUILT package (dist/): loaders, exports map,
 # ESM/CJS scoping, base64-inline path — the layer cargo tests never touch.

@@ -22,7 +22,7 @@
 //! (`pk_seed`, `root`). Each 32-byte role is its own newtype: a public seed
 //! can never be passed where a secret one is expected, and the two `pk_seed`s
 //! that appear across the SHRINCS hybrid ([`crate::sphincs_plus_c`] vs
-//! [`crate::shrincs::uxmss`]) are different types, so they cannot be swapped.
+//! `crate::shrincs::uxmss`) are different types, so they cannot be swapped.
 //!
 //! This same [`Key`] is embedded as the stateless half of a
 //! `shrincs::Keys` (composition, not duplication).
