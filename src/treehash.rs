@@ -297,4 +297,45 @@ mod tests {
         assert_eq!(auth.len(), 1);
         assert_eq!(auth[0], test_leaf(1, 1));
     }
+
+    /// `root_from_auth_path` takes `parent_hash` by reference (verification
+    /// side reuses `node`/`sibling` in place); `test_parent` takes owned
+    /// arrays (the streaming treehash side moves nodes off its stack). This
+    /// adapts the former to the latter's signature.
+    fn test_parent_ref(
+        node_height: u32,
+        parent_index: u32,
+        left: &[u8; HASH_LEN],
+        right: &[u8; HASH_LEN],
+    ) -> [u8; HASH_LEN] {
+        test_parent(node_height, u64::from(parent_index), *left, *right)
+    }
+
+    #[test]
+    fn root_from_auth_path_round_trips_with_treehash() {
+        let height = 4;
+        let selected_leaf = 6;
+        let (root, auth) =
+            treehash_root_and_auth_path(height, selected_leaf, |i| test_leaf(9, i), test_parent);
+        let leaf = test_leaf(9, selected_leaf);
+        let recomputed = root_from_auth_path(height, selected_leaf, leaf, &auth, test_parent_ref)
+            .expect("a full-length auth path must reconstruct the root");
+        assert_eq!(recomputed, root);
+    }
+
+    #[test]
+    fn root_from_auth_path_rejects_a_short_sibling_list() {
+        let height = 4;
+        let selected_leaf = 6;
+        let (_root, auth) =
+            treehash_root_and_auth_path(height, selected_leaf, |i| test_leaf(9, i), test_parent);
+        let leaf = test_leaf(9, selected_leaf);
+
+        let short_auth = &auth[..auth.len() - 1];
+        assert_eq!(
+            root_from_auth_path(height, selected_leaf, leaf, short_auth, test_parent_ref),
+            None,
+            "an auth path shorter than height must be rejected, not silently truncated"
+        );
+    }
 }

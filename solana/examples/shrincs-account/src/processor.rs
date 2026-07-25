@@ -1170,6 +1170,242 @@ mod tests {
         }
     }
 
+    /// Assert the transaction aborted with the given non-custom
+    /// [`solana_sdk::instruction::InstructionError`] variant (e.g.
+    /// `InvalidSeeds`, `AccountAlreadyInitialized`).
+    fn assert_instruction_error(
+        result: &Result<(), solana_sdk::transaction::TransactionError>,
+        expected: solana_sdk::instruction::InstructionError,
+    ) {
+        match result {
+            Err(solana_sdk::transaction::TransactionError::InstructionError(_, err)) => {
+                assert_eq!(err, &expected, "unexpected instruction error");
+            }
+            other => panic!("expected instruction error {expected:?}, got {other:?}"),
+        }
+    }
+
+    /// Build a raw `Init` instruction, letting each `process_init` negative
+    /// test deliberately break exactly one precondition (owner signer flag,
+    /// PDA/seed match, or the destination account).
+    fn init_instruction(
+        program_id: &SdkPubkey,
+        payer: &SdkPubkey,
+        owner: &SdkPubkey,
+        owner_is_signer: bool,
+        account_pda_key: &SdkPubkey,
+        args: InitArgs,
+    ) -> Instruction {
+        Instruction {
+            program_id: *program_id,
+            accounts: vec![
+                AccountMeta::new(*payer, true),
+                AccountMeta::new_readonly(*owner, owner_is_signer),
+                AccountMeta::new(*account_pda_key, false),
+                AccountMeta::new_readonly(solana_program::system_program::id(), false),
+            ],
+            data: borsh::to_vec(&TestInstruction::Init(args)).unwrap(),
+        }
+    }
+
+    #[tokio::test]
+    async fn process_init_rejects_non_signer_owner() {
+        let (program_test, program_id) = setup_test().await;
+        let context = program_test.start_with_context().await;
+        let program_id = program_id.pubkey();
+        let owner = Keypair::new();
+        let salt = [40u8; HASH_LEN];
+        let (account_pda_key, _bump) = account_pda(&program_id, &owner.pubkey(), &salt);
+
+        let instruction = init_instruction(
+            &program_id,
+            &context.payer.pubkey(),
+            &owner.pubkey(),
+            false,
+            &account_pda_key,
+            InitArgs {
+                salt,
+                initial_commitment: [1u8; HASH_LEN],
+            },
+        );
+        // `owner` never signs, matching the instruction's own non-signer meta.
+        let transaction = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer],
+            context.last_blockhash,
+        );
+        let result = context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap();
+        assert_missing_signature(&result.result);
+    }
+
+    #[tokio::test]
+    async fn process_init_rejects_mismatched_seed() {
+        let (program_test, program_id) = setup_test().await;
+        let context = program_test.start_with_context().await;
+        let program_id = program_id.pubkey();
+        let owner = Keypair::new();
+        let salt = [41u8; HASH_LEN];
+        let wrong_salt = [42u8; HASH_LEN];
+        // The PDA passed in is derived from a DIFFERENT salt than the one
+        // carried in `InitArgs`, so `expected_pda != *account_info.key`.
+        let (wrong_pda_key, _bump) = account_pda(&program_id, &owner.pubkey(), &wrong_salt);
+
+        let instruction = init_instruction(
+            &program_id,
+            &context.payer.pubkey(),
+            &owner.pubkey(),
+            true,
+            &wrong_pda_key,
+            InitArgs {
+                salt,
+                initial_commitment: [1u8; HASH_LEN],
+            },
+        );
+        let transaction = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer, &owner],
+            context.last_blockhash,
+        );
+        let result = context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap();
+        assert_instruction_error(
+            &result.result,
+            solana_sdk::instruction::InstructionError::InvalidSeeds,
+        );
+    }
+
+    #[tokio::test]
+    async fn process_init_rejects_reinitialization() {
+        let (program_test, program_id) = setup_test().await;
+        let mut context = program_test.start_with_context().await;
+        let program_id = program_id.pubkey();
+        let owner = Keypair::new();
+        let salt = [43u8; HASH_LEN];
+        let account_pda_key =
+            init_account(&mut context, &program_id, &owner, salt, [1u8; HASH_LEN]).await;
+
+        // Re-init the same (owner, salt) PDA: `data_is_empty()` is now false,
+        // so the griefing guard must fire before anything is rewritten.
+        context.last_blockhash = context.get_new_latest_blockhash().await.unwrap();
+        let instruction = init_instruction(
+            &program_id,
+            &context.payer.pubkey(),
+            &owner.pubkey(),
+            true,
+            &account_pda_key,
+            InitArgs {
+                salt,
+                initial_commitment: [2u8; HASH_LEN],
+            },
+        );
+        let transaction = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer, &owner],
+            context.last_blockhash,
+        );
+        let result = context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap();
+        assert_instruction_error(
+            &result.result,
+            solana_sdk::instruction::InstructionError::AccountAlreadyInitialized,
+        );
+    }
+
+    #[tokio::test]
+    async fn process_init_rejects_all_zero_commitment() {
+        let (program_test, program_id) = setup_test().await;
+        let context = program_test.start_with_context().await;
+        let program_id = program_id.pubkey();
+        let owner = Keypair::new();
+        let salt = [44u8; HASH_LEN];
+        let (account_pda_key, _bump) = account_pda(&program_id, &owner.pubkey(), &salt);
+
+        let instruction = init_instruction(
+            &program_id,
+            &context.payer.pubkey(),
+            &owner.pubkey(),
+            true,
+            &account_pda_key,
+            InitArgs {
+                salt,
+                initial_commitment: [0u8; HASH_LEN],
+            },
+        );
+        let transaction = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer, &owner],
+            context.last_blockhash,
+        );
+        let result = context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap();
+        assert_custom_error(
+            &result.result,
+            ShrincsAccountError::InvalidInitialCommitment,
+        );
+    }
+
+    #[tokio::test]
+    async fn process_init_adopts_prefunded_pda() {
+        let (program_test, program_id) = setup_test().await;
+        let mut context = program_test.start_with_context().await;
+        let program_id = program_id.pubkey();
+        let owner = Keypair::new();
+        let salt = [45u8; HASH_LEN];
+        let (account_pda_key, _bump) = account_pda(&program_id, &owner.pubkey(), &salt);
+
+        // Grief the PDA before init: fund it with 1 lamport while it is still
+        // system-owned and empty -- exactly the attack `create_or_adopt_pda`'s
+        // docstring defends against (a plain `create_account` CPI would fail
+        // `AccountAlreadyInUse` here). The runtime rejects a real transfer
+        // transaction that would leave a destination below the rent-exempt
+        // minimum, so this uses `set_account` (an explicit "state not
+        // reachable by sending transactions" escape hatch, per its own
+        // docstring) to land the account in that exact 1-lamport state.
+        context.set_account(
+            &account_pda_key,
+            &solana_sdk::account::AccountSharedData::new(
+                1,
+                0,
+                &solana_program::system_program::id(),
+            ),
+        );
+
+        let prefunded = context
+            .banks_client
+            .get_account(account_pda_key)
+            .await
+            .unwrap()
+            .expect("prefunded account exists");
+        assert_eq!(prefunded.lamports, 1);
+        assert_eq!(prefunded.owner, solana_program::system_program::id());
+
+        let commitment = [3u8; HASH_LEN];
+        let returned_pda_key =
+            init_account(&mut context, &program_id, &owner, salt, commitment).await;
+        assert_eq!(returned_pda_key, account_pda_key);
+
+        let state = fetch_state(&mut context, &account_pda_key).await;
+        assert_eq!(state.current_public_key_commitment, commitment);
+        assert_eq!(state.owner, owner.pubkey());
+    }
+
     /// Drive one successful stateful action to flip `stateful_policy_frozen`,
     /// mirroring `stateful_action_valid_signature_advances_state`'s flow.
     async fn freeze_stateful_policy(
@@ -1526,6 +1762,238 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn stateful_action_rejects_under_recovery_rotation_policy() {
+        let (program_test, program_id) = setup_test().await;
+        let mut context = program_test.start_with_context().await;
+        let program_id = program_id.pubkey();
+        let owner = Keypair::new();
+        let salt = [60u8; HASH_LEN];
+
+        let (mut keys, public_key) =
+            ShrincsSigner::keygen(b"shrincs-account-example test stateful path disabled", 1024)
+                .expect("keygen");
+        let commitment = fixed_hash_bytes(&public_key.public_key_commitment);
+        let account_pda_key =
+            init_account(&mut context, &program_id, &owner, salt, commitment).await;
+
+        // Switch to RecoveryRotation: stateful use must be disabled outright,
+        // independent of whether recovery mode is armed (see
+        // check_stateful_leaf_use's RecoveryRotation arm).
+        context.last_blockhash = context.get_new_latest_blockhash().await.unwrap();
+        let instruction = policy_instruction(
+            &program_id,
+            &account_pda_key,
+            &owner.pubkey(),
+            TestInstruction::SetPolicyRecoveryRotation,
+        );
+        let transaction = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer, &owner],
+            context.last_blockhash,
+        );
+        context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap()
+            .result
+            .expect("set_policy_recovery_rotation should succeed");
+
+        let domain_separator = messages::domain_separator(&program_id, &account_pda_key);
+        let action_type = messages::ACTION_STATEFUL;
+        let payload_hash =
+            messages::action_payload(&action_type, b"blocked under recovery rotation");
+        let action_context = messages::action_context(
+            domain_separator,
+            [0u8; HASH_LEN],
+            [0u8; HASH_LEN],
+            action_type,
+            payload_hash,
+        );
+        let signature =
+            ShrincsSigner::sign_stateful_action(&mut keys, &public_key, &action_context)
+                .expect("sign");
+
+        let (bitmap_key, _) =
+            crate::pda::bitmap_word_pda(&program_id, &account_pda_key, &[0u8; HASH_LEN], 0);
+        let instruction = Instruction {
+            program_id,
+            accounts: vec![
+                AccountMeta::new(account_pda_key, false),
+                AccountMeta::new(bitmap_key, false),
+                AccountMeta::new(context.payer.pubkey(), true),
+                AccountMeta::new_readonly(solana_program::system_program::id(), false),
+            ],
+            data: {
+                let mut data = Vec::new();
+                TestInstruction::StatefulAction(StatefulActionArgs {
+                    public_key: public_key.into(),
+                    action_type,
+                    payload_hash,
+                    signature: signature.into(),
+                })
+                .serialize(&mut data)
+                .unwrap();
+                data
+            },
+        };
+        let transaction = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer],
+            context.last_blockhash,
+        );
+        let result = context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap();
+        assert_custom_error(&result.result, ShrincsAccountError::StatefulPathDisabled);
+    }
+
+    #[tokio::test]
+    async fn stateful_action_bitmap_replay_rejected() {
+        let (program_test, program_id) = setup_test().await;
+        let mut context = program_test.start_with_context().await;
+        let program_id = program_id.pubkey();
+        let owner = Keypair::new();
+        let salt = [61u8; HASH_LEN];
+
+        let (mut keys, public_key) =
+            ShrincsSigner::keygen(b"shrincs-account-example test bitmap replay", 1024)
+                .expect("keygen");
+        let keys_replay = keys.clone(); // independent signer, still at leaf 1
+        let commitment = fixed_hash_bytes(&public_key.public_key_commitment);
+        let account_pda_key =
+            init_account(&mut context, &program_id, &owner, salt, commitment).await;
+
+        // Switch to LeafBitmap before any stateful use (the policy is not frozen yet).
+        context.last_blockhash = context.get_new_latest_blockhash().await.unwrap();
+        let instruction = policy_instruction(
+            &program_id,
+            &account_pda_key,
+            &owner.pubkey(),
+            TestInstruction::SetPolicyLeafBitmap,
+        );
+        let transaction = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer, &owner],
+            context.last_blockhash,
+        );
+        context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap()
+            .result
+            .expect("set_policy_leaf_bitmap should succeed");
+
+        let (bitmap_key, _) =
+            crate::pda::bitmap_word_pda(&program_id, &account_pda_key, &[0u8; HASH_LEN], 0);
+        let domain_separator = messages::domain_separator(&program_id, &account_pda_key);
+        let action_type = messages::ACTION_STATEFUL;
+
+        // First action: consumes leaf 1 in the bitmap.
+        let payload_hash_1 = messages::action_payload(&action_type, b"first bitmap action");
+        let context_1 = messages::action_context(
+            domain_separator,
+            [0u8; HASH_LEN],
+            [0u8; HASH_LEN],
+            action_type,
+            payload_hash_1,
+        );
+        let signature_1 =
+            ShrincsSigner::sign_stateful_action(&mut keys, &public_key, &context_1).expect("sign");
+        let instruction_1 = Instruction {
+            program_id,
+            accounts: vec![
+                AccountMeta::new(account_pda_key, false),
+                AccountMeta::new(bitmap_key, false),
+                AccountMeta::new(context.payer.pubkey(), true),
+                AccountMeta::new_readonly(solana_program::system_program::id(), false),
+            ],
+            data: {
+                let mut data = Vec::new();
+                TestInstruction::StatefulAction(StatefulActionArgs {
+                    public_key: public_key.clone().into(),
+                    action_type,
+                    payload_hash: payload_hash_1,
+                    signature: signature_1.into(),
+                })
+                .serialize(&mut data)
+                .unwrap();
+                data
+            },
+        };
+        let transaction_1 = Transaction::new_signed_with_payer(
+            &[instruction_1],
+            Some(&context.payer.pubkey()),
+            &[&context.payer],
+            context.last_blockhash,
+        );
+        context
+            .banks_client
+            .process_transaction_with_metadata(transaction_1)
+            .await
+            .unwrap()
+            .result
+            .expect("first bitmap-policy stateful action should succeed");
+
+        // Second action: a fresh, validly signed leaf-1 signature from the
+        // independent `keys_replay` clone, replaying an already-used bitmap leaf.
+        let mut keys_replay = keys_replay;
+        let payload_hash_2 = messages::action_payload(&action_type, b"bitmap replay action");
+        let context_2 = messages::action_context(
+            domain_separator,
+            [0u8; HASH_LEN],
+            [0u8; HASH_LEN],
+            action_type,
+            payload_hash_2,
+        );
+        let signature_2 =
+            ShrincsSigner::sign_stateful_action(&mut keys_replay, &public_key, &context_2)
+                .expect("sign");
+        assert_eq!(signature_2.auth_path.len(), 1, "replay reuses leaf 1");
+
+        context.last_blockhash = context.banks_client.get_latest_blockhash().await.unwrap();
+        let instruction_2 = Instruction {
+            program_id,
+            accounts: vec![
+                AccountMeta::new(account_pda_key, false),
+                AccountMeta::new(bitmap_key, false),
+                AccountMeta::new(context.payer.pubkey(), true),
+                AccountMeta::new_readonly(solana_program::system_program::id(), false),
+            ],
+            data: {
+                let mut data = Vec::new();
+                TestInstruction::StatefulAction(StatefulActionArgs {
+                    public_key: public_key.into(),
+                    action_type,
+                    payload_hash: payload_hash_2,
+                    signature: signature_2.into(),
+                })
+                .serialize(&mut data)
+                .unwrap();
+                data
+            },
+        };
+        let transaction_2 = Transaction::new_signed_with_payer(
+            &[instruction_2],
+            Some(&context.payer.pubkey()),
+            &[&context.payer],
+            context.last_blockhash,
+        );
+        let result = context
+            .banks_client
+            .process_transaction_with_metadata(transaction_2)
+            .await
+            .unwrap();
+        assert_custom_error(&result.result, ShrincsAccountError::StatefulLeafRejected);
+    }
+
+    #[tokio::test]
     async fn stateless_action_valid_signature_advances_state() {
         let (program_test, program_id) = setup_test().await;
         let mut context = program_test.start_with_context().await;
@@ -1598,6 +2066,184 @@ mod tests {
         expected_nonce[HASH_LEN - 1] = 1;
         assert_eq!(state.nonce, expected_nonce, "nonce advances by one");
         assert_eq!(state.stateless_signatures_used, 1);
+    }
+
+    /// Overwrite the on-chain `ShrincsAccountState` for `account_pda_key`,
+    /// preserving lamports/owner/rent-epoch. Used to reach states (e.g.
+    /// `stateless_signatures_used` at the budget boundary) that would take an
+    /// infeasible number of real transactions to reach honestly.
+    async fn set_state(
+        context: &mut ProgramTestContext,
+        account_pda_key: &SdkPubkey,
+        state: &ShrincsAccountState,
+    ) {
+        let account = context
+            .banks_client
+            .get_account(*account_pda_key)
+            .await
+            .unwrap()
+            .expect("account exists");
+        let mut shared = solana_sdk::account::AccountSharedData::from(account);
+        let mut data = Vec::new();
+        state.serialize(&mut data).unwrap();
+        shared.set_data_from_slice(&data);
+        context.set_account(account_pda_key, &shared);
+    }
+
+    #[tokio::test]
+    async fn stateless_action_rejects_at_budget_exhaustion() {
+        let (program_test, program_id) = setup_test().await;
+        let mut context = program_test.start_with_context().await;
+        let program_id = program_id.pubkey();
+        let owner = Keypair::new();
+        let salt = [50u8; HASH_LEN];
+
+        let (keys, public_key) =
+            ShrincsSigner::keygen(b"shrincs-account-example test stateless budget", 1024)
+                .expect("keygen");
+        let commitment = fixed_hash_bytes(&public_key.public_key_commitment);
+        let account_pda_key =
+            init_account(&mut context, &program_id, &owner, salt, commitment).await;
+
+        let mut state = fetch_state(&mut context, &account_pda_key).await;
+        state.stateless_signatures_used = STATELESS_SIGNATURE_LIMIT;
+        set_state(&mut context, &account_pda_key, &state).await;
+
+        let result = try_stateless_action(
+            &mut context,
+            &program_id,
+            &account_pda_key,
+            &keys,
+            &public_key,
+            commitment,
+        )
+        .await;
+        assert_custom_error(&result, ShrincsAccountError::BudgetExhausted);
+
+        let after = fetch_state(&mut context, &account_pda_key).await;
+        assert_eq!(
+            after.stateless_signatures_used, STATELESS_SIGNATURE_LIMIT,
+            "a rejected action must not advance the counter past the limit"
+        );
+    }
+
+    #[tokio::test]
+    async fn stateless_action_rejects_recovery_rotation_without_arming() {
+        let (program_test, program_id) = setup_test().await;
+        let mut context = program_test.start_with_context().await;
+        let program_id = program_id.pubkey();
+        let owner = Keypair::new();
+        let salt = [51u8; HASH_LEN];
+
+        let (keys, public_key) =
+            ShrincsSigner::keygen(b"shrincs-account-example test stateless not armed", 1024)
+                .expect("keygen");
+        let commitment = fixed_hash_bytes(&public_key.public_key_commitment);
+        let account_pda_key =
+            init_account(&mut context, &program_id, &owner, salt, commitment).await;
+
+        // Switch to RecoveryRotation but do NOT enter recovery mode.
+        context.last_blockhash = context.get_new_latest_blockhash().await.unwrap();
+        let instruction = policy_instruction(
+            &program_id,
+            &account_pda_key,
+            &owner.pubkey(),
+            TestInstruction::SetPolicyRecoveryRotation,
+        );
+        let transaction = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer, &owner],
+            context.last_blockhash,
+        );
+        context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap()
+            .result
+            .expect("set_policy_recovery_rotation should succeed");
+
+        let result = try_stateless_action(
+            &mut context,
+            &program_id,
+            &account_pda_key,
+            &keys,
+            &public_key,
+            commitment,
+        )
+        .await;
+        assert_custom_error(&result, ShrincsAccountError::RecoveryNotArmed);
+    }
+
+    #[tokio::test]
+    async fn stateless_action_rejects_tampered_signature() {
+        let (program_test, program_id) = setup_test().await;
+        let mut context = program_test.start_with_context().await;
+        let program_id = program_id.pubkey();
+        let owner = Keypair::new();
+        let salt = [52u8; HASH_LEN];
+
+        let (keys, public_key) =
+            ShrincsSigner::keygen(b"shrincs-account-example test stateless tampered", 1024)
+                .expect("keygen");
+        let commitment: [u8; HASH_LEN] = public_key
+            .public_key_commitment
+            .clone()
+            .try_into()
+            .expect("commitment is 32 bytes");
+        let account_pda_key =
+            init_account(&mut context, &program_id, &owner, salt, commitment).await;
+
+        let domain_separator = messages::domain_separator(&program_id, &account_pda_key);
+        let action_type = messages::ACTION_STATELESS;
+        let payload_hash = messages::action_payload(&action_type, b"tampered stateless payload");
+        let context_msg = messages::action_context(
+            domain_separator,
+            [0u8; HASH_LEN],
+            [0u8; HASH_LEN],
+            action_type,
+            payload_hash,
+        );
+        let message =
+            CoreShrincsVerifier::new().stateless_action_message_hash(commitment, &context_msg);
+        let mut signature = ShrincsSigner::sign_stateless_raw(&keys, &message).expect("sign");
+        signature.fors.randomizer[0] ^= 0x01; // tamper one byte
+
+        let instruction = Instruction {
+            program_id,
+            accounts: vec![AccountMeta::new(account_pda_key, false)],
+            data: {
+                let mut data = Vec::new();
+                TestInstruction::StatelessAction(StatelessActionArgs {
+                    public_key: public_key.into(),
+                    action_type,
+                    payload_hash,
+                    signature: signature.into(),
+                })
+                .serialize(&mut data)
+                .unwrap();
+                data
+            },
+        };
+        let transaction = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer],
+            context.last_blockhash,
+        );
+        let result = context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap();
+        assert_custom_error(&result.result, ShrincsAccountError::InvalidSignature);
+        let return_data = result
+            .metadata
+            .expect("metadata present even on failure")
+            .return_data
+            .expect("return data set before the fail-closed abort");
+        assert_eq!(return_data.data, vec![0]);
     }
 
     #[tokio::test]
@@ -3171,6 +3817,142 @@ mod tests {
         assert!(
             result.result.is_err(),
             "an action carrying the OLD commitment/key must fail after rotation"
+        );
+    }
+
+    // --- router / state-plumbing negative paths ------------------------------
+
+    #[tokio::test]
+    async fn process_instruction_rejects_unknown_discriminant() {
+        let program_id = Keypair::new();
+        let program_test = ProgramTest::new(
+            "shrincs_account_example",
+            program_id.pubkey(),
+            processor!(process_instruction),
+        );
+        let context = program_test.start_with_context().await;
+        let program_id = program_id.pubkey();
+
+        // 0xFF is not a valid `ShrincsAccountInstruction` Borsh discriminant
+        // (11 variants, 0..=10): decode must fail before any account is
+        // touched, through the REAL router (not the test-only `test_dispatch`
+        // stand-in the other tests use).
+        let instruction = Instruction {
+            program_id,
+            accounts: vec![],
+            data: vec![0xFF, 0x00, 0x00, 0x00],
+        };
+        let transaction = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer],
+            context.last_blockhash,
+        );
+        let result = context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap();
+        assert_instruction_error(
+            &result.result,
+            solana_sdk::instruction::InstructionError::InvalidInstructionData,
+        );
+    }
+
+    #[tokio::test]
+    async fn load_state_rejects_foreign_owned_account() {
+        let (program_test, program_id) = setup_test().await;
+        let mut context = program_test.start_with_context().await;
+        let program_id = program_id.pubkey();
+        let owner = Keypair::new();
+        let salt = [70u8; HASH_LEN];
+        let (account_pda_key, _bump) = account_pda(&program_id, &owner.pubkey(), &salt);
+
+        // Plant an account at the expected PDA address that is NOT owned by
+        // the program: `load_state`'s ownership check must reject it before
+        // ever attempting to deserialize its (empty) data.
+        context.set_account(
+            &account_pda_key,
+            &solana_sdk::account::AccountSharedData::new(
+                1_000_000,
+                0,
+                &solana_program::system_program::id(),
+            ),
+        );
+
+        let (bitmap_key, _) =
+            crate::pda::bitmap_word_pda(&program_id, &account_pda_key, &[0u8; HASH_LEN], 0);
+        let instruction = Instruction {
+            program_id,
+            accounts: vec![
+                AccountMeta::new_readonly(account_pda_key, false),
+                AccountMeta::new_readonly(bitmap_key, false),
+            ],
+            data: borsh::to_vec(&TestInstruction::IsLeafUsed(IsLeafUsedArgs {
+                leaf_index: 1,
+            }))
+            .unwrap(),
+        };
+        let transaction = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer],
+            context.last_blockhash,
+        );
+        let result = context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap();
+        assert_instruction_error(
+            &result.result,
+            solana_sdk::instruction::InstructionError::IncorrectProgramId,
+        );
+    }
+
+    #[tokio::test]
+    async fn load_state_rejects_corrupt_account_data() {
+        let (program_test, program_id) = setup_test().await;
+        let mut context = program_test.start_with_context().await;
+        let program_id = program_id.pubkey();
+        let owner = Keypair::new();
+        let salt = [71u8; HASH_LEN];
+        let (account_pda_key, _bump) = account_pda(&program_id, &owner.pubkey(), &salt);
+
+        // Program-owned (passes the ownership check) but too short/garbage
+        // to Borsh-decode as `ShrincsAccountState`.
+        context.set_account(
+            &account_pda_key,
+            &solana_sdk::account::AccountSharedData::new(1_000_000, 4, &program_id),
+        );
+
+        let (bitmap_key, _) =
+            crate::pda::bitmap_word_pda(&program_id, &account_pda_key, &[0u8; HASH_LEN], 0);
+        let instruction = Instruction {
+            program_id,
+            accounts: vec![
+                AccountMeta::new_readonly(account_pda_key, false),
+                AccountMeta::new_readonly(bitmap_key, false),
+            ],
+            data: borsh::to_vec(&TestInstruction::IsLeafUsed(IsLeafUsedArgs {
+                leaf_index: 1,
+            }))
+            .unwrap(),
+        };
+        let transaction = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer],
+            context.last_blockhash,
+        );
+        let result = context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap();
+        assert_instruction_error(
+            &result.result,
+            solana_sdk::instruction::InstructionError::InvalidAccountData,
         );
     }
 }

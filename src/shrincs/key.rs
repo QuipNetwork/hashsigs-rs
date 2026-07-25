@@ -581,6 +581,56 @@ mod tests {
         );
     }
 
+    /// A signature produced under a reset key must verify against the NEW
+    /// commitment `reset` installs, and be rejected against the stale
+    /// pre-reset commitment -- the property that makes `reset` a real key
+    /// rotation rather than a no-op relabeling.
+    #[test]
+    fn reset_then_sign_verifies_against_new_commitment_and_rejects_old() {
+        use crate::shrincs::signer::ShrincsSigner;
+        use crate::shrincs::verifier::{ActionContext, ShrincsVerifier};
+
+        let (mut keys, old_pk) = production_keys();
+        let old_commitment: [u8; HASH_LEN] = old_pk
+            .public_key_commitment
+            .try_into()
+            .expect("commitment is 32 bytes");
+
+        keys.reset(b"reset then sign test seed");
+
+        // `reset` only mutates the stateful half in place; round-trip through
+        // `import_signing_key` to get the `PublicKey` bundle matching the
+        // freshly reset key (and confirm the reset roots still import clean).
+        let (mut keys, new_pk) =
+            ShrincsSigner::import_signing_key(keys).expect("reset key must still import");
+        let new_commitment: [u8; HASH_LEN] = new_pk
+            .public_key_commitment
+            .clone()
+            .try_into()
+            .expect("commitment is 32 bytes");
+        assert_ne!(new_commitment, old_commitment);
+
+        let context = ActionContext {
+            domain_separator: [1u8; HASH_LEN],
+            nonce: [0u8; HASH_LEN],
+            key_version: [0u8; HASH_LEN],
+            action_type: [2u8; HASH_LEN],
+            payload_hash: [3u8; HASH_LEN],
+        };
+        let signature = ShrincsSigner::sign_stateful_action(&mut keys, &new_pk, &context)
+            .expect("sign under the reset key");
+
+        let verifier = ShrincsVerifier::new();
+        assert!(
+            verifier.verify_stateful(new_commitment, &new_pk, &context, &signature),
+            "signature under the reset key must verify against the new commitment"
+        );
+        assert!(
+            !verifier.verify_stateful(old_commitment, &new_pk, &context, &signature),
+            "the same signature must be rejected against the stale pre-reset commitment"
+        );
+    }
+
     #[test]
     fn recompute_commitment_matches_current_commitment() {
         let (keys, _pk) = production_keys();

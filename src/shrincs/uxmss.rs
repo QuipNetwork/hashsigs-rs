@@ -850,3 +850,128 @@ mod key_tests {
         assert!(!shown.contains("03"));
     }
 }
+
+/// Direct unit tests for the stateful sign/verify/Merkle-path core, keygenned
+/// against a small tree (`max_signatures` 8) so they run fast under any
+/// profile. `uxmss` is otherwise only exercised transitively via
+/// `shrincs::signer`/`shrincs::verifier`.
+#[cfg(test)]
+mod stateful_core_tests {
+    use super::*;
+    use crate::hash::derive32;
+
+    /// Build a small-tree stateful key directly, bypassing the stateless half
+    /// entirely (uxmss has no dependency on sphincs_plus_c).
+    fn test_key(seed_label: &[u8], max_signatures: u32) -> Key {
+        let sk_seed = derive32(b"test-uxmss-sk-seed", seed_label, &[]);
+        let prf_seed = derive32(b"test-uxmss-prf-seed", seed_label, &[]);
+        let pk_seed = derive32(b"test-uxmss-pk-seed", seed_label, &[]);
+        let root = stateful_subtree_root(
+            &sk_seed,
+            &pk_seed,
+            INITIAL_STATEFUL_LEAF_INDEX,
+            max_signatures,
+        );
+        Key::new(
+            PrivateKey::new(SkSeed::new(sk_seed), PrfSeed::new(prf_seed)),
+            StructuredPublicKey {
+                pk_seed: PkSeed::new(pk_seed),
+                root: Root::new(root),
+                max_signatures,
+            },
+            INITIAL_STATEFUL_LEAF_INDEX,
+        )
+    }
+
+    fn flat_public_key(key: &Key) -> PublicKey {
+        (*key.public_key()).into()
+    }
+
+    #[test]
+    fn signs_and_verifies_at_leaf_one_mid_and_max() {
+        let max = 8u32;
+        let key = test_key(b"leaf-coverage", max);
+        let pk = flat_public_key(&key);
+        for leaf in [1u32, 4, max] {
+            let message = b"uxmss core test message";
+            let sig = sign_stateful_raw_at_leaf(&key, leaf, message).expect("sign at leaf");
+            assert_eq!(sig.auth_path.len(), leaf as usize, "leaf {leaf}");
+            assert!(
+                verify_stateful_unsafe_raw(&pk, message, &sig),
+                "verify failed at leaf {leaf}",
+            );
+        }
+    }
+
+    #[test]
+    fn tampered_auth_path_node_is_rejected() {
+        let max = 8u32;
+        let key = test_key(b"tamper-auth", max);
+        let pk = flat_public_key(&key);
+        let message = b"tamper auth path";
+        let mut sig = sign_stateful_raw_at_leaf(&key, 4, message).expect("sign");
+        assert!(verify_stateful_unsafe_raw(&pk, message, &sig));
+
+        sig.auth_path[0][0] ^= 0x01;
+        assert!(!verify_stateful_unsafe_raw(&pk, message, &sig));
+    }
+
+    #[test]
+    fn tampered_chain_value_is_rejected() {
+        let max = 8u32;
+        let key = test_key(b"tamper-chain", max);
+        let pk = flat_public_key(&key);
+        let message = b"tamper chain value";
+        let mut sig = sign_stateful_raw_at_leaf(&key, 2, message).expect("sign");
+        assert!(verify_stateful_unsafe_raw(&pk, message, &sig));
+
+        sig.chains[0][0] ^= 0x01;
+        assert!(!verify_stateful_unsafe_raw(&pk, message, &sig));
+    }
+
+    #[test]
+    fn root_from_unbalanced_path_rejects_short_sibling_list() {
+        let max = 8u32;
+        let key = test_key(b"short-path", max);
+        let message = b"short auth path";
+        let leaf_index = 4u32;
+        let sig = sign_stateful_raw_at_leaf(&key, leaf_index, message).expect("sign");
+        let pk_seed = *key.public_key().pk_seed.as_bytes();
+        let leaf_hash =
+            compact_stateful_wots_public_key_from_signature(pk_seed, leaf_index, message, &sig)
+                .expect("wots pk hash");
+
+        // One sibling short of what `leaf_index` requires: the length guard
+        // must reject rather than silently reconstruct a wrong root.
+        let short_path = &sig.auth_path[..sig.auth_path.len() - 1];
+        assert_eq!(
+            root_from_unbalanced_path(pk_seed, leaf_index, leaf_hash, short_path),
+            None
+        );
+    }
+
+    #[test]
+    fn root_from_unbalanced_path_rejects_wrong_sibling_values() {
+        let max = 8u32;
+        let key = test_key(b"wrong-siblings", max);
+        let message = b"wrong sibling values";
+        let leaf_index = 4u32;
+        let sig = sign_stateful_raw_at_leaf(&key, leaf_index, message).expect("sign");
+        let pk_seed = *key.public_key().pk_seed.as_bytes();
+        let leaf_hash =
+            compact_stateful_wots_public_key_from_signature(pk_seed, leaf_index, message, &sig)
+                .expect("wots pk hash");
+        let true_root = root_from_unbalanced_path(pk_seed, leaf_index, leaf_hash, &sig.auth_path)
+            .expect("true root reconstructs");
+        assert_eq!(true_root, key.public_key().root.as_bytes().to_owned());
+
+        // Correct length, wrong values: reconstructs *a* root, but not the
+        // real one — the caller (`verify_stateful_unsafe_raw`) is what turns
+        // this into a rejection.
+        let mut wrong_path = sig.auth_path.clone();
+        wrong_path[0][0] ^= 0xff;
+        let wrong_root = root_from_unbalanced_path(pk_seed, leaf_index, leaf_hash, &wrong_path)
+            .expect("still reconstructs a root");
+        assert_ne!(wrong_root, true_root);
+    }
+}
