@@ -58,12 +58,7 @@ pub(crate) fn word32(input: &[u8]) -> Option<[u8; HASH_LEN]> {
 }
 
 pub(crate) fn base_w16_digit(digest: &[u8; HASH_LEN], index: usize) -> u32 {
-    let byte = digest[index >> 1];
-    if index & 1 == 0 {
-        u32::from(byte >> 4)
-    } else {
-        u32::from(byte & 0x0f)
-    }
+    base_w_digit(16, digest, index)
 }
 
 pub(crate) fn base_w_digit(w: u16, digest: &[u8], index: usize) -> u32 {
