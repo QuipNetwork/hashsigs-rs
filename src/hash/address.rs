@@ -17,7 +17,7 @@
 
 //! ADRS address-word builders.
 
-use crate::primitives::HASH_LEN;
+use crate::HASH_LEN;
 
 pub const ADDRESS_TYPE_WOTS_HASH: u32 = 0;
 pub const ADDRESS_TYPE_TREE: u32 = 2;

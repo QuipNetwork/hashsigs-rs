@@ -59,14 +59,14 @@ pub use dispatch::prepare_stateless_delegation;
 pub use verifier::{ShrincsVerifier, ShrincsVerifierExt};
 
 pub use crate::hash::suite::HASH_SUITE_ID;
-pub use crate::primitives::profiles::{
+pub use crate::profiles::{
     FORS_C_MAX_GRIND_COUNTER, FORS_TREE_HEIGHT, HASH_TRUNC_LEN, HYPERTREE_HEIGHT,
     NUM_FORS_TREES, NUM_HYPERTREE_LAYERS, NUM_WOTS_CHAINS, PROFILE_ID, PROFILE_NAME,
     STATELESS_SIGNATURE_LIMIT, WOTS_CHAIN_LEN,
 };
 pub use crate::hash::{ADDRESS_TYPE_FORS_TREE, ADDRESS_TYPE_TREE, ADDRESS_TYPE_WOTS_HASH};
 pub use crate::hash::suite::{HASH_SUITE_KECCAK_256, HASH_SUITE_SHA2_256};
-pub use crate::primitives::HASH_LEN;
+pub use crate::HASH_LEN;
 pub use action_context::ActionContext;
 pub use public_key::{decode_public_key_commitment, PublicKey};
 pub use signature::{
@@ -100,20 +100,20 @@ pub(crate) use signer_utils::{derive32, public_key_from_components};
 mod profile_tests {
     #[test]
     fn active_profile_id_matches_keccak_of_profile_name() {
-        let expected = crate::hash::backend::keccak256(crate::primitives::profiles::PROFILE_NAME.as_bytes());
-        assert_eq!(crate::primitives::profiles::PROFILE_ID, expected);
+        let expected = crate::hash::backend::keccak256(crate::profiles::PROFILE_NAME.as_bytes());
+        assert_eq!(crate::profiles::PROFILE_ID, expected);
     }
 
     #[cfg(any(feature = "profile-128s-q18", feature = "profile-128s-q20"))]
     #[test]
     fn active_128_profile_uses_raised_fors_grind_budget() {
-        assert_eq!(crate::primitives::profiles::FORS_TREE_HEIGHT, 24);
-        assert_eq!(crate::primitives::profiles::FORS_C_MAX_GRIND_COUNTER, 1 << 28);
+        assert_eq!(crate::profiles::FORS_TREE_HEIGHT, 24);
+        assert_eq!(crate::profiles::FORS_C_MAX_GRIND_COUNTER, 1 << 28);
     }
 
     #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
     #[test]
     fn active_non_128_profile_keeps_default_fors_grind_budget() {
-        assert_eq!(crate::primitives::profiles::FORS_C_MAX_GRIND_COUNTER, 1 << 24);
+        assert_eq!(crate::profiles::FORS_C_MAX_GRIND_COUNTER, 1 << 24);
     }
 }

@@ -19,8 +19,8 @@
 
 use crate::hash::backend;
 use crate::hash::suite::scheme_hash_parts;
-use crate::primitives::profiles::{HASH_TRUNC_LEN, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN};
-use crate::primitives::HASH_LEN;
+use crate::profiles::{HASH_TRUNC_LEN, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN};
+use crate::HASH_LEN;
 
 /// Scheme hash over the logical concatenation of `parts`. Hashing is vectored
 /// (incremental absorb / Solana `hashv`), so no packed buffer is allocated.

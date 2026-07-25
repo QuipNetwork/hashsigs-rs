@@ -34,10 +34,10 @@
 use alloc::vec::Vec;
 
 use super::public_key::PublicKey;
-use crate::primitives::abi::{
+use crate::abi::{
     encode_bytes32_array, encode_tuple, word_from_u32, AbiReader, Field,
 };
-use crate::primitives::HASH_LEN;
+use crate::HASH_LEN;
 use crate::sphincs_plus_c::Signature as StatelessSignature;
 
 /// Upper bound on a stateful auth-path length (equals the leaf index).
@@ -175,7 +175,7 @@ pub fn decode_stateless_envelope(data: &[u8]) -> Option<(PublicKey, StatelessSig
 mod tests {
     use super::*;
     use alloc::vec;
-    use crate::primitives::profiles::NUM_HYPERTREE_LAYERS;
+    use crate::profiles::NUM_HYPERTREE_LAYERS;
     use crate::sphincs_plus_c::{ForsEntry as Entry, ForsSignature, LayerSignature};
     use crate::wots_c::Signature as WotsCSignature;
 

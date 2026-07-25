@@ -23,7 +23,7 @@
 use alloc::vec::Vec;
 use core::cell::Cell;
 
-use crate::primitives::HASH_LEN;
+use crate::HASH_LEN;
 
 /// One field of a head/tail ABI tuple: either inlined directly in the head
 /// (fixed-width Solidity types) or written to the tail with an offset word

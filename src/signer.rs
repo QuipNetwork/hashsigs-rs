@@ -32,7 +32,7 @@
 
 use alloc::vec::Vec;
 
-use crate::primitives::HASH_LEN;
+use crate::HASH_LEN;
 
 /// Produces a signature envelope over a 32-byte hash and the verifying key
 /// that checks it. The mirror of [`crate::verifier::VerifierInterface`].

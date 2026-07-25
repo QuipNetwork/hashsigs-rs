@@ -64,14 +64,18 @@ extern crate alloc;
 #[macro_use]
 mod trace_macros;
 
-// Layering: `primitives` is scheme-neutral; `sphincs_plus_c` is the
+// Layering: the scheme-neutral building blocks (`hash`, `abi`, `buf`,
+// `profiles`, `treehash`) sit at the crate root; `sphincs_plus_c` is the
 // stateless scheme and is oblivious to `shrincs`; `shrincs` builds its
 // hybrid (stateful UXMSS + stateless recovery) on top of `sphincs_plus_c`.
 // `wasm` sits above both.
 pub mod signer;
 pub mod verifier;
+pub(crate) mod abi;
+pub(crate) mod buf;
 pub(crate) mod hash;
-pub(crate) mod primitives;
+pub(crate) mod profiles;
+pub(crate) mod treehash;
 pub mod shrincs;
 pub mod sphincs_plus_c;
 #[cfg(feature = "std")]
@@ -82,9 +86,14 @@ pub mod wots_c;
 #[cfg(all(test, feature = "std"))]
 pub(crate) mod test_support;
 
+// HASH_LEN is the 32-byte hash *slot* width shared by every profile: every
+// hash-valued wire field is a 32-byte slot (Solidity `bytes32`) regardless of
+// the parameter set. A truncated profile emits high-aligned, zero-padded node
+// values inside this slot (see HASH_TRUNC_LEN and `mask_hash`).
+pub const HASH_LEN: usize = 32;
+
 pub use signer::SignerInterface;
 pub use verifier::{VerifierInterface, VerifyOutcome};
-pub use primitives::HASH_LEN;
 pub use sphincs_plus_c::{
     keygen as sphincs_plus_c_keygen, sign as sphincs_plus_c_sign, to_message as sphincs_plus_c_to_message,
     verify as sphincs_plus_c_verify, verify_hash as sphincs_plus_c_verify_hash,

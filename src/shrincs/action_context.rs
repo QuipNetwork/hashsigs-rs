@@ -20,7 +20,7 @@
 //! (`dispatch::stateful_action_message_hash` /
 //! `dispatch::stateless_action_message_hash`).
 
-use crate::primitives::HASH_LEN;
+use crate::HASH_LEN;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ActionContext {

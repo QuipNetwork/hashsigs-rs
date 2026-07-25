@@ -43,7 +43,7 @@ use crate::shrincs::test_fixtures::{
     fixture_entry_opt, fixture_pair, fixture_path, load_fixture_file, TestKeyMode,
 };
 use super::ShrincsVerifier;
-use crate::primitives::HASH_LEN;
+use crate::HASH_LEN;
 use crate::sphincs_plus_c::{ForsEntry, ForsSignature, LayerSignature as HypertreeLayerSignature};
 use crate::sphincs_plus_c::Signature as StatelessSignature;
 use super::public_key::PublicKey;

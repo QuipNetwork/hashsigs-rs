@@ -22,7 +22,7 @@
 //! is arbitrary bytes (or raw 32-byte hash via `to_message` / `verify_hash`).
 //! No SHRINCS public-key-bundle commitment and no action envelope.
 
-use crate::primitives::HASH_LEN;
+use crate::HASH_LEN;
 
 /// Convert a 32-byte hash into the signed message bytes.
 /// The hash IS the message: exactly its 32 bytes.
@@ -272,7 +272,7 @@ mod tests {
     #[test]
     fn stateless_verify_hash_count_matches_model_and_reports_cu_floor() {
         use crate::hash::backend::metrics;
-        use crate::primitives::profiles::{
+        use crate::profiles::{
             FORS_TREE_HEIGHT, HYPERTREE_HEIGHT, NUM_FORS_TREES, NUM_HYPERTREE_LAYERS,
             NUM_WOTS_CHAINS, WOTS_CHAIN_LEN,
         };
@@ -312,7 +312,7 @@ mod tests {
             "CU estimate profile={}: stateless verify = {calls} hash syscalls, \
              {bytes} bytes hashed, syscall floor ≈ {cu_floor} CU \
              (excludes SBF instruction execution and borsh deserialization)",
-            crate::primitives::profiles::PROFILE_NAME
+            crate::profiles::PROFILE_NAME
         );
     }
 }

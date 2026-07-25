@@ -29,7 +29,7 @@ use super::action_context::ActionContext;
 use super::public_key::PublicKey;
 use super::signature::Signature;
 use crate::shrincs::uxmss;
-use crate::primitives::HASH_LEN;
+use crate::HASH_LEN;
 
 pub use super::signer_types::ShrincsSignerResult;
 use super::dispatch::stateful_action_message_hash;
@@ -261,7 +261,7 @@ impl ShrincsSigner {
 
 #[cfg(test)]
 mod tests {
-    use crate::primitives::HASH_LEN;
+    use crate::HASH_LEN;
     use crate::shrincs::test_fixtures::{
         fixture_entry_opt, fixture_pair, fixture_path, load_fixture_file,
         stateful_signer_fixture_path, TestKeyMode,
@@ -306,7 +306,7 @@ mod tests {
                     let fixture_file = load_fixture_file(&path);
                     assert_eq!(
                         fixture_file.profile_name,
-                        crate::primitives::profiles::PROFILE_NAME,
+                        crate::profiles::PROFILE_NAME,
                         "fixture profile mismatch",
                     );
                     if let Some(entry) = fixture_entry_opt(&fixture_file, seed_label) {
@@ -333,7 +333,7 @@ mod tests {
                     let fixture_file = load_fixture_file(&path);
                     assert_eq!(
                         fixture_file.profile_name,
-                        crate::primitives::profiles::PROFILE_NAME,
+                        crate::profiles::PROFILE_NAME,
                         "fixture profile mismatch",
                     );
                     if let Some(entry) = fixture_entry_opt(&fixture_file, seed_label) {
@@ -351,7 +351,7 @@ mod tests {
     #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
     #[test]
     fn signer_constants_match_verifier_constants() {
-        use crate::primitives::profiles::{
+        use crate::profiles::{
             HYPERTREE_HEIGHT, NUM_HYPERTREE_LAYERS, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN,
         };
         assert_eq!(HASH_LEN, 32);
@@ -372,7 +372,7 @@ mod tests {
     #[cfg(any(feature = "profile-128s-q18", feature = "profile-128s-q20"))]
     #[test]
     fn stateful_round_trip_verifies_under_128s_truncation() {
-        use crate::primitives::profiles::HASH_TRUNC_LEN;
+        use crate::profiles::HASH_TRUNC_LEN;
         let seed = b"128s stateful truncation seed";
         let max = 4u32;
         let stateful_sk_seed = derive32(b"shrincs-stateful-sk-seed", seed, &[]);
@@ -883,7 +883,7 @@ mod tests {
     )]
     #[test]
     fn stateless_empty_message_round_trip_and_fors_boundary() {
-        use crate::primitives::profiles::NUM_FORS_TREES;
+        use crate::profiles::NUM_FORS_TREES;
         let (signing_key, public_key) =
             fixture_or_fresh_full_key("stateless empty message seed", 2);
         let expected = expected_key(&public_key);

@@ -33,7 +33,7 @@ use crate::verifier::VerifyOutcome;
 // `shrincs` module path instead), and there is no `StatefulPublicKey` alias.
 pub use crate::hash::{ADDRESS_TYPE_FORS_TREE, ADDRESS_TYPE_TREE, ADDRESS_TYPE_WOTS_HASH};
 pub use crate::hash::suite::HASH_SUITE_KECCAK_256;
-pub use crate::primitives::HASH_LEN;
+pub use crate::HASH_LEN;
 pub use super::action_context::ActionContext;
 pub use super::public_key::PublicKey;
 pub use super::signature::Signature as StatefulSignature;
@@ -44,7 +44,7 @@ pub use super::uxmss::STATEFUL_PUBLIC_KEY_BYTES;
 pub use crate::sphincs_plus_c::Signature as StatelessSignature;
 // Profile parameter tuple also lived in main's shrincs_verifier_types (via
 // `pub use profile::*`); re-export from the current profiles module.
-pub use crate::primitives::profiles::{
+pub use crate::profiles::{
     FORS_TREE_HEIGHT, HASH_TRUNC_LEN, HYPERTREE_HEIGHT, NUM_FORS_TREES, NUM_HYPERTREE_LAYERS,
     NUM_WOTS_CHAINS, PROFILE_NAME, STATELESS_SIGNATURE_LIMIT, WOTS_CHAIN_LEN,
 };

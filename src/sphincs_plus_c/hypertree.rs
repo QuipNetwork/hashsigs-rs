@@ -31,21 +31,21 @@
 use alloc::vec::Vec;
 
 use zeroize::Zeroizing;
-use crate::primitives::abi::{
+use crate::abi::{
     collect_hash_words, encode_bytes, encode_dynamic_array, encode_tuple, AbiReader, Field,
 };
 use crate::hash::{
     base_w_digit, derive32, hash_node, hash_packed, hypertree_address_word, word32,
     wots_address_base, wots_chain_address_word, wots_digest_bytes,
 };
-use crate::primitives::profiles::{
+use crate::profiles::{
     HYPERTREE_HEIGHT, NUM_HYPERTREE_LAYERS, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN,
 };
 use super::key::Key;
 use crate::wots_c::{
     ChainWalk, wots_chain_walk, Signature, TARGET_SUM, WOTS_C_MAX_GRIND_COUNTER,
 };
-use crate::primitives::HASH_LEN;
+use crate::HASH_LEN;
 
 /// Hypertree subtree height: one auth-path node per level per layer. Matches
 /// the historical `envelope::HYPERTREE_SUBTREE_HEIGHT`, moved here with the
@@ -260,7 +260,7 @@ fn verify_wots_c32(
     // fixed-capacity segment buffer (stack by default, Solana heap — see
     // `buf`). Chain order must match the signer's so the pk-hash preimage is
     // byte-identical, which is why segments are stored in index order.
-    let mut segments = crate::primitives::buf::node_buf::<{ NUM_WOTS_CHAINS as usize }>();
+    let mut segments = crate::buf::node_buf::<{ NUM_WOTS_CHAINS as usize }>();
     let segment_at = |chain_index: usize| -> Option<[u8; HASH_LEN]> {
         let chain_value = signature.chains.get(chain_index).copied()?;
         Some(wots_chain32_no_mask_base(
@@ -366,7 +366,7 @@ fn hypertree_root_from_path32(
         return None;
     }
     let pk_seed = word32(pk_seed)?;
-    crate::primitives::treehash::root_from_auth_path(
+    crate::treehash::root_from_auth_path(
         height,
         path.leaf_index,
         leaf,
@@ -585,7 +585,7 @@ fn hypertree_subtree(
     // folded into the tree (same leaf secret derivation path).
     let selected_leaf_hash = hypertree_leaf(pk_seed, layer_seed, layer, tree, selected_leaf);
 
-    let (root, auth_path) = crate::primitives::treehash::treehash_root_and_auth_path(
+    let (root, auth_path) = crate::treehash::treehash_root_and_auth_path(
         subtree_height,
         selected_leaf,
         |leaf| {

@@ -24,7 +24,7 @@
 
 use alloc::vec::Vec;
 
-use crate::primitives::HASH_LEN;
+use crate::HASH_LEN;
 use super::public_key::public_key_commitment;
 use super::public_key::PublicKey;
 

@@ -35,17 +35,17 @@ use alloc::vec::Vec;
 
 use zeroize::Zeroizing;
 
-use crate::primitives::abi::{
+use crate::abi::{
     collect_hash_words, encode_bytes, encode_dynamic_array, encode_tuple, word_from_u32,
     AbiReader, Field,
 };
 use crate::hash::{fors_address_word, hash_node, hash_packed, read_bits32, read_bits64};
-use crate::primitives::profiles::{
+use crate::profiles::{
     FORS_C_MAX_GRIND_COUNTER, FORS_TREE_HEIGHT, HYPERTREE_HEIGHT, NUM_FORS_TREES,
     NUM_HYPERTREE_LAYERS,
 };
 use super::key::Key;
-use crate::primitives::HASH_LEN;
+use crate::HASH_LEN;
 
 /// Signed FORS trees per signature: the final tree is omitted (FORS-C).
 const SIGNED_TREES: usize = NUM_FORS_TREES as usize - 1;
@@ -351,7 +351,7 @@ pub(crate) fn fors_tree_root_and_auth_path(
     // signature field and the leaf-hash step (avoids a second SK derivation).
     let selected_secret_leaf = fors_leaf_secret(pk_seed, sk_seed, coords);
 
-    let (root, auth_path) = crate::primitives::treehash::treehash_root_and_auth_path(
+    let (root, auth_path) = crate::treehash::treehash_root_and_auth_path(
         height,
         coords.leaf,
         |index| {
@@ -403,7 +403,7 @@ fn fors_entry_root32(
         fors_address_word(coords.tree_index, coords.leaf_index, 0, leaf_low_index),
         &entry.secret_leaf,
     )?;
-    crate::primitives::treehash::root_from_auth_path(
+    crate::treehash::root_from_auth_path(
         height,
         coords.leaf,
         leaf,
@@ -711,13 +711,13 @@ mod measurement_tests {
     use super::super::key::{Key, PkSeed, PrfSeed, PublicKey, Root, Secret, SkSeed};
     use super::{signer_fors_digest, SigningForsDigest};
     use crate::hash::hash_packed;
-    use crate::primitives::profiles::FORS_C_MAX_GRIND_COUNTER;
-    use crate::primitives::HASH_LEN;
+    use crate::profiles::FORS_C_MAX_GRIND_COUNTER;
+    use crate::HASH_LEN;
 
     fn measurement_key(seed: &[u8], _max: u32) -> Key {
         hashsigs_println!(
             "measurement setup: deriving stateless key profile={}",
-            crate::primitives::profiles::PROFILE_NAME
+            crate::profiles::PROFILE_NAME
         );
         fn d(domain: &[u8], seed: &[u8]) -> [u8; HASH_LEN] {
             hash_packed(&[domain, seed, &[]])
@@ -770,7 +770,7 @@ mod measurement_tests {
             if counter > 0 && counter % progress.counter_progress_every == 0 {
                 hashsigs_println!(
                     "counter progress profile={} sample={}/? tried={counter}/{limit}",
-                    crate::primitives::profiles::PROFILE_NAME,
+                    crate::profiles::PROFILE_NAME,
                     progress.sample_index + 1
                 );
             }
@@ -800,7 +800,7 @@ mod measurement_tests {
         let counter_progress_every = measurement_counter_progress_interval(limit);
         hashsigs_println!(
             "starting FORS measurement profile={} samples={samples} limit={limit} progress_every={progress_every} counter_progress_every={counter_progress_every}",
-            crate::primitives::profiles::PROFILE_NAME,
+            crate::profiles::PROFILE_NAME,
         );
         let signing_key = measurement_key(b"fors success-rate measurement key", 4);
 
@@ -842,7 +842,7 @@ mod measurement_tests {
             if completed % progress_every == 0 || completed == samples {
                 hashsigs_println!(
                     "progress profile={} completed={completed}/{samples} successes={successes} failures={failures}",
-                    crate::primitives::profiles::PROFILE_NAME
+                    crate::profiles::PROFILE_NAME
                 );
             }
         }
@@ -865,7 +865,7 @@ mod measurement_tests {
 
         hashsigs_println!(
             "profile={} samples={samples} limit={limit} successes={successes} failures={failures} success_pct={success_pct:.2} failure_pct={failure_pct:.2} avg_success_counter={avg_success_counter:.2} max_success_counter={max_success_counter}",
-            crate::primitives::profiles::PROFILE_NAME
+            crate::profiles::PROFILE_NAME
         );
     }
 }

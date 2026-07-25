@@ -38,9 +38,9 @@ use alloc::vec::Vec;
 
 use super::fors_c;
 use super::hypertree::LayerSignature;
-use crate::primitives::abi::{encode_dynamic_array, encode_tuple, AbiReader, Field};
-use crate::primitives::profiles::NUM_HYPERTREE_LAYERS;
-use crate::primitives::HASH_LEN;
+use crate::abi::{encode_dynamic_array, encode_tuple, AbiReader, Field};
+use crate::profiles::NUM_HYPERTREE_LAYERS;
+use crate::HASH_LEN;
 
 /// SPHINCS+C stateless signature: a FORS-C signature over the message,
 /// carried up through the hypertree layers to the pinned hypertree root.
@@ -232,7 +232,7 @@ mod tests {
     #[test]
     fn oversized_fors_entries_length_is_rejected() {
         // FORS entries are a dynamic struct array capped at NUM_FORS_TREES.
-        use crate::primitives::profiles::NUM_FORS_TREES;
+        use crate::profiles::NUM_FORS_TREES;
         let mut encoded = sample_signature().to_bytes();
         // Outer head: one offset to the signature body.
         let sig_start = read_abi_usize(&encoded, 0);

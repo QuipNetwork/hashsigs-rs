@@ -29,7 +29,7 @@ use core::fmt;
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 use crate::hash::{base_w16_digit, hash_node, hash_packed, word32};
 use super::signature::Signature;
-use crate::primitives::HASH_LEN;
+use crate::HASH_LEN;
 use crate::wots_c::{ChainWalk, wots_chain_walk, WOTS_C_MAX_GRIND_COUNTER};
 
 // Encoded stateful public key layout, kept 68 bytes across all profiles:
@@ -158,7 +158,7 @@ fn compact_stateful_wots_public_key_from_signature(
     ]);
 
     let mut digit_sum = 0u32;
-    let mut segments = crate::primitives::buf::node_buf::<{ crate::wots_c::NUM_CHAINS }>();
+    let mut segments = crate::buf::node_buf::<{ crate::wots_c::NUM_CHAINS }>();
     for (chain_index, segment) in segments.iter_mut().enumerate() {
         let digit = base_w16_digit(&digest, chain_index);
         digit_sum = digit_sum.checked_add(digit)?;
@@ -631,7 +631,7 @@ fn stateful_wots_pk_hash(
 ) -> [u8; HASH_LEN] {
     // This is the public WOTS-C commitment for one stateful leaf. It is computed
     // by advancing every chain to its endpoint and hashing all endpoints together.
-    let mut endpoints = crate::primitives::buf::node_buf::<{ crate::wots_c::NUM_CHAINS }>();
+    let mut endpoints = crate::buf::node_buf::<{ crate::wots_c::NUM_CHAINS }>();
     for (chain_index, endpoint) in endpoints.iter_mut().enumerate() {
         // The private chain start is zeroized on drop.
         let secret = Zeroizing::new(stateful_chain_secret(

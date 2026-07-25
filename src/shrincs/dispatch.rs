@@ -26,7 +26,7 @@ use alloc::vec::Vec;
 use crate::hash::keccak_packed;
 use crate::hash::word32;
 use crate::hash::suite::HASH_SUITE_ID;
-use crate::primitives::HASH_LEN;
+use crate::HASH_LEN;
 use crate::sphincs_plus_c;
 use crate::sphincs_plus_c::Signature as StatelessSignature;
 use super::action_context::ActionContext;

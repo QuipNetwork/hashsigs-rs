@@ -33,10 +33,10 @@
 
 use alloc::vec::Vec;
 
-use crate::primitives::abi::{encode_bytes, encode_tuple, AbiReader, Field};
+use crate::abi::{encode_bytes, encode_tuple, AbiReader, Field};
 use crate::hash::{keccak_packed, word32};
-use crate::primitives::profiles::PROFILE_NAME;
-use crate::primitives::HASH_LEN;
+use crate::profiles::PROFILE_NAME;
+use crate::HASH_LEN;
 use super::uxmss::{PublicKey as StatefulPublicKey, STATEFUL_PUBLIC_KEY_BYTES};
 
 /// The SHRINCS hybrid public-key bundle: the encoded stateful sub-key, the

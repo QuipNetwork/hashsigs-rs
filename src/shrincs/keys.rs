@@ -31,7 +31,7 @@ use crate::shrincs::uxmss::{
     self, stateful_subtree_root, INITIAL_STATEFUL_LEAF_INDEX, MAX_STATEFUL_SIGNATURES_LIMIT,
 };
 use crate::sphincs_plus_c;
-use crate::primitives::HASH_LEN;
+use crate::HASH_LEN;
 
 use super::{derive32, public_key_commitment};
 
