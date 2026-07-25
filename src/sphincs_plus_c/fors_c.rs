@@ -543,6 +543,53 @@ mod tests {
 
         assert_eq!(reused, direct);
     }
+
+    /// Direct negative test for `verify_fors_c_and_return_root`: a tampered
+    /// revealed leaf secret, auth-path node, or counter must each recompute a
+    /// root different from the one the honest signature reconstructs. The
+    /// only prior coverage was indirect, through the committed golden vector
+    /// (`shrincs::vector_conformance`'s `tamperedFors` case).
+    #[test]
+    fn verify_rejects_tampered_secret_auth_path_and_counter() {
+        let key = crate::sphincs_plus_c::keygen(
+            [0x33u8; HASH_LEN],
+            [0x44u8; HASH_LEN],
+            [0x55u8; HASH_LEN],
+        );
+        let message = b"fors-c negative test message";
+        let signed = sign_fors_c(&key, message).expect("sign_fors_c should succeed");
+
+        let pk_seed = key.public_key.pk_seed.as_bytes();
+        let hypertree_root = key.public_key.root.as_bytes();
+
+        // Sanity: the honest signature verifies and reconstructs the signed root.
+        let (root, tree_index, leaf_index) =
+            verify_fors_c_and_return_root(pk_seed, hypertree_root, message, &signed.signature)
+                .expect("honest signature verifies");
+        assert_eq!(root, signed.root);
+        assert_eq!(tree_index, signed.tree_index);
+        assert_eq!(leaf_index, signed.leaf_index);
+
+        let recomputed_root = |signature: &Signature| {
+            verify_fors_c_and_return_root(pk_seed, hypertree_root, message, signature)
+                .map(|(root, ..)| root)
+        };
+
+        let mut tampered_secret = signed.signature.clone();
+        tampered_secret.entries[0].secret_leaf[0] ^= 0x01;
+        assert_ne!(recomputed_root(&tampered_secret), Some(signed.root));
+
+        let mut tampered_auth = signed.signature.clone();
+        tampered_auth.entries[0].auth_path[0][0] ^= 0x01;
+        assert_ne!(recomputed_root(&tampered_auth), Some(signed.root));
+
+        // Tampering the counter changes the implied tree/leaf indices and
+        // digest, so the whole reconstruction diverges (may also return
+        // `None` if the omitted-final-tree constraint no longer holds).
+        let mut tampered_counter = signed.signature.clone();
+        tampered_counter.counter = tampered_counter.counter.wrapping_add(1);
+        assert_ne!(recomputed_root(&tampered_counter), Some(signed.root));
+    }
 }
 
 // ---- signing ----
