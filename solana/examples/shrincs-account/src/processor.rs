@@ -3819,4 +3819,140 @@ mod tests {
             "an action carrying the OLD commitment/key must fail after rotation"
         );
     }
+
+    // --- router / state-plumbing negative paths ------------------------------
+
+    #[tokio::test]
+    async fn process_instruction_rejects_unknown_discriminant() {
+        let program_id = Keypair::new();
+        let program_test = ProgramTest::new(
+            "shrincs_account_example",
+            program_id.pubkey(),
+            processor!(process_instruction),
+        );
+        let context = program_test.start_with_context().await;
+        let program_id = program_id.pubkey();
+
+        // 0xFF is not a valid `ShrincsAccountInstruction` Borsh discriminant
+        // (11 variants, 0..=10): decode must fail before any account is
+        // touched, through the REAL router (not the test-only `test_dispatch`
+        // stand-in the other tests use).
+        let instruction = Instruction {
+            program_id,
+            accounts: vec![],
+            data: vec![0xFF, 0x00, 0x00, 0x00],
+        };
+        let transaction = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer],
+            context.last_blockhash,
+        );
+        let result = context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap();
+        assert_instruction_error(
+            &result.result,
+            solana_sdk::instruction::InstructionError::InvalidInstructionData,
+        );
+    }
+
+    #[tokio::test]
+    async fn load_state_rejects_foreign_owned_account() {
+        let (program_test, program_id) = setup_test().await;
+        let mut context = program_test.start_with_context().await;
+        let program_id = program_id.pubkey();
+        let owner = Keypair::new();
+        let salt = [70u8; HASH_LEN];
+        let (account_pda_key, _bump) = account_pda(&program_id, &owner.pubkey(), &salt);
+
+        // Plant an account at the expected PDA address that is NOT owned by
+        // the program: `load_state`'s ownership check must reject it before
+        // ever attempting to deserialize its (empty) data.
+        context.set_account(
+            &account_pda_key,
+            &solana_sdk::account::AccountSharedData::new(
+                1_000_000,
+                0,
+                &solana_program::system_program::id(),
+            ),
+        );
+
+        let (bitmap_key, _) =
+            crate::pda::bitmap_word_pda(&program_id, &account_pda_key, &[0u8; HASH_LEN], 0);
+        let instruction = Instruction {
+            program_id,
+            accounts: vec![
+                AccountMeta::new_readonly(account_pda_key, false),
+                AccountMeta::new_readonly(bitmap_key, false),
+            ],
+            data: borsh::to_vec(&TestInstruction::IsLeafUsed(IsLeafUsedArgs {
+                leaf_index: 1,
+            }))
+            .unwrap(),
+        };
+        let transaction = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer],
+            context.last_blockhash,
+        );
+        let result = context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap();
+        assert_instruction_error(
+            &result.result,
+            solana_sdk::instruction::InstructionError::IncorrectProgramId,
+        );
+    }
+
+    #[tokio::test]
+    async fn load_state_rejects_corrupt_account_data() {
+        let (program_test, program_id) = setup_test().await;
+        let mut context = program_test.start_with_context().await;
+        let program_id = program_id.pubkey();
+        let owner = Keypair::new();
+        let salt = [71u8; HASH_LEN];
+        let (account_pda_key, _bump) = account_pda(&program_id, &owner.pubkey(), &salt);
+
+        // Program-owned (passes the ownership check) but too short/garbage
+        // to Borsh-decode as `ShrincsAccountState`.
+        context.set_account(
+            &account_pda_key,
+            &solana_sdk::account::AccountSharedData::new(1_000_000, 4, &program_id),
+        );
+
+        let (bitmap_key, _) =
+            crate::pda::bitmap_word_pda(&program_id, &account_pda_key, &[0u8; HASH_LEN], 0);
+        let instruction = Instruction {
+            program_id,
+            accounts: vec![
+                AccountMeta::new_readonly(account_pda_key, false),
+                AccountMeta::new_readonly(bitmap_key, false),
+            ],
+            data: borsh::to_vec(&TestInstruction::IsLeafUsed(IsLeafUsedArgs {
+                leaf_index: 1,
+            }))
+            .unwrap(),
+        };
+        let transaction = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer],
+            context.last_blockhash,
+        );
+        let result = context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap();
+        assert_instruction_error(
+            &result.result,
+            solana_sdk::instruction::InstructionError::InvalidAccountData,
+        );
+    }
 }
