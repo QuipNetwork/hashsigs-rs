@@ -274,7 +274,7 @@ mod tests {
         use crate::primitives::hash_backend::metrics;
         use crate::primitives::profiles::{
             FORS_TREE_HEIGHT, HYPERTREE_HEIGHT, NUM_FORS_TREES, NUM_HYPERTREE_LAYERS,
-            NUM_WOTS_CHAINS, WOTS_CHAIN_LEN, WOTS_TARGET_SUM_STATELESS,
+            NUM_WOTS_CHAINS, WOTS_CHAIN_LEN,
         };
 
         let (sk, pk) = independent_keygen(b"sphincs-plus-c cu estimator");
@@ -302,7 +302,7 @@ mod tests {
         // wots-c-pk hash + one node hash per subtree auth-path level.
         let subtree_height = u64::from(HYPERTREE_HEIGHT / NUM_HYPERTREE_LAYERS);
         let chain_steps = u64::from(NUM_WOTS_CHAINS) * u64::from(WOTS_CHAIN_LEN - 1)
-            - u64::from(WOTS_TARGET_SUM_STATELESS);
+            - u64::from(crate::wots_c::TARGET_SUM);
         let per_layer = 1 + chain_steps + 1 + subtree_height;
         let expected_calls = fors_calls + u64::from(NUM_HYPERTREE_LAYERS) * per_layer;
         assert_eq!(calls, expected_calls, "verify hash-count model drifted");

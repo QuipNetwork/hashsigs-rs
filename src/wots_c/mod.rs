@@ -40,6 +40,16 @@ use crate::primitives::HASH_LEN;
 
 pub(crate) use crate::primitives::profiles::WOTS_C_MAX_GRIND_COUNTER;
 
+/// WOTS-C parameters. One construction, used by BOTH the stateful UXMSS leaves
+/// and the stateless hypertree nodes — they differ only in domain-separation
+/// tag, not in `w` / chain-count / target-sum. Solidity's SHRINCSParams names
+/// these per-tree (WOTS_*_STATEFUL / _STATELESS); unified here because every
+/// profile uses identical values for both. Byte-identical to the old split
+/// constants.
+pub(crate) const NUM_CHAINS: usize = NUM_WOTS_CHAINS as usize;
+pub(crate) const BASE: u32 = crate::primitives::profiles::WOTS_CHAIN_LEN as u32;
+pub(crate) const TARGET_SUM: u32 = crate::primitives::profiles::WOTS_TARGET_SUM;
+
 /// Value and step range for one WOTS-C chain walk.
 #[derive(Clone, Copy)]
 pub(crate) struct ChainWalk {

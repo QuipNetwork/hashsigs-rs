@@ -911,7 +911,7 @@ mod tests {
         fn stateful_sign_verify_round_trip_and_single_byte_tamper_rejects(
             message in proptest::collection::vec(any::<u8>(), 0..48usize),
             leaf in 1u32..=4,
-            tamper_chain in 0usize..crate::primitives::profiles::WOTS_CHAINS_STATEFUL,
+            tamper_chain in 0usize..crate::wots_c::NUM_CHAINS,
             tamper_byte in 0usize..HASH_LEN,
         ) {
             let (signing_key, public_key) = stateful_only_key(b"proptest stateful seed", 4);

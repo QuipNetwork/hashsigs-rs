@@ -47,8 +47,7 @@ pub use crate::sphincs_plus_c::Signature as StatelessSignature;
 // `pub use profile::*`); re-export from the current profiles module.
 pub use crate::primitives::profiles::{
     FORS_TREE_HEIGHT, HASH_TRUNC_LEN, HYPERTREE_HEIGHT, NUM_FORS_TREES, NUM_HYPERTREE_LAYERS,
-    NUM_WOTS_CHAINS, PROFILE_NAME, STATELESS_SIGNATURE_LIMIT, WOTS_BASE_STATEFUL, WOTS_CHAIN_LEN,
-    WOTS_CHAINS_STATEFUL, WOTS_TARGET_SUM_STATEFUL,
+    NUM_WOTS_CHAINS, PROFILE_NAME, STATELESS_SIGNATURE_LIMIT, WOTS_CHAIN_LEN,
 };
 use super::dispatch as core_shrincs;
 use super::dispatch::{stateful_action_message_hash, stateless_action_message_hash};

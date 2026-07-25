@@ -19,8 +19,8 @@
 
 // The per-profile parameter tuple (STATELESS_SIGNATURE_LIMIT, HYPERTREE_HEIGHT,
 // NUM_HYPERTREE_LAYERS, FORS_TREE_HEIGHT, NUM_FORS_TREES, WOTS_CHAIN_LEN,
-// NUM_WOTS_CHAINS, FORS_C_MAX_GRIND_COUNTER, ...) comes exclusively from the
-// `profile` module below via
+// NUM_WOTS_CHAINS, FORS_C_MAX_GRIND_COUNTER, WOTS_TARGET_SUM, ...) comes
+// exclusively from the `profile` module below via
 // `pub use profile::*`. These must NOT also be declared unconditionally here:
 // an explicit item silently shadows a glob re-export, so a top-level copy would
 // pin every profile to the 256s values and quietly break `profile-128s-*` builds.
@@ -31,7 +31,11 @@
 // profile, selected by the `shrincs-profile/` Foundry remapping). Counts size
 // arrays and bound loops, so they must be compile-time constants. Every value
 // below matches the corresponding Solidity `SHRINCSParams` values for the
-// Rust-implemented profiles.
+// Rust-implemented profiles. Solidity's SHRINCSParams keeps separate
+// WOTS_*_STATEFUL/_STATELESS target-sum constants per tree; the Rust
+// deliberately unifies them into the single `WOTS_TARGET_SUM` here since every
+// profile uses identical values for both trees (owned alongside `NUM_CHAINS`/
+// `BASE` in `crate::wots_c`, parity preserved, values unchanged).
 #[cfg(shrincs_profile_256s)]
 mod profile {
     include!(concat!(env!("OUT_DIR"), "/shrincs_profile_identity.rs"));
@@ -45,10 +49,7 @@ mod profile {
     pub const WOTS_CHAIN_LEN: u16 = 16;
     pub const NUM_WOTS_CHAINS: u16 = 64;
     pub const FORS_C_MAX_GRIND_COUNTER: u32 = 1 << 24;
-    pub const WOTS_CHAINS_STATEFUL: usize = 64;
-    pub const WOTS_BASE_STATEFUL: u32 = 16;
-    pub const WOTS_TARGET_SUM_STATEFUL: u32 = 480;
-    pub const WOTS_TARGET_SUM_STATELESS: u32 = 480;
+    pub const WOTS_TARGET_SUM: u32 = 480;
 }
 
 #[cfg(shrincs_profile_128s_q18)]
@@ -64,10 +65,7 @@ mod profile {
     pub const WOTS_CHAIN_LEN: u16 = 16;
     pub const NUM_WOTS_CHAINS: u16 = 32;
     pub const FORS_C_MAX_GRIND_COUNTER: u32 = 1 << 28;
-    pub const WOTS_CHAINS_STATEFUL: usize = 32;
-    pub const WOTS_BASE_STATEFUL: u32 = 16;
-    pub const WOTS_TARGET_SUM_STATEFUL: u32 = 240;
-    pub const WOTS_TARGET_SUM_STATELESS: u32 = 240;
+    pub const WOTS_TARGET_SUM: u32 = 240;
 }
 
 #[cfg(shrincs_profile_128s_q20)]
@@ -83,10 +81,7 @@ mod profile {
     pub const WOTS_CHAIN_LEN: u16 = 16;
     pub const NUM_WOTS_CHAINS: u16 = 32;
     pub const FORS_C_MAX_GRIND_COUNTER: u32 = 1 << 28;
-    pub const WOTS_CHAINS_STATEFUL: usize = 32;
-    pub const WOTS_BASE_STATEFUL: u32 = 16;
-    pub const WOTS_TARGET_SUM_STATEFUL: u32 = 240;
-    pub const WOTS_TARGET_SUM_STATELESS: u32 = 240;
+    pub const WOTS_TARGET_SUM: u32 = 240;
 }
 
 #[cfg(shrincs_profile_256s_sha2)]
@@ -102,10 +97,7 @@ mod profile {
     pub const WOTS_CHAIN_LEN: u16 = 16;
     pub const NUM_WOTS_CHAINS: u16 = 64;
     pub const FORS_C_MAX_GRIND_COUNTER: u32 = 1 << 24;
-    pub const WOTS_CHAINS_STATEFUL: usize = 64;
-    pub const WOTS_BASE_STATEFUL: u32 = 16;
-    pub const WOTS_TARGET_SUM_STATEFUL: u32 = 480;
-    pub const WOTS_TARGET_SUM_STATELESS: u32 = 480;
+    pub const WOTS_TARGET_SUM: u32 = 480;
 }
 
 pub use profile::*;

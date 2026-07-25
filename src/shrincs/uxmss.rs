@@ -28,9 +28,6 @@ use alloc::vec::Vec;
 use core::fmt;
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 use crate::primitives::hash::{base_w16_digit, hash_node, hash_packed, word32};
-use crate::primitives::profiles::{
-    WOTS_BASE_STATEFUL, WOTS_CHAINS_STATEFUL, WOTS_TARGET_SUM_STATEFUL,
-};
 use super::signature::Signature;
 use crate::primitives::HASH_LEN;
 use crate::wots_c::{ChainWalk, wots_chain_walk, WOTS_C_MAX_GRIND_COUNTER};
@@ -96,7 +93,7 @@ pub(crate) fn verify_stateful_unsafe_raw(
     if leaf_index == 0 || leaf_index > stateful_key.max_signatures {
         return false;
     }
-    if signature.chains.len() != WOTS_CHAINS_STATEFUL {
+    if signature.chains.len() != crate::wots_c::NUM_CHAINS {
         return false;
     }
 
@@ -161,7 +158,7 @@ fn compact_stateful_wots_public_key_from_signature(
     ]);
 
     let mut digit_sum = 0u32;
-    let mut segments = crate::primitives::buf::node_buf::<WOTS_CHAINS_STATEFUL>();
+    let mut segments = crate::primitives::buf::node_buf::<{ crate::wots_c::NUM_CHAINS }>();
     for (chain_index, segment) in segments.iter_mut().enumerate() {
         let digit = base_w16_digit(&digest, chain_index);
         digit_sum = digit_sum.checked_add(digit)?;
@@ -175,18 +172,19 @@ fn compact_stateful_wots_public_key_from_signature(
             ChainWalk {
                 value: chain_value,
                 start: digit,
-                steps: WOTS_BASE_STATEFUL - 1 - digit,
+                steps: crate::wots_c::BASE - 1 - digit,
             },
         );
     }
 
-    if digit_sum != WOTS_TARGET_SUM_STATEFUL {
+    if digit_sum != crate::wots_c::TARGET_SUM {
         return None;
     }
     // Vectored preimage: tag ‖ pk_seed ‖ leaf_index ‖ segment_0 ‖ … —
     // byte-identical to the packed form.
     let leaf_be = leaf_index.to_be_bytes();
-    let mut parts: [&[u8]; WOTS_CHAINS_STATEFUL + 3] = [&[]; WOTS_CHAINS_STATEFUL + 3];
+    let mut parts: [&[u8]; { crate::wots_c::NUM_CHAINS } + 3] =
+        [&[]; { crate::wots_c::NUM_CHAINS } + 3];
     parts[0] = b"uxmss-wots-pk";
     parts[1] = pk_seed.as_ref();
     parts[2] = leaf_be.as_ref();
@@ -556,7 +554,7 @@ fn sign_stateful_wots_c(
 
     let result = crate::wots_c::grind_digit_sum(
         WOTS_C_MAX_GRIND_COUNTER,
-        WOTS_TARGET_SUM_STATEFUL,
+        crate::wots_c::TARGET_SUM,
         |counter| {
             let digest = hash_packed(&[
                 b"uxmss-wots-digits",
@@ -566,7 +564,7 @@ fn sign_stateful_wots_c(
                 &counter.to_be_bytes(),
                 message,
             ]);
-            let digits = (0..WOTS_CHAINS_STATEFUL)
+            let digits = (0..crate::wots_c::NUM_CHAINS)
                 .map(|index| base_w16_digit(&digest, index))
                 .collect::<Vec<_>>();
             let digit_sum = digits.iter().copied().try_fold(0u32, |a, b| a.checked_add(b))?;
@@ -633,7 +631,7 @@ fn stateful_wots_pk_hash(
 ) -> [u8; HASH_LEN] {
     // This is the public WOTS-C commitment for one stateful leaf. It is computed
     // by advancing every chain to its endpoint and hashing all endpoints together.
-    let mut endpoints = crate::primitives::buf::node_buf::<WOTS_CHAINS_STATEFUL>();
+    let mut endpoints = crate::primitives::buf::node_buf::<{ crate::wots_c::NUM_CHAINS }>();
     for (chain_index, endpoint) in endpoints.iter_mut().enumerate() {
         // The private chain start is zeroized on drop.
         let secret = Zeroizing::new(stateful_chain_secret(
@@ -651,14 +649,15 @@ fn stateful_wots_pk_hash(
             ChainWalk {
                 value: *secret,
                 start: 0,
-                steps: WOTS_BASE_STATEFUL - 1,
+                steps: crate::wots_c::BASE - 1,
             },
         );
     }
     // Vectored preimage, byte-identical to the packed form used by the
     // signature-side reconstruction above.
     let leaf_be = leaf_index.to_be_bytes();
-    let mut parts: [&[u8]; WOTS_CHAINS_STATEFUL + 3] = [&[]; WOTS_CHAINS_STATEFUL + 3];
+    let mut parts: [&[u8]; { crate::wots_c::NUM_CHAINS } + 3] =
+        [&[]; { crate::wots_c::NUM_CHAINS } + 3];
     parts[0] = b"uxmss-wots-pk";
     parts[1] = pk_seed.as_ref();
     parts[2] = leaf_be.as_ref();

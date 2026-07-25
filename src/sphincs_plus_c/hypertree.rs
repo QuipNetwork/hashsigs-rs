@@ -40,10 +40,11 @@ use crate::primitives::hash::{
 };
 use crate::primitives::profiles::{
     HYPERTREE_HEIGHT, NUM_HYPERTREE_LAYERS, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN,
-    WOTS_TARGET_SUM_STATELESS,
 };
 use super::key::Key;
-use crate::wots_c::{ChainWalk, wots_chain_walk, Signature, WOTS_C_MAX_GRIND_COUNTER};
+use crate::wots_c::{
+    ChainWalk, wots_chain_walk, Signature, TARGET_SUM, WOTS_C_MAX_GRIND_COUNTER,
+};
 use crate::primitives::HASH_LEN;
 
 /// Hypertree subtree height: one auth-path node per level per layer. Matches
@@ -251,7 +252,7 @@ fn verify_wots_c32(
         digit_sum = next_sum;
         *digit_slot = digit;
     }
-    if digit_sum != WOTS_TARGET_SUM_STATELESS {
+    if digit_sum != TARGET_SUM {
         return false;
     }
 
@@ -696,7 +697,7 @@ fn sign_stateless_wots_c(
 
     let result = crate::wots_c::grind_digit_sum(
         WOTS_C_MAX_GRIND_COUNTER,
-        WOTS_TARGET_SUM_STATELESS,
+        TARGET_SUM,
         |counter| {
             let digest = stateless_wots_message_digest(
                 seeds.pk_seed,

@@ -37,7 +37,6 @@ use super::public_key::PublicKey;
 use crate::primitives::abi::{
     encode_bytes32_array, encode_tuple, word_from_u32, AbiReader, Field,
 };
-use crate::primitives::profiles::WOTS_CHAINS_STATEFUL;
 use crate::primitives::HASH_LEN;
 use crate::sphincs_plus_c::Signature as StatelessSignature;
 
@@ -88,7 +87,11 @@ impl Signature {
         Some(Self {
             randomizer: reader.read_bytes32(base)?,
             counter: reader.read_u32(base.checked_add(32)?)?,
-            chains: reader.decode_array_bytes32(base, base.checked_add(64)?, WOTS_CHAINS_STATEFUL)?,
+            chains: reader.decode_array_bytes32(
+                base,
+                base.checked_add(64)?,
+                crate::wots_c::NUM_CHAINS,
+            )?,
             auth_path: reader.decode_array_bytes32(
                 base,
                 base.checked_add(96)?,
@@ -419,7 +422,7 @@ mod tests {
 
     #[test]
     fn oversized_array_length_is_rejected() {
-        // Stateful chains are `bytes32[]` capped at WOTS_CHAINS_STATEFUL.
+        // Stateful chains are `bytes32[]` capped at `wots_c::NUM_CHAINS`.
         // Overwrite the chains length word to max+1 without growing the buffer
         // so a naive decoder would either OOM-prep or walk off the end; with
         // the cap it must fail closed before element allocation.
@@ -431,10 +434,10 @@ mod tests {
         let signature_start = read_abi_usize(&encoded, 32);
         // Signature body head: randomizer@0, counter@32, chains_off@64, auth_off@96.
         let chains_start = signature_start + read_abi_usize(&encoded, signature_start + 64);
-        write_abi_usize(&mut encoded, chains_start, WOTS_CHAINS_STATEFUL + 1);
+        write_abi_usize(&mut encoded, chains_start, crate::wots_c::NUM_CHAINS + 1);
         assert!(
             decode_stateful_envelope(&encoded).is_none(),
-            "chains length WOTS_CHAINS_STATEFUL+1 must be rejected"
+            "WOTS-C chain count + 1 must be rejected"
         );
     }
 }
