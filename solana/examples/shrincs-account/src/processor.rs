@@ -1762,6 +1762,238 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn stateful_action_rejects_under_recovery_rotation_policy() {
+        let (program_test, program_id) = setup_test().await;
+        let mut context = program_test.start_with_context().await;
+        let program_id = program_id.pubkey();
+        let owner = Keypair::new();
+        let salt = [60u8; HASH_LEN];
+
+        let (mut keys, public_key) =
+            ShrincsSigner::keygen(b"shrincs-account-example test stateful path disabled", 1024)
+                .expect("keygen");
+        let commitment = fixed_hash_bytes(&public_key.public_key_commitment);
+        let account_pda_key =
+            init_account(&mut context, &program_id, &owner, salt, commitment).await;
+
+        // Switch to RecoveryRotation: stateful use must be disabled outright,
+        // independent of whether recovery mode is armed (see
+        // check_stateful_leaf_use's RecoveryRotation arm).
+        context.last_blockhash = context.get_new_latest_blockhash().await.unwrap();
+        let instruction = policy_instruction(
+            &program_id,
+            &account_pda_key,
+            &owner.pubkey(),
+            TestInstruction::SetPolicyRecoveryRotation,
+        );
+        let transaction = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer, &owner],
+            context.last_blockhash,
+        );
+        context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap()
+            .result
+            .expect("set_policy_recovery_rotation should succeed");
+
+        let domain_separator = messages::domain_separator(&program_id, &account_pda_key);
+        let action_type = messages::ACTION_STATEFUL;
+        let payload_hash =
+            messages::action_payload(&action_type, b"blocked under recovery rotation");
+        let action_context = messages::action_context(
+            domain_separator,
+            [0u8; HASH_LEN],
+            [0u8; HASH_LEN],
+            action_type,
+            payload_hash,
+        );
+        let signature =
+            ShrincsSigner::sign_stateful_action(&mut keys, &public_key, &action_context)
+                .expect("sign");
+
+        let (bitmap_key, _) =
+            crate::pda::bitmap_word_pda(&program_id, &account_pda_key, &[0u8; HASH_LEN], 0);
+        let instruction = Instruction {
+            program_id,
+            accounts: vec![
+                AccountMeta::new(account_pda_key, false),
+                AccountMeta::new(bitmap_key, false),
+                AccountMeta::new(context.payer.pubkey(), true),
+                AccountMeta::new_readonly(solana_program::system_program::id(), false),
+            ],
+            data: {
+                let mut data = Vec::new();
+                TestInstruction::StatefulAction(StatefulActionArgs {
+                    public_key: public_key.into(),
+                    action_type,
+                    payload_hash,
+                    signature: signature.into(),
+                })
+                .serialize(&mut data)
+                .unwrap();
+                data
+            },
+        };
+        let transaction = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer],
+            context.last_blockhash,
+        );
+        let result = context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap();
+        assert_custom_error(&result.result, ShrincsAccountError::StatefulPathDisabled);
+    }
+
+    #[tokio::test]
+    async fn stateful_action_bitmap_replay_rejected() {
+        let (program_test, program_id) = setup_test().await;
+        let mut context = program_test.start_with_context().await;
+        let program_id = program_id.pubkey();
+        let owner = Keypair::new();
+        let salt = [61u8; HASH_LEN];
+
+        let (mut keys, public_key) =
+            ShrincsSigner::keygen(b"shrincs-account-example test bitmap replay", 1024)
+                .expect("keygen");
+        let keys_replay = keys.clone(); // independent signer, still at leaf 1
+        let commitment = fixed_hash_bytes(&public_key.public_key_commitment);
+        let account_pda_key =
+            init_account(&mut context, &program_id, &owner, salt, commitment).await;
+
+        // Switch to LeafBitmap before any stateful use (the policy is not frozen yet).
+        context.last_blockhash = context.get_new_latest_blockhash().await.unwrap();
+        let instruction = policy_instruction(
+            &program_id,
+            &account_pda_key,
+            &owner.pubkey(),
+            TestInstruction::SetPolicyLeafBitmap,
+        );
+        let transaction = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer, &owner],
+            context.last_blockhash,
+        );
+        context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap()
+            .result
+            .expect("set_policy_leaf_bitmap should succeed");
+
+        let (bitmap_key, _) =
+            crate::pda::bitmap_word_pda(&program_id, &account_pda_key, &[0u8; HASH_LEN], 0);
+        let domain_separator = messages::domain_separator(&program_id, &account_pda_key);
+        let action_type = messages::ACTION_STATEFUL;
+
+        // First action: consumes leaf 1 in the bitmap.
+        let payload_hash_1 = messages::action_payload(&action_type, b"first bitmap action");
+        let context_1 = messages::action_context(
+            domain_separator,
+            [0u8; HASH_LEN],
+            [0u8; HASH_LEN],
+            action_type,
+            payload_hash_1,
+        );
+        let signature_1 =
+            ShrincsSigner::sign_stateful_action(&mut keys, &public_key, &context_1).expect("sign");
+        let instruction_1 = Instruction {
+            program_id,
+            accounts: vec![
+                AccountMeta::new(account_pda_key, false),
+                AccountMeta::new(bitmap_key, false),
+                AccountMeta::new(context.payer.pubkey(), true),
+                AccountMeta::new_readonly(solana_program::system_program::id(), false),
+            ],
+            data: {
+                let mut data = Vec::new();
+                TestInstruction::StatefulAction(StatefulActionArgs {
+                    public_key: public_key.clone().into(),
+                    action_type,
+                    payload_hash: payload_hash_1,
+                    signature: signature_1.into(),
+                })
+                .serialize(&mut data)
+                .unwrap();
+                data
+            },
+        };
+        let transaction_1 = Transaction::new_signed_with_payer(
+            &[instruction_1],
+            Some(&context.payer.pubkey()),
+            &[&context.payer],
+            context.last_blockhash,
+        );
+        context
+            .banks_client
+            .process_transaction_with_metadata(transaction_1)
+            .await
+            .unwrap()
+            .result
+            .expect("first bitmap-policy stateful action should succeed");
+
+        // Second action: a fresh, validly signed leaf-1 signature from the
+        // independent `keys_replay` clone, replaying an already-used bitmap leaf.
+        let mut keys_replay = keys_replay;
+        let payload_hash_2 = messages::action_payload(&action_type, b"bitmap replay action");
+        let context_2 = messages::action_context(
+            domain_separator,
+            [0u8; HASH_LEN],
+            [0u8; HASH_LEN],
+            action_type,
+            payload_hash_2,
+        );
+        let signature_2 =
+            ShrincsSigner::sign_stateful_action(&mut keys_replay, &public_key, &context_2)
+                .expect("sign");
+        assert_eq!(signature_2.auth_path.len(), 1, "replay reuses leaf 1");
+
+        context.last_blockhash = context.banks_client.get_latest_blockhash().await.unwrap();
+        let instruction_2 = Instruction {
+            program_id,
+            accounts: vec![
+                AccountMeta::new(account_pda_key, false),
+                AccountMeta::new(bitmap_key, false),
+                AccountMeta::new(context.payer.pubkey(), true),
+                AccountMeta::new_readonly(solana_program::system_program::id(), false),
+            ],
+            data: {
+                let mut data = Vec::new();
+                TestInstruction::StatefulAction(StatefulActionArgs {
+                    public_key: public_key.into(),
+                    action_type,
+                    payload_hash: payload_hash_2,
+                    signature: signature_2.into(),
+                })
+                .serialize(&mut data)
+                .unwrap();
+                data
+            },
+        };
+        let transaction_2 = Transaction::new_signed_with_payer(
+            &[instruction_2],
+            Some(&context.payer.pubkey()),
+            &[&context.payer],
+            context.last_blockhash,
+        );
+        let result = context
+            .banks_client
+            .process_transaction_with_metadata(transaction_2)
+            .await
+            .unwrap();
+        assert_custom_error(&result.result, ShrincsAccountError::StatefulLeafRejected);
+    }
+
+    #[tokio::test]
     async fn stateless_action_valid_signature_advances_state() {
         let (program_test, program_id) = setup_test().await;
         let mut context = program_test.start_with_context().await;
