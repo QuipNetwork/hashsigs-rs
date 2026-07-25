@@ -48,6 +48,19 @@ use zeroize::Zeroizing;
 const HYPERTREE_SUBTREE_HEIGHT: usize =
     (HYPERTREE_HEIGHT as usize) / (NUM_HYPERTREE_LAYERS as usize);
 
+// `hypertree_subtree`'s `selected_leaf`/`subtree_height` guards (and thus
+// `hypertree_public_root`'s `None` fallback, see its doc comment) are only
+// reachable for a profile whose height/layer ratio is degenerate. Every
+// shipping profile keeps a positive subtree height that fits in a `u32`
+// shift; enforce that at compile time so a misconfigured profile fails the
+// build instead of silently minting an all-zero public root.
+const _: () = {
+    assert!(
+        HYPERTREE_SUBTREE_HEIGHT > 0 && HYPERTREE_SUBTREE_HEIGHT < u32::BITS as usize,
+        "HYPERTREE_HEIGHT/NUM_HYPERTREE_LAYERS must yield a subtree height in 1..32"
+    );
+};
+
 /// One hypertree layer's signature: the WOTS-C signature proving
 /// `current_root -> wots_c_pk_hash`, plus the Merkle auth path from
 /// `wots_c_pk_hash` up to the next layer's root.
