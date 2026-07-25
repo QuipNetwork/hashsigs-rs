@@ -17,7 +17,7 @@
 
 //! Signer-specific helpers for the SHRINCS hybrid scheme.
 //!
-//! `derive32` is re-exported from the shared `crate::primitives::hash` module so signer
+//! `derive32` is re-exported from the shared `crate::hash` module so signer
 //! call sites keep one import path; keeping a single copy prevents the signer
 //! and verifier from drifting apart. Only the helpers that are genuinely
 //! signer-specific (public-key assembly) are defined below.
@@ -43,4 +43,4 @@ pub(crate) fn public_key_from_components(
     }
 }
 
-pub(crate) use crate::primitives::hash::derive32;
+pub(crate) use crate::hash::derive32;

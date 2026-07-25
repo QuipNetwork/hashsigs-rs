@@ -22,7 +22,7 @@
 //! `sphincs_plus_c` for stateless recovery. Consumed by `wasm` as the only
 //! place that advances signer-side state (`next_leaf_index`).
 
-use crate::primitives::hash::word32;
+use crate::hash::word32;
 use crate::sphincs_plus_c::Signature as StatelessSignature;
 use crate::sphincs_plus_c::{self};
 use super::action_context::ActionContext;
@@ -266,7 +266,7 @@ mod tests {
         fixture_entry_opt, fixture_pair, fixture_path, load_fixture_file,
         stateful_signer_fixture_path, TestKeyMode,
     };
-    use crate::primitives::hash::hash_packed;
+    use crate::hash::hash_packed;
     use super::*;
     #[cfg(not(target_arch = "wasm32"))]
     use proptest::prelude::*;

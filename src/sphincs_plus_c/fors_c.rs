@@ -39,7 +39,7 @@ use crate::primitives::abi::{
     collect_hash_words, encode_bytes, encode_dynamic_array, encode_tuple, word_from_u32,
     AbiReader, Field,
 };
-use crate::primitives::hash::{fors_address_word, hash_node, hash_packed, read_bits32, read_bits64};
+use crate::hash::{fors_address_word, hash_node, hash_packed, read_bits32, read_bits64};
 use crate::primitives::profiles::{
     FORS_C_MAX_GRIND_COUNTER, FORS_TREE_HEIGHT, HYPERTREE_HEIGHT, NUM_FORS_TREES,
     NUM_HYPERTREE_LAYERS,
@@ -710,7 +710,7 @@ fn winning_fors_counter_and_digest(
 mod measurement_tests {
     use super::super::key::{Key, PkSeed, PrfSeed, PublicKey, Root, Secret, SkSeed};
     use super::{signer_fors_digest, SigningForsDigest};
-    use crate::primitives::hash::hash_packed;
+    use crate::hash::hash_packed;
     use crate::primitives::profiles::FORS_C_MAX_GRIND_COUNTER;
     use crate::primitives::HASH_LEN;
 

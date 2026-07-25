@@ -70,6 +70,7 @@ mod trace_macros;
 // `wasm` sits above both.
 pub mod signer;
 pub mod verifier;
+pub(crate) mod hash;
 pub(crate) mod primitives;
 pub mod shrincs;
 pub mod sphincs_plus_c;

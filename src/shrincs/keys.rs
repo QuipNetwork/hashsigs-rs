@@ -26,7 +26,7 @@
 //! of the 264-byte secret serialization; [`Keys::from_bytes`] recomputes it.
 //! Flat layout: `stateful(136) ‖ stateless(128)` = 264 bytes.
 
-use crate::primitives::hash::word32;
+use crate::hash::word32;
 use crate::shrincs::uxmss::{
     self, stateful_subtree_root, INITIAL_STATEFUL_LEAF_INDEX, MAX_STATEFUL_SIGNATURES_LIMIT,
 };

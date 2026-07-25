@@ -27,7 +27,7 @@ use alloc::vec::Vec;
 
 use core::fmt;
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
-use crate::primitives::hash::{base_w16_digit, hash_node, hash_packed, word32};
+use crate::hash::{base_w16_digit, hash_node, hash_packed, word32};
 use super::signature::Signature;
 use crate::primitives::HASH_LEN;
 use crate::wots_c::{ChainWalk, wots_chain_walk, WOTS_C_MAX_GRIND_COUNTER};
@@ -52,8 +52,8 @@ fn stateful_chain_no_mask(
     ctx: StatefulChainCtx,
     walk: ChainWalk,
 ) -> [u8; HASH_LEN] {
-    use crate::primitives::hash::{address_word32, AddressWord32};
-    use crate::primitives::ADDRESS_TYPE_WOTS_HASH;
+    use crate::hash::{address_word32, AddressWord32};
+    use crate::hash::ADDRESS_TYPE_WOTS_HASH;
     wots_chain_walk(
         b"uxmss-wots-chain",
         pk_seed,

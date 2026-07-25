@@ -18,10 +18,10 @@
 //! SHA-256 scheme-hash suite (HASH_SUITE_ID = 2).
 
 use crate::primitives::HASH_LEN;
-use crate::primitives::HASH_SUITE_SHA2_256;
+use super::HASH_SUITE_SHA2_256;
 
 pub const HASH_SUITE_ID: u32 = HASH_SUITE_SHA2_256;
 
 pub fn scheme_hash_parts(parts: &[&[u8]]) -> [u8; HASH_LEN] {
-    crate::primitives::hash_backend::sha256v(parts)
+    crate::hash::backend::sha256v(parts)
 }

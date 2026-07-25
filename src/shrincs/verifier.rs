@@ -22,7 +22,7 @@
 //! workspace member) one struct-shaped entry point instead of free
 //! functions.
 
-use crate::primitives::hash::keccak_packed;
+use crate::hash::keccak_packed;
 use crate::sphincs_plus_c::verifier::SphincsPlusCVerifier;
 use crate::verifier::VerifyOutcome;
 // Wire types/constants live in dedicated shrincs submodules after the
@@ -31,10 +31,9 @@ use crate::verifier::VerifyOutcome;
 // Not every symbol keeps its historical name: the public key type was
 // renamed from `StatefulPublicKey` to `PublicKey` (disambiguated by the
 // `shrincs` module path instead), and there is no `StatefulPublicKey` alias.
-pub use crate::primitives::{
-    ADDRESS_TYPE_FORS_TREE, ADDRESS_TYPE_TREE, ADDRESS_TYPE_WOTS_HASH, HASH_LEN,
-    HASH_SUITE_KECCAK_256,
-};
+pub use crate::hash::{ADDRESS_TYPE_FORS_TREE, ADDRESS_TYPE_TREE, ADDRESS_TYPE_WOTS_HASH};
+pub use crate::hash::suite::HASH_SUITE_KECCAK_256;
+pub use crate::primitives::HASH_LEN;
 pub use super::action_context::ActionContext;
 pub use super::public_key::PublicKey;
 pub use super::signature::Signature as StatefulSignature;

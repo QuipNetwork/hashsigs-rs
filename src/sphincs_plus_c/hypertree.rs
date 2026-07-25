@@ -34,7 +34,7 @@ use zeroize::Zeroizing;
 use crate::primitives::abi::{
     collect_hash_words, encode_bytes, encode_dynamic_array, encode_tuple, AbiReader, Field,
 };
-use crate::primitives::hash::{
+use crate::hash::{
     base_w_digit, derive32, hash_node, hash_packed, hypertree_address_word, word32,
     wots_address_base, wots_chain_address_word, wots_digest_bytes,
 };
@@ -756,7 +756,7 @@ struct StatelessWotsChainCtx<'a> {
 
 /// Stateless hypertree WOTS-C chain walk with full ADRS coordinates.
 fn stateless_wots_chain(ctx: &StatelessWotsChainCtx<'_>, walk: ChainWalk) -> [u8; HASH_LEN] {
-    use crate::primitives::hash::{address_word32, AddressWord32};
+    use crate::hash::{address_word32, AddressWord32};
     wots_chain_walk(
         b"wots-c-chain",
         ctx.pk_seed,

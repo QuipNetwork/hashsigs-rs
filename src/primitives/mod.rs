@@ -16,26 +16,17 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Scheme-neutral building blocks shared by `sphincs_plus_c` and `shrincs`:
-//! the hash layer and suites, WOTS-C chain walk and grind, streaming
-//! treehash, compile-time profiles, and fixed-capacity buffers. Nothing in
-//! here knows about either scheme's key or envelope shapes.
+//! WOTS-C chain walk and grind, streaming treehash, compile-time profiles,
+//! and fixed-capacity buffers. Nothing in here knows about either scheme's
+//! key or envelope shapes.
 
 // HASH_LEN is the 32-byte hash *slot* width shared by every profile: every
 // hash-valued wire field is a 32-byte slot (Solidity `bytes32`) regardless of
 // the parameter set. A truncated profile emits high-aligned, zero-padded node
 // values inside this slot (see HASH_TRUNC_LEN and `mask_hash`).
 pub const HASH_LEN: usize = 32;
-pub const HASH_SUITE_KECCAK_256: u32 = 1;
-pub const HASH_SUITE_SHA2_256: u32 = 2;
-
-pub const ADDRESS_TYPE_WOTS_HASH: u32 = 0;
-pub const ADDRESS_TYPE_TREE: u32 = 2;
-pub const ADDRESS_TYPE_FORS_TREE: u32 = 3;
 
 pub(crate) mod abi;
 pub(crate) mod buf;
-pub(crate) mod hash;
-pub(crate) mod hash_backend;
-pub(crate) mod hash_suite;
 pub(crate) mod profiles;
 pub(crate) mod treehash;

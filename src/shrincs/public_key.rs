@@ -34,7 +34,7 @@
 use alloc::vec::Vec;
 
 use crate::primitives::abi::{encode_bytes, encode_tuple, AbiReader, Field};
-use crate::primitives::hash::{keccak_packed, word32};
+use crate::hash::{keccak_packed, word32};
 use crate::primitives::profiles::PROFILE_NAME;
 use crate::primitives::HASH_LEN;
 use super::uxmss::{PublicKey as StatefulPublicKey, STATEFUL_PUBLIC_KEY_BYTES};

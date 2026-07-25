@@ -34,7 +34,7 @@ use crate::primitives::abi::{
     collect_hash_words, encode_bytes, encode_dynamic_array, encode_tuple, word_from_u32, AbiReader,
     Field,
 };
-use crate::primitives::hash::hash_node;
+use crate::hash::hash_node;
 use crate::primitives::profiles::NUM_WOTS_CHAINS;
 use crate::primitives::HASH_LEN;
 

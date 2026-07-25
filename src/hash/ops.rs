@@ -15,19 +15,12 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Shared hashing, packing, addressing, and bit-layout helpers.
-//!
-//! This is the Rust analogue of Solidity's shared scheme-hash support layer.
-//! Primitive components (`uxmss`, `fors_c`, `hypertree`) build on these
-//! helpers, while higher-level core and signer modules import the subset they
-//! need. EVM-domain hashes such as canonical action-message construction and
-//! public-key commitments stay on keccak under every suite and are therefore
-//! owned outside this module.
+//! Hashing, packing, and bit-layout helpers.
 
-use crate::primitives::hash_backend;
-use crate::primitives::hash_suite::scheme_hash_parts;
+use crate::hash::backend;
+use crate::hash::suite::scheme_hash_parts;
 use crate::primitives::profiles::{HASH_TRUNC_LEN, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN};
-use crate::primitives::{ADDRESS_TYPE_FORS_TREE, ADDRESS_TYPE_TREE, HASH_LEN};
+use crate::primitives::HASH_LEN;
 
 /// Scheme hash over the logical concatenation of `parts`. Hashing is vectored
 /// (incremental absorb / Solana `hashv`), so no packed buffer is allocated.
@@ -38,7 +31,7 @@ pub(crate) fn hash_packed(parts: &[&[u8]]) -> [u8; HASH_LEN] {
 /// EVM-domain keccak over preimage parts (action hashes, commitments).
 /// Always keccak regardless of the scheme-hash suite.
 pub(crate) fn keccak_packed(parts: &[&[u8]]) -> [u8; HASH_LEN] {
-    hash_backend::keccak256v(parts)
+    backend::keccak256v(parts)
 }
 
 pub(crate) fn mask_hash(mut hash: [u8; HASH_LEN]) -> [u8; HASH_LEN] {
@@ -125,80 +118,10 @@ fn read_bits(input: &[u8], start_bit: usize, bit_len: u32) -> Option<u64> {
     Some(out)
 }
 
-/// Full ADRS word fields for `address_word32` (layer / tree / type / keypair /
-/// chain / step). Bundled so the helper stays within the positional-arg limit.
-#[derive(Clone, Copy)]
-pub(crate) struct AddressWord32 {
-    pub layer: u32,
-    pub tree: u64,
-    pub address_type: u32,
-    pub keypair: u32,
-    pub chain: u32,
-    pub step: u32,
-}
-
-pub(crate) fn address_word32(addr: AddressWord32) -> [u8; HASH_LEN] {
-    let mut out = [0u8; HASH_LEN];
-    out[0..4].copy_from_slice(&addr.layer.to_be_bytes());
-    out[8..16].copy_from_slice(&addr.tree.to_be_bytes());
-    out[16..20].copy_from_slice(&addr.address_type.to_be_bytes());
-    out[20..24].copy_from_slice(&addr.keypair.to_be_bytes());
-    out[24..28].copy_from_slice(&addr.chain.to_be_bytes());
-    out[28..32].copy_from_slice(&addr.step.to_be_bytes());
-    out
-}
-
-pub(crate) fn wots_address_base(layer: u32, tree: u64, keypair: u32) -> [u8; HASH_LEN] {
-    let mut out = [0u8; HASH_LEN];
-    out[0..4].copy_from_slice(&layer.to_be_bytes());
-    out[8..16].copy_from_slice(&tree.to_be_bytes());
-    out[20..24].copy_from_slice(&keypair.to_be_bytes());
-    out
-}
-
-pub(crate) fn wots_chain_address_word(
-    mut address_base: [u8; HASH_LEN],
-    chain_index: u32,
-    step: u32,
-) -> [u8; HASH_LEN] {
-    address_base[24..28].copy_from_slice(&chain_index.to_be_bytes());
-    address_base[28..32].copy_from_slice(&step.to_be_bytes());
-    address_base
-}
-
-pub(crate) fn fors_address_word(
-    tree_index: u64,
-    leaf_index: u32,
-    node_height: u32,
-    low_index: u64,
-) -> [u8; HASH_LEN] {
-    let mut out = [0u8; HASH_LEN];
-    out[8..16].copy_from_slice(&tree_index.to_be_bytes());
-    out[16..20].copy_from_slice(&ADDRESS_TYPE_FORS_TREE.to_be_bytes());
-    out[20..24].copy_from_slice(&leaf_index.to_be_bytes());
-    let low = (u64::from(node_height) << 32) | low_index;
-    out[24..32].copy_from_slice(&low.to_be_bytes());
-    out
-}
-
-pub(crate) fn hypertree_address_word(
-    layer: u32,
-    tree_index: u64,
-    node_height: u32,
-    parent_index: u64,
-) -> [u8; HASH_LEN] {
-    let mut out = [0u8; HASH_LEN];
-    out[0..4].copy_from_slice(&layer.to_be_bytes());
-    out[8..16].copy_from_slice(&tree_index.to_be_bytes());
-    out[16..20].copy_from_slice(&ADDRESS_TYPE_TREE.to_be_bytes());
-    let low = (u64::from(node_height) << 32) | parent_index;
-    out[24..32].copy_from_slice(&low.to_be_bytes());
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hash::address::{address_word32, AddressWord32};
 
     #[test]
     fn address_word_matches_solidity_layout() {
@@ -221,7 +144,7 @@ mod tests {
     #[test]
     fn keccak256_matches_known_empty_vector() {
         assert_eq!(
-            hash_backend::keccak256(&[]),
+            backend::keccak256(&[]),
             [
                 0xc5, 0xd2, 0x46, 0x01, 0x86, 0xf7, 0x23, 0x3c, 0x92, 0x7e, 0x7d, 0xb2, 0xdc, 0xc7,
                 0x03, 0xc0, 0xe5, 0x00, 0xb6, 0x53, 0xca, 0x82, 0x27, 0x3b, 0x7b, 0xfa, 0xd8, 0x04,

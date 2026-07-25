@@ -201,9 +201,9 @@ pub fn keygen(
 /// serialized bytes — do NOT rename them. Shared with `ShrincsSigner::keygen`'s
 /// stateless half so the same master seed yields matching key material.
 pub(crate) fn keygen_from_master_seed(seed: &[u8]) -> key::Key {
-    let sk = crate::primitives::hash::derive32(b"shrincs-stateless-sk-seed", seed, &[]);
-    let prf = crate::primitives::hash::derive32(b"shrincs-stateless-prf-seed", seed, &[]);
-    let pk = crate::primitives::hash::derive32(b"shrincs-pk-seed", seed, &[]);
+    let sk = crate::hash::derive32(b"shrincs-stateless-sk-seed", seed, &[]);
+    let prf = crate::hash::derive32(b"shrincs-stateless-prf-seed", seed, &[]);
+    let pk = crate::hash::derive32(b"shrincs-pk-seed", seed, &[]);
     keygen(sk, prf, pk)
 }
 
@@ -211,7 +211,7 @@ pub(crate) fn keygen_from_master_seed(seed: &[u8]) -> key::Key {
 mod tests {
     use super::*;
     #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
-    use crate::primitives::hash::{derive32, hash_packed};
+    use crate::hash::{derive32, hash_packed};
 
     /// Independent keygen at the SPHINCS+C layer (no SHRINCS hybrid fields).
     #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
@@ -271,7 +271,7 @@ mod tests {
     ))]
     #[test]
     fn stateless_verify_hash_count_matches_model_and_reports_cu_floor() {
-        use crate::primitives::hash_backend::metrics;
+        use crate::hash::backend::metrics;
         use crate::primitives::profiles::{
             FORS_TREE_HEIGHT, HYPERTREE_HEIGHT, NUM_FORS_TREES, NUM_HYPERTREE_LAYERS,
             NUM_WOTS_CHAINS, WOTS_CHAIN_LEN,

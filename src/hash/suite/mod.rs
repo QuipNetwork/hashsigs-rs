@@ -25,6 +25,9 @@
 //! The suite is selected by the `shrincs_hash_suite_sha2` cfg that build.rs
 //! derives from the active profile, not by a Cargo feature directly.
 
+pub const HASH_SUITE_KECCAK_256: u32 = 1;
+pub const HASH_SUITE_SHA2_256: u32 = 2;
+
 #[cfg(not(shrincs_hash_suite_sha2))]
 mod keccak;
 #[cfg(shrincs_hash_suite_sha2)]

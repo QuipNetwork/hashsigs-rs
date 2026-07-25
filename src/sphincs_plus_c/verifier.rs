@@ -42,7 +42,7 @@ impl SphincsPlusCVerifier {
     /// `SPHINCSPlusCVerifier.VERSION_TAG`: names this verifier's key/envelope
     /// format family, not the compiled parameter profile.
     pub fn version_tag() -> [u8; HASH_LEN] {
-        crate::primitives::hash::keccak_packed(&[b"quip.sphincsplusc-verifier.v1"])
+        crate::hash::keccak_packed(&[b"quip.sphincsplusc-verifier.v1"])
     }
 
     /// Verify a SPHINCS+C signature over a 32-byte hash.
@@ -137,7 +137,7 @@ mod tests {
         seed_label: &[u8],
         hash: [u8; HASH_LEN],
     ) -> ([u8; 64], Vec<u8>) {
-        use crate::primitives::hash::hash_packed;
+        use crate::hash::hash_packed;
         use crate::sphincs_plus_c;
 
         let sk_seed = hash_packed(&[b"sphincs-plus-c-verifier-sk", seed_label]);

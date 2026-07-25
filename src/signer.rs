@@ -61,13 +61,13 @@ mod tests {
     use crate::verifier::{VerifierInterface, VerifyOutcome};
 
     fn message() -> [u8; 32] {
-        crate::primitives::hash::hash_packed(&[b"signer-interface-round-trip"])
+        crate::hash::hash_packed(&[b"signer-interface-round-trip"])
     }
 
     #[test]
     fn sphincs_plus_c_signer_round_trips_through_the_verifier() {
         fn d(domain: &[u8]) -> [u8; 32] {
-            crate::primitives::hash::hash_packed(&[domain, b"seed"])
+            crate::hash::hash_packed(&[domain, b"seed"])
         }
         let mut signer = crate::sphincs_plus_c::SphincsPlusCSigner::from_seeds(
             d(b"sk"),
