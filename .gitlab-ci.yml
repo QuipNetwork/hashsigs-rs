@@ -42,6 +42,13 @@ variables:
   # from https://github.com/wasm-bindgen/wasm-bindgen/releases/download/${WASM_BINDGEN_VERSION}/
   # Verified by downloading the release asset (2026-07-23).
   WASM_BINDGEN_SHA256: "63d6a38deb65bd7023c02bdf382ab66b0d2c0241c8582fd3413b5a808b8aeb5b"
+  # cargo-deny / cargo-semver-checks prebuilt musl binaries, pinned like
+  # wasm-bindgen above. SHA256 is of the x86_64-unknown-linux-musl release
+  # tarball, verified by downloading the asset (2026-07-25).
+  CARGO_DENY_VERSION: "0.20.2"
+  CARGO_DENY_SHA256: "9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f"
+  CARGO_SEMVER_CHECKS_VERSION: "0.49.0"
+  CARGO_SEMVER_CHECKS_SHA256: "f25b4fcf842fc8a18fd6f1d9475513dc74ef2c9df201252b9b9d2f6edb6ab6a2"
   # Node 22 LTS; install from nodejs.org tarball so the major is fixed (not
   # whatever Debian ships under apt `nodejs`).
   NODE_MAJOR: "22"
@@ -133,6 +140,44 @@ default:
         *" ${WASM_BINDGEN_VERSION}"*) ;;
         *) echo "expected wasm-bindgen ${WASM_BINDGEN_VERSION}, got $(wasm-bindgen --version)" >&2; exit 1 ;;
       esac
+
+# Prebuilt cargo-deny (musl), pinned + sha-verified like wasm-bindgen above.
+# Cached in .cargo-home/bin, so cold downloads are rare. Targeted extraction of
+# just the binary (the tarball also ships README/LICENSE).
+.install-cargo-deny:
+  before_script:
+    - |
+      set -euo pipefail
+      mkdir -p "${CARGO_HOME}/bin"
+      export PATH="${CARGO_HOME}/bin:${PATH}"
+      if ! cargo-deny --version 2>/dev/null | grep -Fq "${CARGO_DENY_VERSION}"; then
+        echo "installing cargo-deny ${CARGO_DENY_VERSION} (prebuilt musl)"
+        CD_URL="https://github.com/EmbarkStudios/cargo-deny/releases/download/${CARGO_DENY_VERSION}/cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl.tar.gz"
+        curl -fsSL "$CD_URL" -o /tmp/cargo-deny.tar.gz
+        echo "${CARGO_DENY_SHA256}  /tmp/cargo-deny.tar.gz" | sha256sum -c -
+        tar -xz -C "${CARGO_HOME}/bin" --strip-components=1 -f /tmp/cargo-deny.tar.gz \
+          "cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl/cargo-deny"
+        rm -f /tmp/cargo-deny.tar.gz
+      fi
+      cargo-deny --version
+
+# Prebuilt cargo-semver-checks (musl), pinned + sha-verified. The tarball ships
+# the binary at the archive root (no wrapping directory), so no strip.
+.install-cargo-semver-checks:
+  before_script:
+    - |
+      set -euo pipefail
+      mkdir -p "${CARGO_HOME}/bin"
+      export PATH="${CARGO_HOME}/bin:${PATH}"
+      if ! cargo-semver-checks --version 2>/dev/null | grep -Fq "${CARGO_SEMVER_CHECKS_VERSION}"; then
+        echo "installing cargo-semver-checks ${CARGO_SEMVER_CHECKS_VERSION} (prebuilt musl)"
+        SC_URL="https://github.com/obi1kenobi/cargo-semver-checks/releases/download/v${CARGO_SEMVER_CHECKS_VERSION}/cargo-semver-checks-x86_64-unknown-linux-musl.tar.gz"
+        curl -fsSL "$SC_URL" -o /tmp/cargo-semver-checks.tar.gz
+        echo "${CARGO_SEMVER_CHECKS_SHA256}  /tmp/cargo-semver-checks.tar.gz" | sha256sum -c -
+        tar -xz -C "${CARGO_HOME}/bin" -f /tmp/cargo-semver-checks.tar.gz cargo-semver-checks
+        rm -f /tmp/cargo-semver-checks.tar.gz
+      fi
+      cargo-semver-checks --version
 
 build-test:
   stage: test
@@ -241,9 +286,9 @@ supply-chain:
   image: rust:1.89.0
   extends: [.rust-cache, .mr-default-rules]
   before_script:
-    - export PATH="${CARGO_HOME}/bin:${PATH}"
-    - command -v cargo-deny >/dev/null || cargo install --locked cargo-deny
+    - !reference [.install-cargo-deny, before_script]
   script:
+    - export PATH="${CARGO_HOME}/bin:${PATH}"
     - cargo deny check
 
 # Semver advisory: report public-API breaking changes against the last
@@ -257,9 +302,9 @@ semver:
   extends: [.rust-cache, .mr-default-rules]
   allow_failure: true
   before_script:
-    - export PATH="${CARGO_HOME}/bin:${PATH}"
-    - command -v cargo-semver-checks >/dev/null || cargo install --locked cargo-semver-checks
+    - !reference [.install-cargo-semver-checks, before_script]
   script:
+    - export PATH="${CARGO_HOME}/bin:${PATH}"
     - cargo semver-checks check-release
 
 # Conformance test against the BUILT package (dist/): loaders, exports map,
