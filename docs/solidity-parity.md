@@ -3,22 +3,27 @@
 Status of feature and design parity between this crate and hashsigs-solidity
 (`create-x-deployment` branch, commit `dd71249`). Last audited 2026-07-22
 against a two-sided surface inventory plus a line-by-line account-wrapper
-audit.
+audit. Module paths refreshed 2026-07-24 for the `hash/` split and
+`primitives` dissolution.
 
 ## At parity
 
 - Crypto core: WOTS-C, FORS-C, hypertree, UXMSS, SPHINCS+C, SHRINCS verify
   and rotation paths; four profiles; keccak and sha2 hash suites; commitment
   scheme; the four canonical message hashes. Cross-pinned by Rust-anchored
-  vectors consumed on both sides (256s keccak and sha2). Layering: `src/primitives/`
-  and `src/envelope.rs` are scheme-neutral; `src/sphincs_plus_c/` owns
-  FORS-C and the hypertree (`fors_c` ↔ `FORSMinusC.sol`, `hypertree` ↔
-  `Hypertree.sol`) and is oblivious to SHRINCS; `src/shrincs/` builds the
-  hybrid on top of it.
-- `shrincs::envelope`: byte-exact Solidity ABI encoders and strict decoders
-  for every named envelope shape, including ERC-1271 mode-1/2 action
-  envelopes and `prepare_stateless_delegation`. Byte-pinned against the
-  Solidity-exported vector blobs.
+  vectors consumed on both sides (256s keccak and sha2). Layering: the
+  scheme-neutral building blocks (`src/hash/`, `src/abi.rs`, `src/buf.rs`,
+  `src/profiles.rs`, `src/treehash.rs`) sit at the crate root;
+  `src/sphincs_plus_c/` owns FORS-C and the hypertree (`fors_c` ↔
+  `FORSMinusC.sol`, `hypertree` ↔ `Hypertree.sol`) and is oblivious to
+  SHRINCS; `src/shrincs/` builds the hybrid on top of it.
+- `shrincs::signature` (composite envelope codecs) and `shrincs::dispatch`
+  (`prepare_stateless_delegation`): byte-exact Solidity ABI encoders and
+  strict decoders for every named envelope shape, including ERC-1271
+  mode-1/2 action envelopes, over the shared `crate::abi` primitives.
+  Per-scheme signature bodies live in their scheme modules (`wots_c`,
+  `sphincs_plus_c::{fors_c, hypertree, signature}`). Byte-pinned against
+  the Solidity-exported vector blobs.
 - `shrincs::ShrincsVerifier` implementing `verifier::VerifierInterface`
   (`verify_envelope`) mirrors `SHRINCSVerifier.sol` (32-byte commitment key,
   stateful envelope, tri-state outcome, `version_tag()` pins);
