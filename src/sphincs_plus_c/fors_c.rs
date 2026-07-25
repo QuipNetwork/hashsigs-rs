@@ -15,7 +15,6 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-
 //! FORS-C sign and verify, plus the FORS-C signature wire type and its ABI
 //! codec.
 //!
@@ -35,16 +34,16 @@ use alloc::vec::Vec;
 
 use zeroize::Zeroizing;
 
+use super::key::Key;
 use crate::abi::{
-    collect_hash_words, encode_bytes, encode_dynamic_array, encode_tuple, word_from_u32,
-    AbiReader, Field,
+    collect_hash_words, encode_bytes, encode_dynamic_array, encode_tuple, word_from_u32, AbiReader,
+    Field,
 };
 use crate::hash::{fors_address_word, hash_node, hash_packed, read_bits32, read_bits64};
 use crate::profiles::{
     FORS_C_MAX_GRIND_COUNTER, FORS_TREE_HEIGHT, HYPERTREE_HEIGHT, NUM_FORS_TREES,
     NUM_HYPERTREE_LAYERS,
 };
-use super::key::Key;
 use crate::HASH_LEN;
 
 /// Signed FORS trees per signature: the final tree is omitted (FORS-C).
@@ -78,7 +77,10 @@ impl Entry {
         encode_tuple(alloc::vec![
             Field::Dynamic(encode_bytes(&self.secret_leaf)),
             Field::Dynamic(encode_dynamic_array(
-                self.auth_path.iter().map(|node| encode_bytes(node)).collect(),
+                self.auth_path
+                    .iter()
+                    .map(|node| encode_bytes(node))
+                    .collect(),
             )),
         ])
     }
@@ -247,10 +249,7 @@ pub(crate) fn verify_fors_c_and_return_root(
 
 /// Aggregate FORS public key hash: `"fors-pk" ‖ pk_seed ‖ root_0 ‖ …` fed to
 /// the hash vectored, byte-identical to the packed form.
-fn fors_public_key_hash(
-    pk_seed: &[u8],
-    roots: &[[u8; HASH_LEN]; SIGNED_TREES],
-) -> [u8; HASH_LEN] {
+fn fors_public_key_hash(pk_seed: &[u8], roots: &[[u8; HASH_LEN]; SIGNED_TREES]) -> [u8; HASH_LEN] {
     let mut parts: [&[u8]; SIGNED_TREES + 2] = [&[]; SIGNED_TREES + 2];
     parts[0] = b"fors-pk";
     parts[1] = pk_seed;
@@ -532,9 +531,9 @@ mod tests {
 
 // ---- signing ----
 
-use crate::trace_macros::{stateless_trace, stateless_trace_enabled};
 #[cfg(not(feature = "parallel"))]
 use crate::trace_macros::stateless_trace_counter_every;
+use crate::trace_macros::{stateless_trace, stateless_trace_enabled};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SignedForsC {
@@ -549,10 +548,7 @@ pub(crate) struct SignedForsC {
     pub leaf_index: u32,
 }
 
-pub(crate) fn sign_fors_c(
-    signing_key: &Key,
-    message: &[u8],
-) -> Option<SignedForsC> {
+pub(crate) fn sign_fors_c(signing_key: &Key, message: &[u8]) -> Option<SignedForsC> {
     if stateless_trace_enabled() {
         stateless_trace(&format!(
             "stateless trace: FORS start message_len={} signed_trees={} max_counter={}",
@@ -568,8 +564,11 @@ pub(crate) fn sign_fors_c(
     // This is the FORS-C local message randomizer. It is deterministic for the
     // same stateless PRF seed and message, matching the SPHINCS-style separation
     // between SK.seed-derived signing secrets and SK.prf-derived randomness.
-    let randomizer =
-        hash_packed(&[b"fors-randomizer", signing_key.secret.prf_seed.as_bytes(), message]);
+    let randomizer = hash_packed(&[
+        b"fors-randomizer",
+        signing_key.secret.prf_seed.as_bytes(),
+        message,
+    ]);
     stateless_trace("stateless trace: FORS randomizer ready");
 
     if let Some((counter, digest)) =
@@ -665,7 +664,9 @@ fn winning_fors_counter_and_digest(
             Some((counter, _)) => {
                 hashsigs_println!("stateless trace: FORS counter search success counter={counter}")
             }
-            None => hashsigs_println!("stateless trace: FORS counter search exhausted limit={limit}"),
+            None => {
+                hashsigs_println!("stateless trace: FORS counter search exhausted limit={limit}")
+            }
         }
     }
     result
@@ -700,7 +701,9 @@ fn winning_fors_counter_and_digest(
             Some((counter, _)) => {
                 hashsigs_println!("stateless trace: FORS counter search success counter={counter}")
             }
-            None => hashsigs_println!("stateless trace: FORS counter search exhausted limit={limit}"),
+            None => {
+                hashsigs_println!("stateless trace: FORS counter search exhausted limit={limit}")
+            }
         }
     }
     winner
@@ -708,7 +711,7 @@ fn winning_fors_counter_and_digest(
 
 #[cfg(all(test, any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
 mod measurement_tests {
-    use super::super::key::{Key, PkSeed, PrfSeed, PublicKey, Root, PrivateKey, SkSeed};
+    use super::super::key::{Key, PkSeed, PrfSeed, PrivateKey, PublicKey, Root, SkSeed};
     use super::{signer_fors_digest, SigningForsDigest};
     use crate::hash::hash_packed;
     use crate::profiles::FORS_C_MAX_GRIND_COUNTER;
@@ -794,8 +797,7 @@ mod measurement_tests {
     #[ignore = "manual 128s FORS-C success/failure measurement"]
     fn measure_128_fors_signature_success_rate() {
         let samples = measurement_env_u32("SHRINCS_FORS_MEASURE_SAMPLES", 32);
-        let limit =
-            measurement_env_u32("SHRINCS_FORS_MEASURE_LIMIT", FORS_C_MAX_GRIND_COUNTER);
+        let limit = measurement_env_u32("SHRINCS_FORS_MEASURE_LIMIT", FORS_C_MAX_GRIND_COUNTER);
         let progress_every = measurement_progress_interval(samples);
         let counter_progress_every = measurement_counter_progress_interval(limit);
         hashsigs_println!(

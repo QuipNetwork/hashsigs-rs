@@ -108,8 +108,7 @@ fn main() {
 
     let generated = format!(
         "pub const PROFILE_NAME: &str = \"{}\";\n\
-         pub const PROFILE_ID: [u8; 32] = [{profile_id_bytes}];\n"
-        ,
+         pub const PROFILE_ID: [u8; 32] = [{profile_id_bytes}];\n",
         selected.profile_name
     );
 

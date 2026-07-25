@@ -48,6 +48,5 @@ pub enum VerifyOutcome {
 /// A verifier that checks an opaque signature envelope by an opaque key over
 /// a 32-byte message hash.
 pub trait VerifierInterface {
-    fn verify(&self, key: &[u8], hash: &[u8; HASH_LEN], signature: &[u8])
-        -> VerifyOutcome;
+    fn verify(&self, key: &[u8], hash: &[u8; HASH_LEN], signature: &[u8]) -> VerifyOutcome;
 }

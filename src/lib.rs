@@ -15,7 +15,6 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-
 //! Core hash-based signature library.
 //!
 //! This crate exports:
@@ -36,7 +35,6 @@
 //! `no_std + alloc` is the embedded baseline.
 
 #![cfg_attr(not(feature = "std"), no_std)]
-
 // Panic-prevention lints (review bead qg4): library code must not panic on
 // untrusted input. Scoped to non-test builds so `#[cfg(test)]` modules may use
 // unwrap/expect freely. The broader `indexing-slicing` and full `pedantic`
@@ -69,18 +67,18 @@ mod trace_macros;
 // stateless scheme and is oblivious to `shrincs`; `shrincs` builds its
 // hybrid (stateful UXMSS + stateless recovery) on top of `sphincs_plus_c`.
 // `wasm` sits above both.
-pub mod verifier;
 pub(crate) mod abi;
 pub(crate) mod buf;
 pub(crate) mod hash;
 pub(crate) mod profiles;
-pub(crate) mod treehash;
 pub mod shrincs;
 pub mod sphincs_plus_c;
+pub(crate) mod treehash;
+pub mod verifier;
 #[cfg(feature = "std")]
 pub mod wasm;
-pub mod wotsplus;
 pub mod wots_c;
+pub mod wotsplus;
 
 #[cfg(all(test, feature = "std"))]
 pub(crate) mod test_support;
@@ -91,11 +89,11 @@ pub(crate) mod test_support;
 // values inside this slot (see HASH_TRUNC_LEN and `mask_hash`).
 pub const HASH_LEN: usize = 32;
 
-pub use verifier::{VerifierInterface, VerifyOutcome};
+pub use sphincs_plus_c::SphincsPlusCVerifier;
 pub use sphincs_plus_c::{
     keygen as sphincs_plus_c_keygen, sign as sphincs_plus_c_sign,
     sign_hash as sphincs_plus_c_sign_hash, to_message as sphincs_plus_c_to_message,
     verify as sphincs_plus_c_verify, verify_hash as sphincs_plus_c_verify_hash,
 };
-pub use sphincs_plus_c::SphincsPlusCVerifier;
+pub use verifier::{VerifierInterface, VerifyOutcome};
 pub use wotsplus::{constants, HashFn, PublicKey, WOTSPlus};

@@ -62,7 +62,10 @@ impl Signature {
         encode_tuple(alloc::vec![
             Field::Dynamic(self.fors.to_bytes()),
             Field::Dynamic(encode_dynamic_array(
-                self.hypertree.iter().map(LayerSignature::to_bytes).collect(),
+                self.hypertree
+                    .iter()
+                    .map(LayerSignature::to_bytes)
+                    .collect(),
             )),
         ])
     }
@@ -208,8 +211,7 @@ mod tests {
     fn try_from_delegates_to_from_bytes() {
         let signature = sample_signature();
         let encoded = signature.to_bytes();
-        let decoded =
-            Signature::try_from(encoded.as_slice()).expect("valid encoding must decode");
+        let decoded = Signature::try_from(encoded.as_slice()).expect("valid encoding must decode");
         assert_eq!(decoded, signature);
         let truncated = &encoded[..encoded.len() - 1];
         assert!(Signature::try_from(truncated).is_err());

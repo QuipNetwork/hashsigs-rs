@@ -15,7 +15,6 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-
 //! Stateless hypertree sign and verify, plus the hypertree layer signature
 //! wire type and its ABI codec.
 //!
@@ -30,7 +29,7 @@
 
 use alloc::vec::Vec;
 
-use zeroize::Zeroizing;
+use super::key::Key;
 use crate::abi::{
     collect_hash_words, encode_bytes, encode_dynamic_array, encode_tuple, AbiReader, Field,
 };
@@ -38,14 +37,10 @@ use crate::hash::{
     base_w_digit, derive32, hash_node, hash_packed, hypertree_address_word, word32,
     wots_address_base, wots_chain_address_word, wots_digest_bytes,
 };
-use crate::profiles::{
-    HYPERTREE_HEIGHT, NUM_HYPERTREE_LAYERS, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN,
-};
-use super::key::Key;
-use crate::wots_c::{
-    ChainWalk, wots_chain_walk, Signature, TARGET_SUM, WOTS_C_MAX_GRIND_COUNTER,
-};
+use crate::profiles::{HYPERTREE_HEIGHT, NUM_HYPERTREE_LAYERS, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN};
+use crate::wots_c::{wots_chain_walk, ChainWalk, Signature, TARGET_SUM, WOTS_C_MAX_GRIND_COUNTER};
 use crate::HASH_LEN;
+use zeroize::Zeroizing;
 
 /// Hypertree subtree height: one auth-path node per level per layer. Matches
 /// the historical `envelope::HYPERTREE_SUBTREE_HEIGHT`, moved here with the
@@ -80,7 +75,10 @@ impl LayerSignature {
             Field::Dynamic(encode_bytes(&self.wots_c_pk_hash)),
             Field::Dynamic(self.wots_c_signature.to_bytes()),
             Field::Dynamic(encode_dynamic_array(
-                self.auth_path.iter().map(|node| encode_bytes(node)).collect(),
+                self.auth_path
+                    .iter()
+                    .map(|node| encode_bytes(node))
+                    .collect(),
             )),
         ])
     }
@@ -478,7 +476,9 @@ pub(crate) fn sign_hypertree(
         if stateless_trace_enabled() {
             hashsigs_println!(
                 "stateless trace: hypertree layer={} tree={} leaf={}",
-                layer, tree, leaf
+                layer,
+                tree,
+                leaf
             );
         }
         // Build the whole subtree once, then reuse the selected leaf hash for
@@ -491,7 +491,11 @@ pub(crate) fn sign_hypertree(
             tree,
             leaf,
         )?;
-        let coords = WotsKeypair { layer, tree, keypair: leaf };
+        let coords = WotsKeypair {
+            layer,
+            tree,
+            keypair: leaf,
+        };
         let (_, sk_seed) = hypertree_leaf_seeds(&layer_seeds[layer as usize], tree, leaf);
         let seeds = WotsSeeds {
             pk_seed: signing_key.public_key.pk_seed.as_bytes(),

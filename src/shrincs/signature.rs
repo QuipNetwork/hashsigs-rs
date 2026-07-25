@@ -34,11 +34,9 @@
 use alloc::vec::Vec;
 
 use super::key::PublicKey;
-use crate::abi::{
-    encode_bytes32_array, encode_tuple, word_from_u32, AbiReader, Field,
-};
-use crate::HASH_LEN;
+use crate::abi::{encode_bytes32_array, encode_tuple, word_from_u32, AbiReader, Field};
 use crate::sphincs_plus_c::Signature as StatelessSignature;
+use crate::HASH_LEN;
 
 /// Upper bound on a stateful auth-path length (equals the leaf index).
 /// Matches the signer / wasm host cap (`MAX_STATEFUL_SIGNATURES_LIMIT`).
@@ -174,10 +172,10 @@ pub fn decode_stateless_envelope(data: &[u8]) -> Option<(PublicKey, StatelessSig
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::vec;
     use crate::profiles::NUM_HYPERTREE_LAYERS;
     use crate::sphincs_plus_c::{ForsEntry as Entry, ForsSignature, LayerSignature};
     use crate::wots_c::Signature as WotsCSignature;
+    use alloc::vec;
 
     fn sample_public_key() -> PublicKey {
         let mut stateful_public_key = vec![0u8; 68];
@@ -277,7 +275,10 @@ mod tests {
         assert_eq!(decoded_key, public_key);
         assert_eq!(decoded_sig, signature);
         // Canonical framing must re-encode byte-identical.
-        assert_eq!(encode_stateful_envelope(&decoded_key, &decoded_sig), encoded);
+        assert_eq!(
+            encode_stateful_envelope(&decoded_key, &decoded_sig),
+            encoded
+        );
     }
 
     #[test]
@@ -289,7 +290,10 @@ mod tests {
             decode_stateless_envelope(&encoded).expect("valid envelope must decode");
         assert_eq!(decoded_key, public_key);
         assert_eq!(decoded_sig, signature);
-        assert_eq!(encode_stateless_envelope(&decoded_key, &decoded_sig), encoded);
+        assert_eq!(
+            encode_stateless_envelope(&decoded_key, &decoded_sig),
+            encoded
+        );
     }
 
     #[test]
@@ -319,15 +323,16 @@ mod tests {
         // A wrong expected commitment must fail closed.
         let mut wrong_commitment = commitment;
         wrong_commitment[0] ^= 0x01;
-        assert!(crate::shrincs::prepare_stateless_delegation(wrong_commitment, &envelope).is_none());
+        assert!(
+            crate::shrincs::prepare_stateless_delegation(wrong_commitment, &envelope).is_none()
+        );
     }
 
     // --- (c) malformed-input rejection tests ------------------------------
 
     #[test]
     fn truncated_stateful_envelope_is_rejected() {
-        let encoded =
-            encode_stateful_envelope(&sample_public_key(), &sample_stateful_signature());
+        let encoded = encode_stateful_envelope(&sample_public_key(), &sample_stateful_signature());
         for cut in [0usize, 1, 32, 63, encoded.len() - 1] {
             assert!(
                 decode_stateful_envelope(&encoded[..cut]).is_none(),
@@ -363,13 +368,12 @@ mod tests {
         let signature = sample_stateful_signature();
         let mut encoded = encode_stateful_envelope(&public_key, &signature);
         let signature_offset = 32usize;
-        let signature_start =
-            usize::try_from(u32::from_be_bytes(
-                encoded[signature_offset + 28..signature_offset + 32]
-                    .try_into()
-                    .unwrap(),
-            ))
-            .unwrap();
+        let signature_start = usize::try_from(u32::from_be_bytes(
+            encoded[signature_offset + 28..signature_offset + 32]
+                .try_into()
+                .unwrap(),
+        ))
+        .unwrap();
         // counter word sits at signature_start + 32; dirty one high byte.
         encoded[signature_start + 32] = 0x01;
         assert!(decode_stateful_envelope(&encoded).is_none());

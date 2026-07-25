@@ -15,7 +15,6 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-
 //! Verifier-interface facade for the independent SPHINCS+C scheme.
 //!
 //! Key = (pk_seed || hypertree_root) as two 32-byte words. Input is an arbitrary
@@ -76,12 +75,7 @@ impl SphincsPlusCVerifier {
     }
 
     /// Verify over arbitrary message bytes (non-verifier-interface helper).
-    pub fn verify_message(
-        &self,
-        pk: &PublicKey,
-        message: &[u8],
-        signature: &Signature,
-    ) -> bool {
+    pub fn verify_message(&self, pk: &PublicKey, message: &[u8], signature: &Signature) -> bool {
         sphincs_plus_c::verify(pk, message, signature)
     }
 }
@@ -135,10 +129,7 @@ mod tests {
     /// stateless envelope for `VerifierInterface` tests. Gated off the 128s
     /// profiles because independent SPHINCS+C keygen/sign grinds too hard.
     #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
-    fn signed_stateless_envelope(
-        seed_label: &[u8],
-        hash: [u8; HASH_LEN],
-    ) -> ([u8; 64], Vec<u8>) {
+    fn signed_stateless_envelope(seed_label: &[u8], hash: [u8; HASH_LEN]) -> ([u8; 64], Vec<u8>) {
         use crate::hash::hash_packed;
         use crate::sphincs_plus_c;
 
@@ -202,4 +193,3 @@ mod tests {
         assert_eq!(outcome, VerifyOutcome::Malformed);
     }
 }
-

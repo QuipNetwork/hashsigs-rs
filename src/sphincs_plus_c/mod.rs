@@ -15,7 +15,6 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-
 //! Independent SPHINCS+C stateless layer.
 //!
 //! Mirrors Solidity `SPHINCSPlusC.sol`: key = (pk_seed, hypertree_root), message
@@ -92,7 +91,7 @@ pub use hypertree::LayerSignature;
 /// Structured, newtyped SPHINCS+C key: [`key::Key`] = [`key::PrivateKey`] +
 /// [`key::PublicKey`]. Reused as the stateless half of a SHRINCS key.
 pub mod key;
-pub use key::{Key, PkSeed, PrfSeed, PublicKey, Root, PrivateKey, SkSeed};
+pub use key::{Key, PkSeed, PrfSeed, PrivateKey, PublicKey, Root, SkSeed};
 
 /// The stateless signature wire type and its ABI codec, plus the
 /// SPHINCS+C key-spec byte helper.
@@ -197,11 +196,8 @@ mod tests {
         let mut key = [0u8; 64];
         key[..32].copy_from_slice(pk.pk_seed.as_bytes());
         key[32..].copy_from_slice(pk.root.as_bytes());
-        assert!(crate::sphincs_plus_c::verifier::SphincsPlusCVerifier::new().verify_signature(
-            &key,
-            &message,
-            &sig,
-        ));
+        assert!(crate::sphincs_plus_c::verifier::SphincsPlusCVerifier::new()
+            .verify_signature(&key, &message, &sig,));
     }
 
     #[test]
@@ -276,8 +272,7 @@ mod tests {
         };
         // Per signed FORS tree: one leaf hash + one node hash per level; plus
         // the aggregate fors-pk hash.
-        let fors_calls =
-            fors_digest_blocks + signed_trees * (1 + u64::from(FORS_TREE_HEIGHT)) + 1;
+        let fors_calls = fors_digest_blocks + signed_trees * (1 + u64::from(FORS_TREE_HEIGHT)) + 1;
         // Per hypertree layer: WOTS message digest + fixed chain-walk total +
         // wots-c-pk hash + one node hash per subtree auth-path level.
         let subtree_height = u64::from(HYPERTREE_HEIGHT / NUM_HYPERTREE_LAYERS);

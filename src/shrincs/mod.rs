@@ -15,12 +15,10 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-
 //! SHRINCS hybrid scheme: commitments, action hashes, dispatch.
 //!
 //! Wraps independent `sphincs_plus_c` (stateless) and `uxmss` (stateful).
 
-pub(crate) mod uxmss;
 mod action_context;
 mod dispatch;
 /// The composed SHRINCS key (SPHINCS+C ⊕ UXMSS ⊕ commitment), the public-key
@@ -41,29 +39,30 @@ pub mod key;
 /// canonically `crate::shrincs::signature::Signature` (also re-exported as
 /// `crate::shrincs::Signature`).
 pub mod signature;
+pub(crate) mod uxmss;
 
 pub mod signer;
 pub mod verifier;
 
 #[cfg(test)]
-mod vector_conformance;
-#[cfg(test)]
 pub(crate) mod test_fixtures;
+#[cfg(test)]
+mod vector_conformance;
 
 pub use crate::verifier::{VerifierInterface, VerifyOutcome};
+pub use dispatch::prepare_stateless_delegation;
 pub use key::{Commitment, Keys};
 pub use signer::{sign, ShrincsSigner, ShrincsSignerResult};
-pub use dispatch::prepare_stateless_delegation;
 pub use verifier::{ShrincsVerifier, ShrincsVerifierExt};
 
 pub use crate::hash::suite::HASH_SUITE_ID;
-pub use crate::profiles::{
-    FORS_C_MAX_GRIND_COUNTER, FORS_TREE_HEIGHT, HASH_TRUNC_LEN, HYPERTREE_HEIGHT,
-    NUM_FORS_TREES, NUM_HYPERTREE_LAYERS, NUM_WOTS_CHAINS, PROFILE_ID, PROFILE_NAME,
-    STATELESS_SIGNATURE_LIMIT, WOTS_CHAIN_LEN,
-};
-pub use crate::hash::{ADDRESS_TYPE_FORS_TREE, ADDRESS_TYPE_TREE, ADDRESS_TYPE_WOTS_HASH};
 pub use crate::hash::suite::{HASH_SUITE_KECCAK_256, HASH_SUITE_SHA2_256};
+pub use crate::hash::{ADDRESS_TYPE_FORS_TREE, ADDRESS_TYPE_TREE, ADDRESS_TYPE_WOTS_HASH};
+pub use crate::profiles::{
+    FORS_C_MAX_GRIND_COUNTER, FORS_TREE_HEIGHT, HASH_TRUNC_LEN, HYPERTREE_HEIGHT, NUM_FORS_TREES,
+    NUM_HYPERTREE_LAYERS, NUM_WOTS_CHAINS, PROFILE_ID, PROFILE_NAME, STATELESS_SIGNATURE_LIMIT,
+    WOTS_CHAIN_LEN,
+};
 pub use crate::HASH_LEN;
 pub use action_context::ActionContext;
 pub use key::PublicKey;
@@ -79,18 +78,18 @@ pub use uxmss::STATEFUL_PUBLIC_KEY_BYTES;
 pub use crate::sphincs_plus_c::Signature as StatelessSignature;
 
 // Re-export commitment helpers used by wasm/tests.
+#[allow(unused_imports)]
+pub(crate) use crate::hash::derive32;
+#[allow(unused_imports)]
+#[cfg(test)]
+pub(crate) use dispatch::verify_stateless_unsafe_raw;
 #[allow(unused_imports)] // used by wasm/test modules under cfg
 pub(crate) use dispatch::{
     matches_expected_public_key_commitment, valid_public_key, verify_stateful,
     verify_stateful_unsafe_raw, verify_stateless,
 };
 #[allow(unused_imports)]
-#[cfg(test)]
-pub(crate) use dispatch::verify_stateless_unsafe_raw;
-#[allow(unused_imports)]
 pub(crate) use key::{decode_stateful_public_key, encode_stateful_public_key};
-#[allow(unused_imports)]
-pub(crate) use crate::hash::derive32;
 #[allow(unused_imports)]
 pub(crate) use signer::public_key_from_components;
 

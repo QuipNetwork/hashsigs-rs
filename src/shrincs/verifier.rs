@@ -31,29 +31,29 @@ use crate::verifier::VerifyOutcome;
 // Not every symbol keeps its historical name: the public key type was
 // renamed from `StatefulPublicKey` to `PublicKey` (disambiguated by the
 // `shrincs` module path instead), and there is no `StatefulPublicKey` alias.
-pub use crate::hash::{ADDRESS_TYPE_FORS_TREE, ADDRESS_TYPE_TREE, ADDRESS_TYPE_WOTS_HASH};
-pub use crate::hash::suite::HASH_SUITE_KECCAK_256;
-pub use crate::HASH_LEN;
 pub use super::action_context::ActionContext;
 pub use super::key::PublicKey;
 pub use super::signature::Signature as StatefulSignature;
 pub use super::uxmss::STATEFUL_PUBLIC_KEY_BYTES;
+pub use crate::hash::suite::HASH_SUITE_KECCAK_256;
+pub use crate::hash::{ADDRESS_TYPE_FORS_TREE, ADDRESS_TYPE_TREE, ADDRESS_TYPE_WOTS_HASH};
+pub use crate::HASH_LEN;
 // SHRINCS genuinely has a stateless signing path, so this is a legitimate
 // semantic re-export (not a component shim) — see `shrincs::mod`'s matching
 // re-export for the rationale.
 pub use crate::sphincs_plus_c::Signature as StatelessSignature;
 // Profile parameter tuple also lived in main's shrincs_verifier_types (via
 // `pub use profile::*`); re-export from the current profiles module.
-pub use crate::profiles::{
-    FORS_TREE_HEIGHT, HASH_TRUNC_LEN, HYPERTREE_HEIGHT, NUM_FORS_TREES, NUM_HYPERTREE_LAYERS,
-    NUM_WOTS_CHAINS, PROFILE_NAME, STATELESS_SIGNATURE_LIMIT, WOTS_CHAIN_LEN,
-};
 use super::dispatch as core_shrincs;
 use super::dispatch::{stateful_action_message_hash, stateless_action_message_hash};
 use super::key::Commitment;
 use super::signature::{decode_stateful_envelope, decode_stateless_envelope};
 #[cfg(test)]
 use super::signature::{encode_stateful_envelope, encode_stateless_envelope};
+pub use crate::profiles::{
+    FORS_TREE_HEIGHT, HASH_TRUNC_LEN, HYPERTREE_HEIGHT, NUM_FORS_TREES, NUM_HYPERTREE_LAYERS,
+    NUM_WOTS_CHAINS, PROFILE_NAME, STATELESS_SIGNATURE_LIMIT, WOTS_CHAIN_LEN,
+};
 
 pub struct ShrincsVerifier;
 
@@ -75,7 +75,12 @@ impl ShrincsVerifier {
         context: &ActionContext,
         signature: &StatefulSignature,
     ) -> bool {
-        core_shrincs::verify_stateful(expected_public_key_commitment, public_key, context, signature)
+        core_shrincs::verify_stateful(
+            expected_public_key_commitment,
+            public_key,
+            context,
+            signature,
+        )
     }
 
     pub fn verify_stateless(
@@ -85,7 +90,12 @@ impl ShrincsVerifier {
         context: &ActionContext,
         signature: &StatelessSignature,
     ) -> bool {
-        core_shrincs::verify_stateless(expected_public_key_commitment, public_key, context, signature)
+        core_shrincs::verify_stateless(
+            expected_public_key_commitment,
+            public_key,
+            context,
+            signature,
+        )
     }
 
     #[cfg(test)]
@@ -239,9 +249,7 @@ impl crate::verifier::VerifierInterface for ShrincsVerifier {
         let Some(commitment) = Commitment::from_bytes(key).map(|c| *c.as_bytes()) else {
             return VerifyOutcome::Invalid;
         };
-        let Some((public_key, signature)) =
-            decode_stateful_envelope(signature_envelope)
-        else {
+        let Some((public_key, signature)) = decode_stateful_envelope(signature_envelope) else {
             return VerifyOutcome::Malformed;
         };
         // `SHRINCS.verify` packs the bytes32 hash into the signed message as
@@ -295,8 +303,7 @@ mod interface_tests {
             .expect("signing must succeed for a fresh key");
         let envelope = encode_stateful_envelope(&public_key, &signature);
 
-        let outcome =
-            ShrincsVerifier::new().verify(&commitment_of(&public_key), &hash, &envelope);
+        let outcome = ShrincsVerifier::new().verify(&commitment_of(&public_key), &hash, &envelope);
         assert_eq!(outcome, VerifyOutcome::Valid);
     }
 
@@ -309,11 +316,8 @@ mod interface_tests {
         let envelope = encode_stateful_envelope(&public_key, &signature);
 
         let wrong_hash = [0x22u8; HASH_LEN];
-        let outcome = ShrincsVerifier::new().verify(
-            &commitment_of(&public_key),
-            &wrong_hash,
-            &envelope,
-        );
+        let outcome =
+            ShrincsVerifier::new().verify(&commitment_of(&public_key), &wrong_hash, &envelope);
         assert_eq!(outcome, VerifyOutcome::Invalid);
     }
 
@@ -351,8 +355,7 @@ mod interface_tests {
     fn verify_reports_an_empty_envelope_as_malformed() {
         let (_signing_key, public_key) = keypair(b"verifier stateful empty seed");
         let hash = [0x55u8; HASH_LEN];
-        let outcome =
-            ShrincsVerifier::new().verify(&commitment_of(&public_key), &hash, &[]);
+        let outcome = ShrincsVerifier::new().verify(&commitment_of(&public_key), &hash, &[]);
         assert_eq!(outcome, VerifyOutcome::Malformed);
     }
 
@@ -416,11 +419,8 @@ mod interface_tests {
 
         let mut wrong_commitment = commitment_of(&public_key);
         wrong_commitment[0] ^= 0x01;
-        let outcome = ShrincsVerifier::new().verify_stateless_signature(
-            &wrong_commitment,
-            &hash,
-            &envelope,
-        );
+        let outcome =
+            ShrincsVerifier::new().verify_stateless_signature(&wrong_commitment, &hash, &envelope);
         assert_eq!(outcome, VerifyOutcome::Invalid);
     }
 

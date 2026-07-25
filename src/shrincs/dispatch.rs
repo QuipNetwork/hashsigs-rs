@@ -22,19 +22,19 @@
 //! `sphincs_plus_c` (stateless) and `uxmss` (stateful). `mod.rs` re-exports
 //! the pieces `wasm` needs.
 
-use alloc::vec::Vec;
-use crate::hash::keccak_packed;
-use crate::hash::word32;
-use crate::hash::suite::HASH_SUITE_ID;
-use crate::HASH_LEN;
-use crate::sphincs_plus_c;
-use crate::sphincs_plus_c::Signature as StatelessSignature;
 use super::action_context::ActionContext;
+use super::key::decode_stateful_public_key;
 use super::key::PublicKey;
 use super::signature::Signature;
-use crate::shrincs::uxmss;
 use super::uxmss::STATEFUL_PUBLIC_KEY_BYTES;
-use super::key::decode_stateful_public_key;
+use crate::hash::keccak_packed;
+use crate::hash::suite::HASH_SUITE_ID;
+use crate::hash::word32;
+use crate::shrincs::uxmss;
+use crate::sphincs_plus_c;
+use crate::sphincs_plus_c::Signature as StatelessSignature;
+use crate::HASH_LEN;
+use alloc::vec::Vec;
 
 /// Canonical action-verify message hash, binding the operation tag, active
 /// hash-suite ID, and the context's domain separator, nonce, key version,
@@ -65,7 +65,11 @@ pub(crate) fn stateful_action_message_hash(
     expected_public_key_commitment: [u8; HASH_LEN],
     context: &ActionContext,
 ) -> [u8; HASH_LEN] {
-    action_message_hash(b"shrincs-verify-stateful", expected_public_key_commitment, context)
+    action_message_hash(
+        b"shrincs-verify-stateful",
+        expected_public_key_commitment,
+        context,
+    )
 }
 
 /// Canonical message hash for a stateless action verify. See
@@ -74,7 +78,11 @@ pub(crate) fn stateless_action_message_hash(
     expected_public_key_commitment: [u8; HASH_LEN],
     context: &ActionContext,
 ) -> [u8; HASH_LEN] {
-    action_message_hash(b"shrincs-verify-stateless", expected_public_key_commitment, context)
+    action_message_hash(
+        b"shrincs-verify-stateless",
+        expected_public_key_commitment,
+        context,
+    )
 }
 
 fn verify_stateless_crypto(
@@ -132,7 +140,12 @@ pub(crate) fn verify_stateful(
         return false;
     }
     let message = stateful_action_message_hash(expected_public_key_commitment, context);
-    verify_stateful_unsafe_raw(expected_public_key_commitment, public_key, &message, signature)
+    verify_stateful_unsafe_raw(
+        expected_public_key_commitment,
+        public_key,
+        &message,
+        signature,
+    )
 }
 
 pub(crate) fn verify_stateless(
@@ -199,8 +212,7 @@ pub fn prepare_stateless_delegation(
     envelope: &[u8],
 ) -> Option<([u8; 64], Vec<u8>)> {
     let (public_key, signature) = super::signature::decode_stateless_envelope(envelope)?;
-    if !matches_expected_public_key_commitment(&public_key, expected_public_key_commitment)
-    {
+    if !matches_expected_public_key_commitment(&public_key, expected_public_key_commitment) {
         return None;
     }
     if !valid_public_key(&public_key) {

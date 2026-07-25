@@ -15,12 +15,11 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-
 //! Consolidated `#[cfg(test)]` helpers shared across modules.
 
+use crate::shrincs::PublicKey;
 use crate::shrincs::{derive32, Keys, ShrincsSigner};
 use crate::sphincs_plus_c;
-use crate::shrincs::PublicKey;
 
 /// Build a signing key that exercises only the stateful subsystem, with a
 /// placeholder hypertree root. Avoids compute-infeasible stateless hypertree

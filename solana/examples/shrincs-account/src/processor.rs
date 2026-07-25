@@ -64,7 +64,9 @@ use solana_program::{
 };
 
 use crate::messages;
-use crate::pda::{account_pda, is_leaf_used, mark_leaf_used, LeafBitmapAccounts, ACCOUNT_SEED_PREFIX};
+use crate::pda::{
+    account_pda, is_leaf_used, mark_leaf_used, LeafBitmapAccounts, ACCOUNT_SEED_PREFIX,
+};
 use crate::rotation::{self, RotationAuthorization};
 use crate::state::{increment_u256_be, ShrincsAccountState, StatefulPolicy, HASH_LEN};
 
@@ -251,7 +253,13 @@ fn check_stateful_leaf_use(
             }
         }
         StatefulPolicy::LeafBitmap => {
-            if is_leaf_used(program_id, account_key, &state.key_version, leaf_index, bitmap_account)? {
+            if is_leaf_used(
+                program_id,
+                account_key,
+                &state.key_version,
+                leaf_index,
+                bitmap_account,
+            )? {
                 Err(ShrincsAccountError::StatefulLeafRejected.into())
             } else {
                 Ok(())
@@ -274,7 +282,13 @@ fn commit_stateful_leaf_use(
             state.next_stateful_leaf_index = state.next_stateful_leaf_index.saturating_add(1);
         }
         StatefulPolicy::LeafBitmap => {
-            mark_leaf_used(program_id, account_key, &state.key_version, leaf_index, accounts)?;
+            mark_leaf_used(
+                program_id,
+                account_key,
+                &state.key_version,
+                leaf_index,
+                accounts,
+            )?;
         }
         StatefulPolicy::RecoveryRotation => {}
     }
@@ -317,7 +331,11 @@ fn create_account_pda<'info>(
 /// (writable), system_program]`. Installs the initial commitment, default
 /// `MonotonicIndex` policy, `next_stateful_leaf_index = 1`, and zeroed
 /// nonce/key_version.
-pub(crate) fn process_init(program_id: &Pubkey, accounts: &[AccountInfo], args: InitArgs) -> ProgramResult {
+pub(crate) fn process_init(
+    program_id: &Pubkey,
+    accounts: &[AccountInfo],
+    args: InitArgs,
+) -> ProgramResult {
     let accounts_iter = &mut accounts.iter();
     let payer = next_account_info(accounts_iter)?;
     let owner_info = next_account_info(accounts_iter)?;
@@ -358,7 +376,12 @@ pub(crate) fn process_init(program_id: &Pubkey, accounts: &[AccountInfo], args: 
         system_program,
         program_id,
         data.len(),
-        &[ACCOUNT_SEED_PREFIX, owner_info.key.as_ref(), &args.salt, &[bump]],
+        &[
+            ACCOUNT_SEED_PREFIX,
+            owner_info.key.as_ref(),
+            &args.salt,
+            &[bump],
+        ],
     )?;
 
     account_info.try_borrow_mut_data()?[..data.len()].copy_from_slice(&data);
@@ -410,7 +433,13 @@ pub(crate) fn process_verify_stateful_action(
     }
     let leaf_index = signature.auth_path.len() as u32;
 
-    check_stateful_leaf_use(&state, leaf_index, program_id, account_info.key, bitmap_account)?;
+    check_stateful_leaf_use(
+        &state,
+        leaf_index,
+        program_id,
+        account_info.key,
+        bitmap_account,
+    )?;
 
     let domain_separator = messages::domain_separator(program_id, account_info.key);
     let context: ActionContext = messages::action_context(
@@ -587,7 +616,10 @@ pub(crate) fn process_set_policy_recovery_rotation(
 /// `stateful_policy_frozen`, like [`process_set_policy_monotonic`] (not
 /// exempt: unlike `RecoveryRotation`, `LeafBitmap` still accepts stateful
 /// signatures, so switching into it while frozen could bypass the freeze).
-pub(crate) fn process_set_policy_leaf_bitmap(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
+pub(crate) fn process_set_policy_leaf_bitmap(
+    program_id: &Pubkey,
+    accounts: &[AccountInfo],
+) -> ProgramResult {
     let accounts_iter = &mut accounts.iter();
     let account_info = next_account_info(accounts_iter)?;
     let owner_info = next_account_info(accounts_iter)?;
@@ -614,7 +646,10 @@ pub(crate) fn process_set_policy_leaf_bitmap(program_id: &Pubkey, accounts: &[Ac
 /// [`process_verify_stateless_action`] checks before accepting a stateless
 /// signature under `RecoveryRotation` policy. Requires `RecoveryRotation` to
 /// already be the active policy.
-pub(crate) fn process_enter_recovery_mode(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
+pub(crate) fn process_enter_recovery_mode(
+    program_id: &Pubkey,
+    accounts: &[AccountInfo],
+) -> ProgramResult {
     let accounts_iter = &mut accounts.iter();
     let account_info = next_account_info(accounts_iter)?;
     let owner_info = next_account_info(accounts_iter)?;
@@ -703,7 +738,11 @@ pub(crate) fn process_rotate_to_fresh_key(
         current_public_key: &current_public_key,
         recovery_signature: &recovery_signature,
     };
-    rotation::authorize_fresh_key_rotation(&auth, &args.next_stateful_public_key, args.next_commitment)?;
+    rotation::authorize_fresh_key_rotation(
+        &auth,
+        &args.next_stateful_public_key,
+        args.next_commitment,
+    )?;
 
     let previous_commitment = state.current_public_key_commitment;
     // Fresh-key rotation keeps the current stateless half unchanged, so its
@@ -808,9 +847,10 @@ pub(crate) fn process_is_valid_signature(
 
     let is_valid = match args.mode {
         MODE_STATEFUL_ACTION => {
-            let signature: StatefulSignature = StatefulSignatureDto::try_from_slice(&args.signature_bytes)
-                .map_err(|_| ProgramError::InvalidInstructionData)?
-                .into();
+            let signature: StatefulSignature =
+                StatefulSignatureDto::try_from_slice(&args.signature_bytes)
+                    .map_err(|_| ProgramError::InvalidInstructionData)?
+                    .into();
             ShrincsVerifier::new().verify_stateful(
                 state.current_public_key_commitment,
                 &public_key,
@@ -819,9 +859,10 @@ pub(crate) fn process_is_valid_signature(
             )
         }
         MODE_STATELESS_ACTION => {
-            let signature: StatelessSignature = StatelessSignatureDto::try_from_slice(&args.signature_bytes)
-                .map_err(|_| ProgramError::InvalidInstructionData)?
-                .into();
+            let signature: StatelessSignature =
+                StatelessSignatureDto::try_from_slice(&args.signature_bytes)
+                    .map_err(|_| ProgramError::InvalidInstructionData)?
+                    .into();
             ShrincsVerifier::new().verify_stateless(
                 state.current_public_key_commitment,
                 &public_key,
@@ -856,7 +897,13 @@ pub(crate) fn process_is_leaf_used(
     let bitmap_account = next_account_info(accounts_iter)?;
 
     let state = load_state(account_info, program_id)?;
-    let used = is_leaf_used(program_id, account_info.key, &state.key_version, args.leaf_index, bitmap_account)?;
+    let used = is_leaf_used(
+        program_id,
+        account_info.key,
+        &state.key_version,
+        args.leaf_index,
+        bitmap_account,
+    )?;
     set_return_data(&[used as u8]);
     Ok(())
 }
@@ -905,15 +952,21 @@ pub fn process_instruction(
         ShrincsAccountInstruction::SetPolicyLeafBitmap => {
             process_set_policy_leaf_bitmap(program_id, accounts)
         }
-        ShrincsAccountInstruction::EnterRecoveryMode => process_enter_recovery_mode(program_id, accounts),
+        ShrincsAccountInstruction::EnterRecoveryMode => {
+            process_enter_recovery_mode(program_id, accounts)
+        }
         ShrincsAccountInstruction::RotateToFreshKey(args) => {
             process_rotate_to_fresh_key(program_id, accounts, args)
         }
-        ShrincsAccountInstruction::RotateFullKey(args) => process_rotate_full_key(program_id, accounts, args),
+        ShrincsAccountInstruction::RotateFullKey(args) => {
+            process_rotate_full_key(program_id, accounts, args)
+        }
         ShrincsAccountInstruction::IsValidSignature(args) => {
             process_is_valid_signature(program_id, accounts, args)
         }
-        ShrincsAccountInstruction::IsLeafUsed(args) => process_is_leaf_used(program_id, accounts, args),
+        ShrincsAccountInstruction::IsLeafUsed(args) => {
+            process_is_leaf_used(program_id, accounts, args)
+        }
     }
 }
 
@@ -922,8 +975,8 @@ mod tests {
     use super::*;
     use borsh::{BorshDeserialize, BorshSerialize};
     use hashsigs_rs::shrincs::signer::ShrincsSigner;
-    use hashsigs_rs::shrincs::Keys;
     use hashsigs_rs::shrincs::verifier::ShrincsVerifier as CoreShrincsVerifier;
+    use hashsigs_rs::shrincs::Keys;
     use solana_program_test::*;
     use solana_sdk::{
         instruction::{AccountMeta, Instruction},
@@ -953,8 +1006,8 @@ mod tests {
     }
 
     fn test_dispatch(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> ProgramResult {
-        let instruction =
-            TestInstruction::try_from_slice(data).map_err(|_| ProgramError::InvalidInstructionData)?;
+        let instruction = TestInstruction::try_from_slice(data)
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
         match instruction {
             TestInstruction::Init(args) => process_init(program_id, accounts, args),
             TestInstruction::StatefulAction(args) => {
@@ -969,12 +1022,16 @@ mod tests {
             TestInstruction::SetPolicyRecoveryRotation => {
                 process_set_policy_recovery_rotation(program_id, accounts)
             }
-            TestInstruction::SetPolicyLeafBitmap => process_set_policy_leaf_bitmap(program_id, accounts),
+            TestInstruction::SetPolicyLeafBitmap => {
+                process_set_policy_leaf_bitmap(program_id, accounts)
+            }
             TestInstruction::EnterRecoveryMode => process_enter_recovery_mode(program_id, accounts),
             TestInstruction::RotateToFreshKey(args) => {
                 process_rotate_to_fresh_key(program_id, accounts, args)
             }
-            TestInstruction::RotateFullKey(args) => process_rotate_full_key(program_id, accounts, args),
+            TestInstruction::RotateFullKey(args) => {
+                process_rotate_full_key(program_id, accounts, args)
+            }
             TestInstruction::IsValidSignature(args) => {
                 process_is_valid_signature(program_id, accounts, args)
             }
@@ -1119,7 +1176,8 @@ mod tests {
         let signature =
             ShrincsSigner::sign_stateful_action(keys, public_key, &context_msg).expect("sign");
 
-        let (bitmap_key, _) = crate::pda::bitmap_word_pda(program_id, account_pda_key, &[0u8; HASH_LEN], 0);
+        let (bitmap_key, _) =
+            crate::pda::bitmap_word_pda(program_id, account_pda_key, &[0u8; HASH_LEN], 0);
         let instruction = Instruction {
             program_id: *program_id,
             accounts: vec![
@@ -1187,9 +1245,14 @@ mod tests {
         );
         let signature = ShrincsSigner::sign_stateful_action(&mut keys, &public_key, &context_msg)
             .expect("sign");
-        assert_eq!(signature.auth_path.len(), 1, "first stateful signature uses leaf 1");
+        assert_eq!(
+            signature.auth_path.len(),
+            1,
+            "first stateful signature uses leaf 1"
+        );
 
-        let (bitmap_key, _) = crate::pda::bitmap_word_pda(&program_id, &account_pda_key, &[0u8; HASH_LEN], 0);
+        let (bitmap_key, _) =
+            crate::pda::bitmap_word_pda(&program_id, &account_pda_key, &[0u8; HASH_LEN], 0);
         let instruction = Instruction {
             program_id,
             accounts: vec![
@@ -1222,14 +1285,21 @@ mod tests {
             .process_transaction_with_metadata(transaction)
             .await
             .unwrap();
-        assert!(result.result.is_ok(), "valid stateful action should succeed: {:?}", result.result);
+        assert!(
+            result.result.is_ok(),
+            "valid stateful action should succeed: {:?}",
+            result.result
+        );
         assert_eq!(result.metadata.unwrap().return_data.unwrap().data, vec![1]);
 
         let state = fetch_state(&mut context, &account_pda_key).await;
         let mut expected_nonce = [0u8; HASH_LEN];
         expected_nonce[HASH_LEN - 1] = 1;
         assert_eq!(state.nonce, expected_nonce, "nonce advances by one");
-        assert_eq!(state.next_stateful_leaf_index, 2, "MonotonicIndex advances past leaf 1");
+        assert_eq!(
+            state.next_stateful_leaf_index, 2,
+            "MonotonicIndex advances past leaf 1"
+        );
         assert!(state.stateful_policy_frozen);
     }
 
@@ -1261,11 +1331,13 @@ mod tests {
             action_type,
             payload_hash,
         );
-        let mut signature = ShrincsSigner::sign_stateful_action(&mut keys, &public_key, &context_msg)
-            .expect("sign");
+        let mut signature =
+            ShrincsSigner::sign_stateful_action(&mut keys, &public_key, &context_msg)
+                .expect("sign");
         signature.randomizer[0] ^= 0x01; // tamper one byte
 
-        let (bitmap_key, _) = crate::pda::bitmap_word_pda(&program_id, &account_pda_key, &[0u8; HASH_LEN], 0);
+        let (bitmap_key, _) =
+            crate::pda::bitmap_word_pda(&program_id, &account_pda_key, &[0u8; HASH_LEN], 0);
         let instruction = Instruction {
             program_id,
             accounts: vec![
@@ -1298,7 +1370,10 @@ mod tests {
             .process_transaction_with_metadata(transaction)
             .await
             .unwrap();
-        assert!(result.result.is_err(), "tampered signature must abort the instruction");
+        assert!(
+            result.result.is_err(),
+            "tampered signature must abort the instruction"
+        );
         let return_data = result
             .metadata
             .expect("metadata present even on failure")
@@ -1327,7 +1402,8 @@ mod tests {
             init_account(&mut context, &program_id, &owner, salt, commitment).await;
 
         let action_type = messages::ACTION_STATEFUL;
-        let (bitmap_key, _) = crate::pda::bitmap_word_pda(&program_id, &account_pda_key, &[0u8; HASH_LEN], 0);
+        let (bitmap_key, _) =
+            crate::pda::bitmap_word_pda(&program_id, &account_pda_key, &[0u8; HASH_LEN], 0);
 
         // First action: consumes leaf 1, advances next_stateful_leaf_index to 2.
         let domain_separator = messages::domain_separator(&program_id, &account_pda_key);
@@ -1427,7 +1503,10 @@ mod tests {
             .process_transaction_with_metadata(transaction_2)
             .await
             .unwrap();
-        assert!(result.result.is_err(), "reusing leaf 1 must be rejected under MonotonicIndex");
+        assert!(
+            result.result.is_err(),
+            "reusing leaf 1 must be rejected under MonotonicIndex"
+        );
     }
 
     #[tokio::test]
@@ -1460,7 +1539,8 @@ mod tests {
         );
         // verify_stateless computes its own action-message-hash from the
         // ActionContext, same as the stateful path; sign that same hash.
-        let message = CoreShrincsVerifier::new().stateless_action_message_hash(commitment, &context_msg);
+        let message =
+            CoreShrincsVerifier::new().stateless_action_message_hash(commitment, &context_msg);
         let signature = ShrincsSigner::sign_stateless_raw(&keys, &message).expect("sign");
 
         let instruction = Instruction {
@@ -1490,7 +1570,11 @@ mod tests {
             .process_transaction_with_metadata(transaction)
             .await
             .unwrap();
-        assert!(result.result.is_ok(), "valid stateless action should succeed: {:?}", result.result);
+        assert!(
+            result.result.is_ok(),
+            "valid stateless action should succeed: {:?}",
+            result.result
+        );
         assert_eq!(result.metadata.unwrap().return_data.unwrap().data, vec![1]);
 
         let state = fetch_state(&mut context, &account_pda_key).await;
@@ -1510,16 +1594,20 @@ mod tests {
         let salt = [21u8; HASH_LEN];
 
         let (_keys, public_key) =
-            ShrincsSigner::keygen(b"shrincs-account-example test policy owner-gate", 1024).expect("keygen");
+            ShrincsSigner::keygen(b"shrincs-account-example test policy owner-gate", 1024)
+                .expect("keygen");
         let commitment: [u8; HASH_LEN] = public_key
             .public_key_commitment
             .clone()
             .try_into()
             .expect("commitment is 32 bytes");
-        let account_pda_key = init_account(&mut context, &program_id, &owner, salt, commitment).await;
+        let account_pda_key =
+            init_account(&mut context, &program_id, &owner, salt, commitment).await;
 
         let setters: Vec<TestInstruction> = vec![
-            TestInstruction::SetPolicyMonotonic(SetPolicyMonotonicArgs { initial_leaf_index: 1 }),
+            TestInstruction::SetPolicyMonotonic(SetPolicyMonotonicArgs {
+                initial_leaf_index: 1,
+            }),
             TestInstruction::SetPolicyRecoveryRotation,
             TestInstruction::SetPolicyLeafBitmap,
             TestInstruction::EnterRecoveryMode,
@@ -1528,8 +1616,12 @@ mod tests {
         for setter in setters {
             // Wrong owner: `attacker` genuinely signs, but does not match `state.owner`.
             context.last_blockhash = context.get_new_latest_blockhash().await.unwrap();
-            let instruction =
-                policy_instruction(&program_id, &account_pda_key, &attacker.pubkey(), setter.clone());
+            let instruction = policy_instruction(
+                &program_id,
+                &account_pda_key,
+                &attacker.pubkey(),
+                setter.clone(),
+            );
             let transaction = Transaction::new_signed_with_payer(
                 &[instruction],
                 Some(&context.payer.pubkey()),
@@ -1578,17 +1670,29 @@ mod tests {
         let salt = [22u8; HASH_LEN];
 
         let (mut keys, public_key) =
-            ShrincsSigner::keygen(b"shrincs-account-example test freeze exemption", 1024).expect("keygen");
+            ShrincsSigner::keygen(b"shrincs-account-example test freeze exemption", 1024)
+                .expect("keygen");
         let commitment: [u8; HASH_LEN] = public_key
             .public_key_commitment
             .clone()
             .try_into()
             .expect("commitment is 32 bytes");
-        let account_pda_key = init_account(&mut context, &program_id, &owner, salt, commitment).await;
+        let account_pda_key =
+            init_account(&mut context, &program_id, &owner, salt, commitment).await;
 
-        freeze_stateful_policy(&mut context, &program_id, &account_pda_key, &mut keys, &public_key).await;
+        freeze_stateful_policy(
+            &mut context,
+            &program_id,
+            &account_pda_key,
+            &mut keys,
+            &public_key,
+        )
+        .await;
         let frozen_state = fetch_state(&mut context, &account_pda_key).await;
-        assert!(frozen_state.stateful_policy_frozen, "one stateful use must freeze the policy");
+        assert!(
+            frozen_state.stateful_policy_frozen,
+            "one stateful use must freeze the policy"
+        );
 
         // Blocked while frozen: MonotonicIndex.
         context.last_blockhash = context.get_new_latest_blockhash().await.unwrap();
@@ -1596,7 +1700,9 @@ mod tests {
             &program_id,
             &account_pda_key,
             &owner.pubkey(),
-            TestInstruction::SetPolicyMonotonic(SetPolicyMonotonicArgs { initial_leaf_index: 5 }),
+            TestInstruction::SetPolicyMonotonic(SetPolicyMonotonicArgs {
+                initial_leaf_index: 5,
+            }),
         );
         let transaction = Transaction::new_signed_with_payer(
             &[instruction],
@@ -1657,8 +1763,14 @@ mod tests {
             .expect("set_policy_recovery_rotation is exempt from the freeze check");
 
         let state = fetch_state(&mut context, &account_pda_key).await;
-        assert_eq!(state.stateful_policy, StatefulPolicy::RecoveryRotation as u8);
-        assert!(state.stateful_policy_frozen, "the freeze flag itself is untouched by this setter");
+        assert_eq!(
+            state.stateful_policy,
+            StatefulPolicy::RecoveryRotation as u8
+        );
+        assert!(
+            state.stateful_policy_frozen,
+            "the freeze flag itself is untouched by this setter"
+        );
     }
 
     #[tokio::test]
@@ -1676,14 +1788,17 @@ mod tests {
             .clone()
             .try_into()
             .expect("commitment is 32 bytes");
-        let account_pda_key = init_account(&mut context, &program_id, &owner, salt, commitment).await;
+        let account_pda_key =
+            init_account(&mut context, &program_id, &owner, salt, commitment).await;
 
         // Advance the cursor to 5.
         let instruction = policy_instruction(
             &program_id,
             &account_pda_key,
             &owner.pubkey(),
-            TestInstruction::SetPolicyMonotonic(SetPolicyMonotonicArgs { initial_leaf_index: 5 }),
+            TestInstruction::SetPolicyMonotonic(SetPolicyMonotonicArgs {
+                initial_leaf_index: 5,
+            }),
         );
         let transaction = Transaction::new_signed_with_payer(
             &[instruction],
@@ -1707,7 +1822,9 @@ mod tests {
             &program_id,
             &account_pda_key,
             &owner.pubkey(),
-            TestInstruction::SetPolicyMonotonic(SetPolicyMonotonicArgs { initial_leaf_index: 3 }),
+            TestInstruction::SetPolicyMonotonic(SetPolicyMonotonicArgs {
+                initial_leaf_index: 3,
+            }),
         );
         let transaction = Transaction::new_signed_with_payer(
             &[instruction],
@@ -1723,7 +1840,10 @@ mod tests {
         assert_custom_error(&result.result, ShrincsAccountError::StatefulIndexRollback);
 
         let state = fetch_state(&mut context, &account_pda_key).await;
-        assert_eq!(state.next_stateful_leaf_index, 5, "rejected rollback must not mutate the cursor");
+        assert_eq!(
+            state.next_stateful_leaf_index, 5,
+            "rejected rollback must not mutate the cursor"
+        );
     }
 
     #[tokio::test]
@@ -1735,17 +1855,23 @@ mod tests {
         let salt = [24u8; HASH_LEN];
 
         let (_keys, public_key) =
-            ShrincsSigner::keygen(b"shrincs-account-example test enter recovery", 1024).expect("keygen");
+            ShrincsSigner::keygen(b"shrincs-account-example test enter recovery", 1024)
+                .expect("keygen");
         let commitment: [u8; HASH_LEN] = public_key
             .public_key_commitment
             .clone()
             .try_into()
             .expect("commitment is 32 bytes");
-        let account_pda_key = init_account(&mut context, &program_id, &owner, salt, commitment).await;
+        let account_pda_key =
+            init_account(&mut context, &program_id, &owner, salt, commitment).await;
 
         // Default policy is MonotonicIndex: entering recovery must fail.
-        let instruction =
-            policy_instruction(&program_id, &account_pda_key, &owner.pubkey(), TestInstruction::EnterRecoveryMode);
+        let instruction = policy_instruction(
+            &program_id,
+            &account_pda_key,
+            &owner.pubkey(),
+            TestInstruction::EnterRecoveryMode,
+        );
         let transaction = Transaction::new_signed_with_payer(
             &[instruction],
             Some(&context.payer.pubkey()),
@@ -1782,8 +1908,12 @@ mod tests {
             .expect("set_policy_recovery_rotation should succeed");
 
         context.last_blockhash = context.get_new_latest_blockhash().await.unwrap();
-        let instruction =
-            policy_instruction(&program_id, &account_pda_key, &owner.pubkey(), TestInstruction::EnterRecoveryMode);
+        let instruction = policy_instruction(
+            &program_id,
+            &account_pda_key,
+            &owner.pubkey(),
+            TestInstruction::EnterRecoveryMode,
+        );
         let transaction = Transaction::new_signed_with_payer(
             &[instruction],
             Some(&context.payer.pubkey()),
@@ -1799,7 +1929,10 @@ mod tests {
             .expect("enter_recovery_mode should succeed once RecoveryRotation is active");
 
         let state = fetch_state(&mut context, &account_pda_key).await;
-        assert!(state.recovery_mode, "recovery_mode must be armed after enter_recovery_mode");
+        assert!(
+            state.recovery_mode,
+            "recovery_mode must be armed after enter_recovery_mode"
+        );
     }
 
     // --- rotation (Task 6) --------------------------------------------------
@@ -1809,7 +1942,9 @@ mod tests {
     }
 
     fn fixed_stateful_key_bytes(bytes: &[u8]) -> [u8; STATEFUL_PUBLIC_KEY_BYTES] {
-        bytes.try_into().expect("expected a 68-byte stateful public key")
+        bytes
+            .try_into()
+            .expect("expected a 68-byte stateful public key")
     }
 
     /// Switch to `RecoveryRotation` policy and arm recovery mode -- the
@@ -1820,9 +1955,17 @@ mod tests {
         account_pda_key: &SdkPubkey,
         owner: &Keypair,
     ) {
-        for instruction_kind in [TestInstruction::SetPolicyRecoveryRotation, TestInstruction::EnterRecoveryMode] {
+        for instruction_kind in [
+            TestInstruction::SetPolicyRecoveryRotation,
+            TestInstruction::EnterRecoveryMode,
+        ] {
             context.last_blockhash = context.get_new_latest_blockhash().await.unwrap();
-            let instruction = policy_instruction(program_id, account_pda_key, &owner.pubkey(), instruction_kind);
+            let instruction = policy_instruction(
+                program_id,
+                account_pda_key,
+                &owner.pubkey(),
+                instruction_kind,
+            );
             let transaction = Transaction::new_signed_with_payer(
                 &[instruction],
                 Some(&context.payer.pubkey()),
@@ -1891,8 +2034,8 @@ mod tests {
             action_type,
             payload_hash,
         );
-        let message =
-            CoreShrincsVerifier::new().stateless_action_message_hash(message_commitment, &action_context);
+        let message = CoreShrincsVerifier::new()
+            .stateless_action_message_hash(message_commitment, &action_context);
         let signature = ShrincsSigner::sign_stateless_raw(keys, &message).expect("sign");
         let args = StatelessActionArgs {
             public_key: public_key.clone().into(),
@@ -1900,7 +2043,13 @@ mod tests {
             payload_hash,
             signature: signature.into(),
         };
-        send_single_account(context, program_id, account_pda_key, TestInstruction::StatelessAction(args)).await
+        send_single_account(
+            context,
+            program_id,
+            account_pda_key,
+            TestInstruction::StatelessAction(args),
+        )
+        .await
     }
 
     /// Build a fresh-key rotation's args, keeping the CURRENT stateless half
@@ -1920,8 +2069,10 @@ mod tests {
         let current_pk_seed = fixed_hash_bytes(&public_key.pk_seed);
         let current_hypertree_root = fixed_hash_bytes(&public_key.hypertree_root);
         let (_next_keys, next_public_key) =
-            ShrincsSigner::keygen(b"shrincs-account-example test rotate fresh next", 1024).expect("keygen");
-        let next_stateful_public_key = fixed_stateful_key_bytes(&next_public_key.stateful_public_key);
+            ShrincsSigner::keygen(b"shrincs-account-example test rotate fresh next", 1024)
+                .expect("keygen");
+        let next_stateful_public_key =
+            fixed_stateful_key_bytes(&next_public_key.stateful_public_key);
         let next_commitment = CoreShrincsVerifier::new().public_key_commitment(
             &next_stateful_public_key,
             current_pk_seed,
@@ -1929,7 +2080,8 @@ mod tests {
         );
 
         let domain_separator = messages::domain_separator(program_id, account_pda_key);
-        let payload_hash = messages::rotate_stateful_payload(&next_stateful_public_key, &next_commitment);
+        let payload_hash =
+            messages::rotate_stateful_payload(&next_stateful_public_key, &next_commitment);
         let action_context = messages::action_context(
             domain_separator,
             state.nonce,
@@ -1937,10 +2089,16 @@ mod tests {
             messages::ACTION_ROTATE_STATEFUL,
             payload_hash,
         );
-        let message = CoreShrincsVerifier::new().stateless_action_message_hash(commitment, &action_context);
+        let message =
+            CoreShrincsVerifier::new().stateless_action_message_hash(commitment, &action_context);
         let recovery_signature = ShrincsSigner::sign_stateless_raw(keys, &message).expect("sign");
         assert!(
-            CoreShrincsVerifier::new().verify_stateless(commitment, public_key, &action_context, &recovery_signature),
+            CoreShrincsVerifier::new().verify_stateless(
+                commitment,
+                public_key,
+                &action_context,
+                &recovery_signature
+            ),
             "recovery signature must verify before submitting the rotation"
         );
 
@@ -1964,8 +2122,10 @@ mod tests {
     ) -> RotateFullKeyArgs {
         let commitment = fixed_hash_bytes(&public_key.public_key_commitment);
         let (_next_keys, next_public_key) =
-            ShrincsSigner::keygen(b"shrincs-account-example test rotate full next", 1024).expect("keygen");
-        let next_stateful_public_key = fixed_stateful_key_bytes(&next_public_key.stateful_public_key);
+            ShrincsSigner::keygen(b"shrincs-account-example test rotate full next", 1024)
+                .expect("keygen");
+        let next_stateful_public_key =
+            fixed_stateful_key_bytes(&next_public_key.stateful_public_key);
         let next_pk_seed = fixed_hash_bytes(&next_public_key.pk_seed);
         let next_hypertree_root = fixed_hash_bytes(&next_public_key.hypertree_root);
         let next_commitment = CoreShrincsVerifier::new().public_key_commitment(
@@ -1988,10 +2148,16 @@ mod tests {
             messages::ACTION_ROTATE_FULL,
             payload_hash,
         );
-        let message = CoreShrincsVerifier::new().stateless_action_message_hash(commitment, &action_context);
+        let message =
+            CoreShrincsVerifier::new().stateless_action_message_hash(commitment, &action_context);
         let recovery_signature = ShrincsSigner::sign_stateless_raw(keys, &message).expect("sign");
         assert!(
-            CoreShrincsVerifier::new().verify_stateless(commitment, public_key, &action_context, &recovery_signature),
+            CoreShrincsVerifier::new().verify_stateless(
+                commitment,
+                public_key,
+                &action_context,
+                &recovery_signature
+            ),
             "recovery signature must verify before submitting the rotation"
         );
 
@@ -2014,33 +2180,59 @@ mod tests {
         let salt = [31u8; HASH_LEN];
 
         let (keys, public_key) =
-            ShrincsSigner::keygen(b"shrincs-account-example test rotate fresh", 1024).expect("keygen");
+            ShrincsSigner::keygen(b"shrincs-account-example test rotate fresh", 1024)
+                .expect("keygen");
         let commitment = fixed_hash_bytes(&public_key.public_key_commitment);
-        let account_pda_key = init_account(&mut context, &program_id, &owner, salt, commitment).await;
+        let account_pda_key =
+            init_account(&mut context, &program_id, &owner, salt, commitment).await;
         arm_recovery(&mut context, &program_id, &account_pda_key, &owner).await;
 
         // Consume one stateless action first so `stateless_signatures_used` is
         // non-zero going into the rotation; otherwise asserting it stays 0
         // afterward cannot distinguish "preserved" from "reset to 0".
-        try_stateless_action(&mut context, &program_id, &account_pda_key, &keys, &public_key, commitment)
-            .await
-            .expect("a stateless action under armed recovery should succeed");
+        try_stateless_action(
+            &mut context,
+            &program_id,
+            &account_pda_key,
+            &keys,
+            &public_key,
+            commitment,
+        )
+        .await
+        .expect("a stateless action under armed recovery should succeed");
 
         let state_before = fetch_state(&mut context, &account_pda_key).await;
-        assert_eq!(state_before.stateless_signatures_used, 1, "setup consumed one stateless signature");
-        let args = build_fresh_key_rotation_args(&program_id, &account_pda_key, &state_before, &keys, &public_key);
+        assert_eq!(
+            state_before.stateless_signatures_used, 1,
+            "setup consumed one stateless signature"
+        );
+        let args = build_fresh_key_rotation_args(
+            &program_id,
+            &account_pda_key,
+            &state_before,
+            &keys,
+            &public_key,
+        );
         let next_commitment = args.next_commitment;
         let next_stateful_public_key = args.next_stateful_public_key;
 
-        send_single_account(&mut context, &program_id, &account_pda_key, TestInstruction::RotateToFreshKey(args))
-            .await
-            .expect("valid fresh-key rotation should succeed");
+        send_single_account(
+            &mut context,
+            &program_id,
+            &account_pda_key,
+            TestInstruction::RotateToFreshKey(args),
+        )
+        .await
+        .expect("valid fresh-key rotation should succeed");
 
         let state = fetch_state(&mut context, &account_pda_key).await;
         assert_eq!(state.current_public_key_commitment, next_commitment);
         let mut expected_key_version = state_before.key_version;
         increment_u256_be(&mut expected_key_version);
-        assert_eq!(state.key_version, expected_key_version, "key_version advances by one");
+        assert_eq!(
+            state.key_version, expected_key_version,
+            "key_version advances by one"
+        );
         assert_eq!(
             state.stateless_signatures_used, state_before.stateless_signatures_used,
             "fresh-key rotation preserves stateless usage (kept at 1, not reset to 0)"
@@ -2049,11 +2241,24 @@ mod tests {
         assert_eq!(state.stateful_policy, StatefulPolicy::MonotonicIndex as u8);
         assert!(!state.stateful_policy_frozen);
         assert!(!state.recovery_mode);
-        assert_ne!(state.nonce, state_before.nonce, "nonce advances on rotation");
+        assert_ne!(
+            state.nonce, state_before.nonce,
+            "nonce advances on rotation"
+        );
 
-        let old_result =
-            try_stateless_action(&mut context, &program_id, &account_pda_key, &keys, &public_key, commitment).await;
-        assert!(old_result.is_err(), "the old key/commitment must be rejected after rotation");
+        let old_result = try_stateless_action(
+            &mut context,
+            &program_id,
+            &account_pda_key,
+            &keys,
+            &public_key,
+            commitment,
+        )
+        .await;
+        assert!(
+            old_result.is_err(),
+            "the old key/commitment must be rejected after rotation"
+        );
 
         let new_public_key = PublicKey {
             stateful_public_key: next_stateful_public_key.to_vec(),
@@ -2061,9 +2266,16 @@ mod tests {
             pk_seed: public_key.pk_seed.clone(),
             hypertree_root: public_key.hypertree_root.clone(),
         };
-        try_stateless_action(&mut context, &program_id, &account_pda_key, &keys, &new_public_key, next_commitment)
-            .await
-            .expect("the new key's action should verify after rotation");
+        try_stateless_action(
+            &mut context,
+            &program_id,
+            &account_pda_key,
+            &keys,
+            &new_public_key,
+            next_commitment,
+        )
+        .await
+        .expect("the new key's action should verify after rotation");
     }
 
     #[tokio::test]
@@ -2075,22 +2287,38 @@ mod tests {
         let salt = [32u8; HASH_LEN];
 
         let (keys, public_key) =
-            ShrincsSigner::keygen(b"shrincs-account-example test rotate full", 1024).expect("keygen");
+            ShrincsSigner::keygen(b"shrincs-account-example test rotate full", 1024)
+                .expect("keygen");
         let commitment = fixed_hash_bytes(&public_key.public_key_commitment);
-        let account_pda_key = init_account(&mut context, &program_id, &owner, salt, commitment).await;
+        let account_pda_key =
+            init_account(&mut context, &program_id, &owner, salt, commitment).await;
         arm_recovery(&mut context, &program_id, &account_pda_key, &owner).await;
 
         let state_before = fetch_state(&mut context, &account_pda_key).await;
-        let args = build_full_key_rotation_args(&program_id, &account_pda_key, &state_before, &keys, &public_key);
+        let args = build_full_key_rotation_args(
+            &program_id,
+            &account_pda_key,
+            &state_before,
+            &keys,
+            &public_key,
+        );
         let next_commitment = args.next_commitment;
 
-        send_single_account(&mut context, &program_id, &account_pda_key, TestInstruction::RotateFullKey(args))
-            .await
-            .expect("valid full-key rotation should succeed");
+        send_single_account(
+            &mut context,
+            &program_id,
+            &account_pda_key,
+            TestInstruction::RotateFullKey(args),
+        )
+        .await
+        .expect("valid full-key rotation should succeed");
 
         let state = fetch_state(&mut context, &account_pda_key).await;
         assert_eq!(state.current_public_key_commitment, next_commitment);
-        assert_eq!(state.stateless_signatures_used, 0, "fresh stateless half resets usage accounting");
+        assert_eq!(
+            state.stateless_signatures_used, 0,
+            "fresh stateless half resets usage accounting"
+        );
         let mut expected_key_version = state_before.key_version;
         increment_u256_be(&mut expected_key_version);
         assert_eq!(state.key_version, expected_key_version);
@@ -2106,9 +2334,11 @@ mod tests {
         let salt = [33u8; HASH_LEN];
 
         let (keys, public_key) =
-            ShrincsSigner::keygen(b"shrincs-account-example test rotate not armed", 1024).expect("keygen");
+            ShrincsSigner::keygen(b"shrincs-account-example test rotate not armed", 1024)
+                .expect("keygen");
         let commitment = fixed_hash_bytes(&public_key.public_key_commitment);
-        let account_pda_key = init_account(&mut context, &program_id, &owner, salt, commitment).await;
+        let account_pda_key =
+            init_account(&mut context, &program_id, &owner, salt, commitment).await;
 
         // Switch to RecoveryRotation but do NOT enter recovery mode: the
         // "not in recovery mode" gate, not the "wrong policy" gate.
@@ -2134,7 +2364,13 @@ mod tests {
             .expect("set_policy_recovery_rotation should succeed");
 
         let state = fetch_state(&mut context, &account_pda_key).await;
-        let args = build_fresh_key_rotation_args(&program_id, &account_pda_key, &state, &keys, &public_key);
+        let args = build_fresh_key_rotation_args(
+            &program_id,
+            &account_pda_key,
+            &state,
+            &keys,
+            &public_key,
+        );
         let result = send_single_account(
             &mut context,
             &program_id,
@@ -2154,13 +2390,21 @@ mod tests {
         let salt = [34u8; HASH_LEN];
 
         let (keys, public_key) =
-            ShrincsSigner::keygen(b"shrincs-account-example test rotate zero max sig", 1024).expect("keygen");
+            ShrincsSigner::keygen(b"shrincs-account-example test rotate zero max sig", 1024)
+                .expect("keygen");
         let commitment = fixed_hash_bytes(&public_key.public_key_commitment);
-        let account_pda_key = init_account(&mut context, &program_id, &owner, salt, commitment).await;
+        let account_pda_key =
+            init_account(&mut context, &program_id, &owner, salt, commitment).await;
         arm_recovery(&mut context, &program_id, &account_pda_key, &owner).await;
 
         let state = fetch_state(&mut context, &account_pda_key).await;
-        let mut args = build_fresh_key_rotation_args(&program_id, &account_pda_key, &state, &keys, &public_key);
+        let mut args = build_fresh_key_rotation_args(
+            &program_id,
+            &account_pda_key,
+            &state,
+            &keys,
+            &public_key,
+        );
         args.next_stateful_public_key[64..68].copy_from_slice(&0u32.to_be_bytes());
 
         let result = send_single_account(
@@ -2182,13 +2426,21 @@ mod tests {
         let salt = [35u8; HASH_LEN];
 
         let (keys, public_key) =
-            ShrincsSigner::keygen(b"shrincs-account-example test rotate bad commitment", 1024).expect("keygen");
+            ShrincsSigner::keygen(b"shrincs-account-example test rotate bad commitment", 1024)
+                .expect("keygen");
         let commitment = fixed_hash_bytes(&public_key.public_key_commitment);
-        let account_pda_key = init_account(&mut context, &program_id, &owner, salt, commitment).await;
+        let account_pda_key =
+            init_account(&mut context, &program_id, &owner, salt, commitment).await;
         arm_recovery(&mut context, &program_id, &account_pda_key, &owner).await;
 
         let state = fetch_state(&mut context, &account_pda_key).await;
-        let mut args = build_fresh_key_rotation_args(&program_id, &account_pda_key, &state, &keys, &public_key);
+        let mut args = build_fresh_key_rotation_args(
+            &program_id,
+            &account_pda_key,
+            &state,
+            &keys,
+            &public_key,
+        );
         args.next_commitment[0] ^= 0x01;
 
         let result = send_single_account(
@@ -2210,20 +2462,32 @@ mod tests {
         let salt = [36u8; HASH_LEN];
 
         let (keys, public_key) =
-            ShrincsSigner::keygen(b"shrincs-account-example test rotate wrong key", 1024).expect("keygen");
+            ShrincsSigner::keygen(b"shrincs-account-example test rotate wrong key", 1024)
+                .expect("keygen");
         let commitment = fixed_hash_bytes(&public_key.public_key_commitment);
-        let account_pda_key = init_account(&mut context, &program_id, &owner, salt, commitment).await;
+        let account_pda_key =
+            init_account(&mut context, &program_id, &owner, salt, commitment).await;
         arm_recovery(&mut context, &program_id, &account_pda_key, &owner).await;
 
         let (wrong_keys, _wrong_public_key) =
-            ShrincsSigner::keygen(b"shrincs-account-example test rotate wrong signer", 1024).expect("keygen");
+            ShrincsSigner::keygen(b"shrincs-account-example test rotate wrong signer", 1024)
+                .expect("keygen");
 
         let state = fetch_state(&mut context, &account_pda_key).await;
-        let mut args = build_fresh_key_rotation_args(&program_id, &account_pda_key, &state, &keys, &public_key);
+        let mut args = build_fresh_key_rotation_args(
+            &program_id,
+            &account_pda_key,
+            &state,
+            &keys,
+            &public_key,
+        );
 
         // Re-sign the SAME context/payload with the WRONG key's stateless half.
         let domain_separator = messages::domain_separator(&program_id, &account_pda_key);
-        let payload_hash = messages::rotate_stateful_payload(&args.next_stateful_public_key, &args.next_commitment);
+        let payload_hash = messages::rotate_stateful_payload(
+            &args.next_stateful_public_key,
+            &args.next_commitment,
+        );
         let action_context = messages::action_context(
             domain_separator,
             state.nonce,
@@ -2231,10 +2495,17 @@ mod tests {
             messages::ACTION_ROTATE_STATEFUL,
             payload_hash,
         );
-        let message = CoreShrincsVerifier::new().stateless_action_message_hash(commitment, &action_context);
-        let wrong_signature = ShrincsSigner::sign_stateless_raw(&wrong_keys, &message).expect("sign");
+        let message =
+            CoreShrincsVerifier::new().stateless_action_message_hash(commitment, &action_context);
+        let wrong_signature =
+            ShrincsSigner::sign_stateless_raw(&wrong_keys, &message).expect("sign");
         assert!(
-            !CoreShrincsVerifier::new().verify_stateless(commitment, &public_key, &action_context, &wrong_signature),
+            !CoreShrincsVerifier::new().verify_stateless(
+                commitment,
+                &public_key,
+                &action_context,
+                &wrong_signature
+            ),
             "a wrong-key signature must not verify"
         );
         args.recovery_signature = wrong_signature.into();
@@ -2276,8 +2547,15 @@ mod tests {
             .process_transaction_with_metadata(transaction)
             .await
             .unwrap();
-        result.result.expect("is_valid_signature query should succeed");
-        result.metadata.expect("metadata present").return_data.expect("return data set").data
+        result
+            .result
+            .expect("is_valid_signature query should succeed");
+        result
+            .metadata
+            .expect("metadata present")
+            .return_data
+            .expect("return data set")
+            .data
     }
 
     /// Submit a [`TestInstruction::IsLeafUsed`] query against the read-only
@@ -2296,7 +2574,8 @@ mod tests {
                 AccountMeta::new_readonly(*account_pda_key, false),
                 AccountMeta::new_readonly(*bitmap_key, false),
             ],
-            data: borsh::to_vec(&TestInstruction::IsLeafUsed(IsLeafUsedArgs { leaf_index })).unwrap(),
+            data: borsh::to_vec(&TestInstruction::IsLeafUsed(IsLeafUsedArgs { leaf_index }))
+                .unwrap(),
         };
         let transaction = Transaction::new_signed_with_payer(
             &[ix],
@@ -2310,7 +2589,12 @@ mod tests {
             .await
             .unwrap();
         result.result.expect("is_leaf_used query should succeed");
-        result.metadata.expect("metadata present").return_data.expect("return data set").data
+        result
+            .metadata
+            .expect("metadata present")
+            .return_data
+            .expect("return data set")
+            .data
     }
 
     #[tokio::test]
@@ -2322,18 +2606,21 @@ mod tests {
         let salt = [41u8; HASH_LEN];
 
         let (keys, public_key) =
-            ShrincsSigner::keygen(b"shrincs-account-example test is_valid_signature", 1024).expect("keygen");
+            ShrincsSigner::keygen(b"shrincs-account-example test is_valid_signature", 1024)
+                .expect("keygen");
         let commitment: [u8; HASH_LEN] = public_key
             .public_key_commitment
             .clone()
             .try_into()
             .expect("commitment is 32 bytes");
-        let account_pda_key = init_account(&mut context, &program_id, &owner, salt, commitment).await;
+        let account_pda_key =
+            init_account(&mut context, &program_id, &owner, salt, commitment).await;
         let state_before = fetch_state(&mut context, &account_pda_key).await;
 
         let domain_separator = messages::domain_separator(&program_id, &account_pda_key);
         let action_type = messages::ACTION_STATELESS;
-        let payload_hash = messages::action_payload(&action_type, b"is_valid_signature query payload");
+        let payload_hash =
+            messages::action_payload(&action_type, b"is_valid_signature query payload");
         let action_context = messages::action_context(
             domain_separator,
             state_before.nonce,
@@ -2341,7 +2628,8 @@ mod tests {
             action_type,
             payload_hash,
         );
-        let message = CoreShrincsVerifier::new().stateless_action_message_hash(commitment, &action_context);
+        let message =
+            CoreShrincsVerifier::new().stateless_action_message_hash(commitment, &action_context);
         let signature = ShrincsSigner::sign_stateless_raw(&keys, &message).expect("sign");
 
         // A signature that currently verifies against `state.nonce`/`state.key_version` reads `[1]`.
@@ -2350,11 +2638,16 @@ mod tests {
             public_key: public_key.clone().into(),
             action_type,
             payload_hash,
-            signature_bytes: borsh::to_vec(&StatelessSignatureDto::from(signature.clone())).unwrap(),
+            signature_bytes: borsh::to_vec(&StatelessSignatureDto::from(signature.clone()))
+                .unwrap(),
         };
         let return_data =
             query_is_valid_signature(&mut context, &program_id, &account_pda_key, valid_args).await;
-        assert_eq!(return_data, vec![1], "current valid signature must read as valid");
+        assert_eq!(
+            return_data,
+            vec![1],
+            "current valid signature must read as valid"
+        );
         assert_eq!(
             fetch_state(&mut context, &account_pda_key).await,
             state_before,
@@ -2369,11 +2662,17 @@ mod tests {
             public_key: public_key.into(),
             action_type,
             payload_hash,
-            signature_bytes: borsh::to_vec(&StatelessSignatureDto::from(tampered_signature)).unwrap(),
+            signature_bytes: borsh::to_vec(&StatelessSignatureDto::from(tampered_signature))
+                .unwrap(),
         };
         let return_data =
-            query_is_valid_signature(&mut context, &program_id, &account_pda_key, tampered_args).await;
-        assert_eq!(return_data, vec![0], "tampered signature must read as invalid, not abort the instruction");
+            query_is_valid_signature(&mut context, &program_id, &account_pda_key, tampered_args)
+                .await;
+        assert_eq!(
+            return_data,
+            vec![0],
+            "tampered signature must read as invalid, not abort the instruction"
+        );
         assert_eq!(
             fetch_state(&mut context, &account_pda_key).await,
             state_before,
@@ -2390,13 +2689,15 @@ mod tests {
         let salt = [42u8; HASH_LEN];
 
         let (mut keys, public_key) =
-            ShrincsSigner::keygen(b"shrincs-account-example test is_leaf_used", 1024).expect("keygen");
+            ShrincsSigner::keygen(b"shrincs-account-example test is_leaf_used", 1024)
+                .expect("keygen");
         let commitment: [u8; HASH_LEN] = public_key
             .public_key_commitment
             .clone()
             .try_into()
             .expect("commitment is 32 bytes");
-        let account_pda_key = init_account(&mut context, &program_id, &owner, salt, commitment).await;
+        let account_pda_key =
+            init_account(&mut context, &program_id, &owner, salt, commitment).await;
 
         // Switch to LeafBitmap before any stateful use (the policy is not frozen yet).
         context.last_blockhash = context.get_new_latest_blockhash().await.unwrap();
@@ -2420,17 +2721,23 @@ mod tests {
             .result
             .expect("set_policy_leaf_bitmap should succeed");
 
-        let (bitmap_key, _) = crate::pda::bitmap_word_pda(&program_id, &account_pda_key, &[0u8; HASH_LEN], 0);
+        let (bitmap_key, _) =
+            crate::pda::bitmap_word_pda(&program_id, &account_pda_key, &[0u8; HASH_LEN], 0);
 
         // Leaf 1 reads unused before any stateful action consumes it.
         let return_data =
             query_is_leaf_used(&mut context, &program_id, &account_pda_key, &bitmap_key, 1).await;
-        assert_eq!(return_data, vec![0], "leaf 1 must read unused before any stateful action");
+        assert_eq!(
+            return_data,
+            vec![0],
+            "leaf 1 must read unused before any stateful action"
+        );
 
         // Consume leaf 1 via an ordinary stateful action under LeafBitmap policy.
         let domain_separator = messages::domain_separator(&program_id, &account_pda_key);
         let action_type = messages::ACTION_STATEFUL;
-        let payload_hash = messages::action_payload(&action_type, b"consume leaf 1 under bitmap policy");
+        let payload_hash =
+            messages::action_payload(&action_type, b"consume leaf 1 under bitmap policy");
         let action_context = messages::action_context(
             domain_separator,
             [0u8; HASH_LEN],
@@ -2439,8 +2746,13 @@ mod tests {
             payload_hash,
         );
         let signature =
-            ShrincsSigner::sign_stateful_action(&mut keys, &public_key, &action_context).expect("sign");
-        assert_eq!(signature.auth_path.len(), 1, "first stateful signature uses leaf 1");
+            ShrincsSigner::sign_stateful_action(&mut keys, &public_key, &action_context)
+                .expect("sign");
+        assert_eq!(
+            signature.auth_path.len(),
+            1,
+            "first stateful signature uses leaf 1"
+        );
 
         context.last_blockhash = context.get_new_latest_blockhash().await.unwrap();
         let instruction = Instruction {
@@ -2481,11 +2793,19 @@ mod tests {
         // Leaf 1 now reads used; leaf 2 (same bitmap word) still reads unused.
         let return_data =
             query_is_leaf_used(&mut context, &program_id, &account_pda_key, &bitmap_key, 1).await;
-        assert_eq!(return_data, vec![1], "leaf 1 must read used after the stateful action consumes it");
+        assert_eq!(
+            return_data,
+            vec![1],
+            "leaf 1 must read used after the stateful action consumes it"
+        );
 
         let return_data =
             query_is_leaf_used(&mut context, &program_id, &account_pda_key, &bitmap_key, 2).await;
-        assert_eq!(return_data, vec![0], "leaf 2 (same bitmap word) must remain unused");
+        assert_eq!(
+            return_data,
+            vec![0],
+            "leaf 2 (same bitmap word) must remain unused"
+        );
     }
 
     // --- end-to-end through the real router (Task 8) ------------------------
@@ -2557,11 +2877,17 @@ mod tests {
             action_type,
             payload_hash,
         );
-        let signature = ShrincsSigner::sign_stateful_action(&mut keys, &public_key, &action_context)
-            .expect("sign");
-        assert_eq!(signature.auth_path.len(), 1, "first stateful signature uses leaf 1");
+        let signature =
+            ShrincsSigner::sign_stateful_action(&mut keys, &public_key, &action_context)
+                .expect("sign");
+        assert_eq!(
+            signature.auth_path.len(),
+            1,
+            "first stateful signature uses leaf 1"
+        );
 
-        let (bitmap_key, _) = crate::pda::bitmap_word_pda(&program_id, &account_pda_key, &[0u8; HASH_LEN], 0);
+        let (bitmap_key, _) =
+            crate::pda::bitmap_word_pda(&program_id, &account_pda_key, &[0u8; HASH_LEN], 0);
         let stateful_instruction = Instruction {
             program_id,
             accounts: vec![
@@ -2570,12 +2896,14 @@ mod tests {
                 AccountMeta::new(context.payer.pubkey(), true),
                 AccountMeta::new_readonly(solana_program::system_program::id(), false),
             ],
-            data: borsh::to_vec(&ShrincsAccountInstruction::VerifyStatefulAction(StatefulActionArgs {
-                public_key: public_key.clone().into(),
-                action_type,
-                payload_hash,
-                signature: signature.into(),
-            }))
+            data: borsh::to_vec(&ShrincsAccountInstruction::VerifyStatefulAction(
+                StatefulActionArgs {
+                    public_key: public_key.clone().into(),
+                    action_type,
+                    payload_hash,
+                    signature: signature.into(),
+                },
+            ))
             .unwrap(),
         };
         context.last_blockhash = context.get_new_latest_blockhash().await.unwrap();
@@ -2590,7 +2918,9 @@ mod tests {
             .process_transaction_with_metadata(transaction)
             .await
             .unwrap();
-        result.result.expect("stateful action at leaf 1 should succeed");
+        result
+            .result
+            .expect("stateful action at leaf 1 should succeed");
         assert_eq!(result.metadata.unwrap().return_data.unwrap().data, vec![1]);
 
         // --- switch to RecoveryRotation and arm recovery mode ------------
@@ -2628,8 +2958,10 @@ mod tests {
         // --- full rotation authorized by the current key's stateless
         // recovery signature ----------------------------------------------
         let (next_keys, next_public_key) =
-            ShrincsSigner::keygen(b"shrincs-account-example e2e router next", 1024).expect("keygen");
-        let next_stateful_public_key = fixed_stateful_key_bytes(&next_public_key.stateful_public_key);
+            ShrincsSigner::keygen(b"shrincs-account-example e2e router next", 1024)
+                .expect("keygen");
+        let next_stateful_public_key =
+            fixed_stateful_key_bytes(&next_public_key.stateful_public_key);
         let next_pk_seed = fixed_hash_bytes(&next_public_key.pk_seed);
         let next_hypertree_root = fixed_hash_bytes(&next_public_key.hypertree_root);
         let next_commitment = CoreShrincsVerifier::new().public_key_commitment(
@@ -2651,9 +2983,10 @@ mod tests {
             messages::ACTION_ROTATE_FULL,
             rotate_payload_hash,
         );
-        let rotate_message =
-            CoreShrincsVerifier::new().stateless_action_message_hash(commitment, &rotate_action_context);
-        let recovery_signature = ShrincsSigner::sign_stateless_raw(&keys, &rotate_message).expect("sign");
+        let rotate_message = CoreShrincsVerifier::new()
+            .stateless_action_message_hash(commitment, &rotate_action_context);
+        let recovery_signature =
+            ShrincsSigner::sign_stateless_raw(&keys, &rotate_message).expect("sign");
         assert!(
             CoreShrincsVerifier::new().verify_stateless(
                 commitment,
@@ -2667,14 +3000,16 @@ mod tests {
         let rotate_instruction = Instruction {
             program_id,
             accounts: vec![AccountMeta::new(account_pda_key, false)],
-            data: borsh::to_vec(&ShrincsAccountInstruction::RotateFullKey(RotateFullKeyArgs {
-                current_public_key: public_key.clone().into(),
-                next_stateful_public_key,
-                next_pk_seed,
-                next_hypertree_root,
-                next_commitment,
-                recovery_signature: recovery_signature.into(),
-            }))
+            data: borsh::to_vec(&ShrincsAccountInstruction::RotateFullKey(
+                RotateFullKeyArgs {
+                    current_public_key: public_key.clone().into(),
+                    next_stateful_public_key,
+                    next_pk_seed,
+                    next_hypertree_root,
+                    next_commitment,
+                    recovery_signature: recovery_signature.into(),
+                },
+            ))
             .unwrap(),
         };
         context.last_blockhash = context.get_new_latest_blockhash().await.unwrap();
@@ -2693,11 +3028,20 @@ mod tests {
             .expect("full rotation with a valid recovery signature should succeed");
 
         let state_after_rotation = fetch_state(&mut context, &account_pda_key).await;
-        assert_eq!(state_after_rotation.current_public_key_commitment, next_commitment);
+        assert_eq!(
+            state_after_rotation.current_public_key_commitment,
+            next_commitment
+        );
         let mut expected_key_version = state_before_rotation.key_version;
         increment_u256_be(&mut expected_key_version);
-        assert_eq!(state_after_rotation.key_version, expected_key_version, "key_version advances by one");
-        assert_eq!(state_after_rotation.next_stateful_leaf_index, 1, "new epoch resets the leaf cursor");
+        assert_eq!(
+            state_after_rotation.key_version, expected_key_version,
+            "key_version advances by one"
+        );
+        assert_eq!(
+            state_after_rotation.next_stateful_leaf_index, 1,
+            "new epoch resets the leaf cursor"
+        );
 
         // --- the new key's first action (leaf 1 of the new epoch) succeeds
         let mut next_keys = next_keys;
@@ -2707,7 +3051,8 @@ mod tests {
             pk_seed: next_pk_seed.to_vec(),
             hypertree_root: next_hypertree_root.to_vec(),
         };
-        let new_payload_hash = messages::action_payload(&action_type, b"post-rotation stateful action");
+        let new_payload_hash =
+            messages::action_payload(&action_type, b"post-rotation stateful action");
         let new_action_context = messages::action_context(
             domain_separator,
             state_after_rotation.nonce,
@@ -2715,13 +3060,24 @@ mod tests {
             action_type,
             new_payload_hash,
         );
-        let new_signature =
-            ShrincsSigner::sign_stateful_action(&mut next_keys, &new_public_key, &new_action_context)
-                .expect("sign");
-        assert_eq!(new_signature.auth_path.len(), 1, "new epoch's first stateful signature uses leaf 1");
+        let new_signature = ShrincsSigner::sign_stateful_action(
+            &mut next_keys,
+            &new_public_key,
+            &new_action_context,
+        )
+        .expect("sign");
+        assert_eq!(
+            new_signature.auth_path.len(),
+            1,
+            "new epoch's first stateful signature uses leaf 1"
+        );
 
-        let (new_bitmap_key, _) =
-            crate::pda::bitmap_word_pda(&program_id, &account_pda_key, &state_after_rotation.key_version, 0);
+        let (new_bitmap_key, _) = crate::pda::bitmap_word_pda(
+            &program_id,
+            &account_pda_key,
+            &state_after_rotation.key_version,
+            0,
+        );
         let new_stateful_instruction = Instruction {
             program_id,
             accounts: vec![
@@ -2730,12 +3086,14 @@ mod tests {
                 AccountMeta::new(context.payer.pubkey(), true),
                 AccountMeta::new_readonly(solana_program::system_program::id(), false),
             ],
-            data: borsh::to_vec(&ShrincsAccountInstruction::VerifyStatefulAction(StatefulActionArgs {
-                public_key: new_public_key.into(),
-                action_type,
-                payload_hash: new_payload_hash,
-                signature: new_signature.into(),
-            }))
+            data: borsh::to_vec(&ShrincsAccountInstruction::VerifyStatefulAction(
+                StatefulActionArgs {
+                    public_key: new_public_key.into(),
+                    action_type,
+                    payload_hash: new_payload_hash,
+                    signature: new_signature.into(),
+                },
+            ))
             .unwrap(),
         };
         context.last_blockhash = context.get_new_latest_blockhash().await.unwrap();
@@ -2750,11 +3108,14 @@ mod tests {
             .process_transaction_with_metadata(transaction)
             .await
             .unwrap();
-        result.result.expect("the new key's first action should verify after rotation");
+        result
+            .result
+            .expect("the new key's first action should verify after rotation");
         assert_eq!(result.metadata.unwrap().return_data.unwrap().data, vec![1]);
 
         // --- an action still carrying the OLD commitment/key fails --------
-        let old_probe_payload_hash = messages::action_payload(&messages::ACTION_STATELESS, b"stale key probe");
+        let old_probe_payload_hash =
+            messages::action_payload(&messages::ACTION_STATELESS, b"stale key probe");
         let old_probe_context = messages::action_context(
             domain_separator,
             state_after_rotation.nonce,
@@ -2762,18 +3123,21 @@ mod tests {
             messages::ACTION_STATELESS,
             old_probe_payload_hash,
         );
-        let old_probe_message =
-            CoreShrincsVerifier::new().stateless_action_message_hash(commitment, &old_probe_context);
-        let old_probe_signature = ShrincsSigner::sign_stateless_raw(&keys, &old_probe_message).expect("sign");
+        let old_probe_message = CoreShrincsVerifier::new()
+            .stateless_action_message_hash(commitment, &old_probe_context);
+        let old_probe_signature =
+            ShrincsSigner::sign_stateless_raw(&keys, &old_probe_message).expect("sign");
         let old_probe_instruction = Instruction {
             program_id,
             accounts: vec![AccountMeta::new(account_pda_key, false)],
-            data: borsh::to_vec(&ShrincsAccountInstruction::VerifyStatelessAction(StatelessActionArgs {
-                public_key: public_key.into(),
-                action_type: messages::ACTION_STATELESS,
-                payload_hash: old_probe_payload_hash,
-                signature: old_probe_signature.into(),
-            }))
+            data: borsh::to_vec(&ShrincsAccountInstruction::VerifyStatelessAction(
+                StatelessActionArgs {
+                    public_key: public_key.into(),
+                    action_type: messages::ACTION_STATELESS,
+                    payload_hash: old_probe_payload_hash,
+                    signature: old_probe_signature.into(),
+                },
+            ))
             .unwrap(),
         };
         context.last_blockhash = context.get_new_latest_blockhash().await.unwrap();
@@ -2788,6 +3152,9 @@ mod tests {
             .process_transaction_with_metadata(transaction)
             .await
             .unwrap();
-        assert!(result.result.is_err(), "an action carrying the OLD commitment/key must fail after rotation");
+        assert!(
+            result.result.is_err(),
+            "an action carrying the OLD commitment/key must fail after rotation"
+        );
     }
 }

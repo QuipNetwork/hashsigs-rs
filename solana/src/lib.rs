@@ -32,7 +32,11 @@ solana_program::entrypoint!(process_instruction);
 // we install an upward-bumping allocator with no compile-time bound; the VM
 // enforces the granted frame size (out-of-frame access faults the program),
 // so the effective heap is exactly what the transaction requested.
-#[cfg(all(feature = "custom-heap", target_os = "solana", not(feature = "no-entrypoint")))]
+#[cfg(all(
+    feature = "custom-heap",
+    target_os = "solana",
+    not(feature = "no-entrypoint")
+))]
 mod heap {
     use std::alloc::{GlobalAlloc, Layout};
 

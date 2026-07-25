@@ -396,7 +396,10 @@ mod public_key_tests {
     #[test]
     fn commitment_from_bytes_round_trips() {
         let commitment = Commitment::new([0x42; HASH_LEN]);
-        assert_eq!(Commitment::from_bytes(commitment.as_bytes()), Some(commitment));
+        assert_eq!(
+            Commitment::from_bytes(commitment.as_bytes()),
+            Some(commitment)
+        );
     }
 
     #[test]
@@ -540,9 +543,8 @@ mod tests {
     fn recover_commitment_from_envelope_matches_keygen_commitment() {
         let (mut keys, pk) = production_keys();
         let pre_sign_commitment = keys.public_key_commitment;
-        let sig =
-            crate::shrincs::signer::ShrincsSigner::sign_stateful_raw(&mut keys, &[0x11; 32])
-                .expect("sign");
+        let sig = crate::shrincs::signer::ShrincsSigner::sign_stateful_raw(&mut keys, &[0x11; 32])
+            .expect("sign");
         let env = crate::shrincs::signature::encode_stateful_envelope(&pk, &sig);
 
         let recovered = Keys::recover_commitment(&env).expect("recover");

@@ -39,10 +39,8 @@ pub(crate) const STATEFUL_SIGNER_FIXTURE_PATH_ENV: &str =
 pub(crate) const STATEFUL_SIGNER_FIXTURE_BASENAME: &str = "stateful_signer_keys";
 
 fn profile_fixture_path(base_name: &str) -> PathBuf {
-    PathBuf::from(DEFAULT_FIXTURE_DIR).join(format!(
-        "{base_name}.{}.json",
-        crate::shrincs::PROFILE_NAME
-    ))
+    PathBuf::from(DEFAULT_FIXTURE_DIR)
+        .join(format!("{base_name}.{}.json", crate::shrincs::PROFILE_NAME))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -312,7 +310,11 @@ impl From<StatelessSignatureDto> for StatelessSignature {
     fn from(value: StatelessSignatureDto) -> Self {
         Self {
             fors: value.fors.into(),
-            hypertree: value.hypertree.into_iter().map(HypertreeLayerSignature::from).collect(),
+            hypertree: value
+                .hypertree
+                .into_iter()
+                .map(HypertreeLayerSignature::from)
+                .collect(),
         }
     }
 }
@@ -330,12 +332,10 @@ pub(crate) fn stateful_signer_fixture_path() -> PathBuf {
 }
 
 pub(crate) fn load_fixture_file(path: &Path) -> KeyFixtureFile {
-    let json = fs::read_to_string(path).unwrap_or_else(|error| {
-        panic!("failed to read fixture file {}: {error}", path.display())
-    });
-    serde_json::from_str(&json).unwrap_or_else(|error| {
-        panic!("failed to parse fixture file {}: {error}", path.display())
-    })
+    let json = fs::read_to_string(path)
+        .unwrap_or_else(|error| panic!("failed to read fixture file {}: {error}", path.display()));
+    serde_json::from_str(&json)
+        .unwrap_or_else(|error| panic!("failed to parse fixture file {}: {error}", path.display()))
 }
 
 pub(crate) fn write_fixture_file(path: &Path, fixture_file: &KeyFixtureFile) {
@@ -347,11 +347,9 @@ pub(crate) fn write_fixture_file(path: &Path, fixture_file: &KeyFixtureFile) {
             )
         });
     }
-    let json = serde_json::to_string(fixture_file)
-        .expect("fixture file must serialize");
-    fs::write(path, json).unwrap_or_else(|error| {
-        panic!("failed to write fixture file {}: {error}", path.display())
-    });
+    let json = serde_json::to_string(fixture_file).expect("fixture file must serialize");
+    fs::write(path, json)
+        .unwrap_or_else(|error| panic!("failed to write fixture file {}: {error}", path.display()));
 }
 
 pub(crate) fn fixture_entry_opt<'a>(
@@ -374,7 +372,7 @@ pub(crate) fn fixture_pair(entry: &KeyFixtureEntry) -> (Keys, PublicKey) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shrincs::{PROFILE_NAME, ShrincsSigner};
+    use crate::shrincs::{ShrincsSigner, PROFILE_NAME};
 
     #[cfg(any(shrincs_profile_128s_q18, shrincs_profile_128s_q20))]
     fn full_key_fixture_specs() -> Vec<(&'static str, u32)> {
@@ -406,7 +404,6 @@ mod tests {
     }
 
     use crate::test_support::stateful_only_key;
-
 
     fn stateful_signer_fixture_specs() -> Vec<(&'static str, u32)> {
         vec![

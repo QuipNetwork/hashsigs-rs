@@ -39,17 +39,17 @@ use std::path::{Path, PathBuf};
 use flate2::read::GzDecoder;
 use serde_json::Value;
 
+use super::key::PublicKey;
+use super::signature::Signature as StatefulSignature;
+use super::ShrincsSigner;
+use super::ShrincsVerifier;
 use crate::shrincs::test_fixtures::{
     fixture_entry_opt, fixture_pair, fixture_path, load_fixture_file, TestKeyMode,
 };
-use super::ShrincsVerifier;
-use crate::HASH_LEN;
-use crate::sphincs_plus_c::{ForsEntry, ForsSignature, LayerSignature as HypertreeLayerSignature};
 use crate::sphincs_plus_c::Signature as StatelessSignature;
-use super::key::PublicKey;
-use super::signature::Signature as StatefulSignature;
+use crate::sphincs_plus_c::{ForsEntry, ForsSignature, LayerSignature as HypertreeLayerSignature};
 use crate::wots_c::Signature as WotsCSignature;
-use super::ShrincsSigner;
+use crate::HASH_LEN;
 
 // Seeds and budgets MUST match `tests/generate_shrincs_vectors.rs`; the
 // byte-reproduction and stateful conformance tests re-run keygen with them and
@@ -142,7 +142,10 @@ fn read_json_or_gzip(path: &Path) -> std::io::Result<String> {
 fn hex_to_vec(value: &Value) -> Vec<u8> {
     let text = value.as_str().expect("hex field must be a string");
     let body = text.strip_prefix("0x").unwrap_or(text);
-    assert!(body.len().is_multiple_of(2), "hex string must have even length");
+    assert!(
+        body.len().is_multiple_of(2),
+        "hex string must have even length"
+    );
     (0..body.len())
         .step_by(2)
         .map(|i| u8::from_str_radix(&body[i..i + 2], 16).expect("valid hex byte"))
@@ -167,7 +170,11 @@ fn hex_list(value: &Value) -> Vec<Vec<u8>> {
 fn hex_word_list(value: &Value) -> Vec<[u8; HASH_LEN]> {
     hex_list(value)
         .into_iter()
-        .map(|bytes| bytes.try_into().expect("hash list entry must be exactly 32 bytes"))
+        .map(|bytes| {
+            bytes
+                .try_into()
+                .expect("hash list entry must be exactly 32 bytes")
+        })
         .collect()
 }
 
@@ -320,8 +327,8 @@ fn signer_reproduces_committed_stateless_vector_bytes() {
     let (signing_key, public_key) =
         ShrincsSigner::keygen(STATELESS_SEED, STATELESS_MAX_SIGNATURES).expect("stateless keygen");
     let message = hex_to_vec(&section["message"]);
-    let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &message)
-        .expect("stateless signature");
+    let signature =
+        ShrincsSigner::sign_stateless_raw(&signing_key, &message).expect("stateless signature");
 
     assert_eq!(
         public_key,
@@ -362,12 +369,18 @@ fn stateless_verifier_reject_branches_do_not_panic() {
     // reconstruct the committed root.
     let mut counter_mut = base.clone();
     counter_mut.fors.counter ^= 1;
-    assert!(rejects(&counter_mut), "mutated FORS counter must be rejected");
+    assert!(
+        rejects(&counter_mut),
+        "mutated FORS counter must be rejected"
+    );
 
     // Flip a FORS randomizer byte: same digest-derived binding, different seed.
     let mut randomizer_mut = base.clone();
     randomizer_mut.fors.randomizer[0] ^= 1;
-    assert!(rejects(&randomizer_mut), "mutated FORS randomizer must be rejected");
+    assert!(
+        rejects(&randomizer_mut),
+        "mutated FORS randomizer must be rejected"
+    );
 
     // Wrong-length hash fields (31/33-byte pk hashes, secret leaves, chain
     // values) are no longer representable: the wire types use [u8; HASH_LEN],
@@ -395,7 +408,11 @@ fn parse_stateful_signature(value: &Value) -> StatefulSignature {
             .collect(),
         auth_path: hex_list(&value["authPath"])
             .iter()
-            .map(|node| node.as_slice().try_into().expect("auth node must be 32 bytes"))
+            .map(|node| {
+                node.as_slice()
+                    .try_into()
+                    .expect("auth node must be 32 bytes")
+            })
             .collect(),
     }
 }

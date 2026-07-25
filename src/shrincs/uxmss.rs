@@ -15,7 +15,6 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-
 //! Stateful UXMSS sign and verify.
 //!
 //! Unbalanced-tree WOTS-C scheme used by the stateful side of SHRINCS,
@@ -25,12 +24,12 @@
 
 use alloc::vec::Vec;
 
+use super::signature::Signature;
+use crate::hash::{base_w16_digit, hash_node, hash_packed, word32};
+use crate::wots_c::{wots_chain_walk, ChainWalk, WOTS_C_MAX_GRIND_COUNTER};
+use crate::HASH_LEN;
 use core::fmt;
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
-use crate::hash::{base_w16_digit, hash_node, hash_packed, word32};
-use super::signature::Signature;
-use crate::HASH_LEN;
-use crate::wots_c::{ChainWalk, wots_chain_walk, WOTS_C_MAX_GRIND_COUNTER};
 
 // Encoded stateful public key layout, kept 68 bytes across all profiles:
 // 32-byte pkSeed slot || 32-byte root slot || 4-byte maxSignatures.
@@ -52,8 +51,8 @@ fn stateful_chain_no_mask(
     ctx: StatefulChainCtx,
     walk: ChainWalk,
 ) -> [u8; HASH_LEN] {
-    use crate::hash::{address_word32, AddressWord32};
     use crate::hash::ADDRESS_TYPE_WOTS_HASH;
+    use crate::hash::{address_word32, AddressWord32};
     wots_chain_walk(
         b"uxmss-wots-chain",
         pk_seed,
@@ -131,10 +130,7 @@ pub(crate) fn stateful_parent_hash(
     ])
 }
 
-pub(crate) fn stateful_empty_tail(
-    pk_seed: &[u8; HASH_LEN],
-    leaf_index: u32,
-) -> [u8; HASH_LEN] {
+pub(crate) fn stateful_empty_tail(pk_seed: &[u8; HASH_LEN], leaf_index: u32) -> [u8; HASH_LEN] {
     hash_packed(&[
         b"uxmss-empty-tail".as_ref(),
         pk_seed.as_ref(),
@@ -418,8 +414,7 @@ impl Key {
     pub fn to_bytes(&self) -> [u8; 136] {
         let mut out = [0u8; 136];
         out[..64].copy_from_slice(&self.secret.to_bytes());
-        out[64..64 + STATEFUL_PUBLIC_KEY_BYTES]
-            .copy_from_slice(&self.public_key.to_bytes());
+        out[64..64 + STATEFUL_PUBLIC_KEY_BYTES].copy_from_slice(&self.public_key.to_bytes());
         out[132..].copy_from_slice(&self.next_leaf_index.to_be_bytes());
         out
     }
@@ -567,7 +562,10 @@ fn sign_stateful_wots_c(
             let digits = (0..crate::wots_c::NUM_CHAINS)
                 .map(|index| base_w16_digit(&digest, index))
                 .collect::<Vec<_>>();
-            let digit_sum = digits.iter().copied().try_fold(0u32, |a, b| a.checked_add(b))?;
+            let digit_sum = digits
+                .iter()
+                .copied()
+                .try_fold(0u32, |a, b| a.checked_add(b))?;
             Some((digit_sum, digits))
         },
         |digits| {

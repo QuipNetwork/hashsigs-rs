@@ -147,7 +147,8 @@ pub(crate) fn authorize_fresh_key_rotation(
         return Err(ShrincsAccountError::CommitmentMismatch);
     }
 
-    let payload_hash = messages::rotate_stateful_payload(next_stateful_public_key, &next_commitment);
+    let payload_hash =
+        messages::rotate_stateful_payload(next_stateful_public_key, &next_commitment);
     authorize_action(auth, messages::ACTION_ROTATE_STATEFUL, payload_hash)
 }
 

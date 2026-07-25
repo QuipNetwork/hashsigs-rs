@@ -279,9 +279,21 @@ mod tests {
         let commitment_b = [7u8; HASH_LEN];
 
         let base = rotate_full_payload(&key, &pk_seed_a, &root_a, &commitment_a);
-        assert_eq!(base, rotate_full_payload(&key, &pk_seed_a, &root_a, &commitment_a));
-        assert_ne!(base, rotate_full_payload(&key, &pk_seed_b, &root_a, &commitment_a));
-        assert_ne!(base, rotate_full_payload(&key, &pk_seed_a, &root_b, &commitment_a));
-        assert_ne!(base, rotate_full_payload(&key, &pk_seed_a, &root_a, &commitment_b));
+        assert_eq!(
+            base,
+            rotate_full_payload(&key, &pk_seed_a, &root_a, &commitment_a)
+        );
+        assert_ne!(
+            base,
+            rotate_full_payload(&key, &pk_seed_b, &root_a, &commitment_a)
+        );
+        assert_ne!(
+            base,
+            rotate_full_payload(&key, &pk_seed_a, &root_b, &commitment_a)
+        );
+        assert_ne!(
+            base,
+            rotate_full_payload(&key, &pk_seed_a, &root_a, &commitment_b)
+        );
     }
 }

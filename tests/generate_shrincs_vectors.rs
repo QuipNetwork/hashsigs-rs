@@ -361,4 +361,3 @@ fn hex<T: AsRef<[u8]>>(bytes: T) -> String {
     }
     out
 }
-

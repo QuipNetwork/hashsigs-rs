@@ -24,13 +24,13 @@
 
 use alloc::vec::Vec;
 
-use crate::hash::{derive32, word32};
-use crate::sphincs_plus_c::Signature as StatelessSignature;
-use crate::sphincs_plus_c::{self};
 use super::action_context::ActionContext;
 use super::key::{encode_stateful_public_key, Commitment, PublicKey};
 use super::signature::Signature;
+use crate::hash::{derive32, word32};
 use crate::shrincs::uxmss;
+use crate::sphincs_plus_c::Signature as StatelessSignature;
+use crate::sphincs_plus_c::{self};
 use crate::HASH_LEN;
 
 use super::dispatch::stateful_action_message_hash;
@@ -83,7 +83,10 @@ fn public_key_of(keys: &Keys) -> PublicKey {
 pub fn sign(keys: &mut Keys, hash: &[u8; HASH_LEN]) -> Option<Vec<u8>> {
     let public_key = public_key_of(keys);
     let signature = ShrincsSigner::sign_stateful_raw(keys, hash)?;
-    Some(super::signature::encode_stateful_envelope(&public_key, &signature))
+    Some(super::signature::encode_stateful_envelope(
+        &public_key,
+        &signature,
+    ))
 }
 
 #[cfg(test)]
@@ -117,7 +120,11 @@ impl ShrincsSigner {
         // master-seed material is structurally identical between the two.
         let stateless = sphincs_plus_c::keygen_from_master_seed(seed_material);
 
-        Some(Self::build_keys(seed_material, max_stateful_signatures, stateless))
+        Some(Self::build_keys(
+            seed_material,
+            max_stateful_signatures,
+            stateless,
+        ))
     }
 
     /// Derive the stateful half and assemble the full [`Keys`] + `PublicKey`
@@ -253,18 +260,17 @@ impl ShrincsSigner {
 
 #[cfg(test)]
 mod tests {
-    use crate::HASH_LEN;
+    use super::*;
+    use crate::hash::hash_packed;
     use crate::shrincs::test_fixtures::{
         fixture_entry_opt, fixture_pair, fixture_path, load_fixture_file,
         stateful_signer_fixture_path, TestKeyMode,
     };
-    use crate::hash::hash_packed;
-    use super::*;
+    use crate::HASH_LEN;
     #[cfg(not(target_arch = "wasm32"))]
     use proptest::prelude::*;
 
     use crate::test_support::stateful_only_key;
-
 
     fn action_context() -> ActionContext {
         ActionContext {
@@ -285,13 +291,10 @@ mod tests {
         max_stateful_signatures: u32,
     ) -> (Keys, PublicKey) {
         match TestKeyMode::from_env() {
-            TestKeyMode::Fresh => ShrincsSigner::keygen(
-                seed_label.as_bytes(),
-                max_stateful_signatures,
-            )
-            .unwrap_or_else(|| {
-                panic!("fresh keygen failed for seed label {seed_label:?}")
-            }),
+            TestKeyMode::Fresh => {
+                ShrincsSigner::keygen(seed_label.as_bytes(), max_stateful_signatures)
+                    .unwrap_or_else(|| panic!("fresh keygen failed for seed label {seed_label:?}"))
+            }
             TestKeyMode::Fixture => {
                 let path = fixture_path();
                 if path.is_file() {
@@ -306,9 +309,7 @@ mod tests {
                     }
                 }
                 ShrincsSigner::keygen(seed_label.as_bytes(), max_stateful_signatures)
-                    .unwrap_or_else(|| {
-                        panic!("fresh keygen failed for seed label {seed_label:?}")
-                    })
+                    .unwrap_or_else(|| panic!("fresh keygen failed for seed label {seed_label:?}"))
             }
         }
     }
@@ -617,7 +618,10 @@ mod tests {
             VerifyOutcome::Valid
         );
         // The leaf advanced in the key itself.
-        assert_eq!(keys.stateful.next_leaf_index, INITIAL_STATEFUL_LEAF_INDEX + 1);
+        assert_eq!(
+            keys.stateful.next_leaf_index,
+            INITIAL_STATEFUL_LEAF_INDEX + 1
+        );
 
         let sig2 = sign(&mut keys, &hash).expect("second sign");
         assert_ne!(sig1, sig2, "distinct leaves yield distinct signatures");
@@ -704,8 +708,7 @@ mod tests {
     )]
     #[test]
     fn stateless_signature_rejects_wrong_message_and_tampered_hypertree_path() {
-        let (signing_key, public_key) =
-            fixture_or_fresh_full_key("stateless negative seed", 2);
+        let (signing_key, public_key) = fixture_or_fresh_full_key("stateless negative seed", 2);
         let message = hash_packed(&[b"stateless valid message"]);
         let wrong_message = hash_packed(&[b"stateless wrong message"]);
         let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &message).unwrap();
@@ -734,8 +737,7 @@ mod tests {
     )]
     #[test]
     fn stateless_signature_rejects_malformed_lengths() {
-        let (signing_key, public_key) =
-            fixture_or_fresh_full_key("stateless malformed seed", 2);
+        let (signing_key, public_key) = fixture_or_fresh_full_key("stateless malformed seed", 2);
         let message = hash_packed(&[b"stateless malformed message"]);
         let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &message).unwrap();
         let expected = expected_key(&public_key);
@@ -804,11 +806,7 @@ mod tests {
         let (mut key, _) = ShrincsSigner::keygen(b"import counter seed", 4).unwrap();
         key.stateful.next_leaf_index = 5; // max + 1: exhausted, still valid
         let (imported, _) = ShrincsSigner::import_signing_key(key).unwrap();
-        assert!(ShrincsSigner::sign_stateful_raw(
-            &mut { imported },
-            b"no leaves left"
-        )
-        .is_none());
+        assert!(ShrincsSigner::sign_stateful_raw(&mut { imported }, b"no leaves left").is_none());
     }
 
     #[test]
@@ -860,12 +858,9 @@ mod tests {
         let signature = ShrincsSigner::sign_stateful_raw(&mut imported, &message).unwrap();
         assert_eq!(signature.auth_path.len(), 2);
         let expected = word32(&pk.public_key_commitment).unwrap();
-        assert!(ShrincsVerifier::new().verify_stateful_unsafe_raw(
-            expected,
-            &pk,
-            &message,
-            &signature
-        ));
+        assert!(
+            ShrincsVerifier::new().verify_stateful_unsafe_raw(expected, &pk, &message, &signature)
+        );
     }
 
     // Boundary coverage for the stateful tree: the lowest live leaf (1) and the

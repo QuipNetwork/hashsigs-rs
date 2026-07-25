@@ -25,18 +25,18 @@
 //! public-key commitments stay on keccak under every suite and are therefore
 //! owned outside this module.
 
-mod ops;
 mod address;
 pub(crate) mod backend;
+mod ops;
 pub(crate) mod suite;
 
-pub(crate) use ops::{
-    base_w16_digit, base_w_digit, derive32, hash_node, hash_packed, keccak_packed, read_bits32,
-    read_bits64, word32, wots_digest_bytes,
-};
 pub(crate) use address::{
     address_word32, fors_address_word, hypertree_address_word, wots_address_base,
     wots_chain_address_word, AddressWord32,
+};
+pub(crate) use ops::{
+    base_w16_digit, base_w_digit, derive32, hash_node, hash_packed, keccak_packed, read_bits32,
+    read_bits64, word32, wots_digest_bytes,
 };
 // These three stay `pub` (not `pub(crate)`) because `shrincs::mod`/`shrincs::verifier`
 // re-export them as part of the crate's public API (unchanged from their pre-move

@@ -62,11 +62,8 @@ fn stateful_erc7913_adapter_byte_pins_against_solidity_vector() {
         .expect("stateful action message must be exactly 32 bytes");
     let envelope_bytes = encode_stateful_envelope(&oracle.public_key, &oracle.signature);
 
-    let outcome = ShrincsVerifier::new().verify(
-        &oracle.current_shrincs_public_key,
-        &hash,
-        &envelope_bytes,
-    );
+    let outcome =
+        ShrincsVerifier::new().verify(&oracle.current_shrincs_public_key, &hash, &envelope_bytes);
     assert_eq!(outcome, VerifyOutcome::Valid);
 
     // A key of the wrong length is reported Invalid (Solidity: 0xffffffff),
