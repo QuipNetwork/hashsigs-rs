@@ -11,6 +11,17 @@
 # Prereqs:
 #   rustup target add wasm32-unknown-unknown
 #   cargo install wasm-bindgen-cli --version 0.2.100   # must equal the crate's wasm-bindgen version
+#
+# Profile scope: this always builds the default profile (default-profile-256s,
+# i.e. 256s-keccak) -- `ts/test/conformance.test.mjs` therefore only exercises
+# the WASM boundary for that one profile; the 256s-sha2 hash-suite switch and
+# the 128s params are covered on the native Rust side (`cargo test` under
+# each `profile-*` feature) but never through wasm-bindgen. To manually check
+# another profile through the WASM boundary, rebuild with
+# `--no-default-features --features wasm-bindings,profile-256s-sha2` (or
+# `profile-128s-q18`/`profile-128s-q20`) before running this script's
+# `cargo rustc` step and re-run `ts/test/conformance.test.mjs` against that
+# build; this isn't wired into CI as a second automated pass.
 
 set -euo pipefail
 

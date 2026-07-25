@@ -2,6 +2,13 @@
 // exercises the real signing surface through both loaders. This is the only
 // test of the packaging layer itself (loaders, exports map, ESM/CJS scoping,
 // base64-inline path), so it must run after `npm run build` and gate publish.
+//
+// Profile scope: `npm run build` (via `bin/build-wasm.sh`) always builds the
+// default 256s-keccak profile, so this suite only exercises that one profile
+// through the WASM boundary. The 256s-sha2 hash-suite switch and the 128s
+// params are covered on the native Rust side (`cargo test` under each
+// `profile-*` feature) but not through wasm-bindgen; see build-wasm.sh's
+// header comment for how to manually build/test another profile.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
