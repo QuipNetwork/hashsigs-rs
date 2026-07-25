@@ -237,28 +237,31 @@ reruns the selected `test-fast.sh` area whenever something changes.
 - `mod.rs` — module root; owns commitment derivation and action-hash dispatch,
   and composes the independent `sphincs_plus_c` (stateless) and `uxmss`
   (stateful) modules.
-- `keys.rs` (`pub`) — the composed `Keys` type and `Commitment` newtype:
-  `compute_commitment`, `recompute_commitment`, `recover_commitment`,
-  `import`, `reset`, and 264-byte serialization.
-- `signer.rs` (`pub`) — `ShrincsSigner`: key generation, signing-key import,
-  and stateful/stateless signing.
-- `verifier.rs` (`pub`) — `ShrincsVerifier`: `verify_stateful` and
+- `key.rs` (`pub`) — the composed `Keys` type, the `Commitment` newtype
+  (`Commitment::of`, `Commitment::from_bytes`), the `PublicKey` bundle wire
+  type and its ABI codec, and `compute_commitment`/`recompute_commitment`/
+  `recover_commitment`/`import`/`reset` plus 264-byte serialization.
+  Consolidates the former `public_key.rs` to mirror `sphincs_plus_c::key`.
+- `signer.rs` (`pub`) — `ShrincsSigner` (key generation, signing-key import,
+  and stateless signing) and the free `sign` function (stateful signing that
+  advances the key in place). Folds in the former `signer_types.rs` and
+  `signer_utils.rs` helpers.
+- `signature.rs` (`pub`) — the stateful signature wire type and the composite
+  signature codecs.
+- `verifier.rs` (`pub`) — `ShrincsVerifier`: `verify`, `verify_stateful`, and
   `verify_stateless`.
 - `uxmss.rs` (`pub(crate)`) — the stateful half (UXMSS over WOTS+):
-  `SkSeed`/`PrfSeed`/`PkSeed`/`Root` newtypes, `Secret`/`PublicKey`/`Key`, and
-  stateful signing.
-- `public_key.rs` — the stateful public-key wire layout and commitment
-  derivation, shared by `dispatch`, `signer_utils`, and `signer` so
-  encoding/decoding and commitment computation stay on one path.
-- `signer_types.rs`, `signer_utils.rs` — internal signer helper types and
-  utilities.
+  `SkSeed`/`PrfSeed`/`PkSeed`/`Root` newtypes, `PrivateKey`/`PublicKey`/`Key`,
+  and stateful signing.
 - `dispatch.rs` — internal action-hash dispatch glue.
 - `vector_conformance.rs` — vector-conformance tests.
 - `test_fixtures.rs` (`pub(crate)`) — test fixtures.
 
 The stateless half, `sphincs_plus_c`, is a sibling top-level module at
 `src/sphincs_plus_c/`, not a child of `shrincs/`. FORS-C and hypertree logic
-live there and in `src/primitives/`.
+live there (`fors_c.rs`, `hypertree.rs`); the scheme-neutral building blocks
+(`hash/`, `abi.rs`, `buf.rs`, `profiles.rs`, `treehash.rs`) sit at the crate
+root.
 
 ## WASM Testing
 
@@ -578,17 +581,18 @@ NOTE: if on Mac, do not use brew to install rust and instead use https://www.rus
 ├── bin/
 │   └── build-wasm.sh  # cargo + wasm-bindgen helper (nodejs + web → ts/src)
 ├── src/
-│   ├── envelope.rs      # signature envelope encoding
-│   ├── primitives/      # shared hash/WOTS-C/profile building blocks
-│   ├── wotsplus/        # WOTS+ primitives
-│   ├── sphincs_plus_c/  # stateless SPHINCS+C scheme
+│   ├── hash/            # tagged hash suite (keccak / sha2)
+│   ├── abi.rs           # Solidity-compatible ABI encode/decode
+│   ├── profiles.rs      # compile-time parameter sets
+│   ├── treehash.rs      # Merkle tree hashing
+│   ├── wots_c/, wotsplus/  # WOTS-C / WOTS+ primitives
+│   ├── sphincs_plus_c/  # stateless SPHINCS+C scheme (fors_c, hypertree, key)
 │   ├── shrincs/         # composed SHRINCS keys, signer, verifier (flat)
-│   │   ├── keys.rs      # Keys / Commitment, public API
-│   │   ├── signer.rs    # ShrincsSigner, public API
+│   │   ├── key.rs       # Keys / Commitment / PublicKey, public API
+│   │   ├── signer.rs    # ShrincsSigner + free sign(), public API
 │   │   ├── verifier.rs  # ShrincsVerifier, public API
-│   │   ├── uxmss.rs     # stateful UXMSS half, crate-internal
-│   │   └── public_key.rs  # stateful public-key encoding + commitment derivation
-│   └── wasm/      # Verifier / signer wasm-bindgen surface
+│   │   └── uxmss.rs     # stateful UXMSS half, crate-internal
+│   └── wasm/      # verifier / signer wasm-bindgen surface
 ├── ts/            # @quip.network/hashsigs-wasm (loadShrincsWasm entry)
 ├── solana/        # Solana program implementation
 └── tests/         # Test vectors and unit tests
@@ -605,11 +609,12 @@ components:
   the fast-path signing chain.
 
 `shrincs` binds the two into a `Keys` and exposes them through three public
-modules: `keys` (the composed key type and commitment), `signer`
-(`ShrincsSigner`), and `verifier` (`ShrincsVerifier`).
+modules: `key` (the composed key type, the `PublicKey` bundle, and the
+`Commitment`), `signer` (`ShrincsSigner` and the free `sign`), and `verifier`
+(`ShrincsVerifier`).
 
 Public API stability note: the stable public surface is
-`hashsigs_rs::shrincs::keys`, `hashsigs_rs::shrincs::signer`, and
+`hashsigs_rs::shrincs::key`, `hashsigs_rs::shrincs::signer`, and
 `hashsigs_rs::shrincs::verifier`.
 
 ## License
