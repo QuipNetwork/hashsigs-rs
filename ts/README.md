@@ -109,6 +109,13 @@ already-exhausted key: stateful signing then throws
 > depends on. Persist after every `sign`, and never sign again from an older
 > snapshot.
 
+> **Performance:** every `shrincs.*` operation re-validates the full secret
+> key — it recomputes the UXMSS root (up to `maxSignatures` hashes) and the
+> SPHINCS+C root on each call. This is inherent to the stateless key-in /
+> key-out API: each call receives the secret bytes across the wasm boundary
+> and re-checks them, so per-call latency scales with `maxSignatures`. Choose
+> `maxSignatures` no larger than you need.
+
 When the stateful budget runs out, call `shrincs.signStateless` for unlimited
 recovery-path signing, or `shrincs.reset(keys, newSeed)` to start a fresh
 stateful chain. `reset` requires a new 32-byte seed, produces a new

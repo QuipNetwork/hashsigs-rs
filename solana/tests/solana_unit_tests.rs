@@ -253,25 +253,16 @@ pub mod wotsplus_solana_test {
         let result = context
             .banks_client
             .process_transaction_with_metadata(transaction)
-            .await;
+            .await
+            .unwrap();
 
-        match result {
-            Ok(result) => {
-                let metadata = result.metadata.unwrap();
-                let compute_units = metadata.compute_units_consumed;
-                msg!("Verify Empty Signature compute units: {}", compute_units);
-                msg!(
-                    "Verify Empty Signature return data: {:?}",
-                    metadata.return_data
-                );
-                let binding = metadata.return_data.unwrap();
-                assert_eq!(binding.data, vec![0]);
-            }
-            Err(err) => {
-                msg!("Transaction failed: {:?}", err);
-                panic!("Transaction should have succeeded");
-            }
-        }
+        // Fail closed: an invalid (empty) signature must abort the instruction
+        // so a CPI caller checking only instruction success cannot treat it as
+        // accepted. The verdict boolean is still written to return data first.
+        assert!(
+            result.result.is_err(),
+            "invalid signature must fail the transaction"
+        );
     }
 
     #[tokio::test]

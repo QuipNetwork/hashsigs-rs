@@ -532,18 +532,26 @@ pub fn shrincs_verify_stateless(
 /// and then MUTATED IN PLACE with the new stateful seeds and a reset leaf
 /// counter — the caller's `keys.secretKey` Uint8Array changes after this
 /// call, and its `publicKeyCommitment` changes with it (the stateless half
-/// and `maxSignatures` are untouched). `newSeed` is arbitrary-length seed
-/// material; this wasm build has no RNG, so the caller must supply fresh
-/// entropy.
+/// and `maxSignatures` are untouched). `newSeed` must be exactly 32 bytes of
+/// fresh entropy (matching `keygen`); this wasm build has no RNG, so the
+/// caller must supply it.
 ///
 /// # Errors
 ///
 /// Returns a `JsValue` error with:
-/// - `ERR_BAD_LENGTH` when `secretKey` is not 264 bytes
+/// - `ERR_BAD_LENGTH` when `secretKey` is not 264 bytes or `newSeed` is not
+///   exactly 32 bytes
 /// - `ERR_IMPORT_INVALID` when the secret fails root/counter validation
 #[cfg(feature = "wasm-bindings")]
 #[wasm_bindgen(js_name = shrincsReset)]
 pub fn shrincs_reset(secret_key: &mut [u8], new_seed: &[u8]) -> Result<(), JsValue> {
+    // Fail fast on weak seed entropy, symmetric with `shrincs_keygen`.
+    let new_seed = bytes_word32(new_seed).map_err(|_| {
+        js_error(WasmErr {
+            code: ERR_BAD_LENGTH,
+            message: format!("newSeed must be exactly 32 bytes, got {}", new_seed.len()),
+        })
+    })?;
     let candidate = deserialize_shrincs_signing_key(secret_key).map_err(js_error)?;
     let (mut keys, _public_key) =
         ShrincsSigner::import_signing_key(candidate).ok_or_else(|| {
@@ -554,7 +562,7 @@ pub fn shrincs_reset(secret_key: &mut [u8], new_seed: &[u8]) -> Result<(), JsVal
                     .into(),
             })
         })?;
-    keys.reset(new_seed);
+    keys.reset(&new_seed);
     secret_key.copy_from_slice(&serialize_shrincs_signing_key(&keys));
     Ok(())
 }
@@ -840,7 +848,7 @@ mod tests {
         let stateless_public_key = keys.stateless_public_key();
         let original_commitment = keys.public_key_commitment();
 
-        shrincs_reset(&mut secret_key, b"a fresh reset seed").unwrap();
+        shrincs_reset(&mut secret_key, &[0x99u8; 32]).unwrap();
 
         let reset_commitment = shrincs_compute_public_key_commitment(&secret_key).unwrap();
         assert_ne!(reset_commitment, original_commitment);
@@ -857,6 +865,11 @@ mod tests {
         let signature = shrincs_sign(&message, &mut secret_key).unwrap();
         assert!(shrincs_verify(&signature, &message, &reset_commitment));
     }
+
+    // The `shrincs_reset` wrong-length rejection (ERR_BAD_LENGTH) is covered in
+    // ts/test/conformance.test.mjs — the public JsValue error path cannot be
+    // exercised on a non-wasm target (constructing the JsValue panics), so the
+    // native tests only drive the success path.
 
     #[cfg(feature = "wasm-bindings")]
     #[test]

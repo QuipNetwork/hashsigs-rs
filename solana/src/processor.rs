@@ -251,10 +251,13 @@ fn process_verify(
 
     let public_key = PublicKey::from(public_key);
     let is_valid = wots.verify(&public_key, message, &signature);
+    // Fail closed: see `process_sphincs_plus_c_verify`. Write the boolean
+    // first for callers that inspect return data, then abort the transaction
+    // on an invalid signature so a CPI caller checking only instruction
+    // success cannot treat it as accepted.
+    set_return_data(&[is_valid as u8]);
     if !is_valid {
-        set_return_data(&[0]);
-    } else {
-        set_return_data(&[1]);
+        return Err(ProgramError::InvalidArgument);
     }
     Ok(())
 }
@@ -277,10 +280,10 @@ fn process_verify_with_randomization(
         &randomization_elements,
     );
 
+    // Fail closed: see `process_sphincs_plus_c_verify`.
+    set_return_data(&[is_valid as u8]);
     if !is_valid {
-        set_return_data(&[0]);
-    } else {
-        set_return_data(&[1]);
+        return Err(ProgramError::InvalidArgument);
     }
     Ok(())
 }

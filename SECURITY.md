@@ -176,6 +176,21 @@ Guidance:
 - once the stateful budget runs out, switch to the stateless path or call
   `reset` with a fresh seed; don't work around the exhaustion error
 
+Persisted-state rollback:
+
+- the persisted secret carries the leaf counter, but `import` accepts any
+  in-range counter — it cannot distinguish a current key from an *older*
+  serialized snapshot restored from a backup. Restoring an older persisted
+  copy and signing re-consumes already-used leaves: the same catastrophic
+  reuse as signing from a stale in-memory clone.
+- a stateless library owns no persistent state, so it cannot enforce
+  anti-rollback on its own. The caller must persist a monotonic high-water
+  mark for the leaf index and refuse to load or sign below it. The Solana
+  example program (`solana/examples/shrincs-account`) enforces exactly this
+  on-chain — its account state rejects a non-monotonic leaf index with
+  `StatefulIndexRollback` — and is the reference for the guarantee off-chain
+  callers must provide themselves.
+
 ### Public-key commitment binding is security-critical
 
 The current SHRINCS design uses a fixed public-key model tied together by

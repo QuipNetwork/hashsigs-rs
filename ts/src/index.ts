@@ -238,8 +238,9 @@ function makeShrincs(wasm: ShrincsWasmModule) {
      * reuse). MUTATES `keys.stateful` IN PLACE (fresh seeds, root,
      * `nextLeafIndex` back to 1, `remaining` back to `maxSignatures`) and
      * `keys.publicKeyCommitment`; `keys.stateless` and `maxSignatures` are
-     * untouched. This wasm build has no RNG — `newSeed` must be fresh
-     * entropy the caller supplies.
+     * untouched. This wasm build has no RNG — `newSeed` must be exactly
+     * 32 bytes of fresh entropy the caller supplies (matching `keygen`);
+     * a wrong length throws `ERR_BAD_LENGTH`.
      */
     reset(keys: ShrincsKeys, newSeed: Uint8Array): void {
       const secret = shrincsKeysToSecretBytes(keys);

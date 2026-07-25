@@ -361,6 +361,20 @@ for (const [name, load] of loaders) {
     );
   });
 
+  test(`${name}: shrincs.reset requires an exactly-32-byte seed`, async () => {
+    const { shrincs, wasm } = await loadHashSigsFor(load);
+    const keys = shrincs.keygen(SEED, 4);
+    const secret = shrincsKeysToSecretBytes(keys);
+    assert.throws(
+      () => wasm.shrincsReset(secret, new Uint8Array(31)),
+      (e) => e instanceof Error && e.code === "ERR_BAD_LENGTH",
+    );
+    assert.throws(
+      () => wasm.shrincsReset(secret, new Uint8Array(33)),
+      (e) => e instanceof Error && e.code === "ERR_BAD_LENGTH",
+    );
+  });
+
   test(`${name}: persistence round trip via shrincsKeysToSecretBytes -> shrincsImportSigningKey`, async () => {
     const { shrincs, shrincsImportSigningKey } = await loadHashSigsFor(load);
     const keys = shrincs.keygen(SEED, 4);
