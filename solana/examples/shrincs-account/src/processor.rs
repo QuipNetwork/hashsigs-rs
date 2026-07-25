@@ -1996,6 +1996,222 @@ mod tests {
         assert_custom_error(&result.result, ShrincsAccountError::StatefulLeafRejected);
     }
 
+    // Crossing a bitmap-word boundary: a stateful leaf in word 1 (leaf index
+    // >= 256) must create a fresh word-1 bitmap PDA rather than touching word 0.
+    //
+    // This is `#[ignore]`d because reaching leaf 256 requires advancing the
+    // signer with 256 sequential real stateful signatures — the leaf index is
+    // `auth_path.len()`, and there is no arbitrary-leaf signing API exposed to
+    // a downstream crate (`sign_stateful_raw_at_leaf` is `cfg(test)`-internal to
+    // `hashsigs-rs`). The example suite is not run in CI, and a bare
+    // `cargo test` skips ignored tests, so this never runs in CI/CD. Run it
+    // manually with:
+    //   cargo test -p shrincs-account-example -- --ignored bitmap_word_growth
+    #[tokio::test]
+    #[ignore = "slow: 256 sequential signs to cross the bitmap-word boundary; run with --ignored"]
+    async fn stateful_action_bitmap_word_growth_across_word_boundary() {
+        // First leaf of bitmap word 1: bitmap_word_index(256) == 256 >> 8 == 1,
+        // bitmap_bit_index(256) == 256 & 0xff == 0.
+        const BOUNDARY_LEAF: u32 = 256;
+
+        let (program_test, program_id) = setup_test().await;
+        let mut context = program_test.start_with_context().await;
+        let program_id = program_id.pubkey();
+        let owner = Keypair::new();
+        let salt = [62u8; HASH_LEN];
+
+        // maxSignatures must cover leaf 256 (valid leaves are 1..=maxSignatures).
+        let (mut keys, public_key) =
+            ShrincsSigner::keygen(b"shrincs-account-example bitmap word growth", BOUNDARY_LEAF)
+                .expect("keygen");
+        let commitment = fixed_hash_bytes(&public_key.public_key_commitment);
+        let account_pda_key =
+            init_account(&mut context, &program_id, &owner, salt, commitment).await;
+
+        // Switch to LeafBitmap before any stateful use (the policy is not frozen yet).
+        context.last_blockhash = context.get_new_latest_blockhash().await.unwrap();
+        let policy = policy_instruction(
+            &program_id,
+            &account_pda_key,
+            &owner.pubkey(),
+            TestInstruction::SetPolicyLeafBitmap,
+        );
+        let transaction = Transaction::new_signed_with_payer(
+            &[policy],
+            Some(&context.payer.pubkey()),
+            &[&context.payer, &owner],
+            context.last_blockhash,
+        );
+        context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap()
+            .result
+            .expect("set_policy_leaf_bitmap should succeed");
+
+        let domain_separator = messages::domain_separator(&program_id, &account_pda_key);
+        let action_type = messages::ACTION_STATEFUL;
+
+        // Burn leaves 1..=255 off-chain (contexts discarded) so the signer's
+        // next signature lands on leaf 256, the first leaf of word 1.
+        for i in 1..BOUNDARY_LEAF {
+            let burn_ctx = messages::action_context(
+                domain_separator,
+                [0u8; HASH_LEN],
+                [0u8; HASH_LEN],
+                action_type,
+                messages::action_payload(&action_type, &i.to_le_bytes()),
+            );
+            ShrincsSigner::sign_stateful_action(&mut keys, &public_key, &burn_ctx)
+                .expect("burn sign");
+        }
+        // Clone at the leaf-256-ready state for the replay assertion below.
+        let mut keys_replay = keys.clone();
+
+        // Real leaf-256 action, signed over the fresh account's context
+        // (on-chain nonce and key_version are still zero — only this one action
+        // is submitted before the assertion).
+        let payload_hash = messages::action_payload(&action_type, b"word-boundary action");
+        let action_ctx = messages::action_context(
+            domain_separator,
+            [0u8; HASH_LEN],
+            [0u8; HASH_LEN],
+            action_type,
+            payload_hash,
+        );
+        let signature =
+            ShrincsSigner::sign_stateful_action(&mut keys, &public_key, &action_ctx).expect("sign");
+        assert_eq!(
+            signature.auth_path.len() as u32,
+            BOUNDARY_LEAF,
+            "signature must be at the word-boundary leaf",
+        );
+
+        // The word-1 bitmap PDA must not exist yet (word 0 covers leaves 0..255).
+        let (word1_bitmap_key, _) =
+            crate::pda::bitmap_word_pda(&program_id, &account_pda_key, &[0u8; HASH_LEN], 1);
+        assert!(
+            context
+                .banks_client
+                .get_account(word1_bitmap_key)
+                .await
+                .unwrap()
+                .is_none(),
+            "word-1 bitmap PDA must not exist before the boundary-crossing action",
+        );
+
+        context.last_blockhash = context.get_new_latest_blockhash().await.unwrap();
+        let action = Instruction {
+            program_id,
+            accounts: vec![
+                AccountMeta::new(account_pda_key, false),
+                AccountMeta::new(word1_bitmap_key, false),
+                AccountMeta::new(context.payer.pubkey(), true),
+                AccountMeta::new_readonly(solana_program::system_program::id(), false),
+            ],
+            data: {
+                let mut data = Vec::new();
+                TestInstruction::StatefulAction(StatefulActionArgs {
+                    public_key: public_key.clone().into(),
+                    action_type,
+                    payload_hash,
+                    signature: signature.into(),
+                })
+                .serialize(&mut data)
+                .unwrap();
+                data
+            },
+        };
+        let transaction = Transaction::new_signed_with_payer(
+            &[action],
+            Some(&context.payer.pubkey()),
+            &[&context.payer],
+            context.last_blockhash,
+        );
+        context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap()
+            .result
+            .expect("boundary-crossing stateful action should succeed");
+
+        // The action grew the bitmap: the word-1 PDA now exists, is program-owned,
+        // is exactly 32 bytes, and has the leaf-256 bit set.
+        let grown = context
+            .banks_client
+            .get_account(word1_bitmap_key)
+            .await
+            .unwrap()
+            .expect("word-1 bitmap PDA created by the boundary-crossing action");
+        assert_eq!(
+            grown.owner, program_id,
+            "grown bitmap word must be program-owned"
+        );
+        assert_eq!(
+            grown.data.len(),
+            HASH_LEN,
+            "bitmap word is exactly 32 bytes"
+        );
+        let mut word = [0u8; HASH_LEN];
+        word.copy_from_slice(&grown.data);
+        assert!(
+            crate::pda::leaf_bit_is_set(&word, BOUNDARY_LEAF),
+            "leaf-256 bit must be set in the grown word-1 bitmap",
+        );
+
+        // Replay leaf 256 from the independent clone: the word-1 bitmap now
+        // tracks the consumed leaf, so it is rejected before signature
+        // verification (the leaf-use check runs first).
+        let replay_payload = messages::action_payload(&action_type, b"word-boundary replay");
+        let replay_ctx = messages::action_context(
+            domain_separator,
+            [0u8; HASH_LEN],
+            [0u8; HASH_LEN],
+            action_type,
+            replay_payload,
+        );
+        let replay_sig =
+            ShrincsSigner::sign_stateful_action(&mut keys_replay, &public_key, &replay_ctx)
+                .expect("sign");
+        assert_eq!(replay_sig.auth_path.len() as u32, BOUNDARY_LEAF);
+        context.last_blockhash = context.get_new_latest_blockhash().await.unwrap();
+        let replay = Instruction {
+            program_id,
+            accounts: vec![
+                AccountMeta::new(account_pda_key, false),
+                AccountMeta::new(word1_bitmap_key, false),
+                AccountMeta::new(context.payer.pubkey(), true),
+                AccountMeta::new_readonly(solana_program::system_program::id(), false),
+            ],
+            data: {
+                let mut data = Vec::new();
+                TestInstruction::StatefulAction(StatefulActionArgs {
+                    public_key: public_key.into(),
+                    action_type,
+                    payload_hash: replay_payload,
+                    signature: replay_sig.into(),
+                })
+                .serialize(&mut data)
+                .unwrap();
+                data
+            },
+        };
+        let transaction = Transaction::new_signed_with_payer(
+            &[replay],
+            Some(&context.payer.pubkey()),
+            &[&context.payer],
+            context.last_blockhash,
+        );
+        let result = context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap();
+        assert_custom_error(&result.result, ShrincsAccountError::StatefulLeafRejected);
+    }
+
     #[tokio::test]
     async fn stateless_action_valid_signature_advances_state() {
         let (program_test, program_id) = setup_test().await;
