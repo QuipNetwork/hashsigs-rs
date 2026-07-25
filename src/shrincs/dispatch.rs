@@ -226,3 +226,79 @@ pub fn prepare_stateless_delegation(
         signature.to_bytes(),
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::shrincs::signature::encode_stateless_envelope;
+    use crate::shrincs::signer::ShrincsSigner;
+
+    fn keypair(seed: &[u8]) -> (crate::shrincs::Keys, PublicKey) {
+        ShrincsSigner::keygen(seed, 4).expect("keygen must succeed for a valid seed/budget")
+    }
+
+    fn sample_context() -> ActionContext {
+        ActionContext {
+            domain_separator: [1u8; HASH_LEN],
+            nonce: [0u8; HASH_LEN],
+            key_version: [0u8; HASH_LEN],
+            action_type: [2u8; HASH_LEN],
+            payload_hash: [3u8; HASH_LEN],
+        }
+    }
+
+    #[test]
+    fn valid_action_context_accepts_a_well_formed_context() {
+        assert!(valid_action_context(&sample_context()));
+    }
+
+    #[test]
+    fn valid_action_context_rejects_each_zeroed_required_field() {
+        let mut zero_domain = sample_context();
+        zero_domain.domain_separator = [0u8; HASH_LEN];
+        assert!(!valid_action_context(&zero_domain));
+
+        let mut zero_action_type = sample_context();
+        zero_action_type.action_type = [0u8; HASH_LEN];
+        assert!(!valid_action_context(&zero_action_type));
+
+        let mut zero_payload = sample_context();
+        zero_payload.payload_hash = [0u8; HASH_LEN];
+        assert!(!valid_action_context(&zero_payload));
+
+        // nonce/key_version may legitimately be zero (a fresh account) --
+        // only domain_separator/action_type/payload_hash are required non-zero.
+        let mut zero_nonce_and_key_version = sample_context();
+        zero_nonce_and_key_version.nonce = [0u8; HASH_LEN];
+        zero_nonce_and_key_version.key_version = [0u8; HASH_LEN];
+        assert!(valid_action_context(&zero_nonce_and_key_version));
+    }
+
+    #[test]
+    fn prepare_stateless_delegation_rejects_a_mismatched_commitment() {
+        let (signing_key, public_key) =
+            keypair(b"dispatch prepare_stateless_delegation wrong commitment");
+        let hash = [0x77u8; HASH_LEN];
+        let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &hash).expect("sign");
+        let envelope = encode_stateless_envelope(&public_key, &signature);
+
+        let mut wrong_commitment = [0u8; HASH_LEN];
+        wrong_commitment.copy_from_slice(&public_key.public_key_commitment);
+        wrong_commitment[0] ^= 0x01;
+
+        assert!(prepare_stateless_delegation(wrong_commitment, &envelope).is_none());
+    }
+
+    #[test]
+    fn prepare_stateless_delegation_rejects_a_malformed_envelope() {
+        let (_signing_key, public_key) =
+            keypair(b"dispatch prepare_stateless_delegation malformed envelope");
+        let commitment: [u8; HASH_LEN] = public_key
+            .public_key_commitment
+            .try_into()
+            .expect("commitment is 32 bytes");
+
+        assert!(prepare_stateless_delegation(commitment, &[]).is_none());
+        assert!(prepare_stateless_delegation(commitment, &[0xffu8; 3]).is_none());
+    }
+}
