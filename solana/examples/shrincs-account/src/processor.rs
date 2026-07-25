@@ -1836,6 +1836,184 @@ mod tests {
         assert_eq!(state.stateless_signatures_used, 1);
     }
 
+    /// Overwrite the on-chain `ShrincsAccountState` for `account_pda_key`,
+    /// preserving lamports/owner/rent-epoch. Used to reach states (e.g.
+    /// `stateless_signatures_used` at the budget boundary) that would take an
+    /// infeasible number of real transactions to reach honestly.
+    async fn set_state(
+        context: &mut ProgramTestContext,
+        account_pda_key: &SdkPubkey,
+        state: &ShrincsAccountState,
+    ) {
+        let account = context
+            .banks_client
+            .get_account(*account_pda_key)
+            .await
+            .unwrap()
+            .expect("account exists");
+        let mut shared = solana_sdk::account::AccountSharedData::from(account);
+        let mut data = Vec::new();
+        state.serialize(&mut data).unwrap();
+        shared.set_data_from_slice(&data);
+        context.set_account(account_pda_key, &shared);
+    }
+
+    #[tokio::test]
+    async fn stateless_action_rejects_at_budget_exhaustion() {
+        let (program_test, program_id) = setup_test().await;
+        let mut context = program_test.start_with_context().await;
+        let program_id = program_id.pubkey();
+        let owner = Keypair::new();
+        let salt = [50u8; HASH_LEN];
+
+        let (keys, public_key) =
+            ShrincsSigner::keygen(b"shrincs-account-example test stateless budget", 1024)
+                .expect("keygen");
+        let commitment = fixed_hash_bytes(&public_key.public_key_commitment);
+        let account_pda_key =
+            init_account(&mut context, &program_id, &owner, salt, commitment).await;
+
+        let mut state = fetch_state(&mut context, &account_pda_key).await;
+        state.stateless_signatures_used = STATELESS_SIGNATURE_LIMIT;
+        set_state(&mut context, &account_pda_key, &state).await;
+
+        let result = try_stateless_action(
+            &mut context,
+            &program_id,
+            &account_pda_key,
+            &keys,
+            &public_key,
+            commitment,
+        )
+        .await;
+        assert_custom_error(&result, ShrincsAccountError::BudgetExhausted);
+
+        let after = fetch_state(&mut context, &account_pda_key).await;
+        assert_eq!(
+            after.stateless_signatures_used, STATELESS_SIGNATURE_LIMIT,
+            "a rejected action must not advance the counter past the limit"
+        );
+    }
+
+    #[tokio::test]
+    async fn stateless_action_rejects_recovery_rotation_without_arming() {
+        let (program_test, program_id) = setup_test().await;
+        let mut context = program_test.start_with_context().await;
+        let program_id = program_id.pubkey();
+        let owner = Keypair::new();
+        let salt = [51u8; HASH_LEN];
+
+        let (keys, public_key) =
+            ShrincsSigner::keygen(b"shrincs-account-example test stateless not armed", 1024)
+                .expect("keygen");
+        let commitment = fixed_hash_bytes(&public_key.public_key_commitment);
+        let account_pda_key =
+            init_account(&mut context, &program_id, &owner, salt, commitment).await;
+
+        // Switch to RecoveryRotation but do NOT enter recovery mode.
+        context.last_blockhash = context.get_new_latest_blockhash().await.unwrap();
+        let instruction = policy_instruction(
+            &program_id,
+            &account_pda_key,
+            &owner.pubkey(),
+            TestInstruction::SetPolicyRecoveryRotation,
+        );
+        let transaction = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer, &owner],
+            context.last_blockhash,
+        );
+        context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap()
+            .result
+            .expect("set_policy_recovery_rotation should succeed");
+
+        let result = try_stateless_action(
+            &mut context,
+            &program_id,
+            &account_pda_key,
+            &keys,
+            &public_key,
+            commitment,
+        )
+        .await;
+        assert_custom_error(&result, ShrincsAccountError::RecoveryNotArmed);
+    }
+
+    #[tokio::test]
+    async fn stateless_action_rejects_tampered_signature() {
+        let (program_test, program_id) = setup_test().await;
+        let mut context = program_test.start_with_context().await;
+        let program_id = program_id.pubkey();
+        let owner = Keypair::new();
+        let salt = [52u8; HASH_LEN];
+
+        let (keys, public_key) =
+            ShrincsSigner::keygen(b"shrincs-account-example test stateless tampered", 1024)
+                .expect("keygen");
+        let commitment: [u8; HASH_LEN] = public_key
+            .public_key_commitment
+            .clone()
+            .try_into()
+            .expect("commitment is 32 bytes");
+        let account_pda_key =
+            init_account(&mut context, &program_id, &owner, salt, commitment).await;
+
+        let domain_separator = messages::domain_separator(&program_id, &account_pda_key);
+        let action_type = messages::ACTION_STATELESS;
+        let payload_hash = messages::action_payload(&action_type, b"tampered stateless payload");
+        let context_msg = messages::action_context(
+            domain_separator,
+            [0u8; HASH_LEN],
+            [0u8; HASH_LEN],
+            action_type,
+            payload_hash,
+        );
+        let message =
+            CoreShrincsVerifier::new().stateless_action_message_hash(commitment, &context_msg);
+        let mut signature = ShrincsSigner::sign_stateless_raw(&keys, &message).expect("sign");
+        signature.fors.randomizer[0] ^= 0x01; // tamper one byte
+
+        let instruction = Instruction {
+            program_id,
+            accounts: vec![AccountMeta::new(account_pda_key, false)],
+            data: {
+                let mut data = Vec::new();
+                TestInstruction::StatelessAction(StatelessActionArgs {
+                    public_key: public_key.into(),
+                    action_type,
+                    payload_hash,
+                    signature: signature.into(),
+                })
+                .serialize(&mut data)
+                .unwrap();
+                data
+            },
+        };
+        let transaction = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer],
+            context.last_blockhash,
+        );
+        let result = context
+            .banks_client
+            .process_transaction_with_metadata(transaction)
+            .await
+            .unwrap();
+        assert_custom_error(&result.result, ShrincsAccountError::InvalidSignature);
+        let return_data = result
+            .metadata
+            .expect("metadata present even on failure")
+            .return_data
+            .expect("return data set before the fail-closed abort");
+        assert_eq!(return_data.data, vec![0]);
+    }
+
     #[tokio::test]
     async fn policy_setters_reject_wrong_owner_or_missing_signer() {
         let (program_test, program_id) = setup_test().await;
