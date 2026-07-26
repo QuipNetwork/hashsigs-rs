@@ -32,6 +32,10 @@ default = []
 # struct). Select at most one.
 profile-128s-q18 = []
 profile-128s-q20 = []
+# Heap-back the WOTS+ segment accumulator instead of using a stack array.
+# Solana BPF stack frames are 4 KB, well under SIGNATURE_SIZE, so on-chain
+# builds must opt in. Native and wasm builds keep the stack array.
+heap-buffers = []
 wasm-bindings = [
     "dep:serde-wasm-bindgen",
     "dep:wasm-bindgen",
