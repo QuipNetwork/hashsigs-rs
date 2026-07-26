@@ -276,6 +276,29 @@ impl WOTSPlus {
         chain_out
     }
 
+    /// Derive the secret key segment for chain `i`, then walk its hash chain
+    /// `steps` times starting from `index`.
+    ///
+    /// The secret key segment is `hash(function_key || prf(private_key, i + 1))`;
+    /// callers pass `function_key` (which is `randomization_elements[0]`) rather
+    /// than having it re-read here, so a caller holding both does not index twice.
+    fn compute_chain_segment(
+        &self,
+        i: u16,
+        private_key: &[u8; constants::HASH_LEN],
+        function_key: &[u8; constants::HASH_LEN],
+        randomization_elements: &[[u8; constants::HASH_LEN]],
+        index: u16,
+        steps: u16,
+    ) -> [u8; constants::HASH_LEN] {
+        let mut to_hash = vec![0u8; constants::HASH_LEN * 2];
+        to_hash[..constants::HASH_LEN].copy_from_slice(function_key);
+        to_hash[constants::HASH_LEN..].copy_from_slice(&self.prf(private_key, i + 1));
+
+        let secret_key_segment = (self.hash_fn)(&to_hash);
+        self.chain(&secret_key_segment, randomization_elements, index, steps)
+    }
+
     /// Compute message hash chain indexes
     /// This function performs two main tasks:
     /// 1. Convert the message to base-w representation (or base of CHAIN_LEN representation)
@@ -400,13 +423,10 @@ impl WOTSPlus {
         let mut signature = SignatureBuffer::new();
 
         for (i, &chain_idx) in chain_segments.iter().enumerate() {
-            let mut to_hash = vec![0u8; constants::HASH_LEN * 2];
-            to_hash[..constants::HASH_LEN].copy_from_slice(&function_key);
-            to_hash[constants::HASH_LEN..].copy_from_slice(&self.prf(private_key, (i + 1) as u16));
-
-            let secret_key_segment = (self.hash_fn)(&to_hash);
-            let sig_segment = self.chain(
-                &secret_key_segment,
+            let sig_segment = self.compute_chain_segment(
+                i as u16,
+                private_key,
+                &function_key,
                 &randomization_elements,
                 0,
                 chain_idx as u16,
