@@ -155,7 +155,7 @@ fn process_sign(
         &[
             b"signature",
             signer.key.as_ref(),
-            message.as_ref(),
+            message,
         ],
         program_id
     );
@@ -194,7 +194,7 @@ fn process_sign(
             &[&[
                 b"signature",
                 signer.key.as_ref(),
-                message.as_ref(),
+                message,
                 &[bump_seed],
             ]],
         )?;
