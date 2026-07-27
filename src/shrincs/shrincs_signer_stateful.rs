@@ -19,7 +19,7 @@
 
 use zeroize::Zeroizing;
 
-use super::shrincs_signer_types::{ShrincsSignerResult, ShrincsSigningKey};
+use super::shrincs_signer_types::{ShrincsSignerError, ShrincsSignerResult, ShrincsSigningKey};
 use super::shrincs_signer_utils::{
     address_word32, base_w16_digit, hash_node, hash_packed, WOTS_C_MAX_GRIND_COUNTER,
 };
@@ -36,10 +36,10 @@ pub(crate) fn sign_stateful_raw(
     // signer must advance one leaf at a time and must never reuse a prior leaf.
     let leaf_index = signing_key.next_stateful_leaf_index;
     if leaf_index == 0 {
-        return None;
+        return Err(ShrincsSignerError::StatefulLeavesExhausted);
     }
     if leaf_index > signing_key.max_stateful_signatures {
-        return None;
+        return Err(ShrincsSignerError::StatefulLeavesExhausted);
     }
 
     // sign_stateful_raw_at_leaf already computes the identical auth_path (same
@@ -48,7 +48,7 @@ pub(crate) fn sign_stateful_raw(
     // the dominant signing cost.
     let signature = sign_stateful_raw_at_leaf(signing_key, leaf_index, message)?;
     signing_key.next_stateful_leaf_index = leaf_index.saturating_add(1);
-    Some(signature)
+    Ok(signature)
 }
 
 pub(crate) fn sign_stateful_raw_at_leaf(
@@ -60,10 +60,10 @@ pub(crate) fn sign_stateful_raw_at_leaf(
     // Production signing should use `sign_stateful_raw`, which advances the
     // monotonic `next_stateful_leaf_index` and avoids accidental leaf reuse.
     if leaf_index == 0 {
-        return None;
+        return Err(ShrincsSignerError::StatefulLeavesExhausted);
     }
     if leaf_index > signing_key.max_stateful_signatures {
-        return None;
+        return Err(ShrincsSignerError::StatefulLeavesExhausted);
     }
     let mut signature = sign_stateful_wots_c(
         &signing_key.stateful_sk_seed,
@@ -78,7 +78,7 @@ pub(crate) fn sign_stateful_raw_at_leaf(
         leaf_index,
         signing_key.max_stateful_signatures,
     );
-    Some(signature)
+    Ok(signature)
 }
 
 pub(crate) fn stateful_subtree_root(
@@ -155,7 +155,7 @@ fn sign_stateful_wots_c(
             })
             .collect();
 
-        return Some(StatefulSignature {
+        return Ok(StatefulSignature {
             randomizer,
             counter,
             chains,
@@ -163,7 +163,7 @@ fn sign_stateful_wots_c(
         });
     }
 
-    None
+    Err(ShrincsSignerError::GrindBudgetExhausted)
 }
 
 fn stateful_chain_secret(

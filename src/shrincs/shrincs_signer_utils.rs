@@ -33,6 +33,9 @@ pub(crate) use super::super::shrincs_common::{
 use super::verifier::{PublicKey, HASH_LEN, PROFILE_NAME, STATEFUL_PUBLIC_KEY_BYTES};
 
 pub(crate) const WOTS_C_MAX_GRIND_COUNTER: u32 = 1 << 24;
+#[cfg(any(feature = "profile-128s-q18", feature = "profile-128s-q20"))]
+pub(crate) const FORS_C_MAX_GRIND_COUNTER: u32 = 1 << 30;
+#[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
 pub(crate) const FORS_C_MAX_GRIND_COUNTER: u32 = 1 << 24;
 
 pub(crate) fn public_key_from_components(

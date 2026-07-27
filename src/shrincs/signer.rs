@@ -34,7 +34,7 @@ mod shrincs_signer_types;
 #[path = "shrincs_signer_utils.rs"]
 mod shrincs_signer_utils;
 
-pub use self::shrincs_signer_types::{ShrincsSignerResult, ShrincsSigningKey};
+pub use self::shrincs_signer_types::{ShrincsSignerError, ShrincsSignerResult, ShrincsSigningKey};
 
 use self::shrincs_signer_fors_c::sign_fors_c;
 use self::shrincs_signer_hypertree::{hypertree_public_root, sign_hypertree};
@@ -66,10 +66,10 @@ impl ShrincsSigner {
         max_stateful_signatures: u32,
     ) -> ShrincsSignerResult<(ShrincsSigningKey, PublicKey)> {
         if max_stateful_signatures == 0 {
-            return None;
+            return Err(ShrincsSignerError::InvalidConfiguration);
         }
         if max_stateful_signatures > MAX_STATEFUL_SIGNATURES_LIMIT {
-            return None;
+            return Err(ShrincsSignerError::InvalidConfiguration);
         }
 
         let stateful_sk_seed = derive32(b"shrincs-stateful-sk-seed", seed_material, &[]);
@@ -104,7 +104,7 @@ impl ShrincsSigner {
             hypertree_root,
         );
 
-        Some((signing_key, public_key))
+        Ok((signing_key, public_key))
     }
 
     /// Reconstruct a signing key from previously exported fields (the inverse
@@ -119,11 +119,11 @@ impl ShrincsSigner {
     ) -> ShrincsSignerResult<(ShrincsSigningKey, PublicKey)> {
         let max = candidate.max_stateful_signatures;
         if max == 0 || max > MAX_STATEFUL_SIGNATURES_LIMIT {
-            return None;
+            return Err(ShrincsSignerError::InvalidConfiguration);
         }
         let next = candidate.next_stateful_leaf_index;
         if next < INITIAL_STATEFUL_LEAF_INDEX || next > max.saturating_add(1) {
-            return None;
+            return Err(ShrincsSignerError::InvalidConfiguration);
         }
         // Recompute, never trust: the roots are consensus-critical inputs to
         // every signature this key will produce. The stateful root always
@@ -137,14 +137,14 @@ impl ShrincsSigner {
         let hypertree_root =
             hypertree_public_root(&candidate.stateless_sk_seed, &candidate.pk_seed);
         if stateful_root != candidate.stateful_root || hypertree_root != candidate.hypertree_root {
-            return None;
+            return Err(ShrincsSignerError::InvalidConfiguration);
         }
         let public_key = public_key_from_components(
             encode_stateful_public_key(candidate.stateful_pk_seed, stateful_root, max),
             candidate.pk_seed,
             hypertree_root,
         );
-        Some((candidate, public_key))
+        Ok((candidate, public_key))
     }
 
     /// Sign the verifier's canonical stateful action hash and advance the leaf counter.
@@ -194,7 +194,7 @@ impl ShrincsSigner {
             signed_fors.tree_index,
             signed_fors.leaf_index,
         )?;
-        Some(StatelessSignature {
+        Ok(StatelessSignature {
             fors: signed_fors.signature,
             hypertree,
         })
