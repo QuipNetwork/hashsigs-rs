@@ -24,7 +24,7 @@ pub mod verifier;
 #[cfg(test)]
 mod vector_conformance;
 
-pub use signer::{ShrincsSigner, ShrincsSignerResult, ShrincsSigningKey};
+pub use signer::{ShrincsSigner, ShrincsSignerError, ShrincsSignerResult, ShrincsSigningKey};
 pub use verifier::{
     ActionContext, ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey, RotationContext,
     RotationTarget, ShrincsVerifier, StatefulPublicKey, StatefulRotationTarget, StatefulSignature,

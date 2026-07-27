@@ -153,7 +153,8 @@ impl ShrincsSigner {
         public_key: &PublicKey,
         context: &ActionContext,
     ) -> ShrincsSignerResult<StatefulSignature> {
-        let expected = word32(&public_key.public_key_commitment)?;
+        let expected = word32(&public_key.public_key_commitment)
+            .ok_or(ShrincsSignerError::InvalidConfiguration)?;
         let verifier = ShrincsVerifier::new();
         let message = verifier.stateful_action_message_hash(expected, context);
         sign_stateful_raw_inner(signing_key, &message)
@@ -481,8 +482,8 @@ mod tests {
 
     #[test]
     fn keygen_rejects_empty_or_excessive_stateful_budget() {
-        assert!(ShrincsSigner::keygen(b"seed", 0).is_none());
-        assert!(ShrincsSigner::keygen(b"seed", MAX_STATEFUL_SIGNATURES_LIMIT + 1).is_none());
+        assert!(ShrincsSigner::keygen(b"seed", 0).is_err());
+        assert!(ShrincsSigner::keygen(b"seed", MAX_STATEFUL_SIGNATURES_LIMIT + 1).is_err());
     }
 
     #[cfg_attr(
@@ -510,7 +511,7 @@ mod tests {
 
         // The stateful signer is one-time per leaf. With a budget of one, the
         // next signing attempt must fail instead of reusing the previous leaf.
-        assert!(ShrincsSigner::sign_stateful_raw(&mut signing_key, &message).is_none());
+        assert!(ShrincsSigner::sign_stateful_raw(&mut signing_key, &message).is_err());
     }
 
     #[cfg_attr(
@@ -679,43 +680,43 @@ mod tests {
         let (mut key, _) = ShrincsSigner::keygen(b"import counter seed", 4).unwrap();
         key.next_stateful_leaf_index = 5; // max + 1: exhausted, still valid
         let (imported, _) = ShrincsSigner::import_signing_key(key).unwrap();
-        assert!(ShrincsSigner::sign_stateful_raw(&mut { imported }, b"no leaves left").is_none());
+        assert!(ShrincsSigner::sign_stateful_raw(&mut { imported }, b"no leaves left").is_err());
     }
 
     #[test]
     fn import_rejects_out_of_range_counters_and_budgets() {
         let (mut key, _) = ShrincsSigner::keygen(b"import bounds seed", 4).unwrap();
         key.next_stateful_leaf_index = 0;
-        assert!(ShrincsSigner::import_signing_key(key).is_none());
+        assert!(ShrincsSigner::import_signing_key(key).is_err());
 
         let (mut key, _) = ShrincsSigner::keygen(b"import bounds seed", 4).unwrap();
         key.next_stateful_leaf_index = 6; // max + 2
-        assert!(ShrincsSigner::import_signing_key(key).is_none());
+        assert!(ShrincsSigner::import_signing_key(key).is_err());
 
         let (mut key, _) = ShrincsSigner::keygen(b"import bounds seed", 4).unwrap();
         key.max_stateful_signatures = 0;
-        assert!(ShrincsSigner::import_signing_key(key).is_none());
+        assert!(ShrincsSigner::import_signing_key(key).is_err());
 
         let (mut key, _) = ShrincsSigner::keygen(b"import bounds seed", 4).unwrap();
         key.max_stateful_signatures = 4097; // > MAX_STATEFUL_SIGNATURES_LIMIT
-        assert!(ShrincsSigner::import_signing_key(key).is_none());
+        assert!(ShrincsSigner::import_signing_key(key).is_err());
     }
 
     #[test]
     fn import_rejects_tampered_roots() {
         let (mut key, _) = ShrincsSigner::keygen(b"import tamper seed", 4).unwrap();
         key.stateful_root[0] ^= 0x01;
-        assert!(ShrincsSigner::import_signing_key(key).is_none());
+        assert!(ShrincsSigner::import_signing_key(key).is_err());
 
         let (mut key, _) = ShrincsSigner::keygen(b"import tamper seed", 4).unwrap();
         key.hypertree_root[0] ^= 0x01;
-        assert!(ShrincsSigner::import_signing_key(key).is_none());
+        assert!(ShrincsSigner::import_signing_key(key).is_err());
 
         // Field splice: seeds from one key, roots from another.
         let (key_a, _) = ShrincsSigner::keygen(b"import splice seed A", 4).unwrap();
         let (mut key_b, _) = ShrincsSigner::keygen(b"import splice seed B", 4).unwrap();
         key_b.stateful_root = key_a.stateful_root;
-        assert!(ShrincsSigner::import_signing_key(key_b).is_none());
+        assert!(ShrincsSigner::import_signing_key(key_b).is_err());
     }
 
     #[test]
