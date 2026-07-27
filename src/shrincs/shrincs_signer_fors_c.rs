@@ -24,7 +24,7 @@
 
 use zeroize::Zeroizing;
 
-use super::shrincs_signer_types::{ShrincsSignerResult, ShrincsSigningKey};
+use super::shrincs_signer_types::{ShrincsSignerError, ShrincsSignerResult, ShrincsSigningKey};
 use super::shrincs_signer_utils::{
     fors_address_word, hash_node, hash_packed, pack, read_bits32, read_bits64,
     FORS_C_MAX_GRIND_COUNTER,
@@ -109,7 +109,7 @@ pub(crate) fn sign_fors_c(
         // The verifier aggregates the reconstructed per-tree roots the same way.
         // The public seed is included so roots from a different FORS key cannot
         // be transplanted into this key.
-        return Some(SignedForsC {
+        return Ok(SignedForsC {
             root: hash_node(&[b"fors-pk", &signing_key.pk_seed, &roots]),
             signature: ForsSignature {
                 randomizer: randomizer.to_vec(),
@@ -121,7 +121,7 @@ pub(crate) fn sign_fors_c(
         });
     }
 
-    None
+    Err(ShrincsSignerError::GrindBudgetExhausted)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

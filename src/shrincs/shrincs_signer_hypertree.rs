@@ -19,7 +19,7 @@
 
 use zeroize::Zeroizing;
 
-use super::shrincs_signer_types::{ShrincsSignerResult, ShrincsSigningKey};
+use super::shrincs_signer_types::{ShrincsSignerError, ShrincsSignerResult, ShrincsSigningKey};
 use super::shrincs_signer_utils::{
     address_word32, base_w_digit, derive32, hash_node, hash_packed, hypertree_address_word,
     wots_digest_bytes, WOTS_C_MAX_GRIND_COUNTER,
@@ -84,7 +84,7 @@ pub(crate) fn sign_hypertree(
     // Mirror the verifier's guard so a retuned profile fails closed instead of
     // panicking on the shift below.
     if subtree_height == 0 || subtree_height >= u32::BITS {
-        return None;
+        return Err(ShrincsSignerError::InvalidConfiguration);
     }
     let leaf_mask = (1u64 << subtree_height) - 1;
     // `stateless_sk_seed` is the shared SK.seed-style master for FORS-C and
@@ -166,7 +166,7 @@ pub(crate) fn sign_hypertree(
         leaf = (tree & leaf_mask) as u32;
         tree >>= subtree_height;
     }
-    Some(layers)
+    Ok(layers)
 }
 
 pub(crate) fn hypertree_public_root(
@@ -337,14 +337,14 @@ fn sign_stateless_wots_c(
                 .to_vec()
             })
             .collect();
-        return Some(WotsCSignature {
+        return Ok(WotsCSignature {
             randomizer: randomizer.to_vec(),
             counter,
             chains,
         });
     }
 
-    None
+    Err(ShrincsSignerError::GrindBudgetExhausted)
 }
 
 fn stateless_wots_c_secret(sk_seed: &[u8; HASH_LEN], chain: u32) -> [u8; HASH_LEN] {

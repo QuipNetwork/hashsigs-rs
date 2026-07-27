@@ -76,6 +76,8 @@ const ERR_STATEFUL_LEAF_REJECTED: &str = "ERR_STATEFUL_LEAF_REJECTED";
 #[cfg(feature = "wasm-bindings")]
 const ERR_SIGNING_FAILED: &str = "ERR_SIGNING_FAILED";
 #[cfg(feature = "wasm-bindings")]
+const ERR_GRIND_BUDGET_EXHAUSTED: &str = "ERR_GRIND_BUDGET_EXHAUSTED";
+#[cfg(feature = "wasm-bindings")]
 const ERR_KEYGEN_FAILED: &str = "ERR_KEYGEN_FAILED";
 #[cfg(feature = "wasm-bindings")]
 const ERR_INVALID_INPUT: &str = "ERR_INVALID_INPUT";
@@ -128,7 +130,7 @@ export type ShrincsErrorCode =
   | "ERR_LEAF_OUT_OF_RANGE"
   | "ERR_INVALID_SIGNATURE" | "ERR_BUDGET_EXHAUSTED"
   | "ERR_RECOVERY_NOT_ARMED" | "ERR_STATEFUL_PATH_DISABLED"
-  | "ERR_STATEFUL_LEAF_REJECTED";
+  | "ERR_STATEFUL_LEAF_REJECTED" | "ERR_GRIND_BUDGET_EXHAUSTED";
 "#;
 
 #[cfg(feature = "wasm-bindings")]
@@ -200,11 +202,15 @@ impl WasmShrincsKeypair {
             }));
         }
         let signature =
-            ShrincsSigner::sign_stateful_raw(signing_key, &message).ok_or_else(|| {
-                js_error(WasmErr {
+            ShrincsSigner::sign_stateful_raw(signing_key, &message).map_err(|err| match err {
+                crate::shrincs::ShrincsSignerError::GrindBudgetExhausted => js_error(WasmErr {
+                    code: ERR_GRIND_BUDGET_EXHAUSTED,
+                    message: "grind counter budget exhausted for the supplied key/message".into(),
+                }),
+                _ => js_error(WasmErr {
                     code: ERR_SIGNING_FAILED,
                     message: "stateful signing failed for the supplied key/message".into(),
-                })
+                }),
             })?;
         js_value_from_serde(&StatefulSignResult {
             signature: stateful_signature_dto_from_signer(&signature),
@@ -236,11 +242,15 @@ impl WasmShrincsKeypair {
             }));
         }
         let signature = ShrincsSigner::sign_stateful_raw_at_leaf(signing_key, leaf, &message)
-            .ok_or_else(|| {
-                js_error(WasmErr {
+            .map_err(|err| match err {
+                crate::shrincs::ShrincsSignerError::GrindBudgetExhausted => js_error(WasmErr {
+                    code: ERR_GRIND_BUDGET_EXHAUSTED,
+                    message: "grind counter budget exhausted for the supplied key/message".into(),
+                }),
+                _ => js_error(WasmErr {
                     code: ERR_SIGNING_FAILED,
                     message: "stateful signing failed for the supplied key/leaf/message".into(),
-                })
+                }),
             })?;
         js_value_from_serde(&stateful_signature_dto_from_signer(&signature))
     }
@@ -254,11 +264,15 @@ impl WasmShrincsKeypair {
         let message =
             parse_hex_bytes_with_max(message_hex, MAX_RAW_INPUT_BYTES).map_err(js_error)?;
         let signature = ShrincsSigner::sign_stateless_raw(self.signing_key_ref()?, &message)
-            .ok_or_else(|| {
-                js_error(WasmErr {
+            .map_err(|err| match err {
+                crate::shrincs::ShrincsSignerError::GrindBudgetExhausted => js_error(WasmErr {
+                    code: ERR_GRIND_BUDGET_EXHAUSTED,
+                    message: "grind counter budget exhausted for the supplied key/message".into(),
+                }),
+                _ => js_error(WasmErr {
                     code: ERR_SIGNING_FAILED,
                     message: "stateless signing failed for the supplied key/message".into(),
-                })
+                }),
             })?;
         js_value_from_serde(&stateless_signature_dto_from_signer(&signature))
     }
@@ -592,7 +606,7 @@ pub fn shrincs_keygen(
     seed_material.zeroize();
     // keygen only returns None for the budget range already rejected above, so this
     // fallback is defensive and should be unreachable in practice.
-    let (signing_key, public_key) = result.ok_or_else(|| {
+    let (signing_key, public_key) = result.map_err(|_| {
         js_error(WasmErr {
             code: ERR_KEYGEN_FAILED,
             message: "key generation failed for the supplied inputs".into(),
@@ -644,7 +658,7 @@ pub fn shrincs_import_signing_key(
     };
     zeroize_exported_signing_key(&mut exported);
     let (signing_key, public_key) =
-        ShrincsSigner::import_signing_key(candidate).ok_or_else(|| {
+        ShrincsSigner::import_signing_key(candidate).map_err(|_| {
             js_error(WasmErr {
                 code: ERR_IMPORT_INVALID,
                 message: "exported key failed validation: counter out of range \

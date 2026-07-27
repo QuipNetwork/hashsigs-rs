@@ -22,9 +22,19 @@ use core::fmt;
 use super::verifier::HASH_LEN;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-/// Signer operations return `None` when stateful leaves are exhausted or
-/// WOTS-C/FORS-C grinding fails within the configured counter budget.
-pub type ShrincsSignerResult<T> = Option<T>;
+/// Typed errors returned by SHRINCS signer operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum ShrincsSignerError {
+    #[error("stateful leaves out of range or budget exhausted")]
+    StatefulLeavesExhausted,
+    #[error("grind counter budget exhausted for the supplied key and message")]
+    GrindBudgetExhausted,
+    #[error("invalid parameter or key configuration")]
+    InvalidConfiguration,
+}
+
+/// Signer operations return `Result<T, ShrincsSignerError>`.
+pub type ShrincsSignerResult<T> = Result<T, ShrincsSignerError>;
 
 /// Secret material for both the stateful fast path and stateless recovery path.
 ///
