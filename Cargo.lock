@@ -2340,6 +2340,7 @@ dependencies = [
 name = "hashsigs-rs"
 version = "0.2.0-rc1"
 dependencies = [
+ "getrandom 0.2.16",
  "js-sys",
  "proptest",
  "serde",
