@@ -2,5 +2,5 @@
 # generation and the profile builds are reproducible across machines. This
 # matches the stable release the repository currently builds and tests with.
 [toolchain]
-channel = "1.89.0"
+channel = "1.95.0"
 components = ["rustfmt", "clippy"]

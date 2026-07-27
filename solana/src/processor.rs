@@ -27,7 +27,7 @@ use hashsigs_rs::{WOTSPlus, PublicKey, constants};
 use borsh::{BorshSerialize, BorshDeserialize};
 use solana_program::keccak::hash as keccak256_hash;
 use solana_program::program::set_return_data;
-use solana_program::system_instruction::create_account;
+use solana_system_interface::instruction::create_account;
 use solana_program::account_info::next_account_info;
 
 // NOTE: The following is supposed to increase the stack size but it does not work in practice.

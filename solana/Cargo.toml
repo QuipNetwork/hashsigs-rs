@@ -13,14 +13,19 @@ crate-type = ["cdylib", "lib"]
 no-entrypoint = []
 
 [dependencies]
-solana-program = "2.3"
+solana-program = "4.0"
 hashsigs-rs = { path = "..", features = ["heap-buffers"] }
 borsh = "1.5.7"
 bytemuck = "1.24"
 bytemuck_derive = "1.10.2"  # Updated to satisfy Solana 2.3
-solana-system-interface = "2.0"
+solana-system-interface = { version = "3.2", features = ["bincode"] }
 
 [dev-dependencies]
-solana-program-test = "2.3"
-solana-sdk = "2.3"
+solana-program-test = { version = "4.1", features = ["agave-unstable-api"] }
+solana-keypair = "3.1"
+solana-signer = "3.0"
+solana-instruction = "3.4"
+solana-pubkey = "4.2"
+solana-transaction = "4.1"
+solana-sdk-ids = "3.0"
 tokio = { version = "1.48.0", features = ["full"] }
