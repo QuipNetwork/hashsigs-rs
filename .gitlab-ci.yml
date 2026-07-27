@@ -83,7 +83,7 @@ default:
 
 build-test:
   stage: test
-  image: rust:1.89.0
+  image: rust:1.95.0
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
@@ -98,19 +98,18 @@ build-test:
     # only when packaging via npm run build → build-wasm.sh.
     - cargo build --locked --release --target wasm32-unknown-unknown --features wasm-bindings
 
-# Static clippy gate. Profile features are mutually exclusive, so lint the same
-# feature set CI tests (wasm-bindings), not --all-features. NOTE: `cargo fmt --check`
-# is intentionally not wired in yet — the tree is not fully rustfmt-clean; add it in a
-# dedicated formatting pass so this gate does not fail on pre-existing style drift.
+# Static clippy and formatting gate. Profile features are mutually exclusive, so
+# lint the same feature set CI tests (wasm-bindings), not --all-features.
 clippy:
   stage: test
-  image: rust:1.89.0
+  image: rust:1.95.0
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   before_script:
-    - rustup component add clippy
+    - rustup component add clippy rustfmt
   script:
+    - cargo fmt --check
     - cargo clippy --all-targets --features wasm-bindings --locked -- -D warnings
 
 # Conformance test against the BUILT package (dist/): loaders, exports map,
@@ -119,7 +118,7 @@ clippy:
 # again here.
 ts-conformance:
   stage: test
-  image: rust:1.89.0
+  image: rust:1.95.0
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
@@ -135,7 +134,7 @@ ts-conformance:
 # runner cannot build wasm and must not try to.
 build-package:
   stage: package
-  image: rust:1.89.0
+  image: rust:1.95.0
   # Inherits default tags [linux, x86_64] -> runs on the self-hosted Linux fleet.
   # Anchored semver, optional pre-release suffix (e.g. v0.2.0-rc1); rejects v1.2.3.4 / v1.2.3-foo trailing junk.
   rules:
