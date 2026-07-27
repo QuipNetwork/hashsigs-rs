@@ -44,7 +44,7 @@ wasm-bindings = [
 ]
 
 [dependencies]
-solana-program = "2.3"
+solana-program = "4.0"
 serde = { version = "1.0.219", features = ["derive"] }
 thiserror = "2.0"
 js-sys = { version = "0.3", optional = true }

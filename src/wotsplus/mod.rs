@@ -157,7 +157,7 @@ impl SignatureBuffer {
     fn as_signature_chunks(&self) -> Vec<[u8; constants::HASH_LEN]> {
         let slice = self.as_slice();
         assert!(
-            slice.len() % constants::HASH_LEN == 0,
+            slice.len().is_multiple_of(constants::HASH_LEN),
             "SignatureBuffer length {} is not chunk-aligned",
             slice.len()
         );

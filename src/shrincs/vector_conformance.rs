@@ -68,7 +68,7 @@ fn load_vectors() -> Value {
 fn hex_to_vec(value: &Value) -> Vec<u8> {
     let text = value.as_str().expect("hex field must be a string");
     let body = text.strip_prefix("0x").unwrap_or(text);
-    assert!(body.len() % 2 == 0, "hex string must have even length");
+    assert!(body.len().is_multiple_of(2), "hex string must have even length");
     (0..body.len())
         .step_by(2)
         .map(|i| u8::from_str_radix(&body[i..i + 2], 16).expect("valid hex byte"))

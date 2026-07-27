@@ -16,13 +16,20 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 use hashsigs_rs_solana::processor::process_instruction;
 use solana_program_test::*;
-use solana_sdk::signature::Keypair;
+use solana_keypair::Keypair;
 
 pub mod wotsplus_solana_test {
     use borsh::{BorshDeserialize, BorshSerialize};
     use hashsigs_rs::{constants, PublicKey, WOTSPlus};
     use hashsigs_rs_solana::processor::{self, PublicKeyWrapper};
-    use solana_sdk::{instruction::{AccountMeta, Instruction}, msg, pubkey::Pubkey, signer::Signer, transaction::Transaction};
+    use solana_instruction::{AccountMeta, Instruction};
+    use solana_program_test::{processor, BanksClientError, ProgramTest, ProgramTestContext};
+    use super::Keypair;
+    use super::process_instruction;
+    use solana_program::msg;
+    use solana_pubkey::Pubkey;
+    use solana_signer::Signer;
+    use solana_transaction::Transaction;
 
     use super::*;
 
@@ -145,7 +152,7 @@ pub mod wotsplus_solana_test {
             accounts: vec![
                 AccountMeta::new(context.payer.pubkey(), true),
                 AccountMeta::new(signature_pda, false),
-                AccountMeta::new_readonly(solana_program::system_program::id(), false),
+                AccountMeta::new_readonly(solana_sdk_ids::system_program::id(), false),
             ],
             data: {
                 let mut instruction_data = Vec::new();
