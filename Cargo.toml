@@ -62,6 +62,6 @@ wasm-bindgen = { version = "=0.2.100", optional = true }
 getrandom = { version = "0.2", features = ["js"] }
 
 [dev-dependencies]
-serde_json = "1.0.145"
+serde_json = "1.0.151"
 wasm-bindgen-test = "0.3.50"
 proptest = "1.11.0"
