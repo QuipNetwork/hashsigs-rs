@@ -27,8 +27,8 @@
 // Re-export the byte-identical helpers shared with the signer. Keeping one copy
 // in `shrincs_common` prevents the two sides from drifting apart (F-08 / Q2).
 pub(crate) use super::super::shrincs_common::{
-    address_word32, base_w16_digit, base_w_digit, fors_address_word, hash_node, hash_packed, pack,
-    hypertree_address_word, read_bits32, read_bits64, word32, wots_digest_bytes,
+    address_word32, base_w16_digit, base_w_digit, fors_address_word, hash_node, hash_packed,
+    hypertree_address_word, pack, read_bits32, read_bits64, word32, wots_digest_bytes,
 };
 
 use super::shrincs_verifier_types::{

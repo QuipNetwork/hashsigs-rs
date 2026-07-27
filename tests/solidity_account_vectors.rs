@@ -334,7 +334,10 @@ fn load_vectors() -> Value {
 
 fn hex_to_bytes(hex: &str) -> Vec<u8> {
     let trimmed = hex.trim_start_matches("0x");
-    assert!(trimmed.len().is_multiple_of(2), "hex string must have even length");
+    assert!(
+        trimmed.len().is_multiple_of(2),
+        "hex string must have even length"
+    );
     (0..trimmed.len())
         .step_by(2)
         .map(|index| u8::from_str_radix(&trimmed[index..index + 2], 16).unwrap())

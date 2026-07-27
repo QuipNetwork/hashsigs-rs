@@ -136,9 +136,7 @@ impl ShrincsSigner {
         );
         let hypertree_root =
             hypertree_public_root(&candidate.stateless_sk_seed, &candidate.pk_seed);
-        if stateful_root != candidate.stateful_root
-            || hypertree_root != candidate.hypertree_root
-        {
+        if stateful_root != candidate.stateful_root || hypertree_root != candidate.hypertree_root {
             return None;
         }
         let public_key = public_key_from_components(
@@ -681,11 +679,7 @@ mod tests {
         let (mut key, _) = ShrincsSigner::keygen(b"import counter seed", 4).unwrap();
         key.next_stateful_leaf_index = 5; // max + 1: exhausted, still valid
         let (imported, _) = ShrincsSigner::import_signing_key(key).unwrap();
-        assert!(ShrincsSigner::sign_stateful_raw(
-            &mut { imported },
-            b"no leaves left"
-        )
-        .is_none());
+        assert!(ShrincsSigner::sign_stateful_raw(&mut { imported }, b"no leaves left").is_none());
     }
 
     #[test]
@@ -733,12 +727,9 @@ mod tests {
         let signature = ShrincsSigner::sign_stateful_raw(&mut imported, &message).unwrap();
         assert_eq!(signature.auth_path.len(), 2);
         let expected = word32(&pk.public_key_commitment).unwrap();
-        assert!(ShrincsVerifier::new().verify_stateful_unsafe_raw(
-            expected,
-            &pk,
-            &message,
-            &signature
-        ));
+        assert!(
+            ShrincsVerifier::new().verify_stateful_unsafe_raw(expected, &pk, &message, &signature)
+        );
     }
 
     // Boundary coverage for the stateful tree: the lowest live leaf (1) and the

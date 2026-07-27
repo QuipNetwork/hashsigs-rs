@@ -68,7 +68,10 @@ fn load_vectors() -> Value {
 fn hex_to_vec(value: &Value) -> Vec<u8> {
     let text = value.as_str().expect("hex field must be a string");
     let body = text.strip_prefix("0x").unwrap_or(text);
-    assert!(body.len().is_multiple_of(2), "hex string must have even length");
+    assert!(
+        body.len().is_multiple_of(2),
+        "hex string must have even length"
+    );
     (0..body.len())
         .step_by(2)
         .map(|i| u8::from_str_radix(&body[i..i + 2], 16).expect("valid hex byte"))
@@ -212,8 +215,8 @@ fn signer_reproduces_committed_stateless_vector_bytes() {
     let (signing_key, public_key) =
         ShrincsSigner::keygen(STATELESS_SEED, STATELESS_MAX_SIGNATURES).expect("stateless keygen");
     let message = hex_to_vec(&section["message"]);
-    let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &message)
-        .expect("stateless signature");
+    let signature =
+        ShrincsSigner::sign_stateless_raw(&signing_key, &message).expect("stateless signature");
 
     assert_eq!(
         public_key,
@@ -254,32 +257,54 @@ fn stateless_verifier_reject_branches_do_not_panic() {
     // reconstruct the committed root.
     let mut counter_mut = base.clone();
     counter_mut.fors.counter ^= 1;
-    assert!(rejects(&counter_mut), "mutated FORS counter must be rejected");
+    assert!(
+        rejects(&counter_mut),
+        "mutated FORS counter must be rejected"
+    );
 
     // Flip a FORS randomizer byte: same digest-derived binding, different seed.
     let mut randomizer_mut = base.clone();
     randomizer_mut.fors.randomizer[0] ^= 1;
-    assert!(rejects(&randomizer_mut), "mutated FORS randomizer must be rejected");
+    assert!(
+        rejects(&randomizer_mut),
+        "mutated FORS randomizer must be rejected"
+    );
 
     // Malformed 31-byte WOTS public-key hash: the length guard must fail closed.
     let mut short_pk_hash = base.clone();
-    short_pk_hash.hypertree[0].wots_c_pk_hash.truncate(HASH_LEN - 1);
-    assert!(rejects(&short_pk_hash), "31-byte wots_c_pk_hash must be rejected");
+    short_pk_hash.hypertree[0]
+        .wots_c_pk_hash
+        .truncate(HASH_LEN - 1);
+    assert!(
+        rejects(&short_pk_hash),
+        "31-byte wots_c_pk_hash must be rejected"
+    );
 
     // Malformed 33-byte WOTS public-key hash.
     let mut long_pk_hash = base.clone();
     long_pk_hash.hypertree[0].wots_c_pk_hash.push(0);
-    assert!(rejects(&long_pk_hash), "33-byte wots_c_pk_hash must be rejected");
+    assert!(
+        rejects(&long_pk_hash),
+        "33-byte wots_c_pk_hash must be rejected"
+    );
 
     // Malformed 31-byte FORS secret leaf.
     let mut short_secret_leaf = base.clone();
-    short_secret_leaf.fors.entries[0].secret_leaf.truncate(HASH_LEN - 1);
-    assert!(rejects(&short_secret_leaf), "31-byte FORS secret leaf must be rejected");
+    short_secret_leaf.fors.entries[0]
+        .secret_leaf
+        .truncate(HASH_LEN - 1);
+    assert!(
+        rejects(&short_secret_leaf),
+        "31-byte FORS secret leaf must be rejected"
+    );
 
     // Malformed 33-byte WOTS chain value.
     let mut long_chain = base;
     long_chain.hypertree[0].wots_c_signature.chains[0].push(0);
-    assert!(rejects(&long_chain), "33-byte WOTS chain value must be rejected");
+    assert!(
+        rejects(&long_chain),
+        "33-byte WOTS chain value must be rejected"
+    );
 }
 
 fn encoded_stateful_sub_key(public_key: &Value) -> Vec<u8> {
@@ -302,7 +327,11 @@ fn parse_stateful_signature(value: &Value) -> StatefulSignature {
             .collect(),
         auth_path: hex_list(&value["authPath"])
             .iter()
-            .map(|node| node.as_slice().try_into().expect("auth node must be 32 bytes"))
+            .map(|node| {
+                node.as_slice()
+                    .try_into()
+                    .expect("auth node must be 32 bytes")
+            })
             .collect(),
     }
 }

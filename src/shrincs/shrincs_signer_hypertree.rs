@@ -364,8 +364,14 @@ fn stateless_wots_c_chain(
     // current digit position and `steps` is how far to move from there.
     let mut out = value;
     for step in start..start + steps {
-        let address_word =
-            address_word32(coords.layer, coords.tree, 0, coords.keypair, coords.chain, step);
+        let address_word = address_word32(
+            coords.layer,
+            coords.tree,
+            0,
+            coords.keypair,
+            coords.chain,
+            step,
+        );
         out = hash_node(&[b"wots-c-chain", pk_seed, &address_word, &out]);
     }
     out
