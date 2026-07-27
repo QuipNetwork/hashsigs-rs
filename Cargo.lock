@@ -2533,7 +2533,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "tokio",
  "tower-service",
  "tracing",
@@ -3832,7 +3832,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "thiserror 2.0.19",
  "tokio",
  "tracing",
@@ -5778,9 +5778,9 @@ dependencies = [
 
 [[package]]
 name = "solana-message"
-version = "4.1.1"
+version = "4.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a634d1db65a393d4e87ec49ef97c8dfb12201e2ba9e5faf87ff34e632f29e509"
+checksum = "a81a5ae2aa5c27925de70bc94fc42f1ca80a46c951ae101b419aa4eac9abb56a"
 dependencies = [
  "blake3",
  "lazy_static",
@@ -7124,9 +7124,9 @@ dependencies = [
 
 [[package]]
 name = "solana-transaction"
-version = "4.1.1"
+version = "4.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a98253cefd62dea714b67926d3d918c3b9f7d66993f1f2322ac7549ea991dc3e"
+checksum = "45eb9e481a70f582be316d0bf2f8f8704079664e636a4e5d0c0d077f1c9de8f3"
 dependencies = [
  "serde",
  "serde_derive",
