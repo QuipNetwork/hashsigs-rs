@@ -25,22 +25,19 @@
 //! public-key, signature, and account-context shapes.
 
 #[cfg(any(test, feature = "wasm-bindings"))]
-use crate::shrincs::{
-    ActionContext as CoreActionContext, ForsEntry as CoreForsEntry,
-    ForsSignature as CoreForsSignature,
-    HypertreeLayerSignature as CoreHypertreeLayerSignature, PublicKey,
-    PublicKey as SigningPublicKey, RotationTarget as CoreRotationTarget, ShrincsSigner,
-    ShrincsSigningKey, ShrincsVerifier, StatefulRotationTarget as CoreStatefulRotationTarget,
-    StatefulSignature as CoreStatefulSignature,
-    StatefulSignature as SigningStatefulSignature,
-    StatelessSignature as CoreStatelessSignature,
-    StatelessSignature as SigningStatelessSignature, STATEFUL_PUBLIC_KEY_BYTES,
-    WotsCSignature as CoreWotsCSignature, WOTS_CHAINS_STATEFUL, HASH_LEN,
+use crate::shrincs::verifier::{
+    FORS_TREE_HEIGHT, HYPERTREE_HEIGHT, NUM_FORS_TREES, NUM_HYPERTREE_LAYERS, NUM_WOTS_CHAINS,
 };
 #[cfg(any(test, feature = "wasm-bindings"))]
-use crate::shrincs::verifier::{
-    FORS_TREE_HEIGHT, HYPERTREE_HEIGHT, NUM_FORS_TREES, NUM_HYPERTREE_LAYERS,
-    NUM_WOTS_CHAINS,
+use crate::shrincs::{
+    ActionContext as CoreActionContext, ForsEntry as CoreForsEntry,
+    ForsSignature as CoreForsSignature, HypertreeLayerSignature as CoreHypertreeLayerSignature,
+    PublicKey, PublicKey as SigningPublicKey, RotationTarget as CoreRotationTarget, ShrincsSigner,
+    ShrincsSigningKey, ShrincsVerifier, StatefulRotationTarget as CoreStatefulRotationTarget,
+    StatefulSignature as CoreStatefulSignature, StatefulSignature as SigningStatefulSignature,
+    StatelessSignature as CoreStatelessSignature, StatelessSignature as SigningStatelessSignature,
+    WotsCSignature as CoreWotsCSignature, HASH_LEN, STATEFUL_PUBLIC_KEY_BYTES,
+    WOTS_CHAINS_STATEFUL,
 };
 #[cfg(any(test, feature = "wasm-bindings"))]
 use zeroize::Zeroize;
@@ -190,7 +187,8 @@ impl WasmShrincsKeypair {
     /// * `message_hex` - arbitrary-length hex.
     #[wasm_bindgen(js_name = signStatefulRaw, unchecked_return_type = "StatefulSignResult")]
     pub fn sign_stateful_raw(&mut self, message_hex: &str) -> Result<JsValue, JsValue> {
-        let message = parse_hex_bytes_with_max(message_hex, MAX_RAW_INPUT_BYTES).map_err(js_error)?;
+        let message =
+            parse_hex_bytes_with_max(message_hex, MAX_RAW_INPUT_BYTES).map_err(js_error)?;
         let signing_key = self.signing_key_mut()?;
         // Pre-check exhaustion explicitly. Core signals BOTH exhaustion and
         // (astronomically rare) WOTS-C grinding failure as `None`; without
@@ -201,8 +199,8 @@ impl WasmShrincsKeypair {
                 message: "no unused stateful leaf available for this key".into(),
             }));
         }
-        let signature = ShrincsSigner::sign_stateful_raw(signing_key, &message)
-            .ok_or_else(|| {
+        let signature =
+            ShrincsSigner::sign_stateful_raw(signing_key, &message).ok_or_else(|| {
                 js_error(WasmErr {
                     code: ERR_SIGNING_FAILED,
                     message: "stateful signing failed for the supplied key/message".into(),
@@ -223,7 +221,8 @@ impl WasmShrincsKeypair {
     /// * `message_hex` - arbitrary-length hex.
     #[wasm_bindgen(js_name = signStatefulRawAt, unchecked_return_type = "StatefulSignature")]
     pub fn sign_stateful_raw_at(&self, message_hex: &str, leaf: u32) -> Result<JsValue, JsValue> {
-        let message = parse_hex_bytes_with_max(message_hex, MAX_RAW_INPUT_BYTES).map_err(js_error)?;
+        let message =
+            parse_hex_bytes_with_max(message_hex, MAX_RAW_INPUT_BYTES).map_err(js_error)?;
         let signing_key = self.signing_key_ref()?;
         // Range-check up front so an out-of-range leaf is reported as what it
         // is, not as "exhausted" (the previous, misleading mapping).
@@ -252,9 +251,10 @@ impl WasmShrincsKeypair {
     /// * `message_hex` - arbitrary-length hex.
     #[wasm_bindgen(js_name = signStatelessRaw, unchecked_return_type = "StatelessSignature")]
     pub fn sign_stateless_raw(&self, message_hex: &str) -> Result<JsValue, JsValue> {
-        let message = parse_hex_bytes_with_max(message_hex, MAX_RAW_INPUT_BYTES).map_err(js_error)?;
-        let signature =
-            ShrincsSigner::sign_stateless_raw(self.signing_key_ref()?, &message).ok_or_else(|| {
+        let message =
+            parse_hex_bytes_with_max(message_hex, MAX_RAW_INPUT_BYTES).map_err(js_error)?;
+        let signature = ShrincsSigner::sign_stateless_raw(self.signing_key_ref()?, &message)
+            .ok_or_else(|| {
                 js_error(WasmErr {
                     code: ERR_SIGNING_FAILED,
                     message: "stateless signing failed for the supplied key/message".into(),
@@ -654,8 +654,9 @@ pub fn shrincs_import_signing_key(
         })?;
     Ok(WasmShrincsKeypair {
         signing_key: Some(signing_key),
-        public_key: Some(parse_public_key(&public_key_dto_from_signer(&public_key))
-            .map_err(js_error)?),
+        public_key: Some(
+            parse_public_key(&public_key_dto_from_signer(&public_key)).map_err(js_error)?,
+        ),
     })
 }
 
@@ -723,9 +724,8 @@ pub fn shrincs_stateful_rotation_message_hash(
     #[wasm_bindgen(unchecked_param_type = "RotationContext")] context: JsValue,
     #[wasm_bindgen(unchecked_param_type = "StatefulRotationTarget")] next_key: JsValue,
 ) -> Result<String, JsValue> {
-    let current_public_key: ShrincsPublicKey =
-        serde_wasm_bindgen::from_value(current_public_key)
-            .map_err(js_error_from_serde("currentPublicKey"))?;
+    let current_public_key: ShrincsPublicKey = serde_wasm_bindgen::from_value(current_public_key)
+        .map_err(js_error_from_serde("currentPublicKey"))?;
     let context: RotationContext =
         serde_wasm_bindgen::from_value(context).map_err(js_error_from_serde("context"))?;
     let next_key: StatefulRotationTarget =
@@ -751,9 +751,8 @@ pub fn shrincs_full_rotation_message_hash(
     #[wasm_bindgen(unchecked_param_type = "RotationContext")] context: JsValue,
     #[wasm_bindgen(unchecked_param_type = "RotationTarget")] next_key: JsValue,
 ) -> Result<String, JsValue> {
-    let current_public_key: ShrincsPublicKey =
-        serde_wasm_bindgen::from_value(current_public_key)
-            .map_err(js_error_from_serde("currentPublicKey"))?;
+    let current_public_key: ShrincsPublicKey = serde_wasm_bindgen::from_value(current_public_key)
+        .map_err(js_error_from_serde("currentPublicKey"))?;
     let context: RotationContext =
         serde_wasm_bindgen::from_value(context).map_err(js_error_from_serde("context"))?;
     let next_key: RotationTarget =
@@ -1257,7 +1256,11 @@ fn parse_rotation_context(
 
 #[cfg(any(test, feature = "wasm-bindings"))]
 fn parse_stateful_signature(input: &StatefulSignature) -> Result<CoreStatefulSignature, WasmErr> {
-    expect_vec_len("stateful signature chains", input.chains.len(), WOTS_CHAINS_STATEFUL)?;
+    expect_vec_len(
+        "stateful signature chains",
+        input.chains.len(),
+        WOTS_CHAINS_STATEFUL,
+    )?;
     expect_vec_len_at_most(
         "stateful signature auth path",
         input.auth_path.len(),
@@ -1284,7 +1287,11 @@ fn parse_stateful_signature(input: &StatefulSignature) -> Result<CoreStatefulSig
 /// that function's cyclomatic complexity within bounds.
 #[cfg(any(test, feature = "wasm-bindings"))]
 fn parse_fors_entry(entry: &ForsEntry) -> Result<CoreForsEntry, WasmErr> {
-    expect_vec_len("FORS auth path", entry.auth_path.len(), FORS_TREE_HEIGHT as usize)?;
+    expect_vec_len(
+        "FORS auth path",
+        entry.auth_path.len(),
+        FORS_TREE_HEIGHT as usize,
+    )?;
     Ok(CoreForsEntry {
         secret_leaf: parse_word32(&entry.secret_leaf)?.to_vec(),
         auth_path: entry
@@ -1336,7 +1343,11 @@ fn parse_stateless_signature(
     let signed_fors_trees = NUM_FORS_TREES as usize - 1;
     let subtree_height = (HYPERTREE_HEIGHT / NUM_HYPERTREE_LAYERS) as usize;
     expect_vec_len("FORS entries", input.fors.entries.len(), signed_fors_trees)?;
-    expect_vec_len("hypertree layers", input.hypertree.len(), NUM_HYPERTREE_LAYERS as usize)?;
+    expect_vec_len(
+        "hypertree layers",
+        input.hypertree.len(),
+        NUM_HYPERTREE_LAYERS as usize,
+    )?;
     Ok(CoreStatelessSignature {
         fors: CoreForsSignature {
             randomizer: parse_word32(&input.fors.randomizer)?.to_vec(),
@@ -1428,7 +1439,10 @@ fn normalized_hex_body(input: &str) -> Result<&str, WasmErr> {
     if !trimmed.len().is_multiple_of(2) {
         return Err(WasmErr {
             code: ERR_BAD_LENGTH,
-            message: format!("hex string must have even length (got {} chars)", trimmed.len()),
+            message: format!(
+                "hex string must have even length (got {} chars)",
+                trimmed.len()
+            ),
         });
     }
     Ok(trimmed)
@@ -1539,9 +1553,7 @@ fn public_key_dto_from_signer(public_key: &SigningPublicKey) -> ShrincsPublicKey
 }
 
 #[cfg(any(test, feature = "wasm-bindings"))]
-fn stateful_signature_dto_from_signer(
-    signature: &SigningStatefulSignature,
-) -> StatefulSignature {
+fn stateful_signature_dto_from_signer(signature: &SigningStatefulSignature) -> StatefulSignature {
     StatefulSignature {
         randomizer: hex_string(&signature.randomizer),
         counter: signature.counter,
@@ -1717,16 +1729,12 @@ fn account_error_to_js(error: crate::account::AccountError) -> JsValue {
             "stateful policy changes are frozen after the first successful stateful \
              use in a key epoch",
         ),
-        AccountError::InvalidSignature => {
-            (ERR_INVALID_SIGNATURE, "signature verification failed")
-        }
+        AccountError::InvalidSignature => (ERR_INVALID_SIGNATURE, "signature verification failed"),
         AccountError::BudgetExhausted => (
             ERR_BUDGET_EXHAUSTED,
             "the stateless signature budget is exhausted for the current key epoch",
         ),
-        AccountError::RecoveryNotArmed => {
-            (ERR_RECOVERY_NOT_ARMED, "recovery mode is not armed")
-        }
+        AccountError::RecoveryNotArmed => (ERR_RECOVERY_NOT_ARMED, "recovery mode is not armed"),
         AccountError::StatefulPathDisabled => (
             ERR_STATEFUL_PATH_DISABLED,
             "the stateful signing path is disabled under the recovery-rotation policy",
@@ -1751,7 +1759,9 @@ fn js_value_from_serde<T: serde::Serialize>(value: &T) -> Result<JsValue, JsValu
     // tree index is large. `from_value` already accepts BigInt back into u64.
     let serializer =
         serde_wasm_bindgen::Serializer::new().serialize_large_number_types_as_bigints(true);
-    value.serialize(&serializer).map_err(js_error_from_serde("result"))
+    value
+        .serialize(&serializer)
+        .map_err(js_error_from_serde("result"))
 }
 
 #[cfg(test)]
@@ -2102,12 +2112,11 @@ mod tests {
     #[cfg(all(feature = "wasm-bindings", target_arch = "wasm32"))]
     #[wasm_bindgen_test]
     fn wasm_account_binding_verifies_canonical_stateful_action_end_to_end() {
-        let mut keypair =
-            shrincs_keygen(
-                "0x7761736d2d63616e6f6e6963616c2d737461746566756c000000000000000000",
-                8,
-            )
-            .unwrap();
+        let mut keypair = shrincs_keygen(
+            "0x7761736d2d63616e6f6e6963616c2d737461746566756c000000000000000000",
+            8,
+        )
+        .unwrap();
         let public_key_value = keypair.public_key().unwrap();
         let public_key: ShrincsPublicKey =
             serde_wasm_bindgen::from_value(public_key_value.clone()).unwrap();
@@ -2156,12 +2165,11 @@ mod tests {
     #[cfg(all(feature = "wasm-bindings", target_arch = "wasm32"))]
     #[wasm_bindgen_test]
     fn wasm_account_binding_rotates_full_key_via_canonical_recovery_message() {
-        let current_keypair =
-            shrincs_keygen(
-                "0x7761736d2d726f746174696f6e2d63757272656e740000000000000000000000",
-                8,
-            )
-            .unwrap();
+        let current_keypair = shrincs_keygen(
+            "0x7761736d2d726f746174696f6e2d63757272656e740000000000000000000000",
+            8,
+        )
+        .unwrap();
         let next_keypair = shrincs_keygen(
             "0x7761736d2d726f746174696f6e2d6e6578740000000000000000000000000000",
             16,
@@ -2233,12 +2241,11 @@ mod tests {
     #[cfg(all(feature = "wasm-bindings", target_arch = "wasm32"))]
     #[wasm_bindgen_test]
     fn wasm_account_binding_verifies_canonical_stateless_action_end_to_end() {
-        let keypair =
-            shrincs_keygen(
-                "0x7761736d2d63616e6f6e6963616c2d73746174656c6573730000000000000000",
-                8,
-            )
-            .unwrap();
+        let keypair = shrincs_keygen(
+            "0x7761736d2d63616e6f6e6963616c2d73746174656c6573730000000000000000",
+            8,
+        )
+        .unwrap();
         let public_key_value = keypair.public_key().unwrap();
         let public_key: ShrincsPublicKey =
             serde_wasm_bindgen::from_value(public_key_value.clone()).unwrap();

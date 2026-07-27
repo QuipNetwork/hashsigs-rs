@@ -1,0 +1,53 @@
+  // ─────────────────────────────────────────────────────────────
+  // 1. SPHINCS+C  (standalone stateless scheme)
+  // ─────────────────────────────────────────────────────────────
+  const { sphincsPlusC } = await loadHashSigs();
+
+  const keys = sphincsPlusC.keygen(seed32);
+  //   keys.secretKey  : Uint8Array(128)
+  //   keys.publicKey  : Uint8Array(64)   (pkSeed ‖ hypertreeRoot)
+
+  const sig = sphincsPlusC.sign(message, keys);          // never mutates keys
+  const ok  = sphincsPlusC.verify(sig, message, keys.publicKey);   // → boolean
+
+  // ─────────────────────────────────────────────────────────────
+  // 2. SHRINCS  — STATEFUL path (fast, one-time-leaf, on-chain-facing)
+  // ─────────────────────────────────────────────────────────────
+  const { shrincs } = await loadHashSigs();
+
+  const keys = shrincs.keygen(seed32, 1024);           // maxSignatures = 1024
+  // OR const keys = shrincs.keygen(seed32);, where maxSignatures is defaulted to 1024 per a global
+  //   keys.stateless.secretKey           : Uint8Array(128)
+  //   keys.stateless.publicKey           : Uint8Array(64)
+  //   keys.ephemeralSecretKey           : Uint8Array(264)
+  //   keys.ephemeralPublicKey           : Uint8Array(164)
+  //   keys.publicKeyCommitment : Uint8Array(32)
+
+
+  const sig = shrincs.sign(message, keys);               // STATEFUL: consumes the next leaf and
+                                                       // advances keys.secretKey IN PLACE.
+                                                       // → persist keys.secretKey now.
+                                                       // uses hash to generage msg32
+                                                       // throws error when out of keys
+
+  const ok = shrincs.verify(sig, message, keys.publicKeyCommitment);   // → boolean
+
+  // ...
+  keys.rotate(1024); // maxSignatures = 1024, resets tree.
+  keys.reset(...); // roll back to previous key state, this should be warned to be dangerous
+
+  // ─────────────────────────────────────────────────────────────
+  // 3. SHRINCS  — STATELESS path (unlimited recovery signing)
+  // ─────────────────────────────────────────────────────────────
+  const rsig = shrincs.signStateless(message, keys);     // never mutates keys.secretKey
+
+  const ok = shrincs.verifyStateless(rsig, message, keys.stateless.publicKey);
+  //   A stateless SHRINCS signature IS a SPHINCS+C signature, so this line is
+  //   exactly:  sphincsPlusC.verify(rsig, message, keys.statelessPublicKey)
+
+
+1. OK so lets drop it. Not useful.
+2. OK, what does noble do? We should mirror that. EIP-712 parity can be trivially maintained by using the same hash. 
+3. OK great. The .reset is to reset the entire stateful chain (i.e., 1024 brand new uses). It is not a rollback. Users will need a way to do this. 
+4. Got it, sounds good. Let's document that.
+5. OK, this exposes the true problem which is you are combining everything into singular objects instead of decomposing them. Separate truly stateless parts from the stateful and show me the new object. 
