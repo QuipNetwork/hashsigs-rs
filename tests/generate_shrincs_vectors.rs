@@ -2,26 +2,31 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+use flate2::write::GzEncoder;
+use flate2::Compression;
 use hashsigs_rs::shrincs::{
-    PublicKey, ShrincsSigner, StatefulSignature, StatelessSignature, HASH_LEN,
+    PublicKey, ShrincsSigner, Signature as StatefulSignature, StatelessSignature, HASH_LEN,
 };
 use serde_json::{json, Value};
 use std::fs;
+use std::io::Write;
 use std::path::Path;
 use std::process::Command;
 
 // Output path per compiled profile, mirroring the profile the crate was built
-// with. The default (256s) build keeps the original filename. Emitting the two
-// 128s sets requires building this test crate with the matching profile feature
-// (e.g. `--features profile-128s-q18`); note that 128s stateless generation is
+// with. The default build keeps the original filename. Emitting the
+// non-default profiles requires building this test crate with
+// `--features <profile>`; note that 128s stateless generation is
 // the heavy, cache-backed regeneration event (2^24-leaf FORS trees, 2^18-leaf
 // hypertree) rather than an in-line run.
-#[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
-const OUT_PATH: &str = "tests/test_vectors/shrincs_sphincs_256s_keccak.json";
-#[cfg(feature = "profile-128s-q18")]
-const OUT_PATH: &str = "tests/test_vectors/shrincs_sphincs_128s_q18_keccak.json";
-#[cfg(all(feature = "profile-128s-q20", not(feature = "profile-128s-q18")))]
-const OUT_PATH: &str = "tests/test_vectors/shrincs_sphincs_128s_q20_keccak.json";
+#[cfg(shrincs_profile_256s)]
+const OUT_PATH: &str = "tests/test_vectors/shrincs_sphincs_256s_keccak.json.gz";
+#[cfg(shrincs_profile_128s_q18)]
+const OUT_PATH: &str = "tests/test_vectors/shrincs_sphincs_128s_q18_keccak.json.gz";
+#[cfg(shrincs_profile_128s_q20)]
+const OUT_PATH: &str = "tests/test_vectors/shrincs_sphincs_128s_q20_keccak.json.gz";
+#[cfg(shrincs_profile_256s_sha2)]
+const OUT_PATH: &str = "tests/test_vectors/shrincs_sphincs_256s_sha2.json.gz";
 
 #[test]
 #[ignore = "run explicitly to refresh Solidity SHRINCS vectors"]
@@ -94,21 +99,35 @@ fn generate_shrincs_sphincs_vectors() {
         }
     });
 
-    let out = serde_json::to_string_pretty(&vectors).expect("serialize vectors");
-    fs::write(Path::new(OUT_PATH), format!("{out}\n")).expect("write SHRINCS Solidity vectors");
+    let out = serde_json::to_vec_pretty(&vectors).expect("serialize vectors");
+    write_gzip_json(Path::new(OUT_PATH), &out);
     println!("wrote {OUT_PATH}");
+}
+
+fn write_gzip_json(path: &Path, json: &[u8]) {
+    let file = fs::File::create(path).expect("create SHRINCS Solidity vectors");
+    let mut encoder = GzEncoder::new(file, Compression::default());
+    encoder
+        .write_all(json)
+        .expect("write compressed SHRINCS Solidity vectors");
+    encoder
+        .write_all(b"\n")
+        .expect("terminate compressed SHRINCS Solidity vectors");
+    encoder
+        .finish()
+        .expect("finish compressed SHRINCS Solidity vectors");
 }
 
 // Emit the SHRINCSSignerKeygen.t.sol `EXPECTED_*` anchors for the active
 // compile-time profile. The Solidity test drives keygen("solidity public key
 // seed", 4); this reproduces the same call so the printed constants can be
 // pasted directly into the per-profile golden block. Run once per profile
-// feature (`--features profile-128s-q18` / `-q20`); under a 128s profile this
-// performs the heavy 2^18-leaf hypertree keygen.
+// feature (`--features profile-128s-q18` / `-q20`);
+// under a 128s profile this performs the heavy 2^18-leaf hypertree keygen.
 #[test]
 #[ignore = "run explicitly to refresh SHRINCSSignerKeygen anchors"]
 fn emit_keygen_goldens() {
-    let profile = hashsigs_rs::shrincs::verifier::PROFILE_NAME;
+    let profile = hashsigs_rs::shrincs::PROFILE_NAME;
     let (signing_key, public_key) =
         ShrincsSigner::keygen(b"solidity public key seed", 4).expect("keygen");
 
@@ -120,17 +139,38 @@ fn emit_keygen_goldens() {
     };
 
     println!("// ==== SHRINCSSignerKeygen goldens for profile {profile} ====");
-    sol_bytes32("EXPECTED_STATEFUL_SK_SEED", &signing_key.stateful_sk_seed);
-    sol_bytes32("EXPECTED_STATEFUL_PRF_SEED", &signing_key.stateful_prf_seed);
-    sol_bytes32("EXPECTED_STATEFUL_PK_SEED", &signing_key.stateful_pk_seed);
-    sol_bytes32("EXPECTED_STATEFUL_ROOT", &signing_key.stateful_root);
-    sol_bytes32("EXPECTED_STATELESS_SK_SEED", &signing_key.stateless_sk_seed);
+    sol_bytes32(
+        "EXPECTED_STATEFUL_SK_SEED",
+        signing_key.stateful().secret().as_sk_seed().as_bytes(),
+    );
+    sol_bytes32(
+        "EXPECTED_STATEFUL_PRF_SEED",
+        signing_key.stateful().secret().as_prf_seed().as_bytes(),
+    );
+    sol_bytes32(
+        "EXPECTED_STATEFUL_PK_SEED",
+        signing_key.stateful().public_key().pk_seed.as_bytes(),
+    );
+    sol_bytes32(
+        "EXPECTED_STATEFUL_ROOT",
+        signing_key.stateful().public_key().root.as_bytes(),
+    );
+    sol_bytes32(
+        "EXPECTED_STATELESS_SK_SEED",
+        signing_key.stateless().secret().as_sk_seed().as_bytes(),
+    );
     sol_bytes32(
         "EXPECTED_STATELESS_PRF_SEED",
-        &signing_key.stateless_prf_seed,
+        signing_key.stateless().secret().as_prf_seed().as_bytes(),
     );
-    sol_bytes32("EXPECTED_PK_SEED", &signing_key.pk_seed);
-    sol_bytes32("EXPECTED_HYPERTREE_ROOT", &signing_key.hypertree_root);
+    sol_bytes32(
+        "EXPECTED_PK_SEED",
+        signing_key.stateless().public_key.pk_seed.as_bytes(),
+    );
+    sol_bytes32(
+        "EXPECTED_HYPERTREE_ROOT",
+        signing_key.stateless().public_key.root.as_bytes(),
+    );
     sol_bytes32(
         "EXPECTED_PUBLIC_KEY_COMMITMENT",
         &public_key.public_key_commitment,
@@ -215,26 +255,26 @@ fn stateless_signature_cast(signature: &StatelessSignature) -> String {
     let fors_entries = signature.fors.entries.iter().map(|entry| {
         format!(
             "({},{})",
-            hex(&entry.secret_leaf),
+            hex(entry.secret_leaf),
             fixed_array(entry.auth_path.iter().map(hex))
         )
     });
     let fors = format!(
         "({},{},{})",
-        hex(&signature.fors.randomizer),
+        hex(signature.fors.randomizer),
         signature.fors.counter,
         fixed_array(fors_entries)
     );
     let layers = signature.hypertree.iter().map(|layer| {
         let wots = format!(
             "({},{},{})",
-            hex(&layer.wots_c_signature.randomizer),
+            hex(layer.wots_c_signature.randomizer),
             layer.wots_c_signature.counter,
             fixed_array(layer.wots_c_signature.chains.iter().map(hex))
         );
         format!(
             "({},{},{})",
-            hex(&layer.wots_c_pk_hash),
+            hex(layer.wots_c_pk_hash),
             wots,
             fixed_array(layer.auth_path.iter().map(hex))
         )
@@ -292,19 +332,19 @@ fn stateful_signature_json(signature: &StatefulSignature) -> Value {
 fn stateless_signature_json(signature: &StatelessSignature) -> Value {
     json!({
         "fors": {
-            "randomizer": hex(&signature.fors.randomizer),
+            "randomizer": hex(signature.fors.randomizer),
             "counter": signature.fors.counter,
             "entries": signature.fors.entries.iter().map(|entry| json!({
-                "secretLeaf": hex(&entry.secret_leaf),
-                "sk": hex(&entry.secret_leaf),
+                "secretLeaf": hex(entry.secret_leaf),
+                "sk": hex(entry.secret_leaf),
                 "authPath": entry.auth_path.iter().map(hex).collect::<Vec<_>>(),
                 "auth": entry.auth_path.iter().map(hex).collect::<Vec<_>>()
             })).collect::<Vec<_>>()
         },
         "hypertree": signature.hypertree.iter().map(|layer| json!({
-            "wotsCPkHash": hex(&layer.wots_c_pk_hash),
+            "wotsCPkHash": hex(layer.wots_c_pk_hash),
             "wotsCSignature": {
-                "randomizer": hex(&layer.wots_c_signature.randomizer),
+                "randomizer": hex(layer.wots_c_signature.randomizer),
                 "counter": layer.wots_c_signature.counter,
                 "chains": layer.wots_c_signature.chains.iter().map(hex).collect::<Vec<_>>()
             },

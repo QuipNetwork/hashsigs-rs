@@ -1,0 +1,249 @@
+# Minimal gate on version tags so build-package/publish-npm cannot release an
+# untested SHA. Re-runs the default wasm-bindings cargo suite plus the TS
+# package build; full profile/solana matrix stays on MR + default-branch only.
+tag-gate:
+  stage: test
+  image: rust:1.95.0
+  extends: .rust-cache
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$/
+  before_script:
+    - !reference [.install-node-pinned, before_script]
+    - !reference [.install-wasm-bindgen, before_script]
+  script:
+    - cargo test --locked --features wasm-bindings
+    - export PATH="${CARGO_HOME}/bin:${PATH}"
+    - cd ts && npm ci
+    - npm run build
+
+# Build + pack on the self-hosted fleet (has the Rust/wasm toolchain and the
+# muscle for it). Produces the publishable tarball as an artifact; the shared
+# runner cannot build wasm and must not try to.
+build-package:
+  stage: package
+  image: rust:1.95.0
+  extends: .rust-cache
+  # Inherits default tags [linux, x86_64] -> runs on the self-hosted Linux fleet.
+  # Anchored semver, optional pre-release suffix (e.g. v0.2.0-rc1); rejects v1.2.3.4 / v1.2.3-foo trailing junk.
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$/ # runs only on a semver version tag
+  needs: [tag-gate]
+  before_script:
+    - !reference [.install-node-pinned, before_script]
+    - !reference [.install-wasm-bindgen, before_script]
+  script:
+    # tag-gate already ran cargo test --features wasm-bindings and the ts build
+    # on this tag SHA. Pack only here (prepack rebuilds wasm via npm run build).
+    - export PATH="${CARGO_HOME}/bin:${PATH}"
+    - cd ts && npm ci
+    - npm version "${CI_COMMIT_TAG#v}" --no-git-tag-version --allow-same-version # tag v0.2.0 -> 0.2.0
+    # `npm pack` runs prepack -> npm run build (wasm + tsc + conformance +
+    # sync-version), then writes quip.network-hashsigs-wasm-<version>.tgz.
+    - npm pack
+  artifacts:
+    paths:
+      - ts/quip.network-hashsigs-wasm-*.tgz
+    expire_in: 7 days
+
+# Stage the prebuilt tarball on a shared runner (npm OIDC only works there).
+# Publishing a tarball skips prepack, so no Rust/wasm toolchain is needed.
+publish-npm:
+  stage: publish
+  image: node:${NODE_VERSION}
+  tags: [saas-linux-small-amd64] # gitlab.com shared runner; required for npm OIDC
+  # OIDC token for tokenless trusted publishing; npm auto-detects NPM_ID_TOKEN.
+  # SIGSTORE_ID_TOKEN enables the sigstore-signed provenance attestation.
+  id_tokens:
+    NPM_ID_TOKEN:
+      aud: "npm:registry.npmjs.org"
+    SIGSTORE_ID_TOKEN:
+      aud: sigstore
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$/ # runs only on a semver version tag
+  dependencies: [build-package] # pull the tarball artifact
+  # `release:validate` is in this same stage, and sharing a stage creates NO
+  # ordering: a job with `needs:` starts as soon as its needs are met and
+  # ignores stage order entirely. Without this edge the gate and the publish
+  # run concurrently, and the package can reach npm while the check that is
+  # meant to stop it is still running.
+  needs: [build-package, "release:validate"]
+  before_script:
+    # Trusted publishing (>=11.5.1) and staging (>=11.15.0) need a newer npm than
+    # the node:22.14 image bundles.
+    - npm install -g "npm@${NPM_VERSION}"
+    - npm --version
+  script:
+    # Stage the release for maintainer approval (npm stage approve, 2FA). The
+    # package must already exist (first publish is a one-time manual local
+    # `npm publish`); fail with a clear message rather than a cryptic npm error
+    # if it does not. Prereleases (e.g. 0.2.0-rc1) must go to a non-`latest`
+    # dist-tag, derived from the prerelease identifier (rc1 -> rc, beta.2 -> beta).
+    - |
+      set -euo pipefail
+      PKG="$(node -p 'require("./ts/package.json").name')"
+      # Leading ./ so npm treats this as a file, not a github owner/repo spec.
+      TARBALL="./$(ls ts/quip.network-hashsigs-wasm-*.tgz)"
+      if ! npm view "$PKG" version >/dev/null 2>&1; then
+        echo "ERROR: $PKG is not on npm yet. Do the one-time bootstrap publish" >&2
+        echo "locally (npm publish, with 2FA), add the Trusted Publisher, then" >&2
+        echo "re-run this tag. CI only stages releases for existing packages." >&2
+        exit 1
+      fi
+      VERSION="${CI_COMMIT_TAG#v}"
+      DIST_TAG="latest"
+      case "$VERSION" in
+        *-*)
+          DIST_TAG="$(printf '%s' "${VERSION#*-}" | sed -E 's/[^A-Za-z].*$//')"
+          [ -n "$DIST_TAG" ] || DIST_TAG="next"
+          ;;
+      esac
+      echo "staging $TARBALL ($PKG@$VERSION) on dist-tag '$DIST_TAG'"
+      npm stage publish "$TARBALL" --access public --tag "$DIST_TAG"
+
+# Publish the crate via crates.io Trusted Publishing (OIDC, public beta for
+# GitLab CI). cargo has no native support yet: the job exchanges the GitLab
+# JWT for a ~30-minute crates.io token, publishes, then revokes the token.
+# Unlike npm there is no staging step -- a crates.io publish is immediate and
+# yank-only -- so this job runs only behind `release:validate` and `tag-gate`.
+publish-crates:
+  stage: publish
+  image: rust:1.95.0
+  extends: .rust-cache
+  tags: [saas-linux-small-amd64] # gitlab.com shared runner, same OIDC posture as publish-npm
+  # The `environment` claim inside CRATES_IO_ID_TOKEN must match the
+  # environment named in the crate's Trusted Publisher config on crates.io.
+  environment: cargo
+  id_tokens:
+    CRATES_IO_ID_TOKEN:
+      aud: crates.io
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$/ # runs only on a semver version tag
+  dependencies: [] # no artifacts consumed; `cargo publish` verifies from source
+  needs: [tag-gate, "release:validate"]
+  script:
+    - |
+      set -euo pipefail
+      # sed instead of jq: the response is a single-key JSON object and the
+      # rust image does not ship jq.
+      RESPONSE="$(curl --fail --silent --show-error \
+        --request POST \
+        --header "Content-Type: application/json" \
+        --data "{\"jwt\": \"${CRATES_IO_ID_TOKEN}\"}" \
+        https://crates.io/api/v1/trusted_publishing/tokens)"
+      CARGO_REGISTRY_TOKEN="$(printf '%s' "$RESPONSE" | sed -n 's/.*"token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+      if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
+        echo "ERROR: crates.io token exchange returned no token. Check that the" >&2
+        echo "Trusted Publisher on crates.io names this project, .gitlab-ci.yml," >&2
+        echo "and the 'cargo' environment." >&2
+        exit 1
+      fi
+      export CARGO_REGISTRY_TOKEN
+      cargo publish --locked -p hashsigs-rs
+      curl --silent --show-error --request DELETE \
+        --header "Authorization: ${CARGO_REGISTRY_TOKEN}" \
+        https://crates.io/api/v1/trusted_publishing/tokens \
+        || echo "WARN: token revocation failed; the token expires within 30 minutes"
+
+# Publish the Python wheel + sdist via PyPI Trusted Publishing (OIDC). The
+# py/ crate is currently a stub that exposes only __version__; publishing it
+# is deliberate, to prove this pipe end to end before the bindings land.
+# Every stub release is a prerelease, so default pip resolution never picks
+# it. maturin both builds and uploads, so no twine is needed.
+publish-pypi:
+  stage: publish
+  image: rust:1.95.0
+  extends: .rust-cache
+  tags: [saas-linux-small-amd64] # gitlab.com shared runner, same OIDC posture as the other publish jobs
+  # The `environment` claim inside PYPI_ID_TOKEN must match the environment
+  # named in the Trusted Publisher config on PyPI.
+  environment: pypi
+  id_tokens:
+    PYPI_ID_TOKEN:
+      aud: pypi
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$/ # runs only on a semver version tag
+  dependencies: []
+  needs: [tag-gate, "release:validate"]
+  before_script:
+    # The rust image has python3 via apt but no pip; a venv keeps the pinned
+    # maturin out of the system interpreter.
+    - apt-get update -qq && apt-get install -y -qq python3-venv > /dev/null
+    - python3 -m venv /tmp/pypi-venv
+    - /tmp/pypi-venv/bin/pip install --quiet maturin==1.14.1
+  script:
+    - |
+      set -euo pipefail
+      # Exchange the GitLab OIDC token for a short-lived PyPI API token.
+      # sed instead of jq: single-key JSON response, and the image has no jq.
+      RESPONSE="$(curl --fail --silent --show-error \
+        --request POST \
+        --header "Content-Type: application/json" \
+        --data "{\"token\": \"${PYPI_ID_TOKEN}\"}" \
+        https://pypi.org/_/oidc/mint-token)"
+      MATURIN_PYPI_TOKEN="$(printf '%s' "$RESPONSE" | sed -n 's/.*"token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+      if [ -z "$MATURIN_PYPI_TOKEN" ]; then
+        echo "ERROR: PyPI token mint returned no token. Check that the Trusted" >&2
+        echo "Publisher on PyPI names this project, .gitlab-ci.yml, and the" >&2
+        echo "'pypi' environment." >&2
+        exit 1
+      fi
+      export MATURIN_PYPI_TOKEN
+      /tmp/pypi-venv/bin/maturin publish --locked --sdist -m py/Cargo.toml --non-interactive
+
+# The dry-run gate. Runs on merge request pipelines, on the default branch,
+# and on every tag, using the same build path the publish jobs use. A push to
+# a feature branch with no open merge request does NOT run it, which is the
+# one shape that skips packaging feedback.
+#
+# The guarantee: when this job fails, every registry still holds what it held
+# before. A packaging regression -- a missing license file, an exports map
+# that omits a file, a manifest version that drifted -- fails here instead of
+# after publication.
+#
+# `make -k`, not `make`: a failing crate check must not hide a failing npm
+# package. See the Makefile header.
+#
+# This job declares no `environment:` and must not gain one, because it runs
+# on refs that are not tags. The publish jobs carry the environments the
+# registries' Trusted Publisher configs pin (`crates` for crates.io, `pypi`
+# for the future PyPI job); npm's publisher predates the environments and
+# validates project + pipeline file only. Registry protection rests on
+# protected tags, the environment claim in each OIDC token, and the
+# maintainer 2FA approval on `npm stage publish`.
+release:validate:
+  stage: publish
+  # `make check-release` runs cargo AND the wasm/TypeScript build, so this job
+  # needs the same toolchain as ts-conformance. There is no `default: image:`
+  # in this pipeline -- only `default: tags` -- so an omitted image leaves the
+  # job with no cargo at all, and check-crate-publish dies on the first line.
+  image: rust:1.95.0
+  extends: .rust-cache
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG
+  # Nothing here consumes another job's artifacts; ordering is expressed with
+  # `needs:` alone. Without this, GitLab downloads every prior stage's
+  # artifacts before running a packaging check.
+  dependencies: []
+  # The npm leg rebuilds the wasm and runs the TypeScript suite on a cold
+  # cache. A timeout exists to kill a job that will never finish, not to
+  # police one that is merely slow.
+  timeout: 60m
+  before_script:
+    - !reference [.install-node-pinned, before_script]
+    # check-npm-dists packs the npm tarball, and prepack rebuilds the wasm.
+    # Without this, bin/build-wasm.sh exits 1 with "wasm-bindgen CLI not found".
+    - !reference [.install-wasm-bindgen, before_script]
+  script:
+    # The wasm-bindgen template installs into ${CARGO_HOME}/bin, which is not
+    # on PATH in a fresh script step.
+    - export PATH="${CARGO_HOME}/bin:${PATH}"
+    # Assert the tag against the manifests FIRST, before anything is built.
+    # Without this the only thing enforcing tag-versus-crate agreement is the
+    # sync check buried inside `npm pack`, so a mistyped tag is discovered
+    # after a full wasm rebuild rather than in the pipeline's first seconds.
+    # `expect` reuses the same version reader `check` uses, so CI has no second
+    # idea of how to parse Cargo.toml.
+    - test -z "${CI_COMMIT_TAG:-}" || bash bin/sync-versions.sh expect "${CI_COMMIT_TAG#v}"
+    - make -k check-release

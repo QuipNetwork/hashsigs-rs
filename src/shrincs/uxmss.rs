@@ -1,0 +1,977 @@
+// Copyright (C) 2026 quip.network
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+//! Stateful UXMSS sign and verify.
+//!
+//! Unbalanced-tree WOTS-C scheme used by the stateful side of SHRINCS,
+//! mirroring Solidity's `UXMSS.sol`. Builds on `wots_c`'s shared chain-walk
+//! and grind helpers; `shrincs` drives it directly (no `sphincs_plus_c`
+//! dependency — the stateful and stateless signers are independent).
+
+use alloc::vec::Vec;
+
+use super::signature::Signature;
+use crate::hash::{base_w16_digit, hash_node, hash_packed, word32};
+use crate::wots_c::{wots_chain_walk, ChainWalk, WOTS_C_MAX_GRIND_COUNTER};
+use crate::HASH_LEN;
+use core::fmt;
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
+
+// Encoded stateful public key layout, kept 68 bytes across all profiles:
+// 32-byte pkSeed slot || 32-byte root slot || 4-byte maxSignatures.
+pub const STATEFUL_PUBLIC_KEY_BYTES: usize = 68;
+
+pub(crate) const INITIAL_STATEFUL_LEAF_INDEX: u32 = 1;
+pub(crate) const MAX_STATEFUL_SIGNATURES_LIMIT: u32 = 4096;
+
+/// Leaf/chain coordinates for a stateful UXMSS WOTS-C chain walk.
+#[derive(Clone, Copy)]
+struct StatefulChainCtx {
+    leaf_index: u32,
+    chain_index: u32,
+}
+
+/// Stateful UXMSS WOTS-C chain walk (`b"uxmss-wots-chain"`).
+fn stateful_chain_no_mask(
+    pk_seed: &[u8; HASH_LEN],
+    ctx: StatefulChainCtx,
+    walk: ChainWalk,
+) -> [u8; HASH_LEN] {
+    use crate::hash::ADDRESS_TYPE_WOTS_HASH;
+    use crate::hash::{address_word32, AddressWord32};
+    wots_chain_walk(
+        b"uxmss-wots-chain",
+        pk_seed,
+        |step| {
+            address_word32(AddressWord32 {
+                layer: 0,
+                tree: 0,
+                address_type: ADDRESS_TYPE_WOTS_HASH,
+                keypair: ctx.leaf_index,
+                chain: ctx.chain_index,
+                step,
+            })
+        },
+        walk,
+    )
+}
+
+/// The stateful sub-key: `pk_seed || root || max_signatures`, the flat
+/// (non-newtyped) shape carried inside [`super::key::PublicKey`]'s
+/// `stateful_public_key` field and consumed by the verifier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PublicKey {
+    /// Public seed used by stateful WOTS-C and the unbalanced XMSS-like tree.
+    pub pk_seed: [u8; HASH_LEN],
+    /// Root of the stateful unbalanced authentication tree.
+    pub root: [u8; HASH_LEN],
+    /// Highest accepted stateful leaf index.
+    pub max_signatures: u32,
+}
+
+pub(crate) fn verify_stateful_unsafe_raw(
+    stateful_key: &PublicKey,
+    message: &[u8],
+    signature: &Signature,
+) -> bool {
+    let leaf_index = signature.auth_path.len() as u32;
+    if leaf_index == 0 || leaf_index > stateful_key.max_signatures {
+        return false;
+    }
+    if signature.chains.len() != crate::wots_c::NUM_CHAINS {
+        return false;
+    }
+
+    let Some(pk_hash) = compact_stateful_wots_public_key_from_signature(
+        stateful_key.pk_seed,
+        leaf_index,
+        message,
+        signature,
+    ) else {
+        return false;
+    };
+    let Some(root) = root_from_unbalanced_path(
+        stateful_key.pk_seed,
+        leaf_index,
+        pk_hash,
+        &signature.auth_path,
+    ) else {
+        return false;
+    };
+    stateful_key.root == root
+}
+
+pub(crate) fn stateful_parent_hash(
+    pk_seed: &[u8; HASH_LEN],
+    left_leaf_index: u32,
+    left: [u8; HASH_LEN],
+    right: [u8; HASH_LEN],
+) -> [u8; HASH_LEN] {
+    hash_node(&[
+        b"uxmss-node".as_ref(),
+        pk_seed.as_ref(),
+        left_leaf_index.to_be_bytes().as_ref(),
+        left.as_ref(),
+        right.as_ref(),
+    ])
+}
+
+pub(crate) fn stateful_empty_tail(pk_seed: &[u8; HASH_LEN], leaf_index: u32) -> [u8; HASH_LEN] {
+    hash_packed(&[
+        b"uxmss-empty-tail".as_ref(),
+        pk_seed.as_ref(),
+        leaf_index.to_be_bytes().as_ref(),
+    ])
+}
+
+fn compact_stateful_wots_public_key_from_signature(
+    pk_seed: [u8; HASH_LEN],
+    leaf_index: u32,
+    message: &[u8],
+    signature: &Signature,
+) -> Option<[u8; HASH_LEN]> {
+    let digest = hash_packed(&[
+        b"uxmss-wots-digits".as_ref(),
+        pk_seed.as_ref(),
+        leaf_index.to_be_bytes().as_ref(),
+        signature.randomizer.as_slice(),
+        signature.counter.to_be_bytes().as_ref(),
+        message,
+    ]);
+
+    let mut digit_sum = 0u32;
+    let mut segments = crate::buf::node_buf::<{ crate::wots_c::NUM_CHAINS }>();
+    for (chain_index, segment) in segments.iter_mut().enumerate() {
+        let digit = base_w16_digit(&digest, chain_index);
+        digit_sum = digit_sum.checked_add(digit)?;
+        let chain_value = *signature.chains.get(chain_index)?;
+        *segment = stateful_chain_no_mask(
+            &pk_seed,
+            StatefulChainCtx {
+                leaf_index,
+                chain_index: chain_index as u32,
+            },
+            ChainWalk {
+                value: chain_value,
+                start: digit,
+                steps: crate::wots_c::BASE - 1 - digit,
+            },
+        );
+    }
+
+    if digit_sum != crate::wots_c::TARGET_SUM {
+        return None;
+    }
+    // Vectored preimage: tag ‖ pk_seed ‖ leaf_index ‖ segment_0 ‖ … —
+    // byte-identical to the packed form.
+    let leaf_be = leaf_index.to_be_bytes();
+    let mut parts: [&[u8]; { crate::wots_c::NUM_CHAINS } + 3] =
+        [&[]; { crate::wots_c::NUM_CHAINS } + 3];
+    parts[0] = b"uxmss-wots-pk";
+    parts[1] = pk_seed.as_ref();
+    parts[2] = leaf_be.as_ref();
+    for (part, segment) in parts[3..].iter_mut().zip(segments.iter()) {
+        *part = segment.as_ref();
+    }
+    Some(hash_node(&parts))
+}
+
+fn root_from_unbalanced_path(
+    pk_seed: [u8; HASH_LEN],
+    leaf_index: u32,
+    leaf: [u8; HASH_LEN],
+    auth_path: &[[u8; HASH_LEN]],
+) -> Option<[u8; HASH_LEN]> {
+    if auth_path.len() != leaf_index as usize || auth_path.is_empty() {
+        return None;
+    }
+    let mut root = stateful_parent_hash(&pk_seed, leaf_index, leaf, *auth_path.first()?);
+    for offset in 0..auth_path.len() - 1 {
+        root = stateful_parent_hash(
+            &pk_seed,
+            leaf_index - offset as u32 - 1,
+            *auth_path.get(offset + 1)?,
+            root,
+        );
+    }
+    Some(root)
+}
+
+// ---- signing ----
+
+// ── Structured, newtyped UXMSS key (the SHRINCS stateful fast path) ──────────
+//
+// Each 32-byte role is its own type, distinct from the identically-shaped
+// `sphincs_plus_c` roles by module path, so the two `pk_seed`s / roots of the
+// SHRINCS hybrid cannot be swapped. This `Key` is the stateful half of a
+// `shrincs::Keys`. Flat layout (matching the wasm ABI):
+// `PrivateKey = sk_seed(32) ‖ prf_seed(32)` (64 B), `StructuredPublicKey =
+// pk_seed(32) ‖ root(32) ‖ max_signatures(4 BE)` (68 B, bridges to/from the
+// flat `PublicKey` above via `From`), `Key = PrivateKey ‖ StructuredPublicKey ‖
+// next_leaf_index(4 BE)` (136 B).
+
+/// PrivateKey seed deriving stateful WOTS-C chain secrets.
+#[derive(Clone, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]
+pub struct SkSeed([u8; HASH_LEN]);
+
+/// PrivateKey PRF seed deriving stateful WOTS-C message randomizers.
+#[derive(Clone, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]
+pub struct PrfSeed([u8; HASH_LEN]);
+
+/// Public seed used by stateful WOTS-C and the unbalanced tree hashing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PkSeed([u8; HASH_LEN]);
+
+/// Root of the stateful unbalanced authentication tree.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Root([u8; HASH_LEN]);
+
+impl SkSeed {
+    /// Wrap 32 raw bytes.
+    pub const fn new(bytes: [u8; HASH_LEN]) -> Self {
+        Self(bytes)
+    }
+    /// Wrap a slice, returning `None` for any length other than 32.
+    pub fn from_slice(bytes: &[u8]) -> Option<Self> {
+        Some(Self(word32(bytes)?))
+    }
+    /// Borrow the raw bytes for hashing.
+    pub fn as_bytes(&self) -> &[u8; HASH_LEN] {
+        &self.0
+    }
+}
+
+impl TryFrom<&[u8]> for SkSeed {
+    type Error = ();
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        Self::from_slice(value).ok_or(())
+    }
+}
+
+impl PrfSeed {
+    /// Wrap 32 raw bytes.
+    pub const fn new(bytes: [u8; HASH_LEN]) -> Self {
+        Self(bytes)
+    }
+    /// Wrap a slice, returning `None` for any length other than 32.
+    pub fn from_slice(bytes: &[u8]) -> Option<Self> {
+        Some(Self(word32(bytes)?))
+    }
+    /// Borrow the raw bytes for hashing.
+    pub fn as_bytes(&self) -> &[u8; HASH_LEN] {
+        &self.0
+    }
+}
+
+impl TryFrom<&[u8]> for PrfSeed {
+    type Error = ();
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        Self::from_slice(value).ok_or(())
+    }
+}
+
+impl PkSeed {
+    /// Wrap 32 raw bytes.
+    pub const fn new(bytes: [u8; HASH_LEN]) -> Self {
+        Self(bytes)
+    }
+    /// Wrap a slice, returning `None` for any length other than 32.
+    pub fn from_slice(bytes: &[u8]) -> Option<Self> {
+        Some(Self(word32(bytes)?))
+    }
+    /// Borrow the raw bytes for hashing.
+    pub fn as_bytes(&self) -> &[u8; HASH_LEN] {
+        &self.0
+    }
+}
+
+impl TryFrom<&[u8]> for PkSeed {
+    type Error = ();
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        Self::from_slice(value).ok_or(())
+    }
+}
+
+impl Root {
+    /// Wrap 32 raw bytes.
+    pub const fn new(bytes: [u8; HASH_LEN]) -> Self {
+        Self(bytes)
+    }
+    /// Wrap a slice, returning `None` for any length other than 32.
+    pub fn from_slice(bytes: &[u8]) -> Option<Self> {
+        Some(Self(word32(bytes)?))
+    }
+    /// Borrow the raw bytes for hashing.
+    pub fn as_bytes(&self) -> &[u8; HASH_LEN] {
+        &self.0
+    }
+}
+
+impl TryFrom<&[u8]> for Root {
+    type Error = ();
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        Self::from_slice(value).ok_or(())
+    }
+}
+
+impl fmt::Debug for SkSeed {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("SkSeed(<redacted>)")
+    }
+}
+
+impl fmt::Debug for PrfSeed {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("PrfSeed(<redacted>)")
+    }
+}
+
+/// The secret half of a stateful key: the 64 bytes that are actually secret.
+///
+/// Fields are private; construct via [`Self::new`] / [`Self::from_bytes`] and
+/// read via [`Self::as_sk_seed`] / [`Self::as_prf_seed`].
+#[derive(Clone, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]
+pub struct PrivateKey {
+    /// Derives stateful WOTS-C chain secrets.
+    sk_seed: SkSeed,
+    /// Derives stateful WOTS-C message randomizers.
+    prf_seed: PrfSeed,
+}
+
+impl fmt::Debug for PrivateKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PrivateKey")
+            .field("sk_seed", &"<redacted>")
+            .field("prf_seed", &"<redacted>")
+            .finish()
+    }
+}
+
+/// The public half of a stateful key: `pk_seed ‖ root ‖ max_signatures`.
+/// Newtyped (`PkSeed`/`Root`) counterpart of the flat [`PublicKey`] above;
+/// bridges to/from it via `From`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StructuredPublicKey {
+    /// Public seed used by stateful WOTS-C and the unbalanced tree.
+    pub pk_seed: PkSeed,
+    /// Root of the stateful unbalanced authentication tree.
+    pub root: Root,
+    /// Highest accepted stateful leaf index.
+    pub max_signatures: u32,
+}
+
+/// A stateful UXMSS key: secret seeds, public bundle, and the monotonic
+/// leaf counter that `sign` advances.
+///
+/// All fields are private so external callers cannot rewind the one-time leaf
+/// counter or splice secret seeds. Construct via [`Self::new`] /
+/// [`Self::from_bytes`]; advance the counter only through the sign path
+/// ([`advance_next_leaf_index`](Self::advance_next_leaf_index)).
+#[derive(Clone, PartialEq, Eq)]
+pub struct Key {
+    /// PrivateKey seeds.
+    secret: PrivateKey,
+    /// Public seed, root, and budget.
+    public_key: StructuredPublicKey,
+    /// Next monotonic leaf index; advanced on each stateful signature.
+    next_leaf_index: u32,
+}
+
+impl fmt::Debug for Key {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Key")
+            .field("secret", &self.secret)
+            .field("public_key", &self.public_key)
+            .field("next_leaf_index", &self.next_leaf_index)
+            .finish()
+    }
+}
+
+impl StructuredPublicKey {
+    /// Encoded stateful public key `pk_seed(32) ‖ root(32) ‖ max(4 BE)`,
+    /// 68 bytes (`STATEFUL_PUBLIC_KEY_BYTES`).
+    pub fn to_bytes(self) -> [u8; STATEFUL_PUBLIC_KEY_BYTES] {
+        let mut out = [0u8; STATEFUL_PUBLIC_KEY_BYTES];
+        out[..HASH_LEN].copy_from_slice(self.pk_seed.as_bytes());
+        out[HASH_LEN..HASH_LEN * 2].copy_from_slice(self.root.as_bytes());
+        out[HASH_LEN * 2..].copy_from_slice(&self.max_signatures.to_be_bytes());
+        out
+    }
+    /// Parse the 68-byte encoded stateful public key; `None` on wrong length.
+    pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() != STATEFUL_PUBLIC_KEY_BYTES {
+            return None;
+        }
+        Some(Self {
+            pk_seed: PkSeed::from_slice(bytes.get(..HASH_LEN)?)?,
+            root: Root::from_slice(bytes.get(HASH_LEN..HASH_LEN * 2)?)?,
+            max_signatures: u32::from_be_bytes(word4(bytes.get(HASH_LEN * 2..)?)?),
+        })
+    }
+}
+
+impl TryFrom<&[u8]> for StructuredPublicKey {
+    type Error = ();
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        Self::from_bytes(value).ok_or(())
+    }
+}
+
+impl PrivateKey {
+    /// Assemble from the two seed newtypes.
+    pub const fn new(sk_seed: SkSeed, prf_seed: PrfSeed) -> Self {
+        Self { sk_seed, prf_seed }
+    }
+
+    /// Borrow the secret seed that derives WOTS-C chain secrets.
+    pub fn as_sk_seed(&self) -> &SkSeed {
+        &self.sk_seed
+    }
+
+    /// Borrow the secret seed that derives message randomizers.
+    pub fn as_prf_seed(&self) -> &PrfSeed {
+        &self.prf_seed
+    }
+
+    /// Flat layout `sk_seed(32) ‖ prf_seed(32)`, 64 bytes.
+    pub fn to_bytes(&self) -> [u8; 64] {
+        let mut out = [0u8; 64];
+        out[..HASH_LEN].copy_from_slice(self.sk_seed.as_bytes());
+        out[HASH_LEN..].copy_from_slice(self.prf_seed.as_bytes());
+        out
+    }
+    /// Parse the 64-byte flat layout; `None` on wrong length.
+    pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() != 64 {
+            return None;
+        }
+        Some(Self {
+            sk_seed: SkSeed::from_slice(bytes.get(..HASH_LEN)?)?,
+            prf_seed: PrfSeed::from_slice(bytes.get(HASH_LEN..)?)?,
+        })
+    }
+}
+
+impl TryFrom<&[u8]> for PrivateKey {
+    type Error = ();
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        Self::from_bytes(value).ok_or(())
+    }
+}
+
+impl Key {
+    /// Assemble a stateful key from its secret, public half, and leaf counter.
+    pub const fn new(
+        secret: PrivateKey,
+        public_key: StructuredPublicKey,
+        next_leaf_index: u32,
+    ) -> Self {
+        Self {
+            secret,
+            public_key,
+            next_leaf_index,
+        }
+    }
+
+    /// Borrow the secret half (seeds only).
+    pub fn secret(&self) -> &PrivateKey {
+        &self.secret
+    }
+
+    /// Borrow the public seed, root, and signature budget.
+    pub fn public_key(&self) -> &StructuredPublicKey {
+        &self.public_key
+    }
+
+    /// Next one-time leaf the signer will consume.
+    pub fn next_leaf_index(&self) -> u32 {
+        self.next_leaf_index
+    }
+
+    /// Monotonically advance the leaf counter after a successful sign.
+    /// Saturates at `u32::MAX` rather than wrapping.
+    pub(crate) fn advance_next_leaf_index(&mut self) {
+        self.next_leaf_index = self.next_leaf_index.saturating_add(1);
+    }
+
+    /// Flat layout `PrivateKey(64) ‖ StructuredPublicKey(68) ‖
+    /// next_leaf_index(4 BE)`, 136 bytes.
+    pub fn to_bytes(&self) -> [u8; 136] {
+        let mut out = [0u8; 136];
+        out[..64].copy_from_slice(&self.secret.to_bytes());
+        out[64..64 + STATEFUL_PUBLIC_KEY_BYTES].copy_from_slice(&self.public_key.to_bytes());
+        out[132..].copy_from_slice(&self.next_leaf_index.to_be_bytes());
+        out
+    }
+    /// Parse the 136-byte flat layout; `None` on wrong length.
+    pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() != 136 {
+            return None;
+        }
+        Some(Self {
+            secret: PrivateKey::from_bytes(bytes.get(..64)?)?,
+            public_key: StructuredPublicKey::from_bytes(bytes.get(64..132)?)?,
+            next_leaf_index: u32::from_be_bytes(word4(bytes.get(132..)?)?),
+        })
+    }
+}
+
+impl TryFrom<&[u8]> for Key {
+    type Error = ();
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        Self::from_bytes(value).ok_or(())
+    }
+}
+
+impl From<StructuredPublicKey> for PublicKey {
+    fn from(pk: StructuredPublicKey) -> Self {
+        Self {
+            pk_seed: *pk.pk_seed.as_bytes(),
+            root: *pk.root.as_bytes(),
+            max_signatures: pk.max_signatures,
+        }
+    }
+}
+
+impl From<PublicKey> for StructuredPublicKey {
+    fn from(pk: PublicKey) -> Self {
+        Self {
+            pk_seed: PkSeed::new(pk.pk_seed),
+            root: Root::new(pk.root),
+            max_signatures: pk.max_signatures,
+        }
+    }
+}
+
+fn word4(bytes: &[u8]) -> Option<[u8; 4]> {
+    if bytes.len() != 4 {
+        return None;
+    }
+    let mut out = [0u8; 4];
+    out.copy_from_slice(bytes);
+    Some(out)
+}
+
+pub(crate) fn sign_stateful_raw(key: &mut Key, message: &[u8]) -> Option<Signature> {
+    // The verifier derives the stateful leaf index from auth_path.len(), so the
+    // signer must advance one leaf at a time and must never reuse a prior leaf.
+    let leaf_index = key.next_leaf_index();
+    if leaf_index == 0 {
+        return None;
+    }
+    if leaf_index > key.public_key().max_signatures {
+        return None;
+    }
+
+    // sign_stateful_raw_at_leaf already computes the identical auth_path (same
+    // seeds, leaf_index, and max_signatures), so we must not rebuild it here —
+    // stateful_auth_path walks up to max_stateful_signatures nodes and doubled
+    // the dominant signing cost.
+    let signature = sign_stateful_raw_at_leaf(key, leaf_index, message)?;
+    key.advance_next_leaf_index();
+    Some(signature)
+}
+
+pub(crate) fn sign_stateful_raw_at_leaf(
+    key: &Key,
+    leaf_index: u32,
+    message: &[u8],
+) -> Option<Signature> {
+    // This deterministic entry point is useful for tests and vector generation.
+    // Production signing should use `sign_stateful_raw`, which advances the
+    // monotonic `next_stateful_leaf_index` and avoids accidental leaf reuse.
+    if leaf_index == 0 {
+        return None;
+    }
+    if leaf_index > key.public_key().max_signatures {
+        return None;
+    }
+    let mut signature = sign_stateful_wots_c(
+        key.secret().as_sk_seed().as_bytes(),
+        key.secret().as_prf_seed().as_bytes(),
+        key.public_key().pk_seed.as_bytes(),
+        leaf_index,
+        message,
+    )?;
+    signature.auth_path = stateful_auth_path(
+        key.secret().as_sk_seed().as_bytes(),
+        key.public_key().pk_seed.as_bytes(),
+        leaf_index,
+        key.public_key().max_signatures,
+    );
+    Some(signature)
+}
+
+pub(crate) fn stateful_subtree_root(
+    sk_seed: &[u8; HASH_LEN],
+    pk_seed: &[u8; HASH_LEN],
+    leaf_index: u32,
+    max_signatures: u32,
+) -> [u8; HASH_LEN] {
+    // The stateful tree is unbalanced: leaf 1 is the leftmost live leaf, and
+    // each parent combines that leaf with the subtree to its right. Build that
+    // chain iteratively so large-but-valid budgets do not recurse once per leaf.
+    let mut right = stateful_empty_tail(pk_seed, max_signatures);
+    for current_leaf in (leaf_index..=max_signatures).rev() {
+        let leaf = stateful_wots_pk_hash(sk_seed, pk_seed, current_leaf);
+        right = stateful_parent_hash(pk_seed, current_leaf, leaf, right);
+    }
+    right
+}
+
+fn sign_stateful_wots_c(
+    sk_seed: &[u8; HASH_LEN],
+    prf_seed: &[u8; HASH_LEN],
+    pk_seed: &[u8; HASH_LEN],
+    leaf_index: u32,
+    message: &[u8],
+) -> Option<Signature> {
+    // WOTS-C replaces checksum chains with a grinding condition. We keep trying
+    // counters until the base-16 message digits sum to the verifier's target.
+    //
+    // The randomizer is one fixed 32-byte value for this leaf/message pair. The
+    // counter changes the digest derived from that randomizer; the randomizer
+    // itself does not change inside the grinding loop.
+    let randomizer = hash_packed(&[
+        b"uxmss-wots-randomizer",
+        prf_seed,
+        &leaf_index.to_be_bytes(),
+        message,
+    ]);
+
+    let result = crate::wots_c::grind_digit_sum(
+        WOTS_C_MAX_GRIND_COUNTER,
+        crate::wots_c::TARGET_SUM,
+        |counter| {
+            let digest = hash_packed(&[
+                b"uxmss-wots-digits",
+                pk_seed,
+                &leaf_index.to_be_bytes(),
+                &randomizer,
+                &counter.to_be_bytes(),
+                message,
+            ]);
+            let digits = (0..crate::wots_c::NUM_CHAINS)
+                .map(|index| base_w16_digit(&digest, index))
+                .collect::<Vec<_>>();
+            let digit_sum = digits
+                .iter()
+                .copied()
+                .try_fold(0u32, |a, b| a.checked_add(b))?;
+            Some((digit_sum, digits))
+        },
+        |digits| {
+            digits
+                .iter()
+                .enumerate()
+                .map(|(chain_index, digit)| {
+                    let secret = Zeroizing::new(stateful_chain_secret(
+                        sk_seed,
+                        pk_seed,
+                        leaf_index,
+                        chain_index as u32,
+                    ));
+                    stateful_chain_no_mask(
+                        pk_seed,
+                        StatefulChainCtx {
+                            leaf_index,
+                            chain_index: chain_index as u32,
+                        },
+                        ChainWalk {
+                            value: *secret,
+                            start: 0,
+                            steps: *digit,
+                        },
+                    )
+                })
+                .collect::<Vec<_>>()
+        },
+    )?;
+    let (counter, chains) = result;
+    Some(Signature {
+        randomizer,
+        counter,
+        chains,
+        auth_path: Vec::new(),
+    })
+}
+
+fn stateful_chain_secret(
+    sk_seed: &[u8; HASH_LEN],
+    pk_seed: &[u8; HASH_LEN],
+    leaf_index: u32,
+    chain_index: u32,
+) -> [u8; HASH_LEN] {
+    // The private chain start is deterministic from the stateful secret seed,
+    // public seed, leaf, and chain. Including the public seed keeps the same
+    // secret seed from producing interchangeable chains under a different key.
+    hash_packed(&[
+        b"uxmss-wots-chain-secret",
+        sk_seed,
+        pk_seed,
+        &leaf_index.to_be_bytes(),
+        &chain_index.to_be_bytes(),
+    ])
+}
+
+fn stateful_wots_pk_hash(
+    sk_seed: &[u8; HASH_LEN],
+    pk_seed: &[u8; HASH_LEN],
+    leaf_index: u32,
+) -> [u8; HASH_LEN] {
+    // This is the public WOTS-C commitment for one stateful leaf. It is computed
+    // by advancing every chain to its endpoint and hashing all endpoints together.
+    let mut endpoints = crate::buf::node_buf::<{ crate::wots_c::NUM_CHAINS }>();
+    for (chain_index, endpoint) in endpoints.iter_mut().enumerate() {
+        // The private chain start is zeroized on drop.
+        let secret = Zeroizing::new(stateful_chain_secret(
+            sk_seed,
+            pk_seed,
+            leaf_index,
+            chain_index as u32,
+        ));
+        *endpoint = stateful_chain_no_mask(
+            pk_seed,
+            StatefulChainCtx {
+                leaf_index,
+                chain_index: chain_index as u32,
+            },
+            ChainWalk {
+                value: *secret,
+                start: 0,
+                steps: crate::wots_c::BASE - 1,
+            },
+        );
+    }
+    // Vectored preimage, byte-identical to the packed form used by the
+    // signature-side reconstruction above.
+    let leaf_be = leaf_index.to_be_bytes();
+    let mut parts: [&[u8]; { crate::wots_c::NUM_CHAINS } + 3] =
+        [&[]; { crate::wots_c::NUM_CHAINS } + 3];
+    parts[0] = b"uxmss-wots-pk";
+    parts[1] = pk_seed.as_ref();
+    parts[2] = leaf_be.as_ref();
+    for (part, endpoint) in parts[3..].iter_mut().zip(endpoints.iter()) {
+        *part = endpoint.as_ref();
+    }
+    hash_node(&parts)
+}
+
+fn stateful_auth_path(
+    sk_seed: &[u8; HASH_LEN],
+    pk_seed: &[u8; HASH_LEN],
+    leaf_index: u32,
+    max_signatures: u32,
+) -> Vec<[u8; HASH_LEN]> {
+    // The first auth node is the right subtree (or empty tail) beside the signed
+    // leaf. Earlier leaves are then supplied from right to left to match the
+    // verifier's unbalanced path reconstruction.
+    let mut path = Vec::with_capacity(leaf_index as usize);
+    if leaf_index < max_signatures {
+        path.push(stateful_subtree_root(
+            sk_seed,
+            pk_seed,
+            leaf_index + 1,
+            max_signatures,
+        ));
+    } else {
+        path.push(stateful_empty_tail(pk_seed, leaf_index));
+    }
+    for previous_leaf in (1..leaf_index).rev() {
+        path.push(stateful_wots_pk_hash(sk_seed, pk_seed, previous_leaf));
+    }
+    path
+}
+
+#[cfg(test)]
+mod key_tests {
+    use super::*;
+
+    #[test]
+    fn public_key_bytes_round_trip() {
+        let pk = StructuredPublicKey {
+            pk_seed: PkSeed::new([7u8; HASH_LEN]),
+            root: Root::new([9u8; HASH_LEN]),
+            max_signatures: 1024,
+        };
+        let bytes = pk.to_bytes();
+        assert_eq!(bytes.len(), STATEFUL_PUBLIC_KEY_BYTES);
+        // max_signatures is the trailing 4 big-endian bytes.
+        assert_eq!(&bytes[HASH_LEN * 2..], &1024u32.to_be_bytes());
+        assert_eq!(StructuredPublicKey::from_bytes(&bytes), Some(pk));
+    }
+
+    #[test]
+    fn public_key_bridges_to_and_from_stateful_public_key() {
+        let pk = StructuredPublicKey {
+            pk_seed: PkSeed::new([1u8; HASH_LEN]),
+            root: Root::new([2u8; HASH_LEN]),
+            max_signatures: 8,
+        };
+        let flat: PublicKey = pk.into();
+        assert_eq!(flat.max_signatures, 8);
+        assert_eq!(StructuredPublicKey::from(flat), pk);
+    }
+
+    #[test]
+    fn from_bytes_rejects_wrong_length() {
+        assert_eq!(StructuredPublicKey::from_bytes(&[0u8; 67]), None);
+    }
+
+    #[test]
+    fn secret_debug_is_redacted() {
+        let secret = PrivateKey {
+            sk_seed: SkSeed::new([3u8; HASH_LEN]),
+            prf_seed: PrfSeed::new([4u8; HASH_LEN]),
+        };
+        let shown = alloc::format!("{secret:?}");
+        assert!(shown.contains("redacted"));
+        assert!(!shown.contains("03"));
+    }
+}
+
+/// Direct unit tests for the stateful sign/verify/Merkle-path core, keygenned
+/// against a small tree (`max_signatures` 8) so they run fast under any
+/// profile. `uxmss` is otherwise only exercised transitively via
+/// `shrincs::signer`/`shrincs::verifier`.
+#[cfg(test)]
+mod stateful_core_tests {
+    use super::*;
+    use crate::hash::derive32;
+
+    /// Build a small-tree stateful key directly, bypassing the stateless half
+    /// entirely (uxmss has no dependency on sphincs_plus_c).
+    fn test_key(seed_label: &[u8], max_signatures: u32) -> Key {
+        let sk_seed = derive32(b"test-uxmss-sk-seed", seed_label, &[]);
+        let prf_seed = derive32(b"test-uxmss-prf-seed", seed_label, &[]);
+        let pk_seed = derive32(b"test-uxmss-pk-seed", seed_label, &[]);
+        let root = stateful_subtree_root(
+            &sk_seed,
+            &pk_seed,
+            INITIAL_STATEFUL_LEAF_INDEX,
+            max_signatures,
+        );
+        Key::new(
+            PrivateKey::new(SkSeed::new(sk_seed), PrfSeed::new(prf_seed)),
+            StructuredPublicKey {
+                pk_seed: PkSeed::new(pk_seed),
+                root: Root::new(root),
+                max_signatures,
+            },
+            INITIAL_STATEFUL_LEAF_INDEX,
+        )
+    }
+
+    fn flat_public_key(key: &Key) -> PublicKey {
+        (*key.public_key()).into()
+    }
+
+    #[test]
+    fn signs_and_verifies_at_leaf_one_mid_and_max() {
+        let max = 8u32;
+        let key = test_key(b"leaf-coverage", max);
+        let pk = flat_public_key(&key);
+        for leaf in [1u32, 4, max] {
+            let message = b"uxmss core test message";
+            let sig = sign_stateful_raw_at_leaf(&key, leaf, message).expect("sign at leaf");
+            assert_eq!(sig.auth_path.len(), leaf as usize, "leaf {leaf}");
+            assert!(
+                verify_stateful_unsafe_raw(&pk, message, &sig),
+                "verify failed at leaf {leaf}",
+            );
+        }
+    }
+
+    #[test]
+    fn tampered_auth_path_node_is_rejected() {
+        let max = 8u32;
+        let key = test_key(b"tamper-auth", max);
+        let pk = flat_public_key(&key);
+        let message = b"tamper auth path";
+        let mut sig = sign_stateful_raw_at_leaf(&key, 4, message).expect("sign");
+        assert!(verify_stateful_unsafe_raw(&pk, message, &sig));
+
+        sig.auth_path[0][0] ^= 0x01;
+        assert!(!verify_stateful_unsafe_raw(&pk, message, &sig));
+    }
+
+    #[test]
+    fn tampered_chain_value_is_rejected() {
+        let max = 8u32;
+        let key = test_key(b"tamper-chain", max);
+        let pk = flat_public_key(&key);
+        let message = b"tamper chain value";
+        let mut sig = sign_stateful_raw_at_leaf(&key, 2, message).expect("sign");
+        assert!(verify_stateful_unsafe_raw(&pk, message, &sig));
+
+        sig.chains[0][0] ^= 0x01;
+        assert!(!verify_stateful_unsafe_raw(&pk, message, &sig));
+    }
+
+    #[test]
+    fn root_from_unbalanced_path_rejects_short_sibling_list() {
+        let max = 8u32;
+        let key = test_key(b"short-path", max);
+        let message = b"short auth path";
+        let leaf_index = 4u32;
+        let sig = sign_stateful_raw_at_leaf(&key, leaf_index, message).expect("sign");
+        let pk_seed = *key.public_key().pk_seed.as_bytes();
+        let leaf_hash =
+            compact_stateful_wots_public_key_from_signature(pk_seed, leaf_index, message, &sig)
+                .expect("wots pk hash");
+
+        // One sibling short of what `leaf_index` requires: the length guard
+        // must reject rather than silently reconstruct a wrong root.
+        let short_path = &sig.auth_path[..sig.auth_path.len() - 1];
+        assert_eq!(
+            root_from_unbalanced_path(pk_seed, leaf_index, leaf_hash, short_path),
+            None
+        );
+    }
+
+    #[test]
+    fn root_from_unbalanced_path_rejects_wrong_sibling_values() {
+        let max = 8u32;
+        let key = test_key(b"wrong-siblings", max);
+        let message = b"wrong sibling values";
+        let leaf_index = 4u32;
+        let sig = sign_stateful_raw_at_leaf(&key, leaf_index, message).expect("sign");
+        let pk_seed = *key.public_key().pk_seed.as_bytes();
+        let leaf_hash =
+            compact_stateful_wots_public_key_from_signature(pk_seed, leaf_index, message, &sig)
+                .expect("wots pk hash");
+        let true_root = root_from_unbalanced_path(pk_seed, leaf_index, leaf_hash, &sig.auth_path)
+            .expect("true root reconstructs");
+        assert_eq!(true_root, key.public_key().root.as_bytes().to_owned());
+
+        // Correct length, wrong values: reconstructs *a* root, but not the
+        // real one — the caller (`verify_stateful_unsafe_raw`) is what turns
+        // this into a rejection.
+        let mut wrong_path = sig.auth_path.clone();
+        wrong_path[0][0] ^= 0xff;
+        let wrong_root = root_from_unbalanced_path(pk_seed, leaf_index, leaf_hash, &wrong_path)
+            .expect("still reconstructs a root");
+        assert_ne!(wrong_root, true_root);
+    }
+}

@@ -1,67 +1,136 @@
 [package]
 name = "hashsigs-rs"
-version = "0.2.0-rc1"
+version = "0.2.1-rc1"
 edition = "2021"
+rust-version = "1.95"
 authors = ["Richard T. Carback III <rick.rust.cargo.383d5@passmail.net>"]
 description = "Hash-based signatures core library with WOTS+ and SHRINCS primitives"
 license = "AGPL-3.0-or-later"
-repository = "https://github.com/quipnetwork/hashsigs-rs"
+repository = "https://gitlab.com/quip.network/hashsigs-rs"
+homepage = "https://github.com/quipnetwork/hashsigs-rs"
 documentation = "https://docs.rs/hashsigs-rs"
 readme = "README.md"
 keywords = ["cryptography", "wots", "shrincs", "signature", "solana"]
-categories = ["cryptography", "authentication"]
+categories = ["cryptography", "authentication", "no-std"]
+build = "build.rs"
+# Keep the published crate to what a consumer can actually use. The test
+# vectors and fixtures stay: they are what lets `cargo test` verify a
+# downloaded crate against the reference implementation, which is the point of
+# shipping them. Everything below is repository infrastructure -- notably a
+# 1.2 MB slide deck that was a third of the tarball.
+exclude = [
+  "docs/",
+  ".gitlab/",
+  ".gitlab-ci.yml",
+  ".beads/",
+  "bin/",
+  "AGENTS.md",
+  "CLAUDE.md",
+]
 
 [lib]
 name = "hashsigs_rs"
 path = "src/lib.rs"
-crate-type = ["rlib", "cdylib"]
+# rlib only: a host `no_std` build cannot link a cdylib (needs panic_handler +
+# global allocator). Wasm packaging requests cdylib via `cargo rustc
+# --crate-type cdylib` in bin/build-wasm.sh.
+crate-type = ["rlib"]
 
 [workspace]
 members = [
-    "solana"
+    "py",
+    "solana",
+    "solana/examples/shrincs-account"
 ]
 resolver = "2"
 
 [features]
-default = []
-# Compile-time SHRINCS parameter-profile selection. The default build (no
-# profile feature) is shrincs-256s. These mirror the Solidity
+# Keep the default-profile selector internal so downstream additive feature use
+# works as expected: `--features profile-128s-q18` should override the default
+# 256s selection instead of conflicting with it.
+default = ["std", "default-profile-256s"]
+# Host/runtime surface: serde std, env-based debug traces.
+std = ["alloc", "serde/std"]
+# Heap types (Vec/Box/String) used by signature wire types and pack helpers.
+alloc = []
+# Optional Solana program dependency + syscall hash routing (also auto-selected
+# on target_os = "solana" via cfg in hash_backend).
+solana = ["dep:solana-program"]
+# Compile-time SHRINCS parameter-profile selection. These mirror the Solidity
 # contracts/profiles/<profile>/SHRINCSParams.sol libraries selected by the
 # Foundry `shrincs-profile/` remapping: one parameter tuple is chosen at
 # build time, so counts stay compile-time constants (no runtime params
-# struct). Select at most one.
+# struct). `profile-256s-sha2` switches the internal scheme-hash suite to
+# SHA-256 while keeping EVM-domain hashes (profile identity, commitments,
+# canonical action hashes) on keccak to match Solidity. Consumers may either:
+# - rely on the default internal 256s selection
+# - enable one explicit public profile feature
+# Build selection logic lives in build.rs.
+default-profile-256s = []
+profile-256s = []
 profile-128s-q18 = []
 profile-128s-q20 = []
+profile-256s-sha2 = []
 # Heap-back the WOTS+ segment accumulator instead of using a stack array.
 # Solana BPF stack frames are 4 KB, well under SIGNATURE_SIZE, so on-chain
 # builds must opt in. Native and wasm builds keep the stack array.
 heap-buffers = []
 wasm-bindings = [
+    "std",
     "dep:serde-wasm-bindgen",
     "dep:wasm-bindgen",
     "dep:tsify",
     "dep:js-sys",
 ]
+# Parallelize grind searches, batched leaf generation, and WOTS-C chain
+# endpoint computation with rayon. Off by default; never implied by any
+# other feature (rayon pulls in a thread pool, unsuitable for wasm targets).
+# Requires std: rayon has no no_std support.
+parallel = ["std", "dep:rayon"]
 
 [dependencies]
-solana-program = "4.0"
-serde = { version = "1.0.219", features = ["derive"] }
-thiserror = "2.0"
+solana-program = { version = "4.0", optional = true }
+# Portable hash backends (no_std-capable). Used when not on Solana / without
+# the `solana` feature. Keep in lockstep with the build-dep sha3 major line.
+sha3 = { version = "0.10", default-features = false }
+sha2 = { version = "0.10", default-features = false }
+serde = { version = "1.0.219", default-features = false, features = ["derive"] }
 js-sys = { version = "0.3", optional = true }
 serde-wasm-bindgen = { version = "0.6.5", optional = true }
-zeroize = { version = "1.8", features = ["derive"] }
+zeroize = { version = "1.8", default-features = false, features = ["derive"] }
+rayon = { version = "1.12", optional = true }
 # =0.5.5: last tsify accepting wasm-bindgen 0.2.100, which the wasm-bindgen CLI
 # pin in bin/build-wasm.sh must match exactly (0.5.6 forces ^0.2.104).
 tsify = { version = "=0.5.5", default-features = false, features = ["js"], optional = true }
 wasm-bindgen = { version = "=0.2.100", optional = true }
 
-# solana-program 4.x reaches getrandom 0.2 via solana-secp256k1-recover -> k256
-# -> rand_core. getrandom refuses to build for wasm32-unknown-unknown unless its
-# "js" feature is on. Target-gated so the on-chain BPF build is untouched.
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-getrandom = { version = "0.2", features = ["js"] }
-
 [dev-dependencies]
+flate2 = "1.1.2"
 serde_json = "1.0.151"
 wasm-bindgen-test = "0.3.50"
+# Independent oracle for the portable sha3/sha2 hash backend: golden-vector
+# generators hash the same inputs via solana-program directly and assert
+# byte-identical output against hash_backend's default (non-`solana`-feature)
+# sha3/sha2 path. Dev-only — never ships in the published library artifact.
+solana-program = "4.0"
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+getrandom = { version = "0.3.3", features = ["wasm_js"] }
+# The solana-program 4.x dev-dep (hash-backend oracle) reaches getrandom 0.2
+# via solana-secp256k1-recover -> k256 -> rand_core. getrandom 0.2 refuses to
+# build for wasm32-unknown-unknown unless its "js" feature is on. This renamed
+# dep exists only to switch that feature on for wasm32 test compiles; the
+# published wasm artifact never builds dev-deps and stays free of both.
+getrandom02 = { package = "getrandom", version = "0.2", features = ["js"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 proptest = "1.11.0"
+
+[build-dependencies]
+sha3 = "0.10"
+
+# Opt-level 2 for tests: hash-tree-heavy debug (opt-level 0) is the root cause of
+# 128s profile slowness (>25 min without finishing a test). Keep default
+# debug-assertions and overflow-checks (on) so test builds still catch bugs.
+[profile.test]
+opt-level = 2

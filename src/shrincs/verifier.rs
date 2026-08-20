@@ -15,35 +15,67 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Public SHRINCS verifier facade.
+//! Public hybrid SHRINCS verifier surface.
 //!
-//! Performs context binding, rotation-message construction, and high-level public-key
-//! checks, then delegates the cryptographic work to the same component modules
-//! as the Solidity verifier (`ShrincsStateful`, `ShrincsForsC`, and
-//! `ShrincsHypertree`).
+//! Thin, stateless facade (`ShrincsVerifier`) over `dispatch`: every method
+//! forwards directly, giving external callers (`wasm`, the `solana`
+//! workspace member) one struct-shaped entry point instead of free
+//! functions.
 
-#[path = "shrincs_verifier_fors_c.rs"]
-mod shrincs_verifier_fors_c;
-#[path = "shrincs_verifier_hypertree.rs"]
-mod shrincs_verifier_hypertree;
-#[path = "shrincs_verifier_stateful.rs"]
-mod shrincs_verifier_stateful;
-#[path = "shrincs_verifier_types.rs"]
-mod shrincs_verifier_types;
-#[path = "shrincs_verifier_utils.rs"]
-mod shrincs_verifier_utils;
-
-pub use self::shrincs_verifier_types::*;
-
-use self::shrincs_verifier_fors_c::verify_fors_c_and_return_root;
-use self::shrincs_verifier_hypertree::verify_hypertree;
-use self::shrincs_verifier_stateful::verify_stateful_unsafe_raw as verify_stateful_unsafe_raw_component;
-use self::shrincs_verifier_utils::{
-    decode_stateful_public_key, hash_packed, matches_expected_public_key_commitment,
-    rotation_target_commitment, stateful_rotation_target_commitment, valid_action_context,
-    valid_public_key, valid_rotation_context, word32,
+use crate::hash::keccak_packed;
+use crate::sphincs_plus_c::verifier::SphincsPlusCVerifier;
+use crate::verifier::VerifyOutcome;
+// Wire types/constants live in dedicated shrincs submodules after the
+// restructure. Re-export them here so `hashsigs_rs::shrincs::verifier::*`
+// still glob-imports (main used `pub use self::shrincs_verifier_types::*`).
+// Not every symbol keeps its historical name: the public key type was
+// renamed from `StatefulPublicKey` to `PublicKey` (disambiguated by the
+// `shrincs` module path instead), and there is no `StatefulPublicKey` alias.
+pub use super::action_context::ActionContext;
+pub use super::key::PublicKey;
+pub use super::signature::Signature as StatefulSignature;
+pub use super::uxmss::STATEFUL_PUBLIC_KEY_BYTES;
+pub use crate::hash::suite::HASH_SUITE_KECCAK_256;
+pub use crate::hash::{ADDRESS_TYPE_FORS_TREE, ADDRESS_TYPE_TREE, ADDRESS_TYPE_WOTS_HASH};
+pub use crate::HASH_LEN;
+// SHRINCS genuinely has a stateless signing path, so this is a legitimate
+// semantic re-export (not a component shim) — see `shrincs::mod`'s matching
+// re-export for the rationale.
+pub use crate::sphincs_plus_c::Signature as StatelessSignature;
+// Profile parameter tuple also lived in main's shrincs_verifier_types (via
+// `pub use profile::*`); re-export from the current profiles module.
+use super::dispatch as core_shrincs;
+use super::dispatch::{stateful_action_message_hash, stateless_action_message_hash};
+use super::key::Commitment;
+use super::signature::{decode_stateful_envelope, decode_stateless_envelope};
+#[cfg(test)]
+use super::signature::{encode_stateful_envelope, encode_stateless_envelope};
+pub use crate::profiles::{
+    FORS_TREE_HEIGHT, HASH_TRUNC_LEN, HYPERTREE_HEIGHT, NUM_FORS_TREES, NUM_HYPERTREE_LAYERS,
+    NUM_WOTS_CHAINS, PROFILE_NAME, STATELESS_SIGNATURE_LIMIT, WOTS_CHAIN_LEN,
 };
 
+/// Stateless hybrid SHRINCS verifier facade.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// # fn main() -> Result<(), ()> {
+/// use hashsigs_rs::shrincs::{sign, ShrincsSigner, ShrincsVerifier, VerifierInterface};
+///
+/// let (mut keys, public_key) = ShrincsSigner::keygen(b"verify-seed", 4).ok_or(())?;
+/// let hash = [9u8; 32];
+/// let envelope = sign(&mut keys, &hash).ok_or(())?;
+/// let ok = ShrincsVerifier::new().verify(
+///     &public_key.public_key_commitment,
+///     &hash,
+///     &envelope,
+/// );
+/// assert_eq!(ok, hashsigs_rs::VerifyOutcome::Valid);
+/// # Ok(())
+/// # }
+/// ```
+#[derive(Debug, Clone, Copy)]
 pub struct ShrincsVerifier;
 
 impl Default for ShrincsVerifier {
@@ -53,21 +85,16 @@ impl Default for ShrincsVerifier {
 }
 
 impl ShrincsVerifier {
-    /// Construct a verifier.
-    ///
-    /// The verifier is stateless: all state needed for verification is supplied
-    /// through the public key, signed context, and signature structures.
+    /// Construct a verifier handle. The type carries no state; the handle
+    /// exists so both schemes share the `VerifierInterface` shape.
     pub fn new() -> Self {
         Self
     }
 
-    /// Verify a stateful signature over an action context.
-    ///
-    /// This is the safe account-style path. The caller provides structured
-    /// context rather than raw bytes, and the verifier hashes that context into
-    /// the exact message that must have been signed. This binds replay-control
-    /// fields (`nonce`, `key_version`), domain separation, action type, payload,
-    /// hash suite, and expected installed public-key commitment.
+    /// Verify a stateful (UXMSS fast-path) SHRINCS signature: recompute the
+    /// action message from `expected_public_key_commitment` and `context`,
+    /// then check `signature` against it and `public_key`. Returns `true` only
+    /// for a valid signature bound to that exact context.
     pub fn verify_stateful(
         &self,
         expected_public_key_commitment: [u8; HASH_LEN],
@@ -75,23 +102,17 @@ impl ShrincsVerifier {
         context: &ActionContext,
         signature: &StatefulSignature,
     ) -> bool {
-        if !valid_action_context(context) {
-            return false;
-        }
-        let message = self.stateful_action_message_hash(expected_public_key_commitment, context);
-        self.verify_stateful_unsafe_raw(
+        core_shrincs::verify_stateful(
             expected_public_key_commitment,
             public_key,
-            &message,
+            context,
             signature,
         )
     }
 
-    /// Verify a stateless signature over an action context.
-    ///
-    /// This follows the same safe-context pattern as `verify_stateful`, but it
-    /// verifies the message through FORS-C and the hypertree rather than through
-    /// the stateful WOTS-C tree.
+    /// Verify a stateless (SPHINCS+C) SHRINCS signature over the action
+    /// message derived from `expected_public_key_commitment` and `context`.
+    /// Returns `true` only for a valid signature bound to that exact context.
     pub fn verify_stateless(
         &self,
         expected_public_key_commitment: [u8; HASH_LEN],
@@ -99,151 +120,15 @@ impl ShrincsVerifier {
         context: &ActionContext,
         signature: &StatelessSignature,
     ) -> bool {
-        if !valid_action_context(context) {
-            return false;
-        }
-        let message = self.stateless_action_message_hash(expected_public_key_commitment, context);
-        self.verify_stateless_raw_memory(
+        core_shrincs::verify_stateless(
             expected_public_key_commitment,
             public_key,
-            &message,
+            context,
             signature,
         )
     }
 
-    /// Rotate only the stateful key using a stateless recovery signature.
-    ///
-    /// The stateless key material remains unchanged. The recovery signature must
-    /// authorize a message that binds the current installed-key commitment,
-    /// rotation context, and the next installed-key commitment. If verification
-    /// succeeds, the returned value is the replacement installed-key commitment.
-    pub fn rotate_stateful_via_stateless(
-        &self,
-        expected_public_key_commitment: [u8; HASH_LEN],
-        current_public_key: &PublicKey,
-        context: &RotationContext,
-        recovery_signature: &StatelessSignature,
-        next_stateful_key: &StatefulRotationTarget,
-    ) -> Option<[u8; HASH_LEN]> {
-        // First prove that the current public key is the key the caller intended:
-        // same expected installed-key commitment.
-        if !matches_expected_public_key_commitment(
-            current_public_key,
-            expected_public_key_commitment,
-        ) {
-            return None;
-        }
-        if !valid_rotation_context(context) {
-            return None;
-        }
-        if !valid_public_key(current_public_key) {
-            return None;
-        }
-        // The next stateful key is not trusted just because it was supplied. It
-        // must decode into a non-empty usage budget before it can be signed into
-        // the rotation message.
-        if next_stateful_key.stateful_public_key.len() != STATEFUL_PUBLIC_KEY_BYTES {
-            return None;
-        }
-        let decoded_next_stateful_key =
-            decode_stateful_public_key(&next_stateful_key.stateful_public_key)?;
-        if decoded_next_stateful_key.max_signatures == 0 {
-            return None;
-        }
-        let current_pk_seed = word32(&current_public_key.pk_seed)?;
-        let current_hypertree_root = word32(&current_public_key.hypertree_root)?;
-        let next_public_key_commitment = stateful_rotation_target_commitment(
-            &next_stateful_key.stateful_public_key,
-            &current_pk_seed,
-            &current_hypertree_root,
-        );
-        if word32(&next_stateful_key.public_key_commitment) != Some(next_public_key_commitment) {
-            return None;
-        }
-
-        let recovery_message = self.stateful_rotation_message_hash(
-            expected_public_key_commitment,
-            current_public_key,
-            context,
-            next_stateful_key,
-        );
-        if !self.verify_stateless_raw_memory(
-            expected_public_key_commitment,
-            current_public_key,
-            &recovery_message,
-            recovery_signature,
-        ) {
-            return None;
-        }
-
-        Some(next_public_key_commitment)
-    }
-
-    /// Rotate the full SHRINCS key bundle using a stateless recovery signature.
-    ///
-    /// This is stricter than `rotate_stateful_via_stateless`: every public
-    /// component of the next bundle is supplied and signed into the recovery
-    /// message before the next installed-key commitment is returned.
-    pub fn stateless_rotate(
-        &self,
-        expected_public_key_commitment: [u8; HASH_LEN],
-        current_public_key: &PublicKey,
-        context: &RotationContext,
-        recovery_signature: &StatelessSignature,
-        next_key: &RotationTarget,
-    ) -> Option<[u8; HASH_LEN]> {
-        if !matches_expected_public_key_commitment(
-            current_public_key,
-            expected_public_key_commitment,
-        ) {
-            return None;
-        }
-        if !valid_rotation_context(context) {
-            return None;
-        }
-        if !valid_public_key(current_public_key) {
-            return None;
-        }
-        if next_key.stateful_public_key.len() != STATEFUL_PUBLIC_KEY_BYTES
-            || next_key.pk_seed.len() != HASH_LEN
-            || next_key.hypertree_root.len() != HASH_LEN
-        {
-            return None;
-        }
-        let decoded_next_stateful_key = decode_stateful_public_key(&next_key.stateful_public_key)?;
-        if decoded_next_stateful_key.max_signatures == 0 {
-            return None;
-        }
-        let next_public_key_commitment = rotation_target_commitment(next_key)?;
-        if word32(&next_key.public_key_commitment) != Some(next_public_key_commitment) {
-            return None;
-        }
-
-        // The recovery message signs the replacement bundle fields so callers do
-        // not authorize a different stateful/stateless tuple accidentally.
-        let recovery_message = self.full_rotation_message_hash(
-            expected_public_key_commitment,
-            current_public_key,
-            context,
-            next_key,
-        );
-        if !self.verify_stateless_raw_memory(
-            expected_public_key_commitment,
-            current_public_key,
-            &recovery_message,
-            recovery_signature,
-        ) {
-            return None;
-        }
-        Some(next_public_key_commitment)
-    }
-
-    /// Verify a raw stateful message.
-    ///
-    /// This is intentionally named "unsafe" to match Solidity: it is
-    /// cryptographically valid, but it does not add nonce/domain/payload binding.
-    /// Use `verify_stateful` unless the caller has already constructed a safe
-    /// signed message externally.
+    #[cfg(test)]
     pub(crate) fn verify_stateful_unsafe_raw(
         &self,
         expected_public_key_commitment: [u8; HASH_LEN],
@@ -251,9 +136,7 @@ impl ShrincsVerifier {
         message: &[u8],
         signature: &StatefulSignature,
     ) -> bool {
-        // Low-level verifier path. The caller supplies the signed message directly,
-        // so replay protection and domain separation are entirely caller-managed.
-        verify_stateful_unsafe_raw_component(
+        core_shrincs::verify_stateful_unsafe_raw(
             expected_public_key_commitment,
             public_key,
             message,
@@ -261,11 +144,7 @@ impl ShrincsVerifier {
         )
     }
 
-    /// Verify a raw stateless message.
-    ///
-    /// Same warning as `verify_stateful_unsafe_raw`: callers own replay
-    /// protection and domain separation when they use this path.
-    #[cfg(any(test, feature = "wasm-bindings"))]
+    #[cfg(test)]
     pub(crate) fn verify_stateless_unsafe_raw(
         &self,
         expected_public_key_commitment: [u8; HASH_LEN],
@@ -273,12 +152,7 @@ impl ShrincsVerifier {
         message: &[u8],
         signature: &StatelessSignature,
     ) -> bool {
-        // Low-level verifier path. The caller supplies the signed message directly,
-        // so replay protection and domain separation are entirely caller-managed.
-        if !matches_expected_public_key_commitment(public_key, expected_public_key_commitment) {
-            return false;
-        }
-        self.verify_stateless_raw_memory(
+        core_shrincs::verify_stateless_unsafe_raw(
             expected_public_key_commitment,
             public_key,
             message,
@@ -286,339 +160,347 @@ impl ShrincsVerifier {
         )
     }
 
-    /// Build the canonical message hash for a stateful action.
-    ///
-    /// This mirrors Solidity `abi.encodePacked` exactly: operation tag, hash
-    /// suite, expected installed-key commitment, and action context fields are
-    /// concatenated and Keccak-hashed.
+    /// The 32-byte message a stateful signature must sign: binds the public-key
+    /// commitment to the action `context` (nonce, key version, domain,
+    /// action type, payload hash).
     pub fn stateful_action_message_hash(
         &self,
         expected_public_key_commitment: [u8; HASH_LEN],
         context: &ActionContext,
     ) -> [u8; HASH_LEN] {
-        let op = hash_packed(&[b"shrincs-verify-stateful"]);
-        hash_packed(&[
-            &op,
-            &HASH_SUITE_KECCAK_256.to_be_bytes(),
-            &expected_public_key_commitment,
-            &context.domain_separator,
-            &context.nonce,
-            &context.key_version,
-            &context.action_type,
-            &context.payload_hash,
-        ])
+        stateful_action_message_hash(expected_public_key_commitment, context)
     }
 
-    /// Build the canonical message hash for a stateless action.
-    ///
-    /// The only difference from the stateful action hash is the operation tag.
-    /// That prevents a valid stateful authorization from being replayed as a
-    /// stateless authorization or vice versa.
+    /// The 32-byte message a stateless signature must sign: the same
+    /// commitment-to-`context` binding under the stateless domain tag.
     pub fn stateless_action_message_hash(
         &self,
         expected_public_key_commitment: [u8; HASH_LEN],
         context: &ActionContext,
     ) -> [u8; HASH_LEN] {
-        let op = hash_packed(&[b"shrincs-verify-stateless"]);
-        hash_packed(&[
-            &op,
-            &HASH_SUITE_KECCAK_256.to_be_bytes(),
-            &expected_public_key_commitment,
-            &context.domain_separator,
-            &context.nonce,
-            &context.key_version,
-            &context.action_type,
-            &context.payload_hash,
-        ])
+        stateless_action_message_hash(expected_public_key_commitment, context)
     }
 
-    /// Build the canonical message hash for stateful-only rotation.
-    ///
-    /// This binds the current installed-key commitment and the replacement
-    /// installed-key commitment. A signature over this hash cannot authorize a
-    /// different replacement bundle.
-    pub fn stateful_rotation_message_hash(
+    /// Commitment binding an encoded stateful public key with a stateless
+    /// `pk_seed`/`hypertree_root` pair, mirroring
+    /// `SHRINCS.publicKeyCommitmentFromParts`. Exposed for callers that need
+    /// to derive a candidate bundle's commitment before it is installed.
+    pub fn public_key_commitment(
         &self,
-        expected_public_key_commitment: [u8; HASH_LEN],
-        current_public_key: &PublicKey,
-        context: &RotationContext,
-        next_stateful_key: &StatefulRotationTarget,
+        stateful_public_key: &[u8],
+        pk_seed: [u8; HASH_LEN],
+        hypertree_root: [u8; HASH_LEN],
     ) -> [u8; HASH_LEN] {
-        let op = hash_packed(&[b"shrincs-rotate-stateful"]);
-        hash_packed(&[
-            &op,
-            &HASH_SUITE_KECCAK_256.to_be_bytes(),
-            &expected_public_key_commitment,
-            &context.domain_separator,
-            &context.nonce,
-            &context.key_version,
-            &current_public_key.public_key_commitment,
-            &next_stateful_key.public_key_commitment,
-        ])
+        *Commitment::of(stateful_public_key, &pk_seed, &hypertree_root).as_bytes()
     }
+}
 
-    /// Build the canonical message hash for full key-bundle rotation.
-    ///
-    /// The next key bundle is first compressed into `next_key_bundle_hash`, then
-    /// that hash is included in the signed rotation message.
-    pub fn full_rotation_message_hash(
-        &self,
-        expected_public_key_commitment: [u8; HASH_LEN],
-        current_public_key: &PublicKey,
-        context: &RotationContext,
-        next_key: &RotationTarget,
-    ) -> [u8; HASH_LEN] {
-        let op = hash_packed(&[b"shrincs-rotate-full"]);
-        hash_packed(&[
-            &op,
-            &HASH_SUITE_KECCAK_256.to_be_bytes(),
-            &expected_public_key_commitment,
-            &context.domain_separator,
-            &context.nonce,
-            &context.key_version,
-            &current_public_key.public_key_commitment,
-            &next_key.public_key_commitment,
-        ])
+impl ShrincsVerifier {
+    /// `keccak256("quip.shrincs-verifier.v1")`. Mirrors
+    /// `SHRINCSVerifier.VERSION_TAG`: names this verifier's key/envelope
+    /// format family, not the compiled parameter profile.
+    pub fn version_tag() -> [u8; HASH_LEN] {
+        keccak_packed(&[b"quip.shrincs-verifier.v1"])
     }
+}
 
-    fn verify_stateless_raw_memory(
+/// SHRINCS-specific extension of [`crate::verifier::VerifierInterface`]:
+/// the stateless recovery path (ERC-7913's SPHINCS+C-delegated verify),
+/// which has no equivalent on the generic stateful interface.
+pub trait ShrincsVerifierExt {
+    /// Stateless verify through the verifier interface shapes, delegated to the pinned SPHINCS+C sibling.
+    /// Mirrors `SHRINCSVerifier.verifyStateless`: decode the commitment key,
+    /// run `prepare_stateless_delegation` (mirroring
+    /// `SHRINCS.prepareStatelessDelegation`) to extract the delegate
+    /// `(pkSeed, hypertreeRoot)` key and re-encoded signature envelope, then
+    /// hand both to `SphincsPlusCVerifier::verify`, exactly like the
+    /// Solidity adapter's external call to its pinned sibling.
+    fn verify_stateless_signature(
         &self,
-        expected_public_key_commitment: [u8; HASH_LEN],
-        public_key: &PublicKey,
-        message: &[u8],
-        signature: &StatelessSignature,
-    ) -> bool {
-        // The stateless verifier has two phases:
-        // 1. FORS-C verifies the external message and yields a FORS root.
-        // 2. The hypertree verifies that FORS root up to the committed hypertree root.
-        if !matches_expected_public_key_commitment(public_key, expected_public_key_commitment) {
-            return false;
-        }
-        if !valid_public_key(public_key) {
-            return false;
-        }
-        if signature.hypertree.is_empty() {
-            return false;
-        }
+        key: &[u8],
+        hash: &[u8; HASH_LEN],
+        stateless_envelope: &[u8],
+    ) -> VerifyOutcome;
+}
 
-        let Some((fors_root, seed_tree_index, seed_leaf_index)) =
-            verify_fors_c_and_return_root(public_key, message, &signature.fors)
-        else {
-            return false;
+impl ShrincsVerifierExt for ShrincsVerifier {
+    fn verify_stateless_signature(
+        &self,
+        key: &[u8],
+        hash: &[u8; HASH_LEN],
+        stateless_envelope: &[u8],
+    ) -> VerifyOutcome {
+        let Some(commitment) = Commitment::from_bytes(key).map(|c| *c.as_bytes()) else {
+            return VerifyOutcome::Invalid;
         };
-        verify_hypertree(
-            public_key,
-            fors_root,
-            seed_tree_index,
-            seed_leaf_index,
-            &signature.hypertree,
-        )
+        // `prepare_stateless_delegation` (in `super`/`dispatch`) folds
+        // envelope-decode failure, commitment mismatch, and public-key shape
+        // failure into a single `None`. Decode
+        // once more here, purely to split "framing that can't be read at
+        // all" (Malformed) from "well-formed but rejected" (Invalid),
+        // without duplicating its commitment/shape-check logic.
+        if decode_stateless_envelope(stateless_envelope).is_none() {
+            return VerifyOutcome::Malformed;
+        }
+        let Some((delegate_key, delegate_signature_envelope)) =
+            super::prepare_stateless_delegation(commitment, stateless_envelope)
+        else {
+            return VerifyOutcome::Invalid;
+        };
+        // `prepare_stateless_delegation` hands back a re-encoded signature
+        // envelope, not a typed signature — Solidity's zero-copy calldata
+        // pointer aliasing has no Rust equivalent here, so this decodes it
+        // straight back into the typed form `SphincsPlusCVerifier::verify`
+        // expects (an encode-then-decode round trip the Solidity adapter
+        // never pays).
+        let Some(delegate_signature) =
+            crate::sphincs_plus_c::Signature::from_bytes(&delegate_signature_envelope)
+        else {
+            // `prepare_stateless_delegation` only ever emits a canonically
+            // re-encoded envelope for a delegation it accepted, so this
+            // should be unreachable; fail closed as Malformed rather than
+            // silently treating a codec-internal inconsistency as Invalid.
+            return VerifyOutcome::Malformed;
+        };
+        if SphincsPlusCVerifier::new().verify_signature(&delegate_key, hash, &delegate_signature) {
+            VerifyOutcome::Valid
+        } else {
+            VerifyOutcome::Invalid
+        }
+    }
+}
+
+impl crate::verifier::VerifierInterface for ShrincsVerifier {
+    /// Stateful verify: `key` is the 32-byte SHRINCS `publicKeyCommitment`; Mirrors `SHRINCSVerifier.verify` /
+    /// `SHRINCS.verify`: `key` must be exactly 32 bytes (the SHRINCS
+    /// `publicKeyCommitment`); `signature_envelope` is
+    /// `abi.encode(PublicKey, SHRINCS.Signature)`.
+    fn verify(
+        &self,
+        key: &[u8],
+        hash: &[u8; HASH_LEN],
+        signature_envelope: &[u8],
+    ) -> VerifyOutcome {
+        let Some(commitment) = Commitment::from_bytes(key).map(|c| *c.as_bytes()) else {
+            return VerifyOutcome::Invalid;
+        };
+        let Some((public_key, signature)) = decode_stateful_envelope(signature_envelope) else {
+            return VerifyOutcome::Malformed;
+        };
+        // `SHRINCS.verify` packs the bytes32 hash into the signed message as
+        // its raw 32 bytes (`SPHINCSPlusC.toMessage`); `hash` IS the message.
+        if super::verify_stateful_unsafe_raw(commitment, &public_key, hash, &signature) {
+            VerifyOutcome::Valid
+        } else {
+            VerifyOutcome::Invalid
+        }
     }
 }
 
 #[cfg(test)]
-mod tests {
+use crate::verifier::VerifierInterface as _;
+
+#[cfg(test)]
+mod interface_tests {
     use super::*;
-    use crate::shrincs::signer::verifier::{
-        PublicKey as SignerPublicKey, StatelessSignature as SignerStatelessSignature,
-    };
-    use crate::shrincs::ShrincsSigner;
-    use solana_program::keccak::hash as keccak256_hash;
+    use crate::shrincs::{PublicKey, ShrincsSigner, StatelessSignature};
 
-    fn to_public_key(input: &SignerPublicKey) -> PublicKey {
-        PublicKey {
-            stateful_public_key: input.stateful_public_key.clone(),
-            public_key_commitment: input.public_key_commitment.clone(),
-            pk_seed: input.pk_seed.clone(),
-            hypertree_root: input.hypertree_root.clone(),
-        }
+    fn keypair(seed: &[u8]) -> (crate::shrincs::Keys, PublicKey) {
+        ShrincsSigner::keygen(seed, 4).expect("keygen must succeed for a valid seed/budget")
     }
 
-    fn to_stateless_signature(input: &SignerStatelessSignature) -> StatelessSignature {
-        StatelessSignature {
-            fors: ForsSignature {
-                randomizer: input.fors.randomizer.clone(),
-                counter: input.fors.counter,
-                entries: input
-                    .fors
-                    .entries
-                    .iter()
-                    .map(|entry| ForsEntry {
-                        secret_leaf: entry.secret_leaf.clone(),
-                        auth_path: entry.auth_path.clone(),
-                    })
-                    .collect(),
-            },
-            hypertree: input
-                .hypertree
-                .iter()
-                .map(|layer| HypertreeLayerSignature {
-                    wots_c_pk_hash: layer.wots_c_pk_hash.clone(),
-                    wots_c_signature: WotsCSignature {
-                        randomizer: layer.wots_c_signature.randomizer.clone(),
-                        counter: layer.wots_c_signature.counter,
-                        chains: layer.wots_c_signature.chains.clone(),
-                    },
-                    auth_path: layer.auth_path.clone(),
-                })
-                .collect(),
-        }
+    fn commitment_of(public_key: &PublicKey) -> Vec<u8> {
+        public_key.public_key_commitment.clone()
     }
 
-    fn public_key_commitment(
-        stateful_public_key: &[u8],
-        pk_seed: &[u8],
-        hypertree_root: &[u8],
-    ) -> [u8; HASH_LEN] {
-        let mut packed = Vec::with_capacity(
-            b"shrincs-public-key/".len()
-                + PROFILE_NAME.len()
-                + stateful_public_key.len()
-                + pk_seed.len()
-                + hypertree_root.len(),
-        );
-        packed.extend_from_slice(b"shrincs-public-key/");
-        packed.extend_from_slice(PROFILE_NAME.as_bytes());
-        packed.extend_from_slice(stateful_public_key);
-        packed.extend_from_slice(pk_seed);
-        packed.extend_from_slice(hypertree_root);
-        keccak256_hash(&packed).to_bytes()
+    // --- version tag -------------------------------------------------------
+
+    #[test]
+    fn version_tag_matches_pinned_solidity_constant() {
+        // keccak256("quip.shrincs-verifier.v1"), computed independently and
+        // pinned here so drift in either the literal string or the hash
+        // routine fails loud instead of silently matching itself.
+        const EXPECTED: [u8; HASH_LEN] = [
+            0x06, 0x4b, 0x5b, 0x1b, 0x1f, 0x5d, 0x6d, 0xc3, 0xd3, 0x8c, 0x8e, 0xd9, 0xf3, 0x8f,
+            0xd2, 0x4f, 0x68, 0x62, 0x83, 0x29, 0xf9, 0x32, 0x9a, 0x54, 0xb8, 0xe8, 0xc5, 0x3e,
+            0x3b, 0x06, 0xda, 0x58,
+        ];
+        assert_eq!(ShrincsVerifier::version_tag(), EXPECTED);
     }
 
-    fn expected_key(public_key: &PublicKey) -> [u8; HASH_LEN] {
-        public_key.public_key_commitment.clone().try_into().unwrap()
-    }
+    // --- stateful verify -----------------------------------------------------
 
-    fn sample_action_context() -> ActionContext {
-        ActionContext {
-            domain_separator: [7u8; HASH_LEN],
-            nonce: [1u8; HASH_LEN],
-            key_version: [2u8; HASH_LEN],
-            action_type: [3u8; HASH_LEN],
-            payload_hash: [4u8; HASH_LEN],
-        }
-    }
+    #[test]
+    fn verify_accepts_a_valid_stateful_signature_over_the_raw_hash() {
+        let (mut signing_key, public_key) = keypair(b"verifier stateful accept seed");
+        let hash = [0x42u8; HASH_LEN];
+        let signature = ShrincsSigner::sign_stateful_raw(&mut signing_key, &hash)
+            .expect("signing must succeed for a fresh key");
+        let envelope = encode_stateful_envelope(&public_key, &signature);
 
-    fn sample_rotation_context() -> RotationContext {
-        RotationContext {
-            domain_separator: [9u8; HASH_LEN],
-            nonce: [5u8; HASH_LEN],
-            key_version: [6u8; HASH_LEN],
-        }
+        let outcome = ShrincsVerifier::new().verify(&commitment_of(&public_key), &hash, &envelope);
+        assert_eq!(outcome, VerifyOutcome::Valid);
     }
 
     #[test]
-    fn contexts_reject_zero_domain_values() {
-        let zero = [0u8; HASH_LEN];
-        let context = ActionContext {
-            domain_separator: zero,
-            nonce: zero,
-            key_version: zero,
-            action_type: [1u8; HASH_LEN],
-            payload_hash: [2u8; HASH_LEN],
-        };
-        assert!(!valid_action_context(&context));
+    fn verify_rejects_a_signature_over_a_different_hash() {
+        let (mut signing_key, public_key) = keypair(b"verifier stateful reject seed");
+        let hash = [0x11u8; HASH_LEN];
+        let signature = ShrincsSigner::sign_stateful_raw(&mut signing_key, &hash)
+            .expect("signing must succeed for a fresh key");
+        let envelope = encode_stateful_envelope(&public_key, &signature);
+
+        let wrong_hash = [0x22u8; HASH_LEN];
+        let outcome =
+            ShrincsVerifier::new().verify(&commitment_of(&public_key), &wrong_hash, &envelope);
+        assert_eq!(outcome, VerifyOutcome::Invalid);
     }
 
-    #[cfg_attr(
-        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
-        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
-    )]
     #[test]
-    fn verify_stateless_accepts_valid_action_signature() {
-        let verifier = ShrincsVerifier::new();
-        let (signing_key, public_key) =
-            ShrincsSigner::keygen(b"verifier stateless action seed", 4).unwrap();
-        let public_key = to_public_key(&public_key);
-        let context = sample_action_context();
-        let expected = expected_key(&public_key);
-        let message = verifier.stateless_action_message_hash(expected, &context);
-        let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &message).unwrap();
-        let signature = to_stateless_signature(&signature);
+    fn verify_rejects_a_wrong_length_key() {
+        let (mut signing_key, public_key) = keypair(b"verifier stateful wrong key seed");
+        let hash = [0x33u8; HASH_LEN];
+        let signature = ShrincsSigner::sign_stateful_raw(&mut signing_key, &hash)
+            .expect("signing must succeed for a fresh key");
+        let envelope = encode_stateful_envelope(&public_key, &signature);
 
-        assert!(verifier.verify_stateless(expected, &public_key, &context, &signature,));
+        let mut short_key = commitment_of(&public_key);
+        short_key.pop();
+        let outcome = ShrincsVerifier::new().verify(&short_key, &hash, &envelope);
+        assert_eq!(outcome, VerifyOutcome::Invalid);
     }
 
-    #[cfg_attr(
-        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
-        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
-    )]
     #[test]
-    fn rotate_stateful_via_stateless_accepts_valid_recovery_signature() {
-        let verifier = ShrincsVerifier::new();
-        let (signing_key, public_key) =
-            ShrincsSigner::keygen(b"verifier stateful rotation current seed", 4).unwrap();
-        let (_, next_public_key) =
-            ShrincsSigner::keygen(b"verifier stateful rotation next seed", 8).unwrap();
-        let public_key = to_public_key(&public_key);
-        let context = sample_rotation_context();
-        let expected = expected_key(&public_key);
-        let next_commitment = public_key_commitment(
-            &next_public_key.stateful_public_key,
-            &public_key.pk_seed,
-            &public_key.hypertree_root,
-        );
-        let next_target = StatefulRotationTarget {
-            stateful_public_key: next_public_key.stateful_public_key.clone(),
-            public_key_commitment: next_commitment.to_vec(),
-        };
+    fn verify_reports_a_truncated_envelope_as_malformed() {
+        let (mut signing_key, public_key) = keypair(b"verifier stateful malformed seed");
+        let hash = [0x44u8; HASH_LEN];
+        let signature = ShrincsSigner::sign_stateful_raw(&mut signing_key, &hash)
+            .expect("signing must succeed for a fresh key");
+        let envelope = encode_stateful_envelope(&public_key, &signature);
 
-        let recovery_message =
-            verifier.stateful_rotation_message_hash(expected, &public_key, &context, &next_target);
-        let recovery_signature =
-            ShrincsSigner::sign_stateless_raw(&signing_key, &recovery_message).unwrap();
-        let recovery_signature = to_stateless_signature(&recovery_signature);
-
-        assert_eq!(
-            verifier.rotate_stateful_via_stateless(
-                expected,
-                &public_key,
-                &context,
-                &recovery_signature,
-                &next_target,
-            ),
-            Some(next_commitment)
+        let outcome = ShrincsVerifier::new().verify(
+            &commitment_of(&public_key),
+            &hash,
+            &envelope[..envelope.len() - 1],
         );
+        assert_eq!(outcome, VerifyOutcome::Malformed);
     }
 
-    #[cfg_attr(
-        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
-        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
-    )]
     #[test]
-    fn stateless_rotate_accepts_valid_recovery_signature() {
-        let verifier = ShrincsVerifier::new();
-        let (signing_key, public_key) =
-            ShrincsSigner::keygen(b"verifier full rotation current seed", 4).unwrap();
-        let (_, next_public_key) =
-            ShrincsSigner::keygen(b"verifier full rotation next seed", 8).unwrap();
-        let public_key = to_public_key(&public_key);
-        let next_public_key = to_public_key(&next_public_key);
-        let context = sample_rotation_context();
-        let expected = expected_key(&public_key);
-        let next_commitment = expected_key(&next_public_key);
-        let next_target = RotationTarget {
-            stateful_public_key: next_public_key.stateful_public_key.clone(),
-            public_key_commitment: next_public_key.public_key_commitment.clone(),
-            pk_seed: next_public_key.pk_seed.clone(),
-            hypertree_root: next_public_key.hypertree_root.clone(),
-        };
+    fn verify_reports_an_empty_envelope_as_malformed() {
+        let (_signing_key, public_key) = keypair(b"verifier stateful empty seed");
+        let hash = [0x55u8; HASH_LEN];
+        let outcome = ShrincsVerifier::new().verify(&commitment_of(&public_key), &hash, &[]);
+        assert_eq!(outcome, VerifyOutcome::Malformed);
+    }
 
-        let recovery_message =
-            verifier.full_rotation_message_hash(expected, &public_key, &context, &next_target);
-        let recovery_signature =
-            ShrincsSigner::sign_stateless_raw(&signing_key, &recovery_message).unwrap();
-        let recovery_signature = to_stateless_signature(&recovery_signature);
+    #[test]
+    fn verify_reports_a_mismatched_commitment_as_invalid_not_malformed() {
+        let (mut signing_key, public_key) = keypair(b"verifier stateful wrong commitment seed");
+        let hash = [0x5du8; HASH_LEN];
+        let signature = ShrincsSigner::sign_stateful_raw(&mut signing_key, &hash)
+            .expect("signing must succeed for a fresh key");
+        let envelope = encode_stateful_envelope(&public_key, &signature);
 
-        assert_eq!(
-            verifier.stateless_rotate(
-                expected,
-                &public_key,
-                &context,
-                &recovery_signature,
-                &next_target,
-            ),
-            Some(next_commitment)
+        // Structurally well-formed (correct-length, well-decoded) but wrong
+        // commitment: must be Invalid, not Malformed -- the stateless analog
+        // is `verify_stateless_reports_a_mismatched_commitment_as_invalid_not_malformed`.
+        let mut wrong_commitment = commitment_of(&public_key);
+        wrong_commitment[0] ^= 0x01;
+        let outcome = ShrincsVerifier::new().verify(&wrong_commitment, &hash, &envelope);
+        assert_eq!(outcome, VerifyOutcome::Invalid);
+    }
+
+    // --- stateless verify ------------------------------------------------
+
+    #[test]
+    fn verify_stateless_accepts_a_valid_stateless_signature_over_the_raw_hash() {
+        let (signing_key, public_key) = keypair(b"verifier stateless accept seed");
+        let hash = [0x66u8; HASH_LEN];
+        let signature: StatelessSignature = ShrincsSigner::sign_stateless_raw(&signing_key, &hash)
+            .expect("stateless signing must succeed for a fresh key");
+        let envelope = encode_stateless_envelope(&public_key, &signature);
+
+        let outcome = ShrincsVerifier::new().verify_stateless_signature(
+            &commitment_of(&public_key),
+            &hash,
+            &envelope,
         );
+        assert_eq!(outcome, VerifyOutcome::Valid);
+    }
+
+    #[test]
+    fn verify_stateless_rejects_a_signature_over_a_different_hash() {
+        let (signing_key, public_key) = keypair(b"verifier stateless reject seed");
+        let hash = [0x77u8; HASH_LEN];
+        let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &hash)
+            .expect("stateless signing must succeed for a fresh key");
+        let envelope = encode_stateless_envelope(&public_key, &signature);
+
+        let wrong_hash = [0x88u8; HASH_LEN];
+        let outcome = ShrincsVerifier::new().verify_stateless_signature(
+            &commitment_of(&public_key),
+            &wrong_hash,
+            &envelope,
+        );
+        assert_eq!(outcome, VerifyOutcome::Invalid);
+    }
+
+    #[test]
+    fn verify_stateless_rejects_a_wrong_length_key() {
+        let (signing_key, public_key) = keypair(b"verifier stateless wrong key seed");
+        let hash = [0x99u8; HASH_LEN];
+        let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &hash)
+            .expect("stateless signing must succeed for a fresh key");
+        let envelope = encode_stateless_envelope(&public_key, &signature);
+
+        let mut short_key = commitment_of(&public_key);
+        short_key.pop();
+        let outcome =
+            ShrincsVerifier::new().verify_stateless_signature(&short_key, &hash, &envelope);
+        assert_eq!(outcome, VerifyOutcome::Invalid);
+    }
+
+    #[test]
+    fn verify_stateless_reports_a_mismatched_commitment_as_invalid_not_malformed() {
+        let (signing_key, public_key) = keypair(b"verifier stateless wrong commitment seed");
+        let hash = [0xaau8; HASH_LEN];
+        let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &hash)
+            .expect("stateless signing must succeed for a fresh key");
+        let envelope = encode_stateless_envelope(&public_key, &signature);
+
+        let mut wrong_commitment = commitment_of(&public_key);
+        wrong_commitment[0] ^= 0x01;
+        let outcome =
+            ShrincsVerifier::new().verify_stateless_signature(&wrong_commitment, &hash, &envelope);
+        assert_eq!(outcome, VerifyOutcome::Invalid);
+    }
+
+    #[test]
+    fn verify_stateless_reports_a_truncated_envelope_as_malformed() {
+        let (signing_key, public_key) = keypair(b"verifier stateless malformed seed");
+        let hash = [0xbbu8; HASH_LEN];
+        let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &hash)
+            .expect("stateless signing must succeed for a fresh key");
+        let envelope = encode_stateless_envelope(&public_key, &signature);
+
+        let outcome = ShrincsVerifier::new().verify_stateless_signature(
+            &commitment_of(&public_key),
+            &hash,
+            &envelope[..envelope.len() - 1],
+        );
+        assert_eq!(outcome, VerifyOutcome::Malformed);
+    }
+
+    #[test]
+    fn verify_stateless_reports_an_empty_envelope_as_malformed() {
+        let (_signing_key, public_key) = keypair(b"verifier stateless empty seed");
+        let hash = [0xccu8; HASH_LEN];
+        let outcome = ShrincsVerifier::new().verify_stateless_signature(
+            &commitment_of(&public_key),
+            &hash,
+            &[],
+        );
+        assert_eq!(outcome, VerifyOutcome::Malformed);
     }
 }

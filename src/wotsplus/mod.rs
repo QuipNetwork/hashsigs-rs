@@ -1,4 +1,31 @@
+// Copyright (C) 2026 quip.network
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+//! Standalone WOTS+ (RFC 8391-style) primitives.
+//!
+//! Independent of the SHRINCS/SPHINCS+C DAG: this is the original one-time
+//! signature scheme kept as a public primitive for callers (e.g. the `solana`
+//! workspace member) that want plain WOTS+ directly, parameterized by a
+//! caller-supplied hash function rather than the crate's internal hash suite.
+
 /// Hash function type for WOTS+
+use alloc::vec;
+use alloc::vec::Vec;
+
 pub type HashFn = fn(&[u8]) -> [u8; 32];
 
 /// Constants from the WOTS+ implementation
@@ -204,13 +231,22 @@ impl PublicKey {
         public_seed.copy_from_slice(&bytes[..constants::HASH_LEN]);
         public_key_hash.copy_from_slice(&bytes[constants::HASH_LEN..]);
 
-        Some(PublicKey {
+        Some(Self {
             public_seed,
             public_key_hash,
         })
     }
 }
 
+impl TryFrom<&[u8]> for PublicKey {
+    type Error = ();
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        Self::from_bytes(value).ok_or(())
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct WOTSPlus {
     hash_fn: HashFn,
 }
@@ -542,7 +578,7 @@ mod tests {
     // Real one-way hash for tests that depend on preimage resistance (e.g. rejecting
     // a forged message). mock_hash is essentially identity and cannot bind messages.
     fn keccak256(data: &[u8]) -> [u8; 32] {
-        solana_program::keccak::hash(data).to_bytes()
+        crate::hash::backend::keccak256(data)
     }
 
     // Mock hash function for testing

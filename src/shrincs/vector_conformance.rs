@@ -17,12 +17,13 @@
 
 //! Regression guard over the committed SHRINCS golden vector.
 //!
-//! `tests/test_vectors/shrincs_sphincs_256s_keccak.json` is the cross-implementation
-//! reference the Solidity verifier is also checked against. It is produced by the
-//! (ignored) generator in `tests/generate_shrincs_vectors.rs`. Without a consuming
-//! test, a signer change could silently emit a different — possibly unverifiable —
-//! golden file with nothing failing. This test loads the committed file and asserts
-//! the Rust verifier accepts the `valid` case and rejects every tampered case.
+//! The profile-selected `tests/test_vectors/shrincs_sphincs_*.json` file is the
+//! cross-implementation reference the Solidity verifier is also checked against.
+//! It is produced by the (ignored) generator in
+//! `tests/generate_shrincs_vectors.rs`. Without a consuming test, a signer
+//! change could silently emit a different — possibly unverifiable — golden file
+//! with nothing failing. This test loads the committed file and asserts the
+//! Rust verifier accepts the `valid` case and rejects every tampered case.
 //!
 //! Scope: the stateless section only. Its `publicKey` records the full public key
 //! (stateful key, commitment, pk_seed, hypertree root), which is exactly what
@@ -32,15 +33,23 @@
 //! `review` bead).
 
 use std::fs;
-use std::path::PathBuf;
+use std::io::Read;
+use std::path::{Path, PathBuf};
 
+use flate2::read::GzDecoder;
 use serde_json::Value;
 
-use super::verifier::{
-    ForsEntry, ForsSignature, HypertreeLayerSignature, PublicKey, ShrincsVerifier,
-    StatefulSignature, StatelessSignature, WotsCSignature, HASH_LEN,
-};
+use super::key::PublicKey;
+use super::signature::Signature as StatefulSignature;
 use super::ShrincsSigner;
+use super::ShrincsVerifier;
+use crate::shrincs::test_fixtures::{
+    fixture_entry_opt, fixture_pair, fixture_path, load_fixture_file, TestKeyMode,
+};
+use crate::sphincs_plus_c::Signature as StatelessSignature;
+use crate::sphincs_plus_c::{ForsEntry, ForsSignature, LayerSignature as HypertreeLayerSignature};
+use crate::wots_c::Signature as WotsCSignature;
+use crate::HASH_LEN;
 
 // Seeds and budgets MUST match `tests/generate_shrincs_vectors.rs`; the
 // byte-reproduction and stateful conformance tests re-run keygen with them and
@@ -51,18 +60,83 @@ const STATEFUL_SEED: &[u8] = b"shrincs solidity vector stateful seed";
 const STATEFUL_MAX_SIGNATURES: u32 = 4;
 
 fn vector_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/test_vectors/shrincs_sphincs_256s_keccak.json")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(vector_filename())
+}
+
+#[cfg(shrincs_profile_256s)]
+fn vector_filename() -> &'static str {
+    "tests/test_vectors/shrincs_sphincs_256s_keccak.json"
+}
+
+#[cfg(shrincs_profile_128s_q18)]
+fn vector_filename() -> &'static str {
+    "tests/test_vectors/shrincs_sphincs_128s_q18_keccak.json"
+}
+
+#[cfg(shrincs_profile_128s_q20)]
+fn vector_filename() -> &'static str {
+    "tests/test_vectors/shrincs_sphincs_128s_q20_keccak.json"
+}
+
+#[cfg(shrincs_profile_256s_sha2)]
+fn vector_filename() -> &'static str {
+    "tests/test_vectors/shrincs_sphincs_256s_sha2.json"
 }
 
 fn load_vectors() -> Value {
-    let raw = fs::read_to_string(vector_path()).unwrap_or_else(|error| {
+    let path = vector_path();
+    let raw = read_json_or_gzip(&path).unwrap_or_else(|error| {
         panic!(
-            "failed to read committed golden vector at {}: {error}",
-            vector_path().display()
+            "failed to read committed golden vector at {} or {}: {error}",
+            path.display(),
+            gz_path(&path).display()
         )
     });
     serde_json::from_str(&raw).expect("golden vector must be valid JSON")
+}
+
+fn fixture_or_fresh_full_key(
+    seed_label: &'static str,
+    max_stateful_signatures: u32,
+) -> (super::Keys, PublicKey) {
+    match TestKeyMode::from_env() {
+        TestKeyMode::Fresh => ShrincsSigner::keygen(seed_label.as_bytes(), max_stateful_signatures)
+            .unwrap_or_else(|| panic!("fresh keygen failed for seed label {seed_label:?}")),
+        TestKeyMode::Fixture => {
+            let path = fixture_path();
+            if path.is_file() {
+                let fixture_file = load_fixture_file(&path);
+                assert_eq!(
+                    fixture_file.profile_name,
+                    crate::shrincs::PROFILE_NAME,
+                    "fixture profile mismatch",
+                );
+                if let Some(entry) = fixture_entry_opt(&fixture_file, seed_label) {
+                    return fixture_pair(entry);
+                }
+            }
+            ShrincsSigner::keygen(seed_label.as_bytes(), max_stateful_signatures)
+                .unwrap_or_else(|| panic!("fresh keygen failed for seed label {seed_label:?}"))
+        }
+    }
+}
+
+fn gz_path(path: &Path) -> PathBuf {
+    PathBuf::from(format!("{}.gz", path.display()))
+}
+
+fn read_json_or_gzip(path: &Path) -> std::io::Result<String> {
+    match fs::read_to_string(path) {
+        Ok(text) => Ok(text),
+        Err(json_error) => {
+            let gz_path = gz_path(path);
+            let file = fs::File::open(&gz_path).map_err(|_| json_error)?;
+            let mut decoder = GzDecoder::new(file);
+            let mut text = String::new();
+            decoder.read_to_string(&mut text)?;
+            Ok(text)
+        }
+    }
 }
 
 fn hex_to_vec(value: &Value) -> Vec<u8> {
@@ -93,6 +167,17 @@ fn hex_list(value: &Value) -> Vec<Vec<u8>> {
         .collect()
 }
 
+fn hex_word_list(value: &Value) -> Vec<[u8; HASH_LEN]> {
+    hex_list(value)
+        .into_iter()
+        .map(|bytes| {
+            bytes
+                .try_into()
+                .expect("hash list entry must be exactly 32 bytes")
+        })
+        .collect()
+}
+
 fn u64_field(parent: &Value, key: &str) -> u64 {
     parent[key]
         .as_u64()
@@ -115,12 +200,12 @@ fn parse_stateless_signature(value: &Value) -> StatelessSignature {
         .expect("fors.entries must be an array")
         .iter()
         .map(|entry| ForsEntry {
-            secret_leaf: hex_to_vec(&entry["secretLeaf"]),
-            auth_path: hex_list(&entry["authPath"]),
+            secret_leaf: hex_to_hash(&entry["secretLeaf"]),
+            auth_path: hex_word_list(&entry["authPath"]),
         })
         .collect();
     let fors = ForsSignature {
-        randomizer: hex_to_vec(&fors_value["randomizer"]),
+        randomizer: hex_to_hash(&fors_value["randomizer"]),
         counter: u64_field(fors_value, "counter") as u32,
         entries,
     };
@@ -131,13 +216,13 @@ fn parse_stateless_signature(value: &Value) -> StatelessSignature {
         .map(|layer| {
             let wots = &layer["wotsCSignature"];
             HypertreeLayerSignature {
-                wots_c_pk_hash: hex_to_vec(&layer["wotsCPkHash"]),
+                wots_c_pk_hash: hex_to_hash(&layer["wotsCPkHash"]),
                 wots_c_signature: WotsCSignature {
-                    randomizer: hex_to_vec(&wots["randomizer"]),
+                    randomizer: hex_to_hash(&wots["randomizer"]),
                     counter: u64_field(wots, "counter") as u32,
-                    chains: hex_list(&wots["chains"]),
+                    chains: hex_word_list(&wots["chains"]),
                 },
-                auth_path: hex_list(&layer["authPath"]),
+                auth_path: hex_word_list(&layer["authPath"]),
             }
         })
         .collect();
@@ -152,23 +237,33 @@ fn verify_stateless_case(case: &Value) -> bool {
     let expected_commitment = hex_to_hash(&case["publicKey"]["publicKeyCommitment"]);
     let message = hex_to_vec(&case["message"]);
     let signature = parse_stateless_signature(&case["signature"]);
-    ShrincsVerifier::new().verify_stateless_unsafe_raw(
+    let hybrid_ok = ShrincsVerifier::new().verify_stateless_unsafe_raw(
         expected_commitment,
         &public_key,
         &message,
         &signature,
-    )
+    );
+    // Independent SPHINCS+C path (no commitment): must agree whenever the
+    // hybrid path accepts. When hybrid rejects for commitment/shape reasons,
+    // the independent path may still accept pure crypto — only assert when
+    // hybrid accepts.
+    if hybrid_ok {
+        let pk = crate::sphincs_plus_c::PublicKey::from_slices(
+            &public_key.pk_seed,
+            &public_key.hypertree_root,
+        )
+        .expect("vector pk_seed/root are 32 bytes");
+        assert!(
+            crate::sphincs_plus_c::verify(&pk, &message, &signature),
+            "stateless vector must verify through independent sphincs_plus_c::verify"
+        );
+    }
+    hybrid_ok
 }
 
 #[test]
 fn stateless_golden_vector_accepts_valid_and_rejects_tampered() {
-    let raw = fs::read_to_string(vector_path()).unwrap_or_else(|error| {
-        panic!(
-            "failed to read committed golden vector at {}: {error}",
-            vector_path().display()
-        )
-    });
-    let vectors: Value = serde_json::from_str(&raw).expect("golden vector must be valid JSON");
+    let vectors = load_vectors();
     let cases = &vectors["stateless"]["cases"];
 
     assert!(
@@ -197,6 +292,23 @@ fn stateless_golden_vector_accepts_valid_and_rejects_tampered() {
             "tampered stateless golden case '{name}' must be rejected but verified true"
         );
     }
+}
+
+#[cfg(any(feature = "profile-128s-q18", feature = "profile-128s-q20"))]
+#[test]
+fn logs_committed_128_stateless_fors_counter() {
+    use crate::shrincs::{FORS_C_MAX_GRIND_COUNTER, PROFILE_NAME};
+
+    let vectors = load_vectors();
+    let counter = u64_field(&vectors["stateless"]["signature"]["fors"], "counter") as u32;
+    eprintln!(
+        "profile={PROFILE_NAME} committed valid stateless FORS counter={counter} budget={}",
+        FORS_C_MAX_GRIND_COUNTER
+    );
+    assert!(
+        counter < FORS_C_MAX_GRIND_COUNTER,
+        "committed 128 stateless vector uses FORS counter outside active grind budget"
+    );
 }
 
 /// Re-run keygen + sign with the generator's seeds and assert the produced public
@@ -270,41 +382,10 @@ fn stateless_verifier_reject_branches_do_not_panic() {
         "mutated FORS randomizer must be rejected"
     );
 
-    // Malformed 31-byte WOTS public-key hash: the length guard must fail closed.
-    let mut short_pk_hash = base.clone();
-    short_pk_hash.hypertree[0]
-        .wots_c_pk_hash
-        .truncate(HASH_LEN - 1);
-    assert!(
-        rejects(&short_pk_hash),
-        "31-byte wots_c_pk_hash must be rejected"
-    );
-
-    // Malformed 33-byte WOTS public-key hash.
-    let mut long_pk_hash = base.clone();
-    long_pk_hash.hypertree[0].wots_c_pk_hash.push(0);
-    assert!(
-        rejects(&long_pk_hash),
-        "33-byte wots_c_pk_hash must be rejected"
-    );
-
-    // Malformed 31-byte FORS secret leaf.
-    let mut short_secret_leaf = base.clone();
-    short_secret_leaf.fors.entries[0]
-        .secret_leaf
-        .truncate(HASH_LEN - 1);
-    assert!(
-        rejects(&short_secret_leaf),
-        "31-byte FORS secret leaf must be rejected"
-    );
-
-    // Malformed 33-byte WOTS chain value.
-    let mut long_chain = base;
-    long_chain.hypertree[0].wots_c_signature.chains[0].push(0);
-    assert!(
-        rejects(&long_chain),
-        "33-byte WOTS chain value must be rejected"
-    );
+    // Wrong-length hash fields (31/33-byte pk hashes, secret leaves, chain
+    // values) are no longer representable: the wire types use [u8; HASH_LEN],
+    // so malformed lengths fail at the decode boundary instead of in verify.
+    let _ = base;
 }
 
 fn encoded_stateful_sub_key(public_key: &Value) -> Vec<u8> {
@@ -354,15 +435,17 @@ fn stateful_public_key_from_case(base: &PublicKey, case_public_key: &Value) -> P
 /// corruptedSignature. (Bead p8a.)
 #[cfg_attr(
     any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
-    ignore = "128s stateful keygen rebuilds the hypertree, compute-infeasible in-process"
+    ignore = "128s stateful golden conformance still needs a full key fixture/manual regeneration path"
 )]
 #[test]
 fn stateful_golden_vector_accepts_valid_and_rejects_tampered() {
     let vectors = load_vectors();
     let section = &vectors["stateful"];
 
-    let (_, base_public_key) =
-        ShrincsSigner::keygen(STATEFUL_SEED, STATEFUL_MAX_SIGNATURES).expect("stateful keygen");
+    let (_, base_public_key) = fixture_or_fresh_full_key(
+        std::str::from_utf8(STATEFUL_SEED).expect("generator seed must be utf-8"),
+        STATEFUL_MAX_SIGNATURES,
+    );
     let expected: [u8; HASH_LEN] = base_public_key
         .public_key_commitment
         .clone()

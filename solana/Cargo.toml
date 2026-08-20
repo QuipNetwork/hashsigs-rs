@@ -2,22 +2,30 @@
 name = "hashsigs-rs-solana"
 version = "0.0.1"
 edition = "2021"
+rust-version = "1.95"
 authors = ["Richard T. Carback III <rick.carback@gmail.com>"]
 description = "Solana program for WOTS+"
-license = "AGPL-3.0"
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/quipnetwork/hashsigs-rs"
+publish = false
 
 [lib]
 crate-type = ["cdylib", "lib"]
 
 [features]
 no-entrypoint = []
+# Replaces the entrypoint's default 32 KiB-bounded bump allocator with an
+# unbounded one so ComputeBudgetInstruction::request_heap_frame actually
+# extends usable heap (the VM enforces the granted frame size).
+custom-heap = []
+default = ["custom-heap"]
 
 [dependencies]
 solana-program = "4.0"
-hashsigs-rs = { path = "..", features = ["heap-buffers"] }
+hashsigs-rs = { path = "..", features = ["solana", "heap-buffers"] }
 borsh = "1.5.7"
 bytemuck = "1.24"
-bytemuck_derive = "1.10.2"  # Updated to satisfy Solana 2.3
+bytemuck_derive = "1.10.2"
 solana-system-interface = { version = "3.2", features = ["bincode"] }
 
 [dev-dependencies]

@@ -1,0 +1,326 @@
+// Copyright (C) 2026 quip.network
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+//! Independent SPHINCS+C stateless layer.
+//!
+//! Mirrors Solidity `SPHINCSPlusC.sol`: key = (pk_seed, hypertree_root), message
+//! is arbitrary bytes (or raw 32-byte hash via `to_message` / `verify_hash`).
+//! No SHRINCS public-key-bundle commitment and no action envelope.
+
+use crate::HASH_LEN;
+
+/// Convert a 32-byte hash into the signed message bytes.
+/// The hash IS the message: exactly its 32 bytes.
+pub fn to_message(hash: &[u8; HASH_LEN]) -> [u8; HASH_LEN] {
+    *hash
+}
+
+/// Verify a SPHINCS+C signature over an arbitrary message.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// # fn main() -> Result<(), ()> {
+/// use hashsigs_rs::sphincs_plus_c::{keygen, sign, verify};
+///
+/// let key = keygen([1u8; 32], [2u8; 32], [3u8; 32]);
+/// let message = b"hello";
+/// let sig = sign(&key, message).ok_or(())?;
+/// assert!(verify(&key.public_key, message, &sig));
+/// # Ok(())
+/// # }
+/// ```
+pub fn verify(pk: &key::PublicKey, message: &[u8], sig: &Signature) -> bool {
+    verify_raw(pk.pk_seed.as_bytes(), pk.root.as_bytes(), message, sig)
+}
+
+/// Verify a SPHINCS+C signature over a 32-byte hash.
+pub fn verify_hash(pk: &key::PublicKey, hash: &[u8; HASH_LEN], sig: &Signature) -> bool {
+    verify(pk, &to_message(hash), sig)
+}
+
+/// Core verify: FORS-C then hypertree (byte-identical to prior `verify_stateless_raw`).
+pub(crate) fn verify_raw(
+    pk_seed: &[u8; HASH_LEN],
+    hypertree_root: &[u8; HASH_LEN],
+    message: &[u8],
+    signature: &Signature,
+) -> bool {
+    if signature.hypertree.is_empty() {
+        return false;
+    }
+    let Some((fors_root, seed_tree_index, seed_leaf_index)) =
+        fors_c::verify_fors_c_and_return_root(pk_seed, hypertree_root, message, &signature.fors)
+    else {
+        return false;
+    };
+    hypertree::verify_hypertree(
+        pk_seed,
+        hypertree_root,
+        fors_root,
+        hypertree::HypertreeSeed {
+            tree_index: seed_tree_index,
+            leaf_index: seed_leaf_index,
+        },
+        &signature.hypertree,
+    )
+}
+
+/// FORS-C signature wire type and its ABI codec, plus internal sign/verify.
+///
+/// `pub(crate)` because the module itself is an implementation detail;
+/// `fors_c::Entry`/`fors_c::Signature` are part of the crate's public
+/// wire-type surface and are re-exported below as `ForsEntry`/`ForsSignature`:
+/// the `tests/` integration suite and the `solana` workspace member
+/// reconstruct them from their DTOs, importing them at the canonical path
+/// `crate::sphincs_plus_c::{ForsEntry, ForsSignature}`.
+pub(crate) mod fors_c;
+pub use fors_c::{Entry as ForsEntry, Signature as ForsSignature};
+
+/// Hypertree layer signature wire type and its ABI codec, plus internal
+/// sign/verify.
+///
+/// `pub(crate)` because the module itself is an implementation detail;
+/// `hypertree::LayerSignature` is part of the crate's public wire-type
+/// surface and is re-exported below: the `tests/` integration suite and the
+/// `solana` workspace member reconstruct it from their DTOs, importing it at
+/// the canonical path `crate::sphincs_plus_c::LayerSignature`.
+pub(crate) mod hypertree;
+pub use hypertree::LayerSignature;
+
+/// Structured, newtyped SPHINCS+C key: [`key::Key`] = [`key::PrivateKey`] +
+/// [`key::PublicKey`]. Reused as the stateless half of a SHRINCS key.
+pub mod key;
+pub use key::{Key, PkSeed, PrfSeed, PrivateKey, PublicKey, Root, SkSeed};
+
+/// The stateless signature wire type and its ABI codec, plus the
+/// SPHINCS+C key-spec byte helper.
+///
+/// `pub` (rather than `pub(crate)`) because `Signature` is part of the
+/// crate's public wire-type surface: the `tests/` integration suite and the
+/// `solana` workspace member reconstruct it from their DTOs, importing it at
+/// the canonical path `crate::sphincs_plus_c::Signature` (also re-exported as
+/// `crate::shrincs::StatelessSignature`, a legitimate semantic alias — SHRINCS
+/// genuinely has a stateless signing path).
+pub mod signature;
+pub use signature::{encode_public_key, Signature};
+
+/// Verifier-interface facade (opaque key/signature bytes, tri-state verdict).
+pub mod verifier;
+pub use verifier::SphincsPlusCVerifier;
+
+/// Sign an arbitrary message at the SPHINCS+C layer.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// # fn main() -> Result<(), ()> {
+/// use hashsigs_rs::sphincs_plus_c::{keygen, sign};
+///
+/// let key = keygen([1u8; 32], [2u8; 32], [3u8; 32]);
+/// let sig = sign(&key, b"hello").ok_or(())?;
+/// assert!(!sig.to_bytes().is_empty());
+/// # Ok(())
+/// # }
+/// ```
+pub fn sign(signing_key: &key::Key, message: &[u8]) -> Option<Signature> {
+    let signed_fors = fors_c::sign_fors_c(signing_key, message)?;
+    let hypertree_layers = hypertree::sign_hypertree(
+        signing_key,
+        signed_fors.root,
+        signed_fors.tree_index,
+        signed_fors.leaf_index,
+    )?;
+    Some(Signature {
+        fors: signed_fors.signature,
+        hypertree: hypertree_layers,
+    })
+}
+
+/// Sign a 32-byte hash, returning the stateless signature the matching
+/// verifier accepts. Stateless: the key is not mutated. The bytes a
+/// [`SphincsPlusCVerifier`] takes are `signature.to_bytes()`.
+pub fn sign_hash(signing_key: &key::Key, hash: &[u8; HASH_LEN]) -> Option<Signature> {
+    sign(signing_key, &to_message(hash))
+}
+
+/// Derive the SPHINCS+C signing key and public key from raw seed material.
+///
+/// `hypertree_root` is computed here (the SPHINCS+C "keygen" step); this is
+/// the only public entry point that produces a real (non-placeholder) root,
+/// so downstream consumers (tests, on-chain fixtures) do not need crate-
+/// internal access to build a fully independent SPHINCS+C keypair.
+/// `stateless_prf_seed` only affects signing randomness, not the public key.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// use hashsigs_rs::sphincs_plus_c::keygen;
+///
+/// let key = keygen([1u8; 32], [2u8; 32], [3u8; 32]);
+/// assert_eq!(key.to_bytes().len(), 128);
+/// ```
+pub fn keygen(
+    sk_seed: [u8; HASH_LEN],
+    prf_seed: [u8; HASH_LEN],
+    pk_seed: [u8; HASH_LEN],
+) -> key::Key {
+    let hypertree_root = hypertree::hypertree_public_root(&sk_seed, &pk_seed);
+    key::Key::new(
+        key::PrivateKey::new(key::SkSeed::new(sk_seed), key::PrfSeed::new(prf_seed)),
+        key::PublicKey {
+            pk_seed: key::PkSeed::new(pk_seed),
+            root: key::Root::new(hypertree_root),
+        },
+    )
+}
+
+/// Derive a SPHINCS+C key from a master seed. Domain tags are consensus-fixed
+/// serialized bytes — do NOT rename them. Shared with `ShrincsSigner::keygen`'s
+/// stateless half so the same master seed yields matching key material.
+pub(crate) fn keygen_from_master_seed(seed: &[u8]) -> key::Key {
+    let sk = crate::hash::derive32(b"shrincs-stateless-sk-seed", seed, &[]);
+    let prf = crate::hash::derive32(b"shrincs-stateless-prf-seed", seed, &[]);
+    let pk = crate::hash::derive32(b"shrincs-pk-seed", seed, &[]);
+    keygen(sk, prf, pk)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
+    use crate::hash::{derive32, hash_packed};
+
+    /// Independent keygen at the SPHINCS+C layer (no SHRINCS hybrid fields).
+    #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
+    fn independent_keygen(seed: &[u8]) -> (Key, PublicKey) {
+        let key = keygen(
+            derive32(b"shrincs-stateless-sk-seed", seed, &[]),
+            derive32(b"shrincs-stateless-prf-seed", seed, &[]),
+            derive32(b"shrincs-pk-seed", seed, &[]),
+        );
+        let public_key = key.public_key;
+        (key, public_key)
+    }
+
+    #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
+    #[test]
+    fn sphincs_plus_c_sign_verify_round_trip() {
+        let (sk, pk) = independent_keygen(b"sphincs-plus-c independent rt");
+        let message = hash_packed(&[b"sphincs-plus-c-rt-message"]);
+        let sig = sign(&sk, &message).expect("sign");
+        assert!(verify(&pk, &message, &sig));
+        assert!(verify_hash(&pk, &message, &sig));
+        // verifier key shape: pk_seed || hypertree_root
+        let mut key = [0u8; 64];
+        key[..32].copy_from_slice(pk.pk_seed.as_bytes());
+        key[32..].copy_from_slice(pk.root.as_bytes());
+        assert!(crate::sphincs_plus_c::verifier::SphincsPlusCVerifier::new()
+            .verify_signature(&key, &message, &sig,));
+    }
+
+    #[test]
+    fn to_message_is_identity() {
+        let h = [0xabu8; 32];
+        assert_eq!(to_message(&h), h);
+    }
+
+    // Relocated from the removed `crate::signer` interface module: signing a
+    // hash with the free function and verifying the resulting bytes through
+    // the opaque `VerifierInterface` must round-trip. The stateless key is not
+    // mutated (no `&mut`), which is the point of the free-function shape.
+    #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
+    #[test]
+    fn sign_hash_round_trips_through_the_verifier_interface() {
+        use crate::verifier::{VerifierInterface, VerifyOutcome};
+        let (sk, pk) = independent_keygen(b"sphincs sign_hash round trip");
+        let hash = hash_packed(&[b"sphincs-plus-c sign_hash rt"]);
+        let signature = sign_hash(&sk, &hash).expect("sign_hash");
+        let mut key = [0u8; 64];
+        key[..32].copy_from_slice(pk.pk_seed.as_bytes());
+        key[32..].copy_from_slice(pk.root.as_bytes());
+        assert_eq!(
+            SphincsPlusCVerifier::new().verify(&key, &hash, &signature.to_bytes()),
+            VerifyOutcome::Valid
+        );
+    }
+
+    /// Solana compute-unit estimator for one stateless verify.
+    ///
+    /// The verify-path hash count is a per-profile structural constant: WOTS-C's
+    /// target-sum check fixes total chain-walk steps at
+    /// `chains * (w-1) - target_sum` regardless of message, and the FORS /
+    /// auth-path counts are structural. This asserts the exact count against
+    /// the analytic model, then prints the agave syscall charge
+    /// `calls * 85 + Σ_slices max(10, len/2)` (agave `SyscallHash`) — a floor:
+    /// SBF instruction execution and instruction deserialization come on top.
+    ///
+    /// Excluded under `parallel` (rayon workers would record into their own
+    /// thread-local counters) and under the 128s profiles (signing there is
+    /// too slow for the default-profile test lanes; the structural model
+    /// covers them analytically).
+    #[cfg(all(
+        feature = "std",
+        not(feature = "parallel"),
+        not(any(feature = "profile-128s-q18", feature = "profile-128s-q20"))
+    ))]
+    #[test]
+    fn stateless_verify_hash_count_matches_model_and_reports_cu_floor() {
+        use crate::hash::backend::metrics;
+        use crate::profiles::{
+            FORS_TREE_HEIGHT, HYPERTREE_HEIGHT, NUM_FORS_TREES, NUM_HYPERTREE_LAYERS,
+            NUM_WOTS_CHAINS, WOTS_CHAIN_LEN,
+        };
+
+        let (sk, pk) = independent_keygen(b"sphincs-plus-c cu estimator");
+        let message = hash_packed(&[b"sphincs-plus-c-cu-message"]);
+        let sig = sign(&sk, &message).expect("sign");
+
+        metrics::reset();
+        assert!(verify(&pk, &message, &sig));
+        let (calls, bytes, slice_cost) = metrics::snapshot();
+
+        let signed_trees = u64::from(NUM_FORS_TREES) - 1;
+        let digest_bytes = (u64::from(NUM_FORS_TREES) * u64::from(FORS_TREE_HEIGHT)
+            + u64::from(HYPERTREE_HEIGHT))
+        .div_ceil(8);
+        let fors_digest_blocks = if digest_bytes <= 32 {
+            1
+        } else {
+            digest_bytes.div_ceil(32)
+        };
+        // Per signed FORS tree: one leaf hash + one node hash per level; plus
+        // the aggregate fors-pk hash.
+        let fors_calls = fors_digest_blocks + signed_trees * (1 + u64::from(FORS_TREE_HEIGHT)) + 1;
+        // Per hypertree layer: WOTS message digest + fixed chain-walk total +
+        // wots-c-pk hash + one node hash per subtree auth-path level.
+        let subtree_height = u64::from(HYPERTREE_HEIGHT / NUM_HYPERTREE_LAYERS);
+        let chain_steps = u64::from(NUM_WOTS_CHAINS) * u64::from(WOTS_CHAIN_LEN - 1)
+            - u64::from(crate::wots_c::TARGET_SUM);
+        let per_layer = 1 + chain_steps + 1 + subtree_height;
+        let expected_calls = fors_calls + u64::from(NUM_HYPERTREE_LAYERS) * per_layer;
+        assert_eq!(calls, expected_calls, "verify hash-count model drifted");
+
+        let cu_floor = metrics::estimated_syscall_cu(calls, slice_cost);
+        hashsigs_println!(
+            "CU estimate profile={}: stateless verify = {calls} hash syscalls, \
+             {bytes} bytes hashed, syscall floor ≈ {cu_floor} CU \
+             (excludes SBF instruction execution and borsh deserialization)",
+            crate::profiles::PROFILE_NAME
+        );
+    }
+}

@@ -16,3 +16,22 @@ ts/src/web
 
 # local prompt/planning scratch - not committed
 _prompt_planning/
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+.beads/**/*.db
+.beads-credential-key
+.beads/proxieddb/
+.beads.gate.lock
+
+# Agent/tooling workspaces and instructions (local only)
+.beads/
+.agents/
+.claude/
+.codex/
+CLAUDE.md
+
+# Writable cargo home used by CI (must not collide with committed .cargo/)
+.cargo-home/
+.rustcheck/
+.serena/

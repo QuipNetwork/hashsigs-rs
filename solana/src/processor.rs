@@ -15,7 +15,8 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 use borsh::{BorshDeserialize, BorshSerialize};
-use hashsigs_rs::{constants, PublicKey, WOTSPlus};
+use hashsigs_rs::shrincs::ShrincsVerifier;
+use hashsigs_rs::{constants, PublicKey, SphincsPlusCVerifier, WOTSPlus};
 use solana_program::account_info::next_account_info;
 use solana_program::keccak::hash as keccak256_hash;
 use solana_program::program::set_return_data;
@@ -29,6 +30,10 @@ use solana_program::{
     sysvar::{rent::Rent, Sysvar},
 };
 use solana_system_interface::instruction::create_account;
+
+use crate::sphincs_plus_c::{
+    ActionContextDto, ShrincsPublicKeyDto, StatefulSignatureDto, StatelessSignatureDto,
+};
 
 // NOTE: The following is supposed to increase the stack size but it does not work in practice.
 /*
@@ -90,7 +95,7 @@ impl borsh::de::BorshDeserialize for PublicKeyWrapper {
     }
 }
 
-#[derive(BorshSerialize, BorshDeserialize)]
+#[derive(BorshSerialize, BorshDeserialize, Debug)]
 pub struct SignatureAccount {
     pub is_initialized: bool,
     pub signature: Vec<[u8; constants::HASH_LEN]>,
@@ -115,6 +120,33 @@ pub enum WOTSPlusInstruction {
         message: Vec<u8>,
         signature: Vec<[u8; constants::HASH_LEN]>,
         randomization_elements: Vec<[u8; constants::HASH_LEN]>,
+    },
+    /// Independent SPHINCS+C verify (ERC-7913 shape): no account state, no
+    /// SHRINCS commitment or action envelope. `key` is `pk_seed ||
+    /// hypertree_root` (64 bytes); `hash` is the signed 32-byte message hash.
+    SphincsPlusCVerify {
+        key: [u8; 64],
+        hash: [u8; constants::HASH_LEN],
+        signature: StatelessSignatureDto,
+    },
+    /// SHRINCS hybrid stateless verify: commitment + shape check, then
+    /// delegates to the same SPHINCS+C verify. No account state -- every
+    /// input (expected commitment, public-key bundle, action context) is
+    /// passed by value.
+    ShrincsVerifyStateless {
+        expected_public_key_commitment: [u8; constants::HASH_LEN],
+        public_key: ShrincsPublicKeyDto,
+        context: ActionContextDto,
+        signature: StatelessSignatureDto,
+    },
+    /// SHRINCS hybrid stateful (UXMSS fast path) verify: commitment + shape
+    /// check, then the unbalanced-tree WOTS-C verification. No account state
+    /// -- every input is passed by value, boolean result via return data.
+    ShrincsVerifyStateful {
+        expected_public_key_commitment: [u8; constants::HASH_LEN],
+        public_key: ShrincsPublicKeyDto,
+        context: ActionContextDto,
+        signature: StatefulSignatureDto,
     },
 }
 
@@ -199,7 +231,7 @@ fn process_sign(
     // Store the signature in the account
     let signature_account_data = SignatureAccount {
         is_initialized: true,
-        signature: signature.to_vec(),
+        signature,
     };
 
     signature_account_data.serialize(&mut &mut signature_account.try_borrow_mut_data()?[..])?;
@@ -219,10 +251,13 @@ fn process_verify(
 
     let public_key = PublicKey::from(public_key);
     let is_valid = wots.verify(&public_key, message, &signature);
+    // Fail closed: see `process_sphincs_plus_c_verify`. Write the boolean
+    // first for callers that inspect return data, then abort the transaction
+    // on an invalid signature so a CPI caller checking only instruction
+    // success cannot treat it as accepted.
+    set_return_data(&[is_valid as u8]);
     if !is_valid {
-        set_return_data(&[0]);
-    } else {
-        set_return_data(&[1]);
+        return Err(ProgramError::InvalidArgument);
     }
     Ok(())
 }
@@ -245,14 +280,95 @@ fn process_verify_with_randomization(
         &randomization_elements,
     );
 
+    // Fail closed: see `process_sphincs_plus_c_verify`.
+    set_return_data(&[is_valid as u8]);
     if !is_valid {
-        set_return_data(&[0]);
-    } else {
-        set_return_data(&[1]);
+        return Err(ProgramError::InvalidArgument);
     }
     Ok(())
 }
 
+// View-style: no account state read or written, no signer requirement beyond
+// what `process_instruction` already checks. Kept small for the 4 KB SBF
+// stack-frame limit -- the signature DTO lives on the heap (Vec fields).
+fn process_sphincs_plus_c_verify(
+    key: [u8; 64],
+    hash: [u8; constants::HASH_LEN],
+    signature: StatelessSignatureDto,
+) -> ProgramResult {
+    let signature = signature.into();
+    let is_valid = SphincsPlusCVerifier::new().verify_signature(&key, &hash, &signature);
+    // Fail closed: a CPI caller that checks only instruction success must not
+    // treat an invalid signature as accepted. Write the boolean first for
+    // callers that inspect return data, then abort the transaction on invalid.
+    set_return_data(&[is_valid as u8]);
+    if !is_valid {
+        return Err(ProgramError::InvalidArgument);
+    }
+    Ok(())
+}
+
+fn process_shrincs_verify_stateful(
+    expected_public_key_commitment: [u8; constants::HASH_LEN],
+    public_key: ShrincsPublicKeyDto,
+    context: ActionContextDto,
+    signature: StatefulSignatureDto,
+) -> ProgramResult {
+    let public_key = public_key.into();
+    let context = context.into();
+    let signature = signature.into();
+    let is_valid = ShrincsVerifier::new().verify_stateful(
+        expected_public_key_commitment,
+        &public_key,
+        &context,
+        &signature,
+    );
+    // Fail closed: see `process_sphincs_plus_c_verify`.
+    set_return_data(&[is_valid as u8]);
+    if !is_valid {
+        return Err(ProgramError::InvalidArgument);
+    }
+    Ok(())
+}
+
+fn process_shrincs_verify_stateless(
+    expected_public_key_commitment: [u8; constants::HASH_LEN],
+    public_key: ShrincsPublicKeyDto,
+    context: ActionContextDto,
+    signature: StatelessSignatureDto,
+) -> ProgramResult {
+    let public_key = public_key.into();
+    let context = context.into();
+    let signature = signature.into();
+    let is_valid = ShrincsVerifier::new().verify_stateless(
+        expected_public_key_commitment,
+        &public_key,
+        &context,
+        &signature,
+    );
+    // Fail closed: see `process_sphincs_plus_c_verify`.
+    set_return_data(&[is_valid as u8]);
+    if !is_valid {
+        return Err(ProgramError::InvalidArgument);
+    }
+    Ok(())
+}
+
+/// Program entrypoint: deserialize a `WOTSPlusInstruction` and dispatch.
+///
+/// # Errors
+///
+/// Returns:
+/// - [`ProgramError::InvalidInstructionData`] when `instruction_data` is empty
+///   or fails Borsh deserialization
+/// - [`ProgramError::NotEnoughAccountKeys`] when a handler needs more accounts
+///   than provided
+/// - [`ProgramError::InvalidAccountData`] / [`ProgramError::UninitializedAccount`]
+///   on account layout or ownership failures
+/// - [`ProgramError::InvalidArgument`] when a cryptographic verify path rejects
+///   the signature
+/// - Other [`ProgramError`] variants from system/rent CPI and account ops used
+///   by individual instruction handlers
 pub fn process_instruction(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
@@ -260,13 +376,6 @@ pub fn process_instruction(
 ) -> ProgramResult {
     if instruction_data.is_empty() {
         return Err(ProgramError::InvalidInstructionData);
-    }
-
-    // Only verify signatures for accounts that are marked as signers
-    for account_info in accounts.iter() {
-        if account_info.is_signer && account_info.signer_key().is_none() {
-            return Err(ProgramError::MissingRequiredSignature);
-        }
     }
 
     // Initialize WOTS+ instance
@@ -306,6 +415,33 @@ pub fn process_instruction(
             &message,
             signature,
             randomization_elements,
+        ),
+        WOTSPlusInstruction::SphincsPlusCVerify {
+            key,
+            hash,
+            signature,
+        } => process_sphincs_plus_c_verify(key, hash, signature),
+        WOTSPlusInstruction::ShrincsVerifyStateless {
+            expected_public_key_commitment,
+            public_key,
+            context,
+            signature,
+        } => process_shrincs_verify_stateless(
+            expected_public_key_commitment,
+            public_key,
+            context,
+            signature,
+        ),
+        WOTSPlusInstruction::ShrincsVerifyStateful {
+            expected_public_key_commitment,
+            public_key,
+            context,
+            signature,
+        } => process_shrincs_verify_stateful(
+            expected_public_key_commitment,
+            public_key,
+            context,
+            signature,
         ),
     }
 }

@@ -2252,9 +2252,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "26145e563e54f2cadc477553f1ec5ee650b00862f0a58bcd12cbdc5f0ea2d2f4"
 dependencies = [
  "cfg-if",
+ "js-sys",
  "libc",
  "r-efi 5.3.0",
  "wasi 0.14.2+wasi-0.2.4",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -2337,17 +2339,29 @@ dependencies = [
 ]
 
 [[package]]
-name = "hashsigs-rs"
-version = "0.2.0-rc1"
+name = "hashsigs-py"
+version = "0.2.1-rc1"
 dependencies = [
+ "hashsigs-rs",
+ "pyo3",
+]
+
+[[package]]
+name = "hashsigs-rs"
+version = "0.2.1-rc1"
+dependencies = [
+ "flate2",
  "getrandom 0.2.16",
+ "getrandom 0.3.3",
  "js-sys",
  "proptest",
+ "rayon",
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
+ "sha2 0.10.9",
+ "sha3",
  "solana-program",
- "thiserror 2.0.19",
  "tsify",
  "wasm-bindgen",
  "wasm-bindgen-test",
@@ -2533,7 +2547,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "tokio",
  "tower-service",
  "tracing",
@@ -3794,6 +3808,63 @@ dependencies = [
 ]
 
 [[package]]
+name = "pyo3"
+version = "0.29.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4688ddedf473e32662b9b067670129a8afb8c18e351482c70d62ba4a88171e8b"
+dependencies = [
+ "libc",
+ "once_cell",
+ "portable-atomic",
+ "pyo3-build-config",
+ "pyo3-ffi",
+ "pyo3-macros",
+]
+
+[[package]]
+name = "pyo3-build-config"
+version = "0.29.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f41027e41b4bd03f6e60f9f417fe24a6341a6bb744edd62b6f709f2a52ea30e9"
+dependencies = [
+ "target-lexicon",
+]
+
+[[package]]
+name = "pyo3-ffi"
+version = "0.29.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e591a95526fead067432c3b3a33fc74770b87b1e04e73671090d9c2055a2b327"
+dependencies = [
+ "libc",
+ "pyo3-build-config",
+]
+
+[[package]]
+name = "pyo3-macros"
+version = "0.29.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "73225868fc1cd84eef2c3c230ddb91273bf1de46aeb8a4248da76d32a0924a1c"
+dependencies = [
+ "proc-macro2",
+ "pyo3-macros-backend",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "pyo3-macros-backend"
+version = "0.29.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "571575aa3749fa6216757dd47d2a3e7ef360f329a40f0666a9fbd14889024952"
+dependencies = [
+ "heck",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "qstring"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3832,7 +3903,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "thiserror 2.0.19",
  "tokio",
  "tracing",
@@ -4595,6 +4666,27 @@ name = "shlex"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
+
+[[package]]
+name = "shrincs-account-example"
+version = "0.0.1"
+dependencies = [
+ "borsh",
+ "hashsigs-rs",
+ "hashsigs-rs-solana",
+ "solana-account 4.3.0",
+ "solana-instruction",
+ "solana-keypair",
+ "solana-program",
+ "solana-program-test",
+ "solana-pubkey 4.2.0",
+ "solana-sdk-ids",
+ "solana-signer",
+ "solana-system-interface 3.2.0",
+ "solana-transaction",
+ "solana-transaction-error",
+ "tokio",
+]
 
 [[package]]
 name = "signal-hook"
@@ -7742,6 +7834,12 @@ dependencies = [
  "libc",
  "xattr",
 ]
+
+[[package]]
+name = "target-lexicon"
+version = "0.13.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "adb6935a6f5c20170eeceb1a3835a49e12e19d792f6dd344ccc76a985ca5a6ca"
 
 [[package]]
 name = "tarpc"
