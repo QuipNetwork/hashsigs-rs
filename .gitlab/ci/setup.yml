@@ -1,0 +1,115 @@
+# Pin every job to the self-hosted Linux fleet (lovelace/watch/finney all carry
+# these tags; SaaS runners do not). This keeps all jobs on project runners even
+# after shared runners are enabled on the project. publish-npm overrides this
+# with its own `tags` to reach a gitlab.com shared runner, the only place npm
+# OIDC trusted publishing works. A job's own `tags` replaces the default (no
+# merge), so the override is clean.
+default:
+  tags: [linux, x86_64]
+
+# Shared cargo/target cache keyed on Cargo.lock + job name so stale deps cannot
+# drift under --locked and so mutually-exclusive profile feature jobs do not
+# share a single target/ tree (profile features overwrite each other).
+# Applied via extends on Rust jobs only (not publish-npm).
+.rust-cache:
+  cache:
+    key:
+      files:
+        - Cargo.lock
+      prefix: "${CI_JOB_NAME}"
+    paths:
+      - .cargo-home/registry/
+      - .cargo-home/git/
+      - .cargo-home/bin/
+      - target/
+
+# Shared rules: run on merge requests and on the default branch. Extended by the
+# static-analysis/standards jobs so the trigger set lives in one place.
+.mr-default-rules:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# Shared before_script fragments via GitLab !reference (not YAML list anchors,
+# which nest incorrectly when expanded under another list).
+.install-node-pinned:
+  before_script:
+    - |
+      set -euo pipefail
+      ARCH="$(uname -m)"
+      case "$ARCH" in
+        x86_64) NODE_ARCH=x64 ;;
+        aarch64|arm64) NODE_ARCH=arm64 ;;
+        *) echo "unsupported arch: $ARCH" >&2; exit 1 ;;
+      esac
+      curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz" \
+        | tar -xJ -C /usr/local --strip-components=1
+      node --version
+      npm --version
+      case "$(node --version)" in
+        v${NODE_MAJOR}.*) ;;
+        *) echo "expected Node ${NODE_MAJOR}.x, got $(node --version)" >&2; exit 1 ;;
+      esac
+
+# Download the prebuilt wasm-bindgen CLI (musl) instead of compiling from
+# source via `cargo install`. Version is pinned in WASM_BINDGEN_VERSION;
+# tarball integrity is checked against WASM_BINDGEN_SHA256 before extract.
+# .cargo-home/bin is cache-backed so cold downloads are rare.
+.install-wasm-bindgen:
+  before_script:
+    - rustup target add wasm32-unknown-unknown
+    - |
+      set -euo pipefail
+      mkdir -p "${CARGO_HOME}/bin"
+      export PATH="${CARGO_HOME}/bin:${PATH}"
+      if ! wasm-bindgen --version 2>/dev/null | grep -Fq "${WASM_BINDGEN_VERSION}"; then
+        echo "installing wasm-bindgen-cli ${WASM_BINDGEN_VERSION} (prebuilt musl)"
+        WB_URL="https://github.com/wasm-bindgen/wasm-bindgen/releases/download/${WASM_BINDGEN_VERSION}/wasm-bindgen-${WASM_BINDGEN_VERSION}-x86_64-unknown-linux-musl.tar.gz"
+        curl -fsSL "$WB_URL" -o /tmp/wasm-bindgen.tar.gz
+        echo "${WASM_BINDGEN_SHA256}  /tmp/wasm-bindgen.tar.gz" | sha256sum -c -
+        tar -xz -C "${CARGO_HOME}/bin" --strip-components=1 -f /tmp/wasm-bindgen.tar.gz
+        rm -f /tmp/wasm-bindgen.tar.gz
+      fi
+      wasm-bindgen --version
+      case "$(wasm-bindgen --version)" in
+        *" ${WASM_BINDGEN_VERSION}"*) ;;
+        *) echo "expected wasm-bindgen ${WASM_BINDGEN_VERSION}, got $(wasm-bindgen --version)" >&2; exit 1 ;;
+      esac
+
+# Prebuilt cargo-deny (musl), pinned + sha-verified like wasm-bindgen above.
+# Cached in .cargo-home/bin, so cold downloads are rare. Targeted extraction of
+# just the binary (the tarball also ships README/LICENSE).
+.install-cargo-deny:
+  before_script:
+    - |
+      set -euo pipefail
+      mkdir -p "${CARGO_HOME}/bin"
+      export PATH="${CARGO_HOME}/bin:${PATH}"
+      if ! cargo-deny --version 2>/dev/null | grep -Fq "${CARGO_DENY_VERSION}"; then
+        echo "installing cargo-deny ${CARGO_DENY_VERSION} (prebuilt musl)"
+        CD_URL="https://github.com/EmbarkStudios/cargo-deny/releases/download/${CARGO_DENY_VERSION}/cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl.tar.gz"
+        curl -fsSL "$CD_URL" -o /tmp/cargo-deny.tar.gz
+        echo "${CARGO_DENY_SHA256}  /tmp/cargo-deny.tar.gz" | sha256sum -c -
+        tar -xz -C "${CARGO_HOME}/bin" --strip-components=1 -f /tmp/cargo-deny.tar.gz \
+          "cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl/cargo-deny"
+        rm -f /tmp/cargo-deny.tar.gz
+      fi
+      cargo-deny --version
+
+# Prebuilt cargo-semver-checks (musl), pinned + sha-verified. The tarball ships
+# the binary at the archive root (no wrapping directory), so no strip.
+.install-cargo-semver-checks:
+  before_script:
+    - |
+      set -euo pipefail
+      mkdir -p "${CARGO_HOME}/bin"
+      export PATH="${CARGO_HOME}/bin:${PATH}"
+      if ! cargo-semver-checks --version 2>/dev/null | grep -Fq "${CARGO_SEMVER_CHECKS_VERSION}"; then
+        echo "installing cargo-semver-checks ${CARGO_SEMVER_CHECKS_VERSION} (prebuilt musl)"
+        SC_URL="https://github.com/obi1kenobi/cargo-semver-checks/releases/download/v${CARGO_SEMVER_CHECKS_VERSION}/cargo-semver-checks-x86_64-unknown-linux-musl.tar.gz"
+        curl -fsSL "$SC_URL" -o /tmp/cargo-semver-checks.tar.gz
+        echo "${CARGO_SEMVER_CHECKS_SHA256}  /tmp/cargo-semver-checks.tar.gz" | sha256sum -c -
+        tar -xz -C "${CARGO_HOME}/bin" -f /tmp/cargo-semver-checks.tar.gz cargo-semver-checks
+        rm -f /tmp/cargo-semver-checks.tar.gz
+      fi
+      cargo-semver-checks --version

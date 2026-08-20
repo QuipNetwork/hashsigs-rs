@@ -1,0 +1,137 @@
+# Minimal gate on version tags so build-package/publish-npm cannot release an
+# untested SHA. Re-runs the default wasm-bindings cargo suite plus the TS
+# package build; full profile/solana matrix stays on MR + default-branch only.
+tag-gate:
+  stage: test
+  image: rust:1.89.0
+  extends: .rust-cache
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$/
+  before_script:
+    - !reference [.install-node-pinned, before_script]
+    - !reference [.install-wasm-bindgen, before_script]
+  script:
+    - cargo test --locked --features wasm-bindings
+    - export PATH="${CARGO_HOME}/bin:${PATH}"
+    - cd ts && npm ci
+    - npm run build
+
+# Build + pack on the self-hosted fleet (has the Rust/wasm toolchain and the
+# muscle for it). Produces the publishable tarball as an artifact; the shared
+# runner cannot build wasm and must not try to.
+build-package:
+  stage: package
+  image: rust:1.89.0
+  extends: .rust-cache
+  # Inherits default tags [linux, x86_64] -> runs on the self-hosted Linux fleet.
+  # Anchored semver, optional pre-release suffix (e.g. v0.2.0-rc1); rejects v1.2.3.4 / v1.2.3-foo trailing junk.
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$/ # runs only on a semver version tag
+  needs: [tag-gate]
+  before_script:
+    - !reference [.install-node-pinned, before_script]
+    - !reference [.install-wasm-bindgen, before_script]
+  script:
+    # tag-gate already ran cargo test --features wasm-bindings and the ts build
+    # on this tag SHA. Pack only here (prepack rebuilds wasm via npm run build).
+    - export PATH="${CARGO_HOME}/bin:${PATH}"
+    - cd ts && npm ci
+    - npm version "${CI_COMMIT_TAG#v}" --no-git-tag-version --allow-same-version # tag v0.2.0 -> 0.2.0
+    # `npm pack` runs prepack -> npm run build (wasm + tsc + conformance +
+    # sync-version), then writes quip.network-hashsigs-wasm-<version>.tgz.
+    - npm pack
+  artifacts:
+    paths:
+      - ts/quip.network-hashsigs-wasm-*.tgz
+    expire_in: 7 days
+
+# Stage the prebuilt tarball on a shared runner (npm OIDC only works there).
+# Publishing a tarball skips prepack, so no Rust/wasm toolchain is needed.
+publish-npm:
+  stage: publish
+  image: node:${NODE_VERSION}
+  tags: [saas-linux-small-amd64] # gitlab.com shared runner; required for npm OIDC
+  # OIDC token for tokenless trusted publishing; npm auto-detects NPM_ID_TOKEN.
+  # SIGSTORE_ID_TOKEN enables the sigstore-signed provenance attestation.
+  id_tokens:
+    NPM_ID_TOKEN:
+      aud: "npm:registry.npmjs.org"
+    SIGSTORE_ID_TOKEN:
+      aud: sigstore
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$/ # runs only on a semver version tag
+  dependencies: [build-package] # pull the tarball artifact
+  needs: [build-package]
+  before_script:
+    # Trusted publishing (>=11.5.1) and staging (>=11.15.0) need a newer npm than
+    # the node:22.14 image bundles.
+    - npm install -g "npm@${NPM_VERSION}"
+    - npm --version
+  script:
+    # Stage the release for maintainer approval (npm stage approve, 2FA). The
+    # package must already exist (first publish is a one-time manual local
+    # `npm publish`); fail with a clear message rather than a cryptic npm error
+    # if it does not. Prereleases (e.g. 0.2.0-rc1) must go to a non-`latest`
+    # dist-tag, derived from the prerelease identifier (rc1 -> rc, beta.2 -> beta).
+    - |
+      set -euo pipefail
+      PKG="$(node -p 'require("./ts/package.json").name')"
+      # Leading ./ so npm treats this as a file, not a github owner/repo spec.
+      TARBALL="./$(ls ts/quip.network-hashsigs-wasm-*.tgz)"
+      if ! npm view "$PKG" version >/dev/null 2>&1; then
+        echo "ERROR: $PKG is not on npm yet. Do the one-time bootstrap publish" >&2
+        echo "locally (npm publish, with 2FA), add the Trusted Publisher, then" >&2
+        echo "re-run this tag. CI only stages releases for existing packages." >&2
+        exit 1
+      fi
+      VERSION="${CI_COMMIT_TAG#v}"
+      DIST_TAG="latest"
+      case "$VERSION" in
+        *-*)
+          DIST_TAG="$(printf '%s' "${VERSION#*-}" | sed -E 's/[^A-Za-z].*$//')"
+          [ -n "$DIST_TAG" ] || DIST_TAG="next"
+          ;;
+      esac
+      echo "staging $TARBALL ($PKG@$VERSION) on dist-tag '$DIST_TAG'"
+      npm stage publish "$TARBALL" --access public --tag "$DIST_TAG"
+
+# The dry-run gate. Runs on EVERY pipeline: merge requests, branch pushes and
+# tag pipelines alike, using the same build path the publish jobs use.
+#
+# The guarantee: when this job fails, every registry still holds what it held
+# before. A packaging regression -- a missing license file, an exports map
+# that omits a file, a manifest version that drifted -- fails here instead of
+# after publication.
+#
+# `make -k`, not `make`: a failing crate check must not hide a failing npm
+# package. See the Makefile header.
+#
+# This job must NOT declare `environment:`. The publish jobs use the `release`
+# environment, which is restricted to protected tags; this job runs on every
+# ref.
+release:validate:
+  stage: publish
+  extends: .rust-cache
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG
+  # Nothing here consumes another job's artifacts; ordering is expressed with
+  # `needs:` alone. Without this, GitLab downloads every prior stage's
+  # artifacts before running a packaging check.
+  dependencies: []
+  # The npm leg rebuilds the wasm and runs the TypeScript suite on a cold
+  # cache. A timeout exists to kill a job that will never finish, not to
+  # police one that is merely slow.
+  timeout: 60m
+  before_script:
+    - !reference [.install-node-pinned, before_script]
+  script:
+    # Assert the tag against the manifests FIRST, before anything is built.
+    # Without this the only thing enforcing tag-versus-crate agreement is the
+    # sync check buried inside `npm pack`, so a mistyped tag is discovered
+    # after a full wasm rebuild rather than in the pipeline's first seconds.
+    # `expect` reuses the same version reader `check` uses, so CI has no second
+    # idea of how to parse Cargo.toml.
+    - test -z "${CI_COMMIT_TAG:-}" || bash bin/sync-versions.sh expect "${CI_COMMIT_TAG#v}"
+    - make -k check-release
