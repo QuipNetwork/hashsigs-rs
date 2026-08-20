@@ -6,10 +6,13 @@ One `v<X.Y.Z>` git tag publishes every artifact.
 |---|----------|----------|--------------|
 | 1 | `@quip.network/hashsigs-wasm` | npm | `publish-npm`, staged for approval |
 | 2 | `hashsigs-rs` | crates.io | `publish-crates`, automatic |
+| 3 | `hashsigs` | PyPI | `publish-pypi`, automatic |
 
-That is the whole list today. Later plans add the PyPI distribution (the
-`py/` bindings crate exists but publishes nothing yet), the npm profile
-siblings, and the C tarballs.
+That is the whole list today. The PyPI wheel is a stub until the Python
+bindings plan lands: it installs and exposes `__version__`, nothing else,
+and every stub release is a prerelease so default pip resolution never
+picks it. Later plans add the real Python API, the npm profile siblings,
+and the C tarballs.
 
 **Know what each registry lets you undo.** npm allows unpublishing a version
 within 72 hours. PyPI lets you delete a release, but the filename stays
@@ -34,14 +37,13 @@ that job to a private runner loses provenance without warning.
 **The crates.io trusted publisher** must name this project. On crates.io,
 open `hashsigs-rs` > Settings > Trusted Publishing and add a GitLab
 publisher: namespace `quip.network`, project `hashsigs-rs`, top-level
-pipeline file `.gitlab-ci.yml`, environment `crates`. The environment name
+pipeline file `.gitlab-ci.yml`, environment `cargo`. The environment name
 must match the `environment:` on the `publish-crates` job exactly. GitLab
 support is a public beta and works only for projects on gitlab.com.
 
 **The PyPI trusted publisher** is already configured for `hashsigs`
 (project `quip.network/hashsigs-rs`, pipeline `.gitlab-ci.yml`, environment
-`pypi`). No CI job publishes to PyPI yet; the publisher waits for the
-Python bindings work.
+`pypi`). `publish-pypi` builds and uploads through it with maturin.
 
 **The package must already exist on npm.** CI stages releases, it does not
 create packages. A brand new package name needs a one-time manual
@@ -98,10 +100,11 @@ prerelease identifier, so `0.2.0-rc.2` goes to `rc` and `0.3.0-beta.1` goes to
 `beta`. This is what keeps `npm install @quip.network/hashsigs-wasm` from
 picking up a release candidate.
 
-**The crate needs no approval step.** `publish-crates` publishes to
-crates.io as soon as the gates pass on the tag. Confirm the version appears
-on crates.io; if the release must be pulled back, `cargo yank` is the only
-tool, and the version number stays spent.
+**The crate and the wheel need no approval step.** `publish-crates` and
+`publish-pypi` publish as soon as the gates pass on the tag. Confirm the
+version appears on crates.io and PyPI. If a crate release must be pulled
+back, `cargo yank` is the only tool, and the version number stays spent.
+A PyPI release can be deleted, but its filenames stay reserved.
 
 ## When a tag is cut against a red tree
 

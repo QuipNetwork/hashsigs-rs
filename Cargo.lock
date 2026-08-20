@@ -2340,7 +2340,7 @@ dependencies = [
 
 [[package]]
 name = "hashsigs-py"
-version = "0.2.0-rc.2"
+version = "0.2.1-rc1"
 dependencies = [
  "hashsigs-rs",
  "pyo3",
@@ -2348,7 +2348,7 @@ dependencies = [
 
 [[package]]
 name = "hashsigs-rs"
-version = "0.2.0-rc.2"
+version = "0.2.1-rc1"
 dependencies = [
  "flate2",
  "getrandom 0.2.16",

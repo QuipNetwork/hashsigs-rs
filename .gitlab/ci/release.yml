@@ -112,7 +112,7 @@ publish-crates:
   tags: [saas-linux-small-amd64] # gitlab.com shared runner, same OIDC posture as publish-npm
   # The `environment` claim inside CRATES_IO_ID_TOKEN must match the
   # environment named in the crate's Trusted Publisher config on crates.io.
-  environment: crates
+  environment: cargo
   id_tokens:
     CRATES_IO_ID_TOKEN:
       aud: crates.io
@@ -134,7 +134,7 @@ publish-crates:
       if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
         echo "ERROR: crates.io token exchange returned no token. Check that the" >&2
         echo "Trusted Publisher on crates.io names this project, .gitlab-ci.yml," >&2
-        echo "and the 'crates' environment." >&2
+        echo "and the 'cargo' environment." >&2
         exit 1
       fi
       export CARGO_REGISTRY_TOKEN
@@ -143,6 +143,52 @@ publish-crates:
         --header "Authorization: ${CARGO_REGISTRY_TOKEN}" \
         https://crates.io/api/v1/trusted_publishing/tokens \
         || echo "WARN: token revocation failed; the token expires within 30 minutes"
+
+# Publish the Python wheel + sdist via PyPI Trusted Publishing (OIDC). The
+# py/ crate is currently a stub that exposes only __version__; publishing it
+# is deliberate, to prove this pipe end to end before the bindings land.
+# Every stub release is a prerelease, so default pip resolution never picks
+# it. maturin both builds and uploads, so no twine is needed.
+publish-pypi:
+  stage: publish
+  image: rust:1.95.0
+  extends: .rust-cache
+  tags: [saas-linux-small-amd64] # gitlab.com shared runner, same OIDC posture as the other publish jobs
+  # The `environment` claim inside PYPI_ID_TOKEN must match the environment
+  # named in the Trusted Publisher config on PyPI.
+  environment: pypi
+  id_tokens:
+    PYPI_ID_TOKEN:
+      aud: pypi
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$/ # runs only on a semver version tag
+  dependencies: []
+  needs: [tag-gate, "release:validate"]
+  before_script:
+    # The rust image has python3 via apt but no pip; a venv keeps the pinned
+    # maturin out of the system interpreter.
+    - apt-get update -qq && apt-get install -y -qq python3-venv > /dev/null
+    - python3 -m venv /tmp/pypi-venv
+    - /tmp/pypi-venv/bin/pip install --quiet maturin==1.14.1
+  script:
+    - |
+      set -euo pipefail
+      # Exchange the GitLab OIDC token for a short-lived PyPI API token.
+      # sed instead of jq: single-key JSON response, and the image has no jq.
+      RESPONSE="$(curl --fail --silent --show-error \
+        --request POST \
+        --header "Content-Type: application/json" \
+        --data "{\"token\": \"${PYPI_ID_TOKEN}\"}" \
+        https://pypi.org/_/oidc/mint-token)"
+      MATURIN_PYPI_TOKEN="$(printf '%s' "$RESPONSE" | sed -n 's/.*"token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+      if [ -z "$MATURIN_PYPI_TOKEN" ]; then
+        echo "ERROR: PyPI token mint returned no token. Check that the Trusted" >&2
+        echo "Publisher on PyPI names this project, .gitlab-ci.yml, and the" >&2
+        echo "'pypi' environment." >&2
+        exit 1
+      fi
+      export MATURIN_PYPI_TOKEN
+      /tmp/pypi-venv/bin/maturin publish --locked --sdist -m py/Cargo.toml --non-interactive
 
 # The dry-run gate. Runs on merge request pipelines, on the default branch,
 # and on every tag, using the same build path the publish jobs use. A push to

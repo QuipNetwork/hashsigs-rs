@@ -1,8 +1,8 @@
 [package]
 name = "hashsigs-py"
 # Keep in lockstep with the root crate: maturin derives the PyPI version
-# (0.2.0-rc.2 -> 0.2.0rc2 under PEP 440) from this field.
-version = "0.2.0-rc.2"
+# (0.2.1-rc1 -> 0.2.1rc1 under PEP 440) from this field.
+version = "0.2.1-rc1"
 edition = "2021"
 rust-version = "1.95"
 authors = ["Richard T. Carback III <rick.carback@gmail.com>"]
