@@ -61,7 +61,12 @@ publish-npm:
   rules:
     - if: $CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$/ # runs only on a semver version tag
   dependencies: [build-package] # pull the tarball artifact
-  needs: [build-package]
+  # `release:validate` is in this same stage, and sharing a stage creates NO
+  # ordering: a job with `needs:` starts as soon as its needs are met and
+  # ignores stage order entirely. Without this edge the gate and the publish
+  # run concurrently, and the package can reach npm while the check that is
+  # meant to stop it is still running.
+  needs: [build-package, "release:validate"]
   before_script:
     # Trusted publishing (>=11.5.1) and staging (>=11.15.0) need a newer npm than
     # the node:22.14 image bundles.
