@@ -996,14 +996,12 @@ mod tests {
     use hashsigs_rs::shrincs::signer::ShrincsSigner;
     use hashsigs_rs::shrincs::verifier::ShrincsVerifier as CoreShrincsVerifier;
     use hashsigs_rs::shrincs::Keys;
+    use solana_instruction::{AccountMeta, Instruction};
+    use solana_keypair::Keypair;
     use solana_program_test::*;
-    use solana_sdk::{
-        instruction::{AccountMeta, Instruction},
-        pubkey::Pubkey as SdkPubkey,
-        signature::Keypair,
-        signer::Signer,
-        transaction::Transaction,
-    };
+    use solana_pubkey::Pubkey as SdkPubkey;
+    use solana_signer::Signer;
+    use solana_transaction::Transaction;
 
     /// Test-only instruction tag + router: the real dispatch enum is a later
     /// task, so tests drive `process_init`/`process_verify_stateful_action`/
@@ -1084,7 +1082,7 @@ mod tests {
                 AccountMeta::new(context.payer.pubkey(), true),
                 AccountMeta::new_readonly(owner.pubkey(), true),
                 AccountMeta::new(account_pda_key, false),
-                AccountMeta::new_readonly(solana_program::system_program::id(), false),
+                AccountMeta::new_readonly(solana_sdk_ids::system_program::id(), false),
             ],
             data: {
                 let mut data = Vec::new();
@@ -1148,13 +1146,13 @@ mod tests {
     /// Assert the transaction aborted with the given [`ShrincsAccountError`]
     /// custom code.
     fn assert_custom_error(
-        result: &Result<(), solana_sdk::transaction::TransactionError>,
+        result: &Result<(), solana_transaction_error::TransactionError>,
         expected: ShrincsAccountError,
     ) {
         match result {
-            Err(solana_sdk::transaction::TransactionError::InstructionError(
+            Err(solana_transaction_error::TransactionError::InstructionError(
                 _,
-                solana_sdk::instruction::InstructionError::Custom(code),
+                solana_instruction::error::InstructionError::Custom(code),
             )) => {
                 assert_eq!(*code, expected as u32, "unexpected custom error code");
             }
@@ -1163,25 +1161,25 @@ mod tests {
     }
 
     /// Assert the transaction aborted because a required signer was absent.
-    fn assert_missing_signature(result: &Result<(), solana_sdk::transaction::TransactionError>) {
+    fn assert_missing_signature(result: &Result<(), solana_transaction_error::TransactionError>) {
         match result {
-            Err(solana_sdk::transaction::TransactionError::InstructionError(
+            Err(solana_transaction_error::TransactionError::InstructionError(
                 _,
-                solana_sdk::instruction::InstructionError::MissingRequiredSignature,
+                solana_instruction::error::InstructionError::MissingRequiredSignature,
             )) => {}
             other => panic!("expected MissingRequiredSignature, got {other:?}"),
         }
     }
 
     /// Assert the transaction aborted with the given non-custom
-    /// [`solana_sdk::instruction::InstructionError`] variant (e.g.
+    /// [`solana_instruction::error::InstructionError`] variant (e.g.
     /// `InvalidSeeds`, `AccountAlreadyInitialized`).
     fn assert_instruction_error(
-        result: &Result<(), solana_sdk::transaction::TransactionError>,
-        expected: solana_sdk::instruction::InstructionError,
+        result: &Result<(), solana_transaction_error::TransactionError>,
+        expected: solana_instruction::error::InstructionError,
     ) {
         match result {
-            Err(solana_sdk::transaction::TransactionError::InstructionError(_, err)) => {
+            Err(solana_transaction_error::TransactionError::InstructionError(_, err)) => {
                 assert_eq!(err, &expected, "unexpected instruction error");
             }
             other => panic!("expected instruction error {expected:?}, got {other:?}"),
@@ -1205,7 +1203,7 @@ mod tests {
                 AccountMeta::new(*payer, true),
                 AccountMeta::new_readonly(*owner, owner_is_signer),
                 AccountMeta::new(*account_pda_key, false),
-                AccountMeta::new_readonly(solana_program::system_program::id(), false),
+                AccountMeta::new_readonly(solana_sdk_ids::system_program::id(), false),
             ],
             data: borsh::to_vec(&TestInstruction::Init(args)).unwrap(),
         }
@@ -1282,7 +1280,7 @@ mod tests {
             .unwrap();
         assert_instruction_error(
             &result.result,
-            solana_sdk::instruction::InstructionError::InvalidSeeds,
+            solana_instruction::error::InstructionError::InvalidSeeds,
         );
     }
 
@@ -1323,7 +1321,7 @@ mod tests {
             .unwrap();
         assert_instruction_error(
             &result.result,
-            solana_sdk::instruction::InstructionError::AccountAlreadyInitialized,
+            solana_instruction::error::InstructionError::AccountAlreadyInitialized,
         );
     }
 
@@ -1383,11 +1381,7 @@ mod tests {
         // docstring) to land the account in that exact 1-lamport state.
         context.set_account(
             &account_pda_key,
-            &solana_sdk::account::AccountSharedData::new(
-                1,
-                0,
-                &solana_program::system_program::id(),
-            ),
+            &solana_account::AccountSharedData::new(1, 0, &solana_sdk_ids::system_program::id()),
         );
 
         let prefunded = context
@@ -1397,7 +1391,7 @@ mod tests {
             .unwrap()
             .expect("prefunded account exists");
         assert_eq!(prefunded.lamports, 1);
-        assert_eq!(prefunded.owner, solana_program::system_program::id());
+        assert_eq!(prefunded.owner, solana_sdk_ids::system_program::id());
 
         let commitment = [3u8; HASH_LEN];
         let returned_pda_key =
@@ -1439,7 +1433,7 @@ mod tests {
                 AccountMeta::new(*account_pda_key, false),
                 AccountMeta::new(bitmap_key, false),
                 AccountMeta::new(context.payer.pubkey(), true),
-                AccountMeta::new_readonly(solana_program::system_program::id(), false),
+                AccountMeta::new_readonly(solana_sdk_ids::system_program::id(), false),
             ],
             data: {
                 let mut data = Vec::new();
@@ -1514,7 +1508,7 @@ mod tests {
                 AccountMeta::new(account_pda_key, false),
                 AccountMeta::new(bitmap_key, false),
                 AccountMeta::new(context.payer.pubkey(), true),
-                AccountMeta::new_readonly(solana_program::system_program::id(), false),
+                AccountMeta::new_readonly(solana_sdk_ids::system_program::id(), false),
             ],
             data: {
                 let mut data = Vec::new();
@@ -1599,7 +1593,7 @@ mod tests {
                 AccountMeta::new(account_pda_key, false),
                 AccountMeta::new(bitmap_key, false),
                 AccountMeta::new(context.payer.pubkey(), true),
-                AccountMeta::new_readonly(solana_program::system_program::id(), false),
+                AccountMeta::new_readonly(solana_sdk_ids::system_program::id(), false),
             ],
             data: {
                 let mut data = Vec::new();
@@ -1678,7 +1672,7 @@ mod tests {
                 AccountMeta::new(account_pda_key, false),
                 AccountMeta::new(bitmap_key, false),
                 AccountMeta::new(context.payer.pubkey(), true),
-                AccountMeta::new_readonly(solana_program::system_program::id(), false),
+                AccountMeta::new_readonly(solana_sdk_ids::system_program::id(), false),
             ],
             data: {
                 let mut data = Vec::new();
@@ -1732,7 +1726,7 @@ mod tests {
                 AccountMeta::new(account_pda_key, false),
                 AccountMeta::new(bitmap_key, false),
                 AccountMeta::new(context.payer.pubkey(), true),
-                AccountMeta::new_readonly(solana_program::system_program::id(), false),
+                AccountMeta::new_readonly(solana_sdk_ids::system_program::id(), false),
             ],
             data: {
                 let mut data = Vec::new();
@@ -1826,7 +1820,7 @@ mod tests {
                 AccountMeta::new(account_pda_key, false),
                 AccountMeta::new(bitmap_key, false),
                 AccountMeta::new(context.payer.pubkey(), true),
-                AccountMeta::new_readonly(solana_program::system_program::id(), false),
+                AccountMeta::new_readonly(solana_sdk_ids::system_program::id(), false),
             ],
             data: {
                 let mut data = Vec::new();
@@ -1915,7 +1909,7 @@ mod tests {
                 AccountMeta::new(account_pda_key, false),
                 AccountMeta::new(bitmap_key, false),
                 AccountMeta::new(context.payer.pubkey(), true),
-                AccountMeta::new_readonly(solana_program::system_program::id(), false),
+                AccountMeta::new_readonly(solana_sdk_ids::system_program::id(), false),
             ],
             data: {
                 let mut data = Vec::new();
@@ -1967,7 +1961,7 @@ mod tests {
                 AccountMeta::new(account_pda_key, false),
                 AccountMeta::new(bitmap_key, false),
                 AccountMeta::new(context.payer.pubkey(), true),
-                AccountMeta::new_readonly(solana_program::system_program::id(), false),
+                AccountMeta::new_readonly(solana_sdk_ids::system_program::id(), false),
             ],
             data: {
                 let mut data = Vec::new();
@@ -2108,7 +2102,7 @@ mod tests {
                 AccountMeta::new(account_pda_key, false),
                 AccountMeta::new(word1_bitmap_key, false),
                 AccountMeta::new(context.payer.pubkey(), true),
-                AccountMeta::new_readonly(solana_program::system_program::id(), false),
+                AccountMeta::new_readonly(solana_sdk_ids::system_program::id(), false),
             ],
             data: {
                 let mut data = Vec::new();
@@ -2183,7 +2177,7 @@ mod tests {
                 AccountMeta::new(account_pda_key, false),
                 AccountMeta::new(word1_bitmap_key, false),
                 AccountMeta::new(context.payer.pubkey(), true),
-                AccountMeta::new_readonly(solana_program::system_program::id(), false),
+                AccountMeta::new_readonly(solana_sdk_ids::system_program::id(), false),
             ],
             data: {
                 let mut data = Vec::new();
@@ -2302,7 +2296,7 @@ mod tests {
             .await
             .unwrap()
             .expect("account exists");
-        let mut shared = solana_sdk::account::AccountSharedData::from(account);
+        let mut shared = solana_account::AccountSharedData::from(account);
         let mut data = Vec::new();
         state.serialize(&mut data).unwrap();
         shared.set_data_from_slice(&data);
@@ -2871,7 +2865,7 @@ mod tests {
         program_id: &SdkPubkey,
         account_pda_key: &SdkPubkey,
         instruction: TestInstruction,
-    ) -> Result<(), solana_sdk::transaction::TransactionError> {
+    ) -> Result<(), solana_transaction_error::TransactionError> {
         context.last_blockhash = context.get_new_latest_blockhash().await.unwrap();
         let ix = Instruction {
             program_id: *program_id,
@@ -2903,7 +2897,7 @@ mod tests {
         keys: &Keys,
         public_key: &PublicKey,
         message_commitment: [u8; HASH_LEN],
-    ) -> Result<(), solana_sdk::transaction::TransactionError> {
+    ) -> Result<(), solana_transaction_error::TransactionError> {
         let state = fetch_state(context, account_pda_key).await;
         let domain_separator = messages::domain_separator(program_id, account_pda_key);
         let action_type = messages::ACTION_STATELESS;
@@ -3642,7 +3636,7 @@ mod tests {
                 AccountMeta::new(account_pda_key, false),
                 AccountMeta::new(bitmap_key, false),
                 AccountMeta::new(context.payer.pubkey(), true),
-                AccountMeta::new_readonly(solana_program::system_program::id(), false),
+                AccountMeta::new_readonly(solana_sdk_ids::system_program::id(), false),
             ],
             data: {
                 let mut data = Vec::new();
@@ -3725,7 +3719,7 @@ mod tests {
                 AccountMeta::new(context.payer.pubkey(), true),
                 AccountMeta::new_readonly(owner.pubkey(), true),
                 AccountMeta::new(account_pda_key, false),
-                AccountMeta::new_readonly(solana_program::system_program::id(), false),
+                AccountMeta::new_readonly(solana_sdk_ids::system_program::id(), false),
             ],
             data: borsh::to_vec(&ShrincsAccountInstruction::Init(InitArgs {
                 salt,
@@ -3775,7 +3769,7 @@ mod tests {
                 AccountMeta::new(account_pda_key, false),
                 AccountMeta::new(bitmap_key, false),
                 AccountMeta::new(context.payer.pubkey(), true),
-                AccountMeta::new_readonly(solana_program::system_program::id(), false),
+                AccountMeta::new_readonly(solana_sdk_ids::system_program::id(), false),
             ],
             data: borsh::to_vec(&ShrincsAccountInstruction::VerifyStatefulAction(
                 StatefulActionArgs {
@@ -3965,7 +3959,7 @@ mod tests {
                 AccountMeta::new(account_pda_key, false),
                 AccountMeta::new(new_bitmap_key, false),
                 AccountMeta::new(context.payer.pubkey(), true),
-                AccountMeta::new_readonly(solana_program::system_program::id(), false),
+                AccountMeta::new_readonly(solana_sdk_ids::system_program::id(), false),
             ],
             data: borsh::to_vec(&ShrincsAccountInstruction::VerifyStatefulAction(
                 StatefulActionArgs {
@@ -4074,7 +4068,7 @@ mod tests {
             .unwrap();
         assert_instruction_error(
             &result.result,
-            solana_sdk::instruction::InstructionError::InvalidInstructionData,
+            solana_instruction::error::InstructionError::InvalidInstructionData,
         );
     }
 
@@ -4092,10 +4086,10 @@ mod tests {
         // ever attempting to deserialize its (empty) data.
         context.set_account(
             &account_pda_key,
-            &solana_sdk::account::AccountSharedData::new(
+            &solana_account::AccountSharedData::new(
                 1_000_000,
                 0,
-                &solana_program::system_program::id(),
+                &solana_sdk_ids::system_program::id(),
             ),
         );
 
@@ -4125,7 +4119,7 @@ mod tests {
             .unwrap();
         assert_instruction_error(
             &result.result,
-            solana_sdk::instruction::InstructionError::IncorrectProgramId,
+            solana_instruction::error::InstructionError::IncorrectProgramId,
         );
     }
 
@@ -4142,7 +4136,7 @@ mod tests {
         // to Borsh-decode as `ShrincsAccountState`.
         context.set_account(
             &account_pda_key,
-            &solana_sdk::account::AccountSharedData::new(1_000_000, 4, &program_id),
+            &solana_account::AccountSharedData::new(1_000_000, 4, &program_id),
         );
 
         let (bitmap_key, _) =
@@ -4171,7 +4165,7 @@ mod tests {
             .unwrap();
         assert_instruction_error(
             &result.result,
-            solana_sdk::instruction::InstructionError::InvalidAccountData,
+            solana_instruction::error::InstructionError::InvalidAccountData,
         );
     }
 }

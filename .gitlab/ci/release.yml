@@ -3,7 +3,7 @@
 # package build; full profile/solana matrix stays on MR + default-branch only.
 tag-gate:
   stage: test
-  image: rust:1.89.0
+  image: rust:1.95.0
   extends: .rust-cache
   rules:
     - if: $CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$/
@@ -21,7 +21,7 @@ tag-gate:
 # runner cannot build wasm and must not try to.
 build-package:
   stage: package
-  image: rust:1.89.0
+  image: rust:1.95.0
   extends: .rust-cache
   # Inherits default tags [linux, x86_64] -> runs on the self-hosted Linux fleet.
   # Anchored semver, optional pre-release suffix (e.g. v0.2.0-rc1); rejects v1.2.3.4 / v1.2.3-foo trailing junk.
@@ -124,7 +124,7 @@ release:validate:
   # needs the same toolchain as ts-conformance. There is no `default: image:`
   # in this pipeline -- only `default: tags` -- so an omitted image leaves the
   # job with no cargo at all, and check-crate-publish dies on the first line.
-  image: rust:1.89.0
+  image: rust:1.95.0
   extends: .rust-cache
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"

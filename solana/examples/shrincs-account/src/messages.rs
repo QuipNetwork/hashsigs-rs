@@ -81,7 +81,7 @@ pub const ACTION_ROTATE_FULL: [u8; HASH_LEN] = [
 /// Off-chain signers must call this (or replicate it) to build the exact
 /// `ActionContext` a given action instruction will check against.
 pub fn domain_separator(program_id: &Pubkey, account: &Pubkey) -> [u8; HASH_LEN] {
-    hashv(&[&DOMAIN_TAG, program_id.as_ref(), account.as_ref()]).0
+    hashv(&[&DOMAIN_TAG, program_id.as_ref(), account.as_ref()]).to_bytes()
 }
 
 /// Pack the fields the retained `ShrincsVerifier::verify_stateful` /
@@ -105,7 +105,7 @@ pub fn action_context(
 /// Hash an action's payload for [`ActionContext::payload_hash`]:
 /// `keccak256(action_selector || payload)`.
 pub fn action_payload(action_selector: &[u8; HASH_LEN], payload: &[u8]) -> [u8; HASH_LEN] {
-    hashv(&[action_selector, payload]).0
+    hashv(&[action_selector, payload]).to_bytes()
 }
 
 /// Payload hash for a stateful-only rotation (`ACTION_ROTATE_STATEFUL`):
@@ -114,7 +114,7 @@ pub fn rotate_stateful_payload(
     next_stateful_public_key: &[u8; STATEFUL_PUBLIC_KEY_BYTES],
     next_commitment: &[u8; HASH_LEN],
 ) -> [u8; HASH_LEN] {
-    hashv(&[next_stateful_public_key, next_commitment]).0
+    hashv(&[next_stateful_public_key, next_commitment]).to_bytes()
 }
 
 /// Payload hash for a full key rotation (`ACTION_ROTATE_FULL`):
@@ -131,7 +131,7 @@ pub fn rotate_full_payload(
         next_hypertree_root,
         next_commitment,
     ])
-    .0
+    .to_bytes()
 }
 
 #[cfg(test)]
@@ -142,7 +142,7 @@ mod tests {
     fn domain_tag_matches_keccak_of_message() {
         assert_eq!(
             DOMAIN_TAG,
-            solana_program::keccak::hash(b"shrincs-account-v1").0
+            solana_program::keccak::hash(b"shrincs-account-v1").to_bytes()
         );
     }
 
@@ -200,19 +200,19 @@ mod tests {
         // and which would silently diverge from an off-chain signer.
         assert_eq!(
             ACTION_STATEFUL,
-            solana_program::keccak::hash(b"shrincs-account-example/stateful-action").0
+            solana_program::keccak::hash(b"shrincs-account-example/stateful-action").to_bytes()
         );
         assert_eq!(
             ACTION_STATELESS,
-            solana_program::keccak::hash(b"shrincs-account-example/stateless-action").0
+            solana_program::keccak::hash(b"shrincs-account-example/stateless-action").to_bytes()
         );
         assert_eq!(
             ACTION_ROTATE_STATEFUL,
-            solana_program::keccak::hash(b"shrincs-account-example/rotate-stateful").0
+            solana_program::keccak::hash(b"shrincs-account-example/rotate-stateful").to_bytes()
         );
         assert_eq!(
             ACTION_ROTATE_FULL,
-            solana_program::keccak::hash(b"shrincs-account-example/rotate-full").0
+            solana_program::keccak::hash(b"shrincs-account-example/rotate-full").to_bytes()
         );
     }
 

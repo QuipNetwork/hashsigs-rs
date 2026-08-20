@@ -1,6 +1,6 @@
 build-test:
   stage: test
-  image: rust:1.89.0
+  image: rust:1.95.0
   extends: .rust-cache
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -24,7 +24,7 @@ build-test:
 # build-test / clippy / ts-conformance. Manual mirror: bin/test-shrincs-profiles.sh.
 test-128s:
   stage: test
-  image: rust:1.89.0
+  image: rust:1.95.0
   extends: .rust-cache
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -38,7 +38,7 @@ test-128s:
 # harness; keep cost visible as its own job.
 test-solana:
   stage: test
-  image: rust:1.89.0
+  image: rust:1.95.0
   extends: .rust-cache
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -52,7 +52,7 @@ test-solana:
 # the `fmt` job below.
 clippy:
   stage: test
-  image: rust:1.89.0
+  image: rust:1.95.0
   extends: .rust-cache
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -69,7 +69,7 @@ clippy:
 # no build cache. The tree is fully rustfmt-clean; this keeps it that way.
 fmt:
   stage: test
-  image: rust:1.89.0
+  image: rust:1.95.0
   extends: .mr-default-rules
   before_script:
     - rustup component add rustfmt
@@ -80,7 +80,7 @@ fmt:
 # guarding the public-API docs and the runnable doc examples.
 rustdoc:
   stage: test
-  image: rust:1.89.0
+  image: rust:1.95.0
   extends: [.rust-cache, .mr-default-rules]
   variables:
     RUSTDOCFLAGS: "-D warnings"
@@ -88,11 +88,11 @@ rustdoc:
     - cargo doc --no-deps --locked
 
 # Minimum-supported-Rust-version floor. Pinned to the declared rust-version
-# (Cargo.toml `rust-version = "1.89"`) independently of any future bump to the
+# (Cargo.toml `rust-version = "1.95"`) independently of any future bump to the
 # other jobs' image, so an accidental MSRV increase fails here first.
 msrv:
   stage: test
-  image: rust:1.89.0
+  image: rust:1.95.0
   extends: [.rust-cache, .mr-default-rules]
   script:
     - cargo build --locked --features wasm-bindings
@@ -102,7 +102,7 @@ msrv:
 # .cargo-home/bin across runs (first cold run compiles it).
 supply-chain:
   stage: test
-  image: rust:1.89.0
+  image: rust:1.95.0
   extends: [.rust-cache, .mr-default-rules]
   before_script:
     - !reference [.install-cargo-deny, before_script]
@@ -117,7 +117,7 @@ supply-chain:
 # a not-yet-published crate simply yields an allowed failure.
 semver:
   stage: test
-  image: rust:1.89.0
+  image: rust:1.95.0
   extends: [.rust-cache, .mr-default-rules]
   allow_failure: true
   before_script:
@@ -132,7 +132,7 @@ semver:
 # again here.
 ts-conformance:
   stage: test
-  image: rust:1.89.0
+  image: rust:1.95.0
   extends: .rust-cache
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"

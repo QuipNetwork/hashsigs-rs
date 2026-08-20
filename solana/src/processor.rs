@@ -20,7 +20,6 @@ use hashsigs_rs::{constants, PublicKey, SphincsPlusCVerifier, WOTSPlus};
 use solana_program::account_info::next_account_info;
 use solana_program::keccak::hash as keccak256_hash;
 use solana_program::program::set_return_data;
-use solana_program::system_instruction::create_account;
 use solana_program::{
     account_info::AccountInfo,
     entrypoint::ProgramResult,
@@ -30,6 +29,7 @@ use solana_program::{
     pubkey::Pubkey,
     sysvar::{rent::Rent, Sysvar},
 };
+use solana_system_interface::instruction::create_account;
 
 use crate::sphincs_plus_c::{
     ActionContextDto, ShrincsPublicKeyDto, StatefulSignatureDto, StatelessSignatureDto,

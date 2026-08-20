@@ -32,9 +32,9 @@ use solana_program::{
     program::{invoke, invoke_signed},
     program_error::ProgramError,
     pubkey::Pubkey,
-    system_instruction::{allocate, assign, create_account, transfer},
     sysvar::{rent::Rent, Sysvar},
 };
+use solana_system_interface::instruction::{allocate, assign, create_account, transfer};
 
 use crate::state::HASH_LEN;
 
@@ -352,11 +352,10 @@ mod tests {
             &mut short_data,
             &program_id,
             false,
-            u64::default(),
         );
 
         // Payer / system-program placeholders: unused on the guarded path.
-        let system_id = solana_program::system_program::id();
+        let system_id = solana_sdk_ids::system_program::id();
         let payer_key = Pubkey::new_unique();
         let mut payer_lamports = 0u64;
         let mut payer_data: Vec<u8> = Vec::new();
@@ -368,7 +367,6 @@ mod tests {
             &mut payer_data,
             &system_id,
             false,
-            u64::default(),
         );
         let mut sys_lamports = 0u64;
         let mut sys_data: Vec<u8> = Vec::new();
@@ -380,7 +378,6 @@ mod tests {
             &mut sys_data,
             &system_id,
             true,
-            u64::default(),
         );
 
         let result = mark_leaf_used(
