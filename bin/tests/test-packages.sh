@@ -23,7 +23,8 @@ set -euo pipefail
 # profile that never gets built, and nothing else in the tree would say so.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# shellcheck source=../packages.sh
+# shellcheck source-path=SCRIPTDIR/..
+# shellcheck source=packages.sh
 source "${SCRIPT_DIR}/packages.sh"
 
 fail() {
@@ -40,11 +41,22 @@ fail() {
   fail "NPM_SIBLINGS (${#NPM_SIBLINGS[@]}) does not match SIBLING_PROFILES (${#SIBLING_PROFILES[@]})"
 [[ ${#TRIPLES[@]} -eq 6 ]] || fail "expected 6 target triples, got ${#TRIPLES[@]}"
 
+# Equal lengths are not enough. Every later script zips these arrays by
+# index, so entry i of each must describe SIBLING_PROFILES[i]. Reordering
+# one array and not the other keeps the counts correct and ships the wrong
+# package name under a profile's feature flags.
+for i in "${!SIBLING_PROFILES[@]}"; do
+  sibling_profile="${SIBLING_PROFILES[${i}]}"
+  [[ "${PYPI_SIBLINGS[${i}]}" == "hashsigs-profile-${sibling_profile}" ]] ||
+    fail "PYPI_SIBLINGS[${i}] is ${PYPI_SIBLINGS[${i}]}, expected hashsigs-profile-${sibling_profile}"
+  [[ "${NPM_SIBLINGS[${i}]}" == "${NPM_BASE}-${sibling_profile}" ]] ||
+    fail "NPM_SIBLINGS[${i}] is ${NPM_SIBLINGS[${i}]}, expected ${NPM_BASE}-${sibling_profile}"
+done
+
 for profile in "${DEFAULT_PROFILE}" "${SIBLING_PROFILES[@]}"; do
   feature="$(PROFILE_FEATURE "${profile}")"
   [[ -n "${feature}" ]] || fail "no cargo feature mapped for profile ${profile}"
-  grep -q "^${feature} = \[\]" "${SCRIPT_DIR}/../Cargo.toml" ||
-    grep -q "^${feature} = " "${SCRIPT_DIR}/../Cargo.toml" ||
+  grep -q "^${feature} = " "${SCRIPT_DIR}/../Cargo.toml" ||
     fail "cargo feature ${feature} (profile ${profile}) is not declared in Cargo.toml"
 done
 
