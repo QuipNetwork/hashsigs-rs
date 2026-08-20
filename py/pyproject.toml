@@ -1,0 +1,26 @@
+[build-system]
+requires = ["maturin>=1.14,<2"]
+build-backend = "maturin"
+
+[project]
+name = "hashsigs"
+description = "Hash-based signatures: WOTS+ and SHRINCS, backed by hashsigs-rs"
+readme = "README.md"
+license = "AGPL-3.0-or-later"
+requires-python = ">=3.9"
+authors = [{ name = "Richard T. Carback III", email = "rick.carback@gmail.com" }]
+keywords = ["cryptography", "wots", "shrincs", "signature"]
+classifiers = [
+  "Programming Language :: Rust",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Topic :: Security :: Cryptography",
+]
+# Version comes from py/Cargo.toml so the workspace has one source of truth.
+dynamic = ["version"]
+
+[project.urls]
+Repository = "https://gitlab.com/quip.network/hashsigs-rs"
+
+[tool.maturin]
+# The importable module is `hashsigs`, matching the [lib] name.
+module-name = "hashsigs"

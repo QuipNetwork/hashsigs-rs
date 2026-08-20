@@ -38,6 +38,7 @@ crate-type = ["rlib"]
 
 [workspace]
 members = [
+    "py",
     "solana",
     "solana/examples/shrincs-account"
 ]
