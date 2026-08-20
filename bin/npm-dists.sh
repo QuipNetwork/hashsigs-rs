@@ -43,6 +43,14 @@ fi
 scratch="$(mktemp -d)"
 trap 'rm -rf "${scratch}"' EXIT
 
+# prepack runs `tsc`, which is a devDependency. Nothing else in this script,
+# in the Makefile, or in release:validate installs it, so without this the pack
+# dies inside an npm lifecycle with `sh: tsc: not found` on any tree that has
+# no ts/node_modules -- which is every fresh clone and every cold CI runner.
+# It passes locally only because a developer's node_modules already exists.
+echo "==> installing build dependencies"
+(cd "${REPO_ROOT}/ts" && npm ci --silent)
+
 echo "==> packing ${NPM_BASE}"
 # prepack runs the full build (wasm, tsc, copy, test), so this exercises the
 # same path `npm publish` would. `npm --prefix` does not change which

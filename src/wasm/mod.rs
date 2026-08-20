@@ -1049,4 +1049,40 @@ mod tests {
             );
         }
     }
+
+    /// The direction above cannot catch a union member that no Rust variant
+    /// produces. That one ships in the published `.d.ts` and tells callers to
+    /// handle a code they will never receive, so the type definition is a lie
+    /// and no test fails. Containment in one direction is not agreement.
+    #[test]
+    fn every_typescript_union_member_maps_to_an_error_code() {
+        let known: alloc::vec::Vec<_> = crate::ErrorCode::ALL
+            .iter()
+            .map(|code| code.as_str())
+            .collect();
+
+        // Every quoted literal in the union block, without pulling in a
+        // TypeScript parser: nothing else in that literal is double-quoted.
+        let members: alloc::vec::Vec<&str> = TS_ERROR_CODES.split('"').skip(1).step_by(2).collect();
+
+        assert!(
+            !members.is_empty(),
+            "parsed no members out of the union; the literal's shape changed"
+        );
+
+        for member in &members {
+            assert!(
+                known.contains(member),
+                "the TypeScript union declares {member}, which no ErrorCode variant produces"
+            );
+        }
+
+        assert_eq!(
+            members.len(),
+            known.len(),
+            "union has {} members, ErrorCode has {} variants",
+            members.len(),
+            known.len()
+        );
+    }
 }

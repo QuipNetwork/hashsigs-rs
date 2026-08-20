@@ -40,12 +40,15 @@ tags. Set the pattern to `v*` and restrict creation to maintainers.
 
 ## Pre-flight
 
-1. **Watch `release:validate`.** It runs on every pipeline, using the same
-   build path the publish jobs use, and it fails before it touches any
-   registry. Do not merge a release branch while it is red on the default
-   branch.
-2. **Run the same gate locally** with `make -k check-release`. It needs
-   `node`, `npm`, and a Rust toolchain on `PATH`.
+1. **Watch `release:validate`.** It runs on merge request pipelines, on the
+   default branch, and on every tag, using the same build path the publish
+   jobs use, and it fails before it touches any registry. A push to a feature
+   branch with no open merge request does not run it. Do not merge a release
+   branch while it is red on the default branch.
+2. **Run the same gate locally** with `make -k check-release`. It needs a Rust
+   toolchain, the `wasm32-unknown-unknown` target, the `wasm-bindgen` CLI at
+   the version `Cargo.toml` pins, and `node` with `npm`. The npm leg installs
+   its own JavaScript dependencies.
 3. **Check the version.** Every manifest must carry the version being
    tagged. `make check-versions` proves it.
 

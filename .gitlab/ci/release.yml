@@ -100,8 +100,10 @@ publish-npm:
       echo "staging $TARBALL ($PKG@$VERSION) on dist-tag '$DIST_TAG'"
       npm stage publish "$TARBALL" --access public --tag "$DIST_TAG"
 
-# The dry-run gate. Runs on EVERY pipeline: merge requests, branch pushes and
-# tag pipelines alike, using the same build path the publish jobs use.
+# The dry-run gate. Runs on merge request pipelines, on the default branch,
+# and on every tag, using the same build path the publish jobs use. A push to
+# a feature branch with no open merge request does NOT run it, which is the
+# one shape that skips packaging feedback.
 #
 # The guarantee: when this job fails, every registry still holds what it held
 # before. A packaging regression -- a missing license file, an exports map
@@ -111,11 +113,18 @@ publish-npm:
 # `make -k`, not `make`: a failing crate check must not hide a failing npm
 # package. See the Makefile header.
 #
-# This job must NOT declare `environment:`. The publish jobs use the `release`
-# environment, which is restricted to protected tags; this job runs on every
-# ref.
+# This job declares no `environment:`, and neither does any publish job today.
+# Registry protection currently rests on protected tags plus the maintainer
+# 2FA approval on `npm stage publish`. If a GitLab environment restricted to
+# protected tags is added later, it belongs on the publish jobs and must NOT
+# be added here, because this job runs on refs that are not tags.
 release:validate:
   stage: publish
+  # `make check-release` runs cargo AND the wasm/TypeScript build, so this job
+  # needs the same toolchain as ts-conformance. There is no `default: image:`
+  # in this pipeline -- only `default: tags` -- so an omitted image leaves the
+  # job with no cargo at all, and check-crate-publish dies on the first line.
+  image: rust:1.89.0
   extends: .rust-cache
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -131,7 +140,13 @@ release:validate:
   timeout: 60m
   before_script:
     - !reference [.install-node-pinned, before_script]
+    # check-npm-dists packs the npm tarball, and prepack rebuilds the wasm.
+    # Without this, bin/build-wasm.sh exits 1 with "wasm-bindgen CLI not found".
+    - !reference [.install-wasm-bindgen, before_script]
   script:
+    # The wasm-bindgen template installs into ${CARGO_HOME}/bin, which is not
+    # on PATH in a fresh script step.
+    - export PATH="${CARGO_HOME}/bin:${PATH}"
     # Assert the tag against the manifests FIRST, before anything is built.
     # Without this the only thing enforcing tag-versus-crate agreement is the
     # sync check buried inside `npm pack`, so a mistyped tag is discovered

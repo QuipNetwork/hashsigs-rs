@@ -48,18 +48,6 @@ PROFILE_FEATURE() {
   esac
 }
 
-# Cargo build flags for a profile. The default needs no flags; a sibling
-# needs --no-default-features so its selector does not collide with the
-# default selector (build.rs rejects two explicit profiles).
-PROFILE_CARGO_FLAGS() {
-  local profile="$1"
-  if [[ "${profile}" == "${DEFAULT_PROFILE}" ]]; then
-    echo ""
-  else
-    echo "--no-default-features --features std,$(PROFILE_FEATURE "${profile}")"
-  fi
-}
-
 # crates.io. One publishable crate; the binding crates carry publish = false.
 CRATE=hashsigs-rs
 
