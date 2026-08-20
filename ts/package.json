@@ -27,7 +27,7 @@
   "scripts": {
     "build:wasm": "bash ../bin/build-wasm.sh ts/src",
     "gen-wasm-inline": "node scripts/gen-wasm-inline.mjs",
-    "build": "node scripts/sync-version.mjs && npm run build:wasm && npm run gen-wasm-inline && tsc -p tsconfig.json && npm run copy-wasm && npm run test",
+    "build": "bash ../bin/sync-versions.sh check .. && npm run build:wasm && npm run gen-wasm-inline && tsc -p tsconfig.json && npm run copy-wasm && npm run test",
     "copy-wasm": "node scripts/copy-wasm.js",
     "test": "node --test",
     "prepack": "npm run build"
