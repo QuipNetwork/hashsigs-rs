@@ -22,6 +22,7 @@ _prompt_planning/
 .beads/**/*.db
 .beads-credential-key
 .beads/proxieddb/
+.beads.gate.lock
 
 # Agent/tooling workspaces and instructions (local only)
 .beads/
