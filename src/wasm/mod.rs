@@ -29,6 +29,7 @@ use crate::shrincs::{
     encode_stateful_envelope, Keys, PublicKey, ShrincsSigner, ShrincsVerifier, HASH_LEN,
     STATEFUL_PUBLIC_KEY_BYTES,
 };
+use crate::ErrorCode;
 #[cfg(any(test, feature = "wasm-bindings"))]
 use crate::verifier::VerifierInterface as _;
 // The Uint8Array-native noble-style free functions (sphincsPlusC*/shrincs
@@ -41,22 +42,6 @@ use zeroize::Zeroize;
 #[cfg(feature = "wasm-bindings")]
 use wasm_bindgen::prelude::*;
 
-// Machine-readable error codes surfaced to JS as `error.code`. Frozen API once
-// published: additions are safe, renames/removals are breaking.
-#[cfg(any(test, feature = "wasm-bindings"))]
-const ERR_BAD_LENGTH: &str = "ERR_BAD_LENGTH";
-#[cfg(any(test, feature = "wasm-bindings"))]
-const ERR_STATEFUL_LEAVES_EXHAUSTED: &str = "ERR_STATEFUL_LEAVES_EXHAUSTED";
-#[cfg(any(test, feature = "wasm-bindings"))]
-const ERR_ENVELOPE_MALFORMED: &str = "ERR_ENVELOPE_MALFORMED";
-#[cfg(any(test, feature = "wasm-bindings"))]
-const ERR_SIGNING_FAILED: &str = "ERR_SIGNING_FAILED";
-#[cfg(any(test, feature = "wasm-bindings"))]
-const ERR_KEYGEN_FAILED: &str = "ERR_KEYGEN_FAILED";
-#[cfg(any(test, feature = "wasm-bindings"))]
-const ERR_INVALID_INPUT: &str = "ERR_INVALID_INPUT";
-#[cfg(any(test, feature = "wasm-bindings"))]
-const ERR_IMPORT_INVALID: &str = "ERR_IMPORT_INVALID";
 #[cfg(any(test, feature = "wasm-bindings"))]
 const MAX_STATEFUL_SIGNATURES_LIMIT: usize = 4096;
 
@@ -70,8 +55,18 @@ struct WasmErr {
     message: String,
 }
 
-#[cfg(feature = "wasm-bindings")]
-#[wasm_bindgen(typescript_custom_section)]
+// Plain constant so `typescript_union_lists_every_error_code` (below) can read
+// it under a native test build. `#[wasm_bindgen(typescript_custom_section)]`
+// does not just annotate a const, it consumes the item entirely (the const
+// exists only to hand its value to the wasm-bindgen CLI's `.d.ts` generator),
+// so a single item cannot be both wasm_bindgen-registered and visible to
+// ordinary Rust code. The `feature = "wasm-bindings"`-only const just below
+// re-exports this same value to keep that registration; on a non-test build
+// of that feature, this constant's only reader is that const's initializer,
+// and the macro consumes the reference along with the rest of that item, so
+// the compiler cannot see it and misreports this as dead code.
+#[cfg(any(test, feature = "wasm-bindings"))]
+#[cfg_attr(not(test), allow(dead_code))]
 const TS_ERROR_CODES: &str = r#"
 export type ShrincsErrorCode =
   | "ERR_BAD_LENGTH" | "ERR_STATEFUL_LEAVES_EXHAUSTED"
@@ -79,6 +74,10 @@ export type ShrincsErrorCode =
   | "ERR_IMPORT_INVALID"
   | "ERR_ENVELOPE_MALFORMED";
 "#;
+
+#[cfg(feature = "wasm-bindings")]
+#[wasm_bindgen(typescript_custom_section)]
+const _TS_ERROR_CODES_TYPESCRIPT_SECTION: &str = TS_ERROR_CODES;
 
 /// The version of this wasm build, frozen in at compile time from the crate
 /// version (`Cargo.toml`). The npm `package.json` version is synced to the
@@ -116,7 +115,7 @@ fn bytes_word32(input: &[u8]) -> Result<[u8; HASH_LEN], WasmErr> {
 fn bytes_fixed<const N: usize>(input: &[u8]) -> Result<[u8; N], WasmErr> {
     if input.len() != N {
         return Err(WasmErr {
-            code: ERR_BAD_LENGTH,
+            code: ErrorCode::BadLength.as_str(),
             message: format!(
                 "expected {N} bytes for fixed-width field, got {}",
                 input.len()
@@ -136,7 +135,7 @@ fn bytes_fixed<const N: usize>(input: &[u8]) -> Result<[u8; N], WasmErr> {
 #[cfg(any(test, feature = "wasm-bindings"))]
 fn message_hash(message: &[u8]) -> Result<[u8; HASH_LEN], WasmErr> {
     bytes_word32(message).map_err(|_| WasmErr {
-        code: ERR_BAD_LENGTH,
+        code: ErrorCode::BadLength.as_str(),
         message: format!("message must be exactly 32 bytes, got {}", message.len()),
     })
 }
@@ -149,7 +148,7 @@ fn deserialize_sphincs_plus_c_signing_key(
     bytes: &[u8],
 ) -> Result<crate::sphincs_plus_c::Key, WasmErr> {
     crate::sphincs_plus_c::Key::from_bytes(bytes).ok_or_else(|| WasmErr {
-        code: ERR_BAD_LENGTH,
+        code: ErrorCode::BadLength.as_str(),
         message: format!("SPHINCS+C secretKey must be 128 bytes, got {}", bytes.len()),
     })
 }
@@ -227,7 +226,7 @@ pub fn sphincs_plus_c_sign(
     let hash = message_hash(message).map_err(js_error)?;
     let signature = crate::sphincs_plus_c::sign(&full_key, &hash).ok_or_else(|| {
         js_error(WasmErr {
-            code: ERR_SIGNING_FAILED,
+            code: ErrorCode::SigningFailed.as_str(),
             message: "stateless signing failed for the supplied key/message".into(),
         })
     })?;
@@ -267,7 +266,7 @@ fn serialize_shrincs_signing_key(key: &Keys) -> alloc::vec::Vec<u8> {
 #[cfg(any(test, feature = "wasm-bindings"))]
 fn deserialize_shrincs_signing_key(bytes: &[u8]) -> Result<Keys, WasmErr> {
     Keys::from_bytes(bytes).ok_or_else(|| WasmErr {
-        code: ERR_BAD_LENGTH,
+        code: ErrorCode::BadLength.as_str(),
         message: format!("shrincs secretKey must be 264 bytes, got {}", bytes.len()),
     })
 }
@@ -348,7 +347,7 @@ pub fn shrincs_keygen(seed: &[u8], max_signatures: u32) -> Result<WasmShrincsKey
     let mut seed = bytes_fixed::<32>(seed).map_err(js_error)?;
     if max_signatures == 0 || max_signatures > MAX_STATEFUL_SIGNATURES_LIMIT as u32 {
         return Err(js_error(WasmErr {
-            code: ERR_INVALID_INPUT,
+            code: ErrorCode::InvalidInput.as_str(),
             message: format!("maxSignatures must be in 1..={MAX_STATEFUL_SIGNATURES_LIMIT}"),
         }));
     }
@@ -356,7 +355,7 @@ pub fn shrincs_keygen(seed: &[u8], max_signatures: u32) -> Result<WasmShrincsKey
     seed.zeroize();
     let (signing_key, public_key) = result.ok_or_else(|| {
         js_error(WasmErr {
-            code: ERR_KEYGEN_FAILED,
+            code: ErrorCode::KeygenFailed.as_str(),
             message: "key generation failed for the supplied inputs".into(),
         })
     })?;
@@ -387,7 +386,7 @@ pub fn shrincs_import_signing_key(secret_key: &[u8]) -> Result<WasmShrincsKeys, 
     let (signing_key, public_key) =
         ShrincsSigner::import_signing_key(candidate).ok_or_else(|| {
             js_error(WasmErr {
-                code: ERR_IMPORT_INVALID,
+                code: ErrorCode::ImportInvalid.as_str(),
                 message: "secretKey failed validation: counter out of range or roots do not \
                       match the seeds"
                     .into(),
@@ -423,7 +422,7 @@ pub fn shrincs_sign(message: &[u8], secret_key: &mut [u8]) -> Result<alloc::vec:
     let (mut signing_key, public_key) =
         ShrincsSigner::import_signing_key(candidate).ok_or_else(|| {
             js_error(WasmErr {
-                code: ERR_IMPORT_INVALID,
+                code: ErrorCode::ImportInvalid.as_str(),
                 message: "secretKey failed validation: counter out of range or roots do not \
                           match the seeds"
                     .into(),
@@ -435,14 +434,14 @@ pub fn shrincs_sign(message: &[u8], secret_key: &mut [u8]) -> Result<alloc::vec:
     if signing_key.stateful().next_leaf_index() > signing_key.stateful().public_key().max_signatures
     {
         return Err(js_error(WasmErr {
-            code: ERR_STATEFUL_LEAVES_EXHAUSTED,
+            code: ErrorCode::StatefulLeavesExhausted.as_str(),
             message: "no unused stateful leaf available for this key".into(),
         }));
     }
     let hash = message_hash(message).map_err(js_error)?;
     let signature = ShrincsSigner::sign_stateful_raw(&mut signing_key, &hash).ok_or_else(|| {
         js_error(WasmErr {
-            code: ERR_SIGNING_FAILED,
+            code: ErrorCode::SigningFailed.as_str(),
             message: "stateful signing failed for the supplied key/message".into(),
         })
     })?;
@@ -474,7 +473,7 @@ pub fn shrincs_sign_stateless(
     let (signing_key, _public_key) =
         ShrincsSigner::import_signing_key(candidate).ok_or_else(|| {
             js_error(WasmErr {
-                code: ERR_IMPORT_INVALID,
+                code: ErrorCode::ImportInvalid.as_str(),
                 message: "secretKey failed validation: counter out of range or roots do not \
                           match the seeds"
                     .into(),
@@ -483,7 +482,7 @@ pub fn shrincs_sign_stateless(
     let hash = message_hash(message).map_err(js_error)?;
     let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &hash).ok_or_else(|| {
         js_error(WasmErr {
-            code: ERR_SIGNING_FAILED,
+            code: ErrorCode::SigningFailed.as_str(),
             message: "stateless signing failed for the supplied key/message".into(),
         })
     })?;
@@ -548,7 +547,7 @@ pub fn shrincs_reset(secret_key: &mut [u8], new_seed: &[u8]) -> Result<(), JsVal
     // Fail fast on weak seed entropy, symmetric with `shrincs_keygen`.
     let new_seed = bytes_word32(new_seed).map_err(|_| {
         js_error(WasmErr {
-            code: ERR_BAD_LENGTH,
+            code: ErrorCode::BadLength.as_str(),
             message: format!("newSeed must be exactly 32 bytes, got {}", new_seed.len()),
         })
     })?;
@@ -556,7 +555,7 @@ pub fn shrincs_reset(secret_key: &mut [u8], new_seed: &[u8]) -> Result<(), JsVal
     let (mut keys, _public_key) =
         ShrincsSigner::import_signing_key(candidate).ok_or_else(|| {
             js_error(WasmErr {
-                code: ERR_IMPORT_INVALID,
+                code: ErrorCode::ImportInvalid.as_str(),
                 message: "secretKey failed validation: counter out of range or roots do not \
                       match the seeds"
                     .into(),
@@ -586,7 +585,7 @@ pub fn shrincs_compute_public_key_commitment(
     let candidate = deserialize_shrincs_signing_key(secret_key).map_err(js_error)?;
     let (keys, _public_key) = ShrincsSigner::import_signing_key(candidate).ok_or_else(|| {
         js_error(WasmErr {
-            code: ERR_IMPORT_INVALID,
+            code: ErrorCode::ImportInvalid.as_str(),
             message: "secretKey failed validation: counter out of range or roots do not \
                       match the seeds"
                 .into(),
@@ -621,7 +620,7 @@ pub fn shrincs_recover_public_key_commitment(
 #[cfg(feature = "wasm-bindings")]
 fn malformed_envelope() -> JsValue {
     js_error(WasmErr {
-        code: ERR_ENVELOPE_MALFORMED,
+        code: ErrorCode::EnvelopeMalformed.as_str(),
         message: "signature envelope could not be decoded".into(),
     })
 }
@@ -694,7 +693,7 @@ mod tests {
     #[test]
     fn bytes_fixed_rejects_wrong_length_without_echoing_the_value() {
         let err = bytes_fixed::<32>(&[0x42u8; 31]).unwrap_err();
-        assert_eq!(err.code, ERR_BAD_LENGTH);
+        assert_eq!(err.code, ErrorCode::BadLength.as_str());
         assert!(!err.message.contains("42"));
         assert!(err.message.contains("31"));
 
@@ -759,7 +758,7 @@ mod tests {
                 .unwrap()
                 .as_string()
                 .unwrap(),
-            ERR_BAD_LENGTH,
+            ErrorCode::BadLength.as_str(),
         );
     }
 
@@ -909,7 +908,7 @@ mod tests {
                 .unwrap()
                 .as_string()
                 .unwrap(),
-            ERR_ENVELOPE_MALFORMED,
+            ErrorCode::EnvelopeMalformed.as_str(),
         );
     }
 
@@ -928,7 +927,7 @@ mod tests {
                 .unwrap()
                 .as_string()
                 .unwrap(),
-            ERR_STATEFUL_LEAVES_EXHAUSTED,
+            ErrorCode::StatefulLeavesExhausted.as_str(),
         );
     }
 
@@ -1002,7 +1001,7 @@ mod tests {
                 .unwrap()
                 .as_string()
                 .unwrap(),
-            ERR_IMPORT_INVALID,
+            ErrorCode::ImportInvalid.as_str(),
         );
 
         let err = expect_err(shrincs_import_signing_key(&secret_key[..263]));
@@ -1011,7 +1010,7 @@ mod tests {
                 .unwrap()
                 .as_string()
                 .unwrap(),
-            ERR_BAD_LENGTH,
+            ErrorCode::BadLength.as_str(),
         );
     }
 
@@ -1024,7 +1023,7 @@ mod tests {
         assert_eq!(parsed, key);
 
         let err = deserialize_shrincs_signing_key(&bytes[..263]).unwrap_err();
-        assert_eq!(err.code, ERR_BAD_LENGTH);
+        assert_eq!(err.code, ErrorCode::BadLength.as_str());
     }
 
     #[test]
@@ -1037,6 +1036,17 @@ mod tests {
         assert_eq!(parsed, spk);
 
         let err = deserialize_sphincs_plus_c_signing_key(&bytes[..127]).unwrap_err();
-        assert_eq!(err.code, ERR_BAD_LENGTH);
+        assert_eq!(err.code, ErrorCode::BadLength.as_str());
+    }
+
+    #[test]
+    fn typescript_union_lists_every_error_code() {
+        for code in crate::ErrorCode::ALL {
+            let quoted = alloc::format!("\"{}\"", code.as_str());
+            assert!(
+                TS_ERROR_CODES.contains(&quoted),
+                "the ShrincsErrorCode TypeScript union is missing {quoted}"
+            );
+        }
     }
 }
