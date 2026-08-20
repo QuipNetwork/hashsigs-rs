@@ -192,7 +192,11 @@ publish-pypi:
         exit 1
       fi
       export MATURIN_PYPI_TOKEN
-      /tmp/pypi-venv/bin/maturin publish --locked -m py/Cargo.toml --non-interactive
+      # No --locked here: maturin rebuilds the wheel from the sdist, whose
+      # trimmed workspace forces cargo to prune the packaged Cargo.lock, and
+      # --locked forbids that. tag-gate and release:validate already enforce
+      # the lock on this SHA.
+      /tmp/pypi-venv/bin/maturin publish -m py/Cargo.toml --non-interactive
 
 # The dry-run gate. Runs on merge request pipelines, on the default branch,
 # and on every tag, using the same build path the publish jobs use. A push to
