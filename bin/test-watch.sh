@@ -50,12 +50,12 @@ if [ "${1:-}" != "" ] && [[ "${1:-}" =~ ^[0-9]+$ ]]; then
 fi
 
 watch_fingerprint() {
-  find src tests bin solana -type f 2>/dev/null \
+  find src tests bin solana -type f \
     \( -name '*.rs' -o -name '*.toml' -o -name '*.sh' -o -name '*.json' -o -name '*.mjs' -o -name '*.ts' \) \
-    -printf '%p %T@ %s\n'
-  find . -maxdepth 1 -type f 2>/dev/null \
+    -printf '%p %T@ %s\n' 2>/dev/null
+  find . -maxdepth 1 -type f \
     \( -name 'Cargo.toml' -o -name 'Cargo.lock' -o -name 'build.rs' -o -name 'README.md' -o -name 'rust-toolchain.toml' \) \
-    -printf '%p %T@ %s\n'
+    -printf '%p %T@ %s\n' 2>/dev/null
 }
 
 run_once() {
