@@ -124,7 +124,12 @@ semver:
     - !reference [.install-cargo-semver-checks, before_script]
   script:
     - export PATH="${CARGO_HOME}/bin:${PATH}"
-    - cargo semver-checks check-release
+    # Never let the tool pick features: its default heuristic enables every
+    # feature at once, and the four SHRINCS profile features are mutually
+    # exclusive (build.rs panics). --default-features keeps each version on
+    # its own default profile; the additive host-compatible features are
+    # added explicitly. Features absent from the baseline warn, not error.
+    - cargo semver-checks check-release --default-features --features solana --features heap-buffers --features wasm-bindings --features parallel
 
 # Conformance test against the BUILT package (dist/): loaders, exports map,
 # ESM/CJS scoping, base64-inline path — the layer cargo tests never touch.
