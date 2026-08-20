@@ -13,6 +13,20 @@ readme = "README.md"
 keywords = ["cryptography", "wots", "shrincs", "signature", "solana"]
 categories = ["cryptography", "authentication", "no-std"]
 build = "build.rs"
+# Keep the published crate to what a consumer can actually use. The test
+# vectors and fixtures stay: they are what lets `cargo test` verify a
+# downloaded crate against the reference implementation, which is the point of
+# shipping them. Everything below is repository infrastructure -- notably a
+# 1.2 MB slide deck that was a third of the tarball.
+exclude = [
+  "docs/",
+  ".gitlab/",
+  ".gitlab-ci.yml",
+  ".beads/",
+  "bin/",
+  "AGENTS.md",
+  "CLAUDE.md",
+]
 
 [lib]
 name = "hashsigs_rs"
