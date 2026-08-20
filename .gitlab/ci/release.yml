@@ -125,9 +125,12 @@ publish-crates:
       set -euo pipefail
       # sed instead of jq: the response is a single-key JSON object and the
       # rust image does not ship jq.
-      RESPONSE="$(curl --fail --silent --show-error \
+      # The User-Agent is load-bearing: crates.io's CDN rejects curl's
+      # default User-Agent with 403 before the request reaches the API.
+      RESPONSE="$(curl --fail-with-body --silent --show-error \
         --request POST \
         --header "Content-Type: application/json" \
+        --header "User-Agent: hashsigs-rs-release (https://gitlab.com/quip.network/hashsigs-rs)" \
         --data "{\"jwt\": \"${CRATES_IO_ID_TOKEN}\"}" \
         https://crates.io/api/v1/trusted_publishing/tokens)"
       CARGO_REGISTRY_TOKEN="$(printf '%s' "$RESPONSE" | sed -n 's/.*"token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
@@ -141,6 +144,7 @@ publish-crates:
       cargo publish --locked -p hashsigs-rs
       curl --silent --show-error --request DELETE \
         --header "Authorization: ${CARGO_REGISTRY_TOKEN}" \
+        --header "User-Agent: hashsigs-rs-release (https://gitlab.com/quip.network/hashsigs-rs)" \
         https://crates.io/api/v1/trusted_publishing/tokens \
         || echo "WARN: token revocation failed; the token expires within 30 minutes"
 
@@ -175,7 +179,7 @@ publish-pypi:
       set -euo pipefail
       # Exchange the GitLab OIDC token for a short-lived PyPI API token.
       # sed instead of jq: single-key JSON response, and the image has no jq.
-      RESPONSE="$(curl --fail --silent --show-error \
+      RESPONSE="$(curl --fail-with-body --silent --show-error \
         --request POST \
         --header "Content-Type: application/json" \
         --data "{\"token\": \"${PYPI_ID_TOKEN}\"}" \
@@ -188,7 +192,7 @@ publish-pypi:
         exit 1
       fi
       export MATURIN_PYPI_TOKEN
-      /tmp/pypi-venv/bin/maturin publish --locked --sdist -m py/Cargo.toml --non-interactive
+      /tmp/pypi-venv/bin/maturin publish --locked -m py/Cargo.toml --non-interactive
 
 # The dry-run gate. Runs on merge request pipelines, on the default branch,
 # and on every tag, using the same build path the publish jobs use. A push to
