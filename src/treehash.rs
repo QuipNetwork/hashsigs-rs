@@ -225,6 +225,7 @@ pub(crate) fn naive_tree_root_and_auth_path(
 mod tests {
     use super::*;
     use crate::hash::hash_node;
+    #[cfg(not(target_arch = "wasm32"))]
     use proptest::prelude::*;
 
     fn test_parent(
@@ -250,6 +251,7 @@ mod tests {
         ])
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(64))]
         #[test]
