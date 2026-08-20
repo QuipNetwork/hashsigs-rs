@@ -89,7 +89,10 @@ mod tests {
             ErrorCode::StatefulLeavesExhausted.as_str(),
             "ERR_STATEFUL_LEAVES_EXHAUSTED"
         );
-        assert_eq!(ErrorCode::EnvelopeMalformed.as_str(), "ERR_ENVELOPE_MALFORMED");
+        assert_eq!(
+            ErrorCode::EnvelopeMalformed.as_str(),
+            "ERR_ENVELOPE_MALFORMED"
+        );
         assert_eq!(ErrorCode::SigningFailed.as_str(), "ERR_SIGNING_FAILED");
         assert_eq!(ErrorCode::KeygenFailed.as_str(), "ERR_KEYGEN_FAILED");
         assert_eq!(ErrorCode::InvalidInput.as_str(), "ERR_INVALID_INPUT");

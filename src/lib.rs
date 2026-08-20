@@ -73,9 +73,9 @@ mod trace_macros;
 // `wasm` sits above both.
 pub(crate) mod abi;
 pub(crate) mod buf;
+pub mod error;
 pub(crate) mod hash;
 pub(crate) mod profiles;
-pub mod error;
 pub mod shrincs;
 pub mod sphincs_plus_c;
 pub(crate) mod treehash;

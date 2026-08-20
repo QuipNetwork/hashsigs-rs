@@ -29,9 +29,9 @@ use crate::shrincs::{
     encode_stateful_envelope, Keys, PublicKey, ShrincsSigner, ShrincsVerifier, HASH_LEN,
     STATEFUL_PUBLIC_KEY_BYTES,
 };
-use crate::ErrorCode;
 #[cfg(any(test, feature = "wasm-bindings"))]
 use crate::verifier::VerifierInterface as _;
+use crate::ErrorCode;
 // The Uint8Array-native noble-style free functions (sphincsPlusC*/shrincs
 // keygen/sign/verify) work directly with the independent SPHINCS+C layer and
 // the shared scheme-hash, rather than going through the hex DTO plumbing
