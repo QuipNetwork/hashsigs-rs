@@ -1062,13 +1062,26 @@ mod tests {
             .collect();
 
         // Every quoted literal in the union block, without pulling in a
-        // TypeScript parser: nothing else in that literal is double-quoted.
+        // TypeScript parser. This works only because nothing else in
+        // TS_ERROR_CODES is double-quoted. Add a comment containing a quoted
+        // string to that literal and this parse cannot tell the fragment apart
+        // from a union member, so the guard below names that cause instead of
+        // reporting a phantom code.
         let members: alloc::vec::Vec<&str> = TS_ERROR_CODES.split('"').skip(1).step_by(2).collect();
 
         assert!(
             !members.is_empty(),
             "parsed no members out of the union; the literal's shape changed"
         );
+
+        for member in &members {
+            assert!(
+                member.starts_with("ERR_"),
+                "parsed {member:?} out of the union, which is not an error code. \
+                 TS_ERROR_CODES most likely gained a quoted string outside the \
+                 union members, which this parse cannot distinguish from one."
+            );
+        }
 
         for member in &members {
             assert!(
