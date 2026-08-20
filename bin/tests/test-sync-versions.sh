@@ -28,6 +28,9 @@ fail() {
   exit 1
 }
 
+crate_version="$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' \
+  "${REPO_ROOT}/Cargo.toml")"
+
 bash "${REPO_ROOT}/bin/sync-versions.sh" check "${REPO_ROOT}" >/dev/null ||
   fail "the real tree should already be in sync"
 
@@ -69,5 +72,30 @@ stderr="$(bash "${REPO_ROOT}/bin/sync-versions.sh" check "${two_versions}" 2>&1 
 [[ "${status}" -eq 1 ]] || fail "two version lines should exit 1, got ${status}"
 [[ "${stderr}" == *"expected exactly one version line"* ]] ||
   fail "two version lines should report 'expected exactly one version line', got: ${stderr}"
+
+# expect: agrees with the real tree.
+combined="$(bash "${REPO_ROOT}/bin/sync-versions.sh" expect "${crate_version}" "${REPO_ROOT}" 2>&1)" ||
+  fail "expect with the correct version should exit 0, got: ${combined}"
+[[ "${combined}" == *"version check OK"* ]] ||
+  fail "expect with the correct version should print 'version check OK', got: ${combined}"
+[[ "${combined}" != *"set every manifest"* ]] ||
+  fail "a successful expect must not print the remediation line, got: ${combined}"
+
+# expect: disagrees with the real tree.
+status=0
+stderr="$(bash "${REPO_ROOT}/bin/sync-versions.sh" expect "9.9.9-definitely-wrong" "${REPO_ROOT}" \
+  2>&1 1>/dev/null)" || status=$?
+[[ "${status}" -eq 1 ]] || fail "expect with a wrong version should exit 1, got ${status}"
+[[ "${stderr}" == *'expected "9.9.9-definitely-wrong"'* ]] ||
+  fail "expect with a wrong version should quote the expected version, got: ${stderr}"
+[[ "${stderr}" == *"set every manifest and the release tag to the same version, then re-run"* ]] ||
+  fail "expect with a wrong version should print the remediation line, got: ${stderr}"
+
+# expect: no VERSION given is a usage error, not a check failure.
+status=0
+stderr="$(bash "${REPO_ROOT}/bin/sync-versions.sh" expect 2>&1 1>/dev/null)" || status=$?
+[[ "${status}" -eq 2 ]] || fail "expect with no VERSION should exit 2, got ${status}"
+[[ "${stderr}" == *"usage:"* ]] ||
+  fail "expect with no VERSION should print the usage line, got: ${stderr}"
 
 echo "sync-versions invariants OK"

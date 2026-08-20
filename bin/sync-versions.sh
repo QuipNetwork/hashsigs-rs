@@ -27,14 +27,34 @@ set -euo pipefail
 # only the npm manifest.
 #
 # usage: bin/sync-versions.sh check [ROOT]
+#        bin/sync-versions.sh expect VERSION [ROOT]
+#
+# `check` verifies every other manifest against Cargo.toml. `expect` does that
+# AND asserts Cargo.toml itself equals a version the caller names, which is how
+# CI checks a git tag. Both modes live here so nothing else in the tree needs
+# its own idea of how to read a version out of a manifest.
 
 mode="${1:-}"
-root="${2:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+default_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-if [[ "${mode}" != "check" ]]; then
-  echo "usage: $0 check [ROOT]" >&2
+case "${mode}" in
+check)
+  expected=""
+  root="${2:-${default_root}}"
+  ;;
+expect)
+  expected="${2:-}"
+  root="${3:-${default_root}}"
+  if [[ -z "${expected}" ]]; then
+    echo "usage: $0 expect VERSION [ROOT]" >&2
+    exit 2
+  fi
+  ;;
+*)
+  echo "usage: $0 check [ROOT] | expect VERSION [ROOT]" >&2
   exit 2
-fi
+  ;;
+esac
 
 # `|| true` and the redirect are load-bearing: under `set -e` with
 # `pipefail`, a missing Cargo.toml makes sed exit 2 and kills the script
@@ -81,8 +101,17 @@ check_json() {
 
 check_json "${root}/ts/package.json"
 
+# The caller named a version, so Cargo.toml gets checked too instead of being
+# taken as the truth everything else is measured against.
+if [[ -n "${expected}" && "${expected}" != "${crate_version}" ]]; then
+  echo "version mismatch: expected \"${expected}\", Cargo.toml is \"${crate_version}\"" >&2
+  status=1
+fi
+
 if [[ "${status}" -eq 0 ]]; then
   echo "version check OK: every manifest is at ${crate_version}"
+else
+  echo "set every manifest and the release tag to the same version, then re-run" >&2
 fi
 
 exit "${status}"
