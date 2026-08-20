@@ -100,6 +100,50 @@ publish-npm:
       echo "staging $TARBALL ($PKG@$VERSION) on dist-tag '$DIST_TAG'"
       npm stage publish "$TARBALL" --access public --tag "$DIST_TAG"
 
+# Publish the crate via crates.io Trusted Publishing (OIDC, public beta for
+# GitLab CI). cargo has no native support yet: the job exchanges the GitLab
+# JWT for a ~30-minute crates.io token, publishes, then revokes the token.
+# Unlike npm there is no staging step -- a crates.io publish is immediate and
+# yank-only -- so this job runs only behind `release:validate` and `tag-gate`.
+publish-crates:
+  stage: publish
+  image: rust:1.95.0
+  extends: .rust-cache
+  tags: [saas-linux-small-amd64] # gitlab.com shared runner, same OIDC posture as publish-npm
+  # The `environment` claim inside CRATES_IO_ID_TOKEN must match the
+  # environment named in the crate's Trusted Publisher config on crates.io.
+  environment: crates
+  id_tokens:
+    CRATES_IO_ID_TOKEN:
+      aud: crates.io
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$/ # runs only on a semver version tag
+  dependencies: [] # no artifacts consumed; `cargo publish` verifies from source
+  needs: [tag-gate, "release:validate"]
+  script:
+    - |
+      set -euo pipefail
+      # sed instead of jq: the response is a single-key JSON object and the
+      # rust image does not ship jq.
+      RESPONSE="$(curl --fail --silent --show-error \
+        --request POST \
+        --header "Content-Type: application/json" \
+        --data "{\"jwt\": \"${CRATES_IO_ID_TOKEN}\"}" \
+        https://crates.io/api/v1/trusted_publishing/tokens)"
+      CARGO_REGISTRY_TOKEN="$(printf '%s' "$RESPONSE" | sed -n 's/.*"token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+      if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
+        echo "ERROR: crates.io token exchange returned no token. Check that the" >&2
+        echo "Trusted Publisher on crates.io names this project, .gitlab-ci.yml," >&2
+        echo "and the 'crates' environment." >&2
+        exit 1
+      fi
+      export CARGO_REGISTRY_TOKEN
+      cargo publish --locked -p hashsigs-rs
+      curl --silent --show-error --request DELETE \
+        --header "Authorization: ${CARGO_REGISTRY_TOKEN}" \
+        https://crates.io/api/v1/trusted_publishing/tokens \
+        || echo "WARN: token revocation failed; the token expires within 30 minutes"
+
 # The dry-run gate. Runs on merge request pipelines, on the default branch,
 # and on every tag, using the same build path the publish jobs use. A push to
 # a feature branch with no open merge request does NOT run it, which is the
@@ -113,11 +157,13 @@ publish-npm:
 # `make -k`, not `make`: a failing crate check must not hide a failing npm
 # package. See the Makefile header.
 #
-# This job declares no `environment:`, and neither does any publish job today.
-# Registry protection currently rests on protected tags plus the maintainer
-# 2FA approval on `npm stage publish`. If a GitLab environment restricted to
-# protected tags is added later, it belongs on the publish jobs and must NOT
-# be added here, because this job runs on refs that are not tags.
+# This job declares no `environment:` and must not gain one, because it runs
+# on refs that are not tags. The publish jobs carry the environments the
+# registries' Trusted Publisher configs pin (`crates` for crates.io, `pypi`
+# for the future PyPI job); npm's publisher predates the environments and
+# validates project + pipeline file only. Registry protection rests on
+# protected tags, the environment claim in each OIDC token, and the
+# maintainer 2FA approval on `npm stage publish`.
 release:validate:
   stage: publish
   # `make check-release` runs cargo AND the wasm/TypeScript build, so this job

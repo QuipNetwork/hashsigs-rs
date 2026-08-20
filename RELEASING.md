@@ -5,18 +5,20 @@ One `v<X.Y.Z>` git tag publishes every artifact.
 | # | Artifact | Registry | Published by |
 |---|----------|----------|--------------|
 | 1 | `@quip.network/hashsigs-wasm` | npm | `publish-npm`, staged for approval |
+| 2 | `hashsigs-rs` | crates.io | `publish-crates`, automatic |
 
-That is the whole list today. The crate is not published by CI yet, and this
-document does not claim it is. Later plans add crates.io, the PyPI
-distributions, the npm profile siblings, and the C tarballs.
+That is the whole list today. Later plans add the PyPI distribution (the
+`py/` bindings crate exists but publishes nothing yet), the npm profile
+siblings, and the C tarballs.
 
-**When they do, they go in this order: npm, then PyPI, then crates.io.** The
-order is by how hard each registry is to undo, easiest first, so a failure
-strands as little as possible. npm allows unpublishing a version within 72
-hours. PyPI lets you delete a release, but the filename stays reserved
-permanently. Crates.io allows only yanking. It does not allow replacing or
-re-uploading a version. Publishing the hardest one first and failing on an
-easier one behind it spends a version number that cannot be reclaimed.
+**Know what each registry lets you undo.** npm allows unpublishing a version
+within 72 hours. PyPI lets you delete a release, but the filename stays
+reserved permanently. Crates.io allows only yanking. It does not allow
+replacing or re-uploading a version. `publish-crates` is deliberately
+automatic and runs only after `tag-gate` and `release:validate` pass on the
+tag; once it runs, that version number is spent. The npm release stays
+staged until a maintainer approves it, so npm can go live after crates.io
+has already published.
 
 ## Prerequisites (one-time)
 
@@ -28,6 +30,18 @@ that job to a private runner loses provenance without warning.
 
 **The npm trusted publisher** is already configured for
 `@quip.network/hashsigs-wasm`.
+
+**The crates.io trusted publisher** must name this project. On crates.io,
+open `hashsigs-rs` > Settings > Trusted Publishing and add a GitLab
+publisher: namespace `quip.network`, project `hashsigs-rs`, top-level
+pipeline file `.gitlab-ci.yml`, environment `crates`. The environment name
+must match the `environment:` on the `publish-crates` job exactly. GitLab
+support is a public beta and works only for projects on gitlab.com.
+
+**The PyPI trusted publisher** is already configured for `hashsigs`
+(project `quip.network/hashsigs-rs`, pipeline `.gitlab-ci.yml`, environment
+`pypi`). No CI job publishes to PyPI yet; the publisher waits for the
+Python bindings work.
 
 **The package must already exist on npm.** CI stages releases, it does not
 create packages. A brand new package name needs a one-time manual
@@ -83,6 +97,11 @@ The dist-tag is derived from the version, not always `latest`. A plain
 prerelease identifier, so `0.2.0-rc.2` goes to `rc` and `0.3.0-beta.1` goes to
 `beta`. This is what keeps `npm install @quip.network/hashsigs-wasm` from
 picking up a release candidate.
+
+**The crate needs no approval step.** `publish-crates` publishes to
+crates.io as soon as the gates pass on the tag. Confirm the version appears
+on crates.io; if the release must be pulled back, `cargo yank` is the only
+tool, and the version number stays spent.
 
 ## When a tag is cut against a red tree
 
