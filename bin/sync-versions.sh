@@ -36,13 +36,28 @@ if [[ "${mode}" != "check" ]]; then
   exit 2
 fi
 
-crate_version="$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' \
-  "${root}/Cargo.toml" | head -1)"
+# `|| true` and the redirect are load-bearing: under `set -e` with
+# `pipefail`, a missing Cargo.toml makes sed exit 2 and kills the script
+# right here, so the guards below could never run and the caller would see a
+# raw sed error under the usage exit code.
+version_lines="$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' \
+  "${root}/Cargo.toml" 2>/dev/null || true)"
 
-if [[ -z "${crate_version}" ]]; then
+if [[ -z "${version_lines}" ]]; then
   echo "could not read version from ${root}/Cargo.toml" >&2
   exit 1
 fi
+
+# Do not take the first match and hope. A second unindented `version =` line
+# means another table declares one too, and this script exists so that no
+# release ships a version nobody chose.
+if [[ "$(wc -l <<<"${version_lines}")" -ne 1 ]]; then
+  echo "expected exactly one version line in ${root}/Cargo.toml, found:" >&2
+  echo "${version_lines}" >&2
+  exit 1
+fi
+
+crate_version="${version_lines}"
 
 status=0
 
@@ -50,8 +65,14 @@ check_json() {
   local path="$1"
   [[ -f "${path}" ]] || return 0
   local found
-  found="$(node -e 'process.stdout.write(require(process.argv[1]).version || "")' \
-    "${path}")"
+  # Same reason as the sed above: an unparseable manifest must produce an
+  # actionable line, not a raw Node stack trace under `set -e`.
+  if ! found="$(node -e 'process.stdout.write(require(process.argv[1]).version || "")' \
+    "${path}" 2>/dev/null)"; then
+    echo "could not read a version from ${path}" >&2
+    status=1
+    return 0
+  fi
   if [[ "${found}" != "${crate_version}" ]]; then
     echo "version mismatch: ${path} is \"${found}\", Cargo.toml is \"${crate_version}\"" >&2
     status=1
