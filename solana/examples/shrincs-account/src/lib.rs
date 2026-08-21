@@ -15,6 +15,9 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+// `target_os = "solana"` is a real SBF target but not in rustc's default
+// check-cfg allow-list (same justification as the core crate's
+// `src/hash/backend.rs`).
 #![allow(unexpected_cfgs)]
 // Panic-prevention lints, mirroring the core `hashsigs-rs` crate root: program
 // code must not panic on untrusted input. Scoped to non-test builds so

@@ -55,7 +55,10 @@ impl TestKeyMode {
             Ok(value) if value.eq_ignore_ascii_case("fresh") => Self::Fresh,
             Ok(value) if value.eq_ignore_ascii_case("fixture") => Self::Fixture,
             Ok(value) if value.is_empty() => Self::Fixture,
-            Ok(_) | Err(_) => Self::Fixture,
+            // Fail loud on a typo'd mode instead of silently testing the
+            // fixture path the caller did not ask for.
+            Ok(other) => panic!("{KEY_MODE_ENV} must be \"fresh\" or \"fixture\", got {other:?}"),
+            Err(_) => Self::Fixture,
         }
     }
 }

@@ -21,6 +21,31 @@ use crate::shrincs::PublicKey;
 use crate::shrincs::{derive32, Keys, ShrincsSigner};
 use crate::sphincs_plus_c;
 
+/// Rebuild an ABI head/tail encoding with a 32-byte unread gap between the
+/// head block and the tails: every dynamic-slot offset word in the head is
+/// bumped by 32 and 32 junk bytes are inserted after the head, leaving the
+/// tail bytes — and therefore the decoded value — untouched. Codec tests
+/// assert the canonical-form checks reject this malleated form.
+pub(crate) fn insert_abi_head_gap(
+    encoded: &[u8],
+    head_words: usize,
+    dynamic_slots: &[usize],
+) -> alloc::vec::Vec<u8> {
+    let head_len = head_words * crate::HASH_LEN;
+    let mut out = alloc::vec::Vec::with_capacity(encoded.len() + crate::HASH_LEN);
+    out.extend_from_slice(&encoded[..head_len]);
+    for &slot in dynamic_slots {
+        let word_start = slot * crate::HASH_LEN;
+        let mut offset_tail = [0u8; 8];
+        offset_tail.copy_from_slice(&out[word_start + 24..word_start + 32]);
+        let bumped = u64::from_be_bytes(offset_tail) + crate::HASH_LEN as u64;
+        out[word_start + 24..word_start + 32].copy_from_slice(&bumped.to_be_bytes());
+    }
+    out.extend_from_slice(&[0xEE; crate::HASH_LEN]);
+    out.extend_from_slice(&encoded[head_len..]);
+    out
+}
+
 /// Build a signing key that exercises only the stateful subsystem, with a
 /// placeholder hypertree root. Avoids compute-infeasible stateless hypertree
 /// keygen so it runs on every profile.

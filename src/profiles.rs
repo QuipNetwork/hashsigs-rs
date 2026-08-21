@@ -40,7 +40,6 @@
 mod profile {
     include!(concat!(env!("OUT_DIR"), "/shrincs_profile_identity.rs"));
     pub const HASH_TRUNC_LEN: usize = 32;
-    #[allow(dead_code)]
     pub const STATELESS_SIGNATURE_LIMIT: u64 = 1_048_576;
     pub const HYPERTREE_HEIGHT: u8 = 64;
     pub const NUM_HYPERTREE_LAYERS: u8 = 8;
@@ -56,7 +55,6 @@ mod profile {
 mod profile {
     include!(concat!(env!("OUT_DIR"), "/shrincs_profile_identity.rs"));
     pub const HASH_TRUNC_LEN: usize = 16;
-    #[allow(dead_code)]
     pub const STATELESS_SIGNATURE_LIMIT: u64 = 262_144;
     pub const HYPERTREE_HEIGHT: u8 = 18;
     pub const NUM_HYPERTREE_LAYERS: u8 = 1;
@@ -72,7 +70,6 @@ mod profile {
 mod profile {
     include!(concat!(env!("OUT_DIR"), "/shrincs_profile_identity.rs"));
     pub const HASH_TRUNC_LEN: usize = 16;
-    #[allow(dead_code)]
     pub const STATELESS_SIGNATURE_LIMIT: u64 = 1_048_576;
     pub const HYPERTREE_HEIGHT: u8 = 18;
     pub const NUM_HYPERTREE_LAYERS: u8 = 1;
@@ -88,7 +85,6 @@ mod profile {
 mod profile {
     include!(concat!(env!("OUT_DIR"), "/shrincs_profile_identity.rs"));
     pub const HASH_TRUNC_LEN: usize = 32;
-    #[allow(dead_code)]
     pub const STATELESS_SIGNATURE_LIMIT: u64 = 1_048_576;
     pub const HYPERTREE_HEIGHT: u8 = 64;
     pub const NUM_HYPERTREE_LAYERS: u8 = 8;

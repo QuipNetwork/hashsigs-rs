@@ -1,79 +1,76 @@
-# Security Considerations
+# Security considerations
 
-This document outlines the security considerations for the hashsigs-rs project.
+This document describes the security considerations for the hashsigs-rs project.
 
-## Known Security Advisories
+## Known security advisories
 
-We regularly run `cargo audit` to check for known security vulnerabilities in our dependencies. As of the last update, we have identified and documented the following known issues:
+CI runs `cargo deny check` (the `supply-chain` job), which scans `Cargo.lock` against the RustSec advisory database. The policy lives in `deny.toml`. The list below is current as of 2026-08-20.
 
-### Transitive Dependencies from Solana
+### Transitive dependencies from Solana
 
-The following security advisories affect transitive dependencies from the Solana ecosystem that we cannot directly control:
+The following security advisories affect transitive dependencies from the Solana ecosystem that the project cannot directly control:
 
-#### RUSTSEC-2024-0344: Timing variability in curve25519-dalek
-- **Affected crate**: `curve25519-dalek@3.2.0`
-- **Source**: Solana's dependency on `ed25519-dalek@1.0.1`
-- **Risk Assessment**: **Low**
-- **Description**: This is a timing side-channel attack that would require local access and precise timing measurements to exploit.
-- **Mitigation**: We are monitoring Solana's progress on updating their cryptographic dependencies. The vulnerability requires very specific conditions to exploit and is not practical in most deployment scenarios.
+#### RUSTSEC-2024-0344 (timing variability in curve25519-dalek)
+- Affected crate: `curve25519-dalek@3.2.0`
+- Position: dev-dependencies only, through `ed25519-dalek@1.0.1` under `solana-program-test` (the validator test harness)
+- Risk assessment: low
+- Description: a timing side channel in scalar subtraction. Exploitation requires local access and precise timing measurements.
+- Mitigation: the affected version never ships. The library, the wasm package, and the deployed Solana program build with the patched `curve25519-dalek@4.1.3`.
 
-#### RUSTSEC-2022-0093: Double Public Key Signing Function Oracle Attack on ed25519-dalek
-- **Affected crate**: `ed25519-dalek@1.0.1`
-- **Source**: Solana's dependency on `ed25519-dalek@1.0.1`
-- **Risk Assessment**: **Low**
-- **Description**: This attack requires the ability to get signatures on crafted messages.
-- **Mitigation**: Our use case does not allow arbitrary message signing, making this attack vector impractical.
+#### RUSTSEC-2022-0093 (double public key signing function oracle attack on ed25519-dalek)
+- Affected crate: `ed25519-dalek@1.0.1`
+- Position: dev-dependencies only, under `solana-program-test` (the validator test harness)
+- Risk assessment: low
+- Description: the attack requires signatures on crafted messages from the affected signer.
+- Mitigation: the affected version never ships, and this project signs nothing with ed25519.
 
-### Unmaintained Dependencies
+### Unmaintained dependencies
 
-The following crates are flagged as unmaintained but do not pose immediate security risks:
+The RustSec database lists the following transitive crates as unmaintained. None is an active vulnerability:
 
-- **RUSTSEC-2024-0375**: `atty` is unmaintained
-- **RUSTSEC-2024-0388**: `derivative` is unmaintained
-- **RUSTSEC-2024-0436**: `paste` is unmaintained
-- **RUSTSEC-2021-0145**: `atty` potential unaligned read (unsound)
+- **RUSTSEC-2025-0141**: `bincode@1.3.3` is unmaintained. The Solana program dependency graph reaches it through `agave-precompiles`, so `deny.toml` carries a dated ignore entry.
+- **RUSTSEC-2024-0388**: `derivative` is unmaintained. Dev-dependencies only (`solana-program-test`).
+- **RUSTSEC-2024-0436**: `paste` is unmaintained. Dev-dependencies only (`solana-program-test`).
+- **RUSTSEC-2025-0161**: `libsecp256k1` is unmaintained. Dev-dependencies only (`solana-program-test`). `cargo deny check` scopes unmaintained advisories to direct dependencies, so this entry needs no `deny.toml` ignore.
 
 These are transitive dependencies from Solana and represent maintenance concerns rather than active security vulnerabilities.
 
-#### Can These Dependencies Be Replaced?
+#### Why these dependencies are not replaced
 
-**Short Answer**: Not practically, due to API incompatibilities and the fact that they're transitive dependencies from Solana.
+Replacement is not practical. The crates are transitive dependencies from Solana, and the maintained alternatives have incompatible APIs.
 
-**Detailed Analysis**:
+1. **`derivative`**: maintained alternatives exist (`derive_more`, `educe`, `derive-where`), but they have different APIs and feature sets. The Solana dependency tree uses `derivative` deep inside for specific derive macros.
 
-1. **`atty` → `is-terminal`**: While `is-terminal` is the official replacement recommended by the `atty` maintainer, it has a different API. Cargo's `[patch]` feature cannot handle API changes, so this replacement would break the dependency chain.
+2. **`paste`**: this proc-macro crate does token pasting in macros. The advisory flags it as unmaintained, but the crate still works. No drop-in replacement with an identical API exists.
 
-2. **`derivative`**: Maintained alternatives exist (`derive_more`, `educe`, `derive-where`), but they have different APIs and feature sets. The `derivative` crate is used deep in the Solana dependency tree for specific derive macro functionality.
+3. **`bincode`**: `agave-precompiles` uses the 1.x line. The maintained 2.x line has a different API, so a `[patch]` substitution cannot work.
 
-3. **`paste`**: This proc-macro crate is used for token pasting in macros. While flagged as unmaintained, it's still functional and has no direct drop-in replacement with identical API.
-
-**Why Patching Doesn't Work**:
-- These crates come from Solana's transitive dependencies, not our direct dependencies
+**Why patching fails**:
+- These crates come from Solana's transitive dependencies, not this project's direct dependencies
 - API differences between original and replacement crates prevent simple substitution
 - Cargo's patch system requires identical APIs for successful replacement
-- The unmaintained crates are used in test-only dependencies (`solana-program-test`), not production code
 
-**Mitigation Strategy**:
-- Monitor Solana's progress on updating their dependencies
-- The security risk is minimal as these are maintenance warnings, not active vulnerabilities
-- Consider using `--release` builds in production to minimize test dependency inclusion
+**Mitigation**:
+- Track Solana's progress on updated dependencies
+- The security risk is minimal because these are maintenance warnings, not active vulnerabilities
+- Dev-dependencies never appear in published artifacts. The crate, the wasm package, and the deployed program build only from normal dependencies.
 
-## Security Best Practices
+## Security best practices
 
-1. **Regular Audits**: We run `cargo audit` as part of our CI/CD pipeline to catch new vulnerabilities.
+1. **Regular audits**: `cargo audit` runs as part of the CI/CD pipeline to catch new vulnerabilities.
 
-2. **Dependency Updates**: We regularly update dependencies to their latest secure versions where possible.
+2. **Dependency updates**: the project updates dependencies to their latest secure versions where possible.
 
-3. **Monitoring**: We monitor security advisories for the Solana ecosystem and will update our dependencies as soon as secure versions become available.
+3. **Advisory tracking**: the project tracks security advisories for the Solana ecosystem and updates dependencies as soon as secure versions become available.
 
-4. **Risk Assessment**: Each identified vulnerability is assessed for its practical impact on our specific use case.
+4. **Risk assessment**: the project assesses each identified vulnerability for its practical impact on this specific use case.
 
-## Cryptographic and Integration Security Notes
+## Cryptographic and integration security notes
 
 This repository now contains more than low-level hash-based signature
 primitives. It includes:
 
-- standalone `wotsplus` functionality
+- the standalone `wotsplus` module
 - core `shrincs` signer / verifier primitives
 - a `wasm` export surface for JS/TS consumers
 
@@ -85,27 +82,27 @@ for integrators is:
 
 ### Raw verification APIs are low-level
 
-The core SHRINCS verifier exposes low-level raw verification functionality for
-exact caller-supplied message bytes.
+The core SHRINCS verifier exposes raw, low-level verification of exact
+caller-supplied message bytes.
 
 Security implication:
 
-- these paths validate cryptographic correctness only
-- they do **not** provide freshness, nonce management, replay protection, or
+- these paths check cryptographic correctness only
+- they do not provide freshness, nonce management, replay protection, or
   policy enforcement on their own
 
 Guidance:
 
-- the calling system owns freshness, nonce management, and replay state; this
-  library verifies signatures and nothing more
+- the calling system owns freshness, nonce management, and replay state
+- this library verifies signatures and nothing more
 - build domain separation, nonces, and expiry into the message you hash before
-  signing — the library has no place to enforce them for you
+  signing. The library cannot enforce them for you
 
 ### Freshness and replay protection are the caller's responsibility
 
 Signatures from this crate carry no replay protection and no freshness
-guarantee. `sign` produces a signature over exactly the 32-byte digest it's
-given, and `verify` checks exactly that signature against exactly that
+guarantee. `sign` produces a signature over exactly the 32-byte digest it
+receives, and `verify` checks exactly that signature against exactly that
 digest. Neither call knows whether anyone signed or verified the digest
 before.
 
@@ -124,19 +121,19 @@ below.
 
 Guidance:
 
-- don't assume any nonce, sequence, or domain-separation enforcement exists
-  inside this library — none does
+- do not assume this library enforces nonces, sequence numbers, or domain
+  separation. It does not
 - design the signed message, the 32-byte digest, to carry whatever freshness
   and replay-prevention data your app needs before it reaches `sign`
 
 ### Seed entropy is the caller's responsibility
 
 `keygen` and `reset` require a caller-supplied 32-byte seed. The library has
-no RNG fallback and performs no seed-quality check.
+no RNG fallback and does not check seed quality.
 
 Security implication:
 
-- a weak or predictable seed produces a weak key; the library can't detect
+- a weak or predictable seed produces a weak key. The library cannot detect
   this and derives a key from it regardless
 - there is no library-side entropy source to fall back on if the caller
   supplies bad input
@@ -169,17 +166,17 @@ Security implication:
 Guidance:
 
 - persist the current key state after every stateful `sign()` call, before
-  using the signature for anything — a crash between signing and
+  you use the signature for anything. A crash between signing and
   persisting is exactly the window that causes reuse on restart
 - never sign again from a snapshot or clone taken before a later `sign()`
   call succeeded
 - once the stateful budget runs out, switch to the stateless path or call
-  `reset` with a fresh seed; don't work around the exhaustion error
+  `reset` with a fresh seed. Do not work around the exhaustion error
 
 Persisted-state rollback:
 
 - the persisted secret carries the leaf counter, but `import` accepts any
-  in-range counter — it cannot distinguish a current key from an *older*
+  in-range counter. It cannot distinguish a current key from an older
   serialized snapshot restored from a backup. Restoring an older persisted
   copy and signing re-consumes already-used leaves: the same catastrophic
   reuse as signing from a stale in-memory clone.
@@ -187,9 +184,9 @@ Persisted-state rollback:
   anti-rollback on its own. The caller must persist a monotonic high-water
   mark for the leaf index and refuse to load or sign below it. The Solana
   example program (`solana/examples/shrincs-account`) enforces exactly this
-  on-chain — its account state rejects a non-monotonic leaf index with
-  `StatefulIndexRollback` — and is the reference for the guarantee off-chain
-  callers must provide themselves.
+  on-chain: its account state rejects a non-monotonic leaf index with
+  `StatefulIndexRollback`. Treat that program as the reference for the
+  guarantee off-chain callers must provide themselves.
 
 ### Public-key commitment binding is security-critical
 
@@ -207,7 +204,7 @@ Security implication:
 Guidance:
 
 - always verify against the installed/original public key bundle
-- don't reintroduce message-specific replacement public keys
+- do not reintroduce message-specific replacement public keys
 - treat `public_key_commitment` as the installed key's identifier for every
   verification call
 
@@ -219,11 +216,11 @@ policy-enforcing wrapper exists.
 
 Security implication:
 
-- `sphincsPlusC.sign()`/`verify()` and `shrincs.sign()`/`verify()` perform no
-  freshness, replay, or authorization checks; they sign and verify exactly
-  the 32-byte digest they're given
-- misuse is possible if integrations treat a valid signature as proof of
-  authorization by itself, without their own freshness and replay state
+- `sphincsPlusC.sign()`/`verify()` and `shrincs.sign()`/`verify()` apply no
+  freshness, replay, or authorization checks. They sign and verify exactly
+  the 32-byte digest they receive
+- an integration invites misuse when it treats a valid signature alone as
+  proof of authorization and keeps no freshness or replay state of its own
 
 Guidance:
 
@@ -235,16 +232,16 @@ Guidance:
 ### Verifier timing / constant-time threat model
 
 The SHRINCS verifier uses ordinary short-circuit equality (`==`) and early
-`return false` on failed structural and root checks. It doesn't use
-constant-time comparison (`subtle::ConstantTimeEq` or equivalent) for
+`return false` on failed structural and root checks. It does not use
+constant-time comparison (such as `subtle::ConstantTimeEq`) for
 public-key commitment, hypertree root, or intermediate hash equality.
 
 Threat-model assumption:
 
-- verification isn't assumed to resist a local timing adversary on the host
+- verification is not assumed to resist a local timing adversary on the host
   that can measure sub-operation latency of `verify*` with chosen signatures
 - remote network timing of full verification requests is outside the intended
-  attacker model for this crate; deployments that face that threat should treat
+  attacker model for this crate. Deployments that face that threat should treat
   this as residual risk and add their own defenses if needed
 
 Future work, not implemented: constant-time equality on the final root and
@@ -252,7 +249,7 @@ commitment checks, or a documented constant-time verification profile.
 
 ### Browser signer threat model
 
-The wasm signer surface must be treated as running inside the browser's normal
+Treat the wasm signer surface as code that runs inside the browser's normal
 same-origin trust boundary, not inside a hardened enclave.
 
 Security implication:
@@ -268,11 +265,11 @@ Security implication:
 
 Guidance:
 
-- don't run the browser signer in pages that execute untrusted third-party JS
+- do not run the browser signer in pages that execute untrusted third-party JS
 - treat browser local storage, IndexedDB, and ordinary JS heap state as a soft
   boundary, not a strong secret store
 - for SHRINCS stateful signing, persist and reuse the same `keys` object.
-  `shrincs.sign()` mutates `keys.stateful` in place on every call; never sign
+  `shrincs.sign()` mutates `keys.stateful` in place on every call. Never sign
   from a clone or a snapshot taken before an earlier `sign()` call, or you
   reuse a one-time leaf and break the signature's security
 - zero each secret field (`skSeed.fill(0)`, `prfSeed.fill(0)`) once the key
@@ -294,20 +291,20 @@ Security implication:
 
 Guidance:
 
-- do not expose malformed or unvalidated untrusted message lengths to low-level
-  WOTS+ APIs without caller-side validation
-- treat the WOTS+ module as a low-level primitive surface, not a complete
-  policy-enforcing application layer
+- check the length of untrusted messages in the caller before you pass them
+  to a low-level WOTS+ API
+- treat the WOTS+ module as a low-level primitive surface that enforces no
+  policy
 
-## Reporting Security Issues
+## Reporting security issues
 
-If you discover a security vulnerability in this project, please report it privately to:
+To report a security vulnerability in this project, send a private email to:
 
-**Email**: security at quip.network
+**security at quip.network**
 
-### PGP Encryption (Recommended)
+### PGP encryption (recommended)
 
-For sensitive security reports, please encrypt your message using our PGP key (Last Update 2024-11-14):
+For sensitive security reports, encrypt your message with the project PGP key (last updated 2024-11-14):
 
 ```
 -----BEGIN PGP PUBLIC KEY BLOCK-----
@@ -337,35 +334,35 @@ pW7gWQHbPY6BA6dzdWbnxsDDY/fjBQ==
 
 Fingerprint: `7351 B505 5605 50FB 6202  2B61 D88B 24EC 4C72 8908`
 
-#### Download the Latest PGP Key
+#### Download the current PGP key
 
 ```bash
 # Download from ProtonMail's key server
 curl -s "https://api.protonmail.ch/pks/lookup?op=get&search=security@quip.network" | gpg --import
 
 # Or download from a public key server
-gpg --keyserver keyserver.ubuntu.com --recv-keys 0x1234567890ABCDEF
+gpg --keyserver keyserver.ubuntu.com --recv-keys 0xD88B24EC4C728908
 
 # Verify the key fingerprint matches the one listed above
-gpg --fingerprint [email address]
+gpg --fingerprint security@quip.network
 ```
 
-**Note**: Please verify the key fingerprint matches the one listed above before encrypting sensitive information.
+Verify that the key fingerprint matches the fingerprint listed in this document before you encrypt sensitive information.
 
-### What to Include in Your Report
+### What to include in your report
 
 - Description of the vulnerability
 - Steps to reproduce the issue
 - Potential impact assessment
 - Any suggested fixes or mitigations
 
-We will acknowledge receipt of your report within 48 hours and provide a more detailed response within 7 days.
+The maintainers acknowledge receipt of your report within 48 hours and send a detailed response within 7 days.
 
-**Please do not create public issues for security vulnerabilities.**
+**Do not create public issues for security vulnerabilities.**
 
-## Audit Configuration
+## Audit configuration
 
-Our audit configuration is stored in `.cargo/audit.toml` and documents all known issues that we have assessed and decided to temporarily ignore while waiting for upstream fixes.
+The audit configuration in `.cargo/audit.toml` documents all known issues that the project has assessed and chosen to ignore until upstream fixes arrive.
 
 To run the security audit yourself:
 
@@ -373,4 +370,4 @@ To run the security audit yourself:
 cargo audit
 ```
 
-This will use our configuration to show only new, unaddressed security issues.
+The audit uses this configuration and shows only new, unaddressed security issues.

@@ -38,7 +38,8 @@ fixture="$(mktemp -d)"
 missing_root="$(mktemp -d)"
 unparseable="$(mktemp -d)"
 two_versions="$(mktemp -d)"
-trap 'rm -rf "${fixture}" "${missing_root}" "${unparseable}" "${two_versions}"' EXIT
+py_mismatch="$(mktemp -d)"
+trap 'rm -rf "${fixture}" "${missing_root}" "${unparseable}" "${two_versions}" "${py_mismatch}"' EXIT
 
 mkdir -p "${fixture}/ts"
 printf 'version = "9.9.9"\n' >"${fixture}/Cargo.toml"
@@ -47,6 +48,19 @@ printf '{"version":"0.0.1"}\n' >"${fixture}/ts/package.json"
 if bash "${REPO_ROOT}/bin/sync-versions.sh" check "${fixture}" >/dev/null 2>&1; then
   fail "a mismatched tree should exit non-zero"
 fi
+
+# A drifted py/Cargo.toml must fail even when root and ts agree: maturin reads
+# the PyPI wheel version from that manifest, so it is release-gating.
+mkdir -p "${py_mismatch}/ts" "${py_mismatch}/py"
+printf 'version = "9.9.9"\n' >"${py_mismatch}/Cargo.toml"
+printf '{"version":"9.9.9"}\n' >"${py_mismatch}/ts/package.json"
+printf 'version = "0.0.1"\n' >"${py_mismatch}/py/Cargo.toml"
+status=0
+stderr="$(bash "${REPO_ROOT}/bin/sync-versions.sh" check "${py_mismatch}" 2>&1 1>/dev/null)" ||
+  status=$?
+[[ "${status}" -eq 1 ]] || fail "a drifted py/Cargo.toml should exit 1, got ${status}"
+[[ "${stderr}" == *"py/Cargo.toml"* ]] ||
+  fail "a drifted py/Cargo.toml should be named in the error, got: ${stderr}"
 
 status=0
 stderr="$(bash "${REPO_ROOT}/bin/sync-versions.sh" check "${missing_root}" 2>&1 1>/dev/null)" ||

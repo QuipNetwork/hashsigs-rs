@@ -1,32 +1,34 @@
 # Solidity parity
 
-Status of feature and design parity between this crate and hashsigs-solidity
-(`create-x-deployment` branch, commit `dd71249`). Last audited 2026-07-22
-against a two-sided surface inventory plus a line-by-line account-wrapper
-audit. Module paths refreshed 2026-07-24 for the `hash/` split and
-`primitives` dissolution.
+This document records feature and design parity between this crate and
+hashsigs-solidity (`create-x-deployment` branch, commit `dd71249`). The last
+audit, on 2026-07-22, used a two-sided surface inventory plus a line-by-line
+account-wrapper audit. A 2026-07-24 pass refreshed the module paths for the
+`hash/` split and the `primitives` dissolution.
 
 ## At parity
 
-- Crypto core: WOTS-C, FORS-C, hypertree, UXMSS, SPHINCS+C, SHRINCS verify
-  and rotation paths; four profiles; keccak and sha2 hash suites; commitment
-  scheme; the four canonical message hashes. Cross-pinned by Rust-anchored
-  vectors consumed on both sides (256s keccak and sha2). Layering: the
-  scheme-neutral building blocks (`src/hash/`, `src/abi.rs`, `src/buf.rs`,
-  `src/profiles.rs`, `src/treehash.rs`) sit at the crate root;
-  `src/sphincs_plus_c/` owns FORS-C and the hypertree (`fors_c` ↔
-  `FORSMinusC.sol`, `hypertree` ↔ `Hypertree.sol`) and is oblivious to
-  SHRINCS; `src/shrincs/` builds the hybrid on top of it.
+- Crypto core: verify and rotation paths for WOTS-C, FORS-C, the hypertree,
+  UXMSS, SPHINCS+C, and SHRINCS. The four profiles, the commitment scheme,
+  the four canonical message hashes, and the keccak and sha2 hash suites
+  are also at parity. Rust-anchored vectors, consumed on both sides,
+  cross-pin the core (256s keccak and sha2).
+- Layering: the scheme-neutral building blocks (`src/hash/`, `src/abi.rs`,
+  `src/buf.rs`, `src/profiles.rs`, `src/treehash.rs`) sit at the crate
+  root. `src/sphincs_plus_c/` owns FORS-C and the hypertree (`fors_c` ↔
+  `FORSMinusC.sol`, `hypertree` ↔ `Hypertree.sol`) and does not reference
+  SHRINCS. `src/shrincs/` builds the hybrid on top of it.
 - `shrincs::signature` (composite envelope codecs) and `shrincs::dispatch`
   (`prepare_stateless_delegation`): byte-exact Solidity ABI encoders and
-  strict decoders for every named envelope shape, including ERC-1271
-  mode-1/2 action envelopes, over the shared `crate::abi` primitives.
-  Per-scheme signature bodies live in their scheme modules (`wots_c`,
-  `sphincs_plus_c::{fors_c, hypertree, signature}`). Byte-pinned against
-  the Solidity-exported vector blobs.
-- `shrincs::ShrincsVerifier` implementing `verifier::VerifierInterface`
-  (`verify`) mirrors `SHRINCSVerifier.sol` (32-byte commitment key,
-  stateful envelope, tri-state outcome, `version_tag()` pins);
+  strict decoders for every envelope shape named in the Solidity contracts.
+  This includes the ERC-1271 mode-1/2 action envelopes. The codecs build on
+  the shared `crate::abi` primitives. Per-scheme signature bodies live in
+  their scheme modules (`wots_c`,
+  `sphincs_plus_c::{fors_c, hypertree, signature}`). Vector blobs exported
+  from Solidity pin the codecs byte-for-byte.
+- `shrincs::ShrincsVerifier` provides `verifier::VerifierInterface`
+  (`verify`) and mirrors `SHRINCSVerifier.sol` (32-byte commitment key,
+  stateful envelope, tri-state outcome, `version_tag()` pins).
   `SphincsPlusCVerifier` (also `VerifierInterface`) mirrors
   `SPHINCSPlusCVerifier.sol`.
 - Solana program: verify-only instructions for SPHINCS+C, SHRINCS stateless,
@@ -35,89 +37,94 @@ audit. Module paths refreshed 2026-07-24 for the `hash/` split and
 ## Intentional divergences (do not port)
 
 - EIP-1153 transient attestation (`verifyAndAttest`/`wasVerified`,
-  `IERC7913TransientAttestation`): EVM transaction-scoped mechanism with no
-  host or Solana analogue.
+  `IERC7913TransientAttestation`): an EVM transaction-scoped mechanism with
+  no host or Solana analogue.
 - Calldata zero-copy acceptance widening (re-tag reads bounds-checked
-  against `calldatasize`; tail-truncated envelopes verify under masked-hash
-  profiles): documented Solidity malleability. Rust decoders parse strictly
-  and fail closed; never a wrong-accept in either direction.
-- `read_bits` past logical end: Solidity reads adjacent calldata by design;
-  Rust returns `None`.
-- Deployment: CreateX/CREATE3 deterministic addresses on EVM; Solana uses
-  program-id keypairs and verifiable builds.
+  against `calldatasize`, and tail-truncated envelopes verify under
+  masked-hash profiles): documented Solidity malleability. Rust decoders
+  are strict and fail closed. A wrong-accept cannot happen in either
+  direction.
+- `read_bits` past the logical end: by design, Solidity reads adjacent
+  calldata. Rust returns `None`.
+- Deployment: the EVM side uses CreateX/CREATE3 deterministic addresses,
+  and Solana uses program-id keypairs and verifiable builds.
 - Typed `AccountError` (10 variants) instead of Solidity's boolean/revert
   model (approved in MR !2 review).
-- Rust `SCREAMING_SNAKE_CASE` constants vs Solidity PascalCase spec names.
+- Rust `SCREAMING_SNAKE_CASE` constants versus Solidity PascalCase
+  specification names.
 
 ## Maintainer decisions pending
 
 1. **Recovery-rotation freeze exemption (audit F1).** Solidity requires an
-   unfrozen policy to enter `RecoveryRotation`, but freezing happens on
-   first stateful use and only rotation unfreezes — a used monotonic/bitmap
-   account is permanently unable to rotate. Rust exempts that one setter
-   from the freeze check. The audit traced the Solidity behavior and
-   confirmed the lockout. Recommendation: keep the Rust behavior and fix
-   `SHRINCSAccountVerifierExample.sol` upstream.
+   unfrozen policy to enter `RecoveryRotation`. But the first stateful use
+   freezes the policy, and only rotation unfreezes it. A used
+   monotonic/bitmap account can never rotate. Rust exempts that
+   one setter from the freeze check. The audit traced the Solidity behavior
+   and confirmed the lockout. Recommendation: keep the Rust behavior and
+   fix `SHRINCSAccountVerifierExample.sol` upstream.
 2. **Stateless budget reset on full rotation (audit F2).** Solidity resets
-   the budget unconditionally; Rust resets only when the stateless key
-   material actually changed, because a fresh budget for a reused few-time
-   key permits over-use. Recommendation: adopt the Rust behavior upstream.
-3. **Rotation calldata decoders.** The envelope codec does not parse
-   `rotateToFreshKey`/`rotateFullKey` `abi.encodeCall` shapes (no named
-   envelope exists for them in `SHRINCS.sol`); rotation vectors are pinned
-   through oracle-decoded fields instead.
+   the budget unconditionally. Rust resets it only when the stateless key
+   material changed, because a fresh budget for a reused few-time key
+   permits over-use. Recommendation: adopt the Rust behavior upstream.
+3. **Rotation calldata decoders.** The envelope codec does not parse the
+   `rotateToFreshKey`/`rotateFullKey` `abi.encodeCall` shapes because
+   `SHRINCS.sol` names no envelope for them. Oracle-decoded fields pin the
+   rotation vectors instead.
 
-## Cross-implementation vector status
+## Cross-language vector status
 
-- 256s (keccak, sha2): Solidity signs, Rust verifies. A fresh forge 1.7.1
-  run of `dev/export-account-vectors.sh` reproduces the committed fixture
-  byte-identically.
-- 128s (q18, q20): Rust signs, Solidity verifies — in-EVM 128s stateless
-  signing is compute-infeasible (the Solidity export test sits in the 128s
-  skip lists), so the fixtures are generated by the Rust generator in
-  `tests/generate_shrincs_vectors.rs` and consumed on the Solidity side by
-  `test/SHRINCSRustAccountVectors128s.t.sol` (12 checks per profile: both
-  action verifies with message-hash equality, both rotations with
-  commitment equality, tamper rejections). All pass at q18 and q20.
-  Gas at 128s: stateful verify 102,574; stateless verify 247,632;
-  rotations ~255K. The Solidity-side test lives uncommitted in the
-  hashsigs-solidity worktree pending upstream adoption. Regenerate a
-  fixture with `cargo test --release --features profile-128s-q18 --test
-  generate_shrincs_vectors generate_shrincs_account_wrapper_vectors --
-  --ignored --nocapture` (several minutes per profile); the ten dependent
-  tests in `solidity_account_vectors.rs` and `envelope_vectors.rs` run
-  un-ignored under both 128s profiles.
+- Solidity signs and Rust verifies at 256s (keccak and sha2). A fresh forge
+  1.7.1 run of `dev/export-account-vectors.sh` reproduces the committed
+  fixture byte-identically.
+- Rust signs and Solidity verifies at 128s (q18 and q20). In-EVM 128s
+  stateless signing is compute-infeasible, and the Solidity export test
+  sits in the 128s skip lists. The Rust generator in
+  `tests/generate_shrincs_vectors.rs` produces the fixtures, and
+  `test/SHRINCSRustAccountVectors128s.t.sol` consumes them on the Solidity
+  side. Each profile runs 12 checks: both action verifies with
+  message-hash equality, both rotations with commitment equality, and
+  tamper rejections. All pass at q18 and q20. Gas at 128s: stateful verify
+  102,574, stateless verify 247,632, rotations ~255K. The Solidity-side
+  test lives uncommitted in the hashsigs-solidity worktree pending
+  upstream adoption. Regenerate a fixture with `cargo test --release
+  --features profile-128s-q18 --test generate_shrincs_vectors
+  generate_shrincs_account_wrapper_vectors -- --ignored --nocapture` (the
+  run takes minutes per profile). The ten dependent tests in
+  `solidity_account_vectors.rs` and `envelope_vectors.rs` run un-ignored
+  under both 128s profiles.
 
 ## SHRINCS account example
 
-The SHRINCS account state machine, removed from `hashsigs-rs` core in the
-redesign, is now demonstrated at
-[`solana/examples/shrincs-account/`](../solana/examples/shrincs-account/), a
-standalone workspace member built on the retained public primitives
-(`ShrincsVerifier::verify_stateful`/`verify_stateless`, `ActionContext`). See
-that crate's README for the full instruction set and policy model.
+The redesign removed the SHRINCS account state machine from the
+`hashsigs-rs` core. The state machine now lives in
+[`solana/examples/shrincs-account/`](../solana/examples/shrincs-account/),
+a standalone workspace member built on the retained public primitives
+(`ShrincsVerifier::verify_stateful`/`verify_stateless`, `ActionContext`).
+See that crate's README for the full instruction set and policy model.
 
-Its key rotation authorizes through an ordinary action (an `ActionContext`
-digest tagged `ACTION_ROTATE_STATEFUL`/`ACTION_ROTATE_FULL`), not Solidity's
-dedicated `rotateStatefulViaStateless`/`statelessRotate` preimage. A signature
-built for Solidity's rotation message hash doesn't verify against this
-example, and vice versa. This is deliberate: the example owns its own
-wrapper-message convention so the core crate can stay a pure signature
-primitive with no rotation-shaped opinions.
+The example's key rotation authorizes through an ordinary action (an
+`ActionContext` digest tagged `ACTION_ROTATE_STATEFUL`/`ACTION_ROTATE_FULL`),
+not Solidity's dedicated `rotateStatefulViaStateless`/`statelessRotate`
+preimage. A signature built for Solidity's rotation message hash does not
+verify against this example. The reverse also fails. This is deliberate:
+the example owns its own wrapper-message convention. The core crate stays
+a pure signature primitive with no rotation conventions.
 
 ## Known gaps
 
 - No test drives the account state machine against Solidity-produced call
-  traces; the exported `*_verify_calldata`/`*_1271_envelope` blobs are
+  traces. The exported `*_verify_calldata`/`*_1271_envelope` blobs are
   byte-pinned through the codec but not replayed against a
-  vector-controlled account instance (the vectors do not export the
-  generating chain id/contract address).
+  vector-controlled account instance. The vectors do not export the
+  generating chain id or contract address.
 - Upstream follow-ups for hashsigs-solidity: adopt
   `SHRINCSRustAccountVectors128s.t.sol` plus the two 128s fixtures, fix
   the rotation lockout (maintainer decision 1), and adopt the conditional
   stateless budget reset (decision 2).
 
-## Measured Solana compute units (SBF VM, real binary)
+## Solana compute units
+
+All figures come from the real program binary in the SBF virtual machine.
 
 | Instruction | 256s | 256s-sha2 | 128s-q18 |
 |---|---|---|---|
@@ -129,10 +136,10 @@ WOTS+ v1 verify (legacy scheme, not for new integrations): 298,064 CU. The
 instruction pins keccak hashing, so the figure does not depend on the
 compiled profile (measured under the sha2 build).
 
-The 256s-sha2 and WOTS+ figures were measured 2026-08-20 with platform-tools
-v1.54 (rustc 1.89). The crate's `rust-version = "1.95"` pin makes
-`cargo build-sbf` refuse to compile with those tools, so the build passed
-`--ignore-rust-version` through to cargo:
+The 256s-sha2 and WOTS+ figures come from a 2026-08-20 run with
+platform-tools v1.54 (rustc 1.89). The crate's `rust-version = "1.95"` pin
+makes `cargo build-sbf` refuse to compile with those tools, so the build
+passed `--ignore-rust-version` through to cargo:
 
 ```bash
 cargo build-sbf --manifest-path solana/Cargo.toml -- \
@@ -145,8 +152,8 @@ SBF_OUT_DIR=$PWD/target/deploy cargo test -p hashsigs-rs-solana \
 ```
 
 Payloads carrying a 256s stateless signature (~30 KB) need
-`ComputeBudgetInstruction::request_heap_frame`; the program ships an
+`ComputeBudgetInstruction::request_heap_frame`. The program ships an
 unbounded bump allocator (`custom-heap`, default) because the entrypoint
 default is compile-time capped at 32 KiB and ignores the granted frame.
-A 256s signature also exceeds the 1,232-byte transaction MTU; real
+A 256s signature also exceeds the 1,232-byte transaction MTU. Real
 deployments need account-staged delivery or the 128s profile.

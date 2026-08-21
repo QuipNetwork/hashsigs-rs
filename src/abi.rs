@@ -141,7 +141,16 @@ impl<'a> AbiReader<'a> {
         }
     }
 
-    /// Accept only when every input byte was covered by a successful read.
+    /// Accept only when the farthest successful read landed exactly on the
+    /// end of the input, rejecting trailing bytes.
+    ///
+    /// This check alone cannot see interior bytes that offset words skip
+    /// over, nor tails decoded in a non-canonical order: distinct byte
+    /// strings could then decode to the identical value (envelope
+    /// malleability). Every top-level `from_bytes`/envelope decoder
+    /// therefore ALSO re-encodes the decoded value and requires byte
+    /// equality with the input, which admits exactly one encoding — the
+    /// canonical one — per value.
     pub(crate) fn finish(&self) -> Option<()> {
         if self.high_water.get() == self.data.len() {
             Some(())

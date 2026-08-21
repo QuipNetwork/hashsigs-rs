@@ -338,6 +338,10 @@ impl PublicKey {
         let public_key_start = reader.decode_offset(0, 0)?;
         let decoded = Self::decode(&reader, public_key_start)?;
         reader.finish()?;
+        // Reject non-canonical encodings (see `AbiReader::finish` docs).
+        if decoded.to_bytes() != data {
+            return None;
+        }
         Some(decoded)
     }
 
@@ -422,6 +426,16 @@ mod public_key_tests {
         assert!(
             PublicKey::from_bytes(&encoded).is_none(),
             "trailing junk on the public-key envelope must be rejected"
+        );
+    }
+
+    #[test]
+    fn from_bytes_rejects_interior_gap() {
+        let encoded = sample_public_key().to_bytes();
+        let gapped = crate::test_support::insert_abi_head_gap(&encoded, 1, &[0]);
+        assert!(
+            PublicKey::from_bytes(&gapped).is_none(),
+            "an envelope with unread interior bytes must be rejected"
         );
     }
 

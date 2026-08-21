@@ -25,6 +25,7 @@
 /// Hash function type for WOTS+
 use alloc::vec;
 use alloc::vec::Vec;
+use zeroize::Zeroizing;
 
 pub type HashFn = fn(&[u8]) -> [u8; 32];
 
@@ -202,7 +203,7 @@ impl SignatureBuffer {
 /// PublicKey consists of two parts:
 /// 1. The public seed used to generate randomization elements
 /// 2. The hash of all public key segments concatenated together
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PublicKey {
     pub public_seed: [u8; constants::HASH_LEN],
     pub public_key_hash: [u8; constants::HASH_LEN],
@@ -327,11 +328,13 @@ impl WOTSPlus {
         index: u16,
         steps: u16,
     ) -> [u8; constants::HASH_LEN] {
-        let mut to_hash = vec![0u8; constants::HASH_LEN * 2];
+        // Stack-allocated and wiped on drop: both buffers hold secret chain
+        // material (the PRF preimage and the derived chain secret).
+        let mut to_hash = Zeroizing::new([0u8; constants::HASH_LEN * 2]);
         to_hash[..constants::HASH_LEN].copy_from_slice(function_key);
         to_hash[constants::HASH_LEN..].copy_from_slice(&self.prf(private_key, i + 1));
 
-        let secret_key_segment = (self.hash_fn)(&to_hash);
+        let secret_key_segment = Zeroizing::new((self.hash_fn)(&*to_hash));
         self.chain(&secret_key_segment, randomization_elements, index, steps)
     }
 
@@ -394,11 +397,13 @@ impl WOTSPlus {
         let mut public_key_segments = SignatureBuffer::new();
 
         for i in 0..constants::NUM_SIGNATURE_CHUNKS {
-            let mut to_hash = vec![0u8; constants::HASH_LEN * 2];
+            // Stack-allocated and wiped on drop: both buffers hold secret
+            // chain material (the PRF preimage and the derived chain secret).
+            let mut to_hash = Zeroizing::new([0u8; constants::HASH_LEN * 2]);
             to_hash[..constants::HASH_LEN].copy_from_slice(&function_key);
             to_hash[constants::HASH_LEN..].copy_from_slice(&self.prf(private_key, (i + 1) as u16));
 
-            let secret_key_segment = (self.hash_fn)(&to_hash);
+            let secret_key_segment = Zeroizing::new((self.hash_fn)(&*to_hash));
             let segment = self.chain(
                 &secret_key_segment,
                 &randomization_elements,

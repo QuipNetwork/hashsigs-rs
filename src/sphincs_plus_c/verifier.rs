@@ -97,9 +97,7 @@ impl crate::verifier::VerifierInterface for SphincsPlusCVerifier {
         let Some(decoded) = Signature::from_bytes(signature) else {
             return VerifyOutcome::Malformed;
         };
-        let mut hash32 = [0u8; 32];
-        hash32.copy_from_slice(hash);
-        if self.verify_signature(key, &hash32, &decoded) {
+        if self.verify_signature(key, hash, &decoded) {
             VerifyOutcome::Valid
         } else {
             VerifyOutcome::Invalid

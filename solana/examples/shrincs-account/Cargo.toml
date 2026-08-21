@@ -6,7 +6,7 @@ rust-version = "1.95"
 authors = ["Richard T. Carback III <rick.carback@gmail.com>"]
 description = "Solana example program demonstrating the SHRINCS account pattern"
 license = "AGPL-3.0-or-later"
-repository = "https://github.com/quipnetwork/hashsigs-rs"
+repository = "https://gitlab.com/quip.network/hashsigs-rs"
 publish = false
 
 [lib]
