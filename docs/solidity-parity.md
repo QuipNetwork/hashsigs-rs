@@ -119,11 +119,30 @@ primitive with no rotation-shaped opinions.
 
 ## Measured Solana compute units (SBF VM, real binary)
 
-| Instruction | 256s | 128s-q18 |
-|---|---|---|
-| SPHINCS+C stateless verify | 1,028,136 | 106,555 |
-| SHRINCS stateless verify | 1,029,780 | — |
-| SHRINCS stateful verify | 111,586 | 58,461 |
+| Instruction | 256s | 256s-sha2 | 128s-q18 |
+|---|---|---|---|
+| SPHINCS+C stateless verify | 1,028,136 | 930,115 | 106,555 |
+| SHRINCS stateless verify | 1,029,780 | 931,804 | — |
+| SHRINCS stateful verify | 111,586 | 101,909 | 58,461 |
+
+WOTS+ v1 verify (legacy scheme, not for new integrations): 298,064 CU. The
+instruction pins keccak hashing, so the figure does not depend on the
+compiled profile (measured under the sha2 build).
+
+The 256s-sha2 and WOTS+ figures were measured 2026-08-20 with platform-tools
+v1.54 (rustc 1.89). The crate's `rust-version = "1.95"` pin makes
+`cargo build-sbf` refuse to compile with those tools, so the build passed
+`--ignore-rust-version` through to cargo:
+
+```bash
+cargo build-sbf --manifest-path solana/Cargo.toml -- \
+  --features hashsigs-rs/profile-256s-sha2 --ignore-rust-version
+SBF_OUT_DIR=$PWD/target/deploy cargo test -p hashsigs-rs-solana \
+  --features hashsigs-rs/profile-256s-sha2 --test solana_unit_tests -- \
+  --nocapture test_sphincs_plus_c_verify_valid \
+  test_shrincs_verify_stateless_valid test_shrincs_verify_stateful_valid \
+  test_verify_valid_signature
+```
 
 Payloads carrying a 256s stateless signature (~30 KB) need
 `ComputeBudgetInstruction::request_heap_frame`; the program ships an

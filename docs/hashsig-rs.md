@@ -4,7 +4,8 @@
 now contains four main surfaces:
 
 - `wotsplus`
-  - standalone WOTS+ primitives and tests
+  - standalone WOTS+ primitives and tests (legacy v1 — do not use for new
+    integrations)
 - `shrincs`
   - SHRINCS signer / verifier primitives
   - stateful signing path
@@ -44,11 +45,12 @@ hashsigs-rs/
 
 ## Cryptographic layout
 
-### WOTS+
+### WOTS+ (legacy)
 
-The `wotsplus` module provides the lower-level Winternitz signature primitive
-used independently in the repo and as a component inside the broader
-SHRINCS-style construction.
+The `wotsplus` module provides the standalone Winternitz signature primitive
+that shipped as the v1 wallet scheme. It is legacy: do not use it for new
+integrations. Use SHRINCS. It is not a SHRINCS component: the SHRINCS paths
+build on the separate target-sum `wots_c` module.
 
 ### SHRINCS
 

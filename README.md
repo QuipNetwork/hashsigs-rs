@@ -3,10 +3,218 @@
 Core Rust hash-signature workspace with:
 
 - `hashsigs-rs`: one crate containing:
-  - `wotsplus` primitives
-  - `shrincs` signer / verifier primitives
-  - `wasm` verifier / signer bindings
-- `solana/`: Solana program integration
+  - `wotsplus` — the standalone WOTS+ one-time signature scheme (v1, legacy)
+  - `sphincs_plus_c` — the stateless SPHINCS+C scheme
+  - `shrincs` — the hybrid SHRINCS signer / verifier
+  - `wasm` — verifier / signer bindings
+- `solana/`: verify-only Solana program, plus an account-wrapper example at
+  `solana/examples/shrincs-account/`
+- `ts/`: `@quip.network/hashsigs-wasm`, the npm wrapper for the wasm build
+- `py/`: Python package scaffold (`hashsigs`). The binding API is under
+  construction
+
+This crate is the reference signer: it generates the golden vectors that
+anchor the Solidity verifier in
+[`hashsigs-solidity`](https://gitlab.com/quip.network/hashsigs-solidity).
+
+## The SHRINCS construction
+
+SHRINCS is a two-path hash-based signature construction
+([ePrint 2025/2203](https://eprint.iacr.org/2025/2203), appendix). One
+committed key bundle carries two verification paths with different costs and
+budgets:
+
+- **Stateful path (cheap, bounded).** A WOTS-C one-time signature under an
+  unbalanced XMSS-style Merkle tree (UXMSS). Normal operations use this path.
+  Each signature consumes one leaf, up to `maxSignatures` (at most 4,096).
+- **Stateless path (expensive, break-glass).** A full SPHINCS+C signature: a
+  FORS-C few-time signature carried up a hypertree of WOTS-C layers. Reserved
+  for recovery and key rotation. Needs no signer state.
+
+```mermaid
+graph TD
+    C["publicKeyCommitment (32 B)<br/>tag: shrincs-public-key/&lt;profile&gt;<br/>binds statefulPublicKey + pkSeed + hypertreeRoot"]
+    C --> SR["Stateful root (UXMSS)<br/>unbalanced tree of WOTS-C one-time leaves<br/>leaf index = auth-path length"]
+    C --> HR["Stateless root (SPHINCS+C)<br/>hypertree of WOTS-C layers<br/>over FORS-C few-time signatures"]
+```
+
+A 32-byte `publicKeyCommitment` binds both roots plus the profile identity.
+Only the commitment needs on-chain storage. Callers resupply the full
+164-byte public-key bundle on every verify, and the verifier recomputes and
+checks the commitment. Verification is pure keccak-256 (SHA-256 for scheme
+hashes in the sha2 profile) and grinds nothing. Signer state (nonces,
+used-leaf tracking, budgets) belongs to the integrating account, not the
+verifier.
+
+### Components
+
+Dependencies point strictly downward. Neither path knows about the other.
+`shrincs` composes them at the API boundary.
+
+- `shrincs` — the hybrid: commitment scheme, stateful + stateless dispatch,
+  canonical action and rotation hashes.
+- `shrincs::uxmss` — the stateful half: WOTS-C leaves under the unbalanced
+  tree, crate-internal.
+- `sphincs_plus_c` — the stateless half: FORS-C (`fors_c`) and the hypertree
+  (`hypertree`). Oblivious to `shrincs`.
+- `wots_c` — the shared WOTS-C target-sum chain walk, grind, and codec. Both
+  paths bind it with their own domain tags. It calls into neither.
+- `wotsplus` — standalone WOTS+ with checksum chains, the v1 wallet scheme.
+  Not part of SHRINCS. **Legacy: do not use WOTS+ for new integrations. Use
+  SHRINCS.** It stays only to keep v1 wallets verifiable.
+- Scheme-neutral foundation at the crate root: `hash/` (tagged hash suite),
+  `abi` (Solidity-compatible codec), `buf`, `profiles`, `treehash`.
+
+### Research lineage
+
+| Key | Paper | Role here |
+|---|---|---|
+| SHRINCS | Kudinov, Nick — *Hash-based Signature Schemes for Bitcoin*, [ePrint 2025/2203](https://eprint.iacr.org/2025/2203) | The hybrid construction. UXMSS is its App. B.3 |
+| SPHINCS+C | Kudinov, Hülsing, Ronen, Yogev — *SPHINCS+C: Compressing SPHINCS+ With (Almost) No Cost*, [ePrint 2022/778](https://eprint.iacr.org/2022/778), IEEE S&P 2023 | The stateless path: WOTS-C target-sum chains, FORS-C grinding |
+| SPHINCS+ | *SPHINCS+ Specification v3.1* (2022) | Base stateless design: `PK = (PK.seed, PK.root)`, FORS + hypertree |
+| FIPS 205 | NIST — *Stateless Hash-Based Digital Signature Standard* (SLH-DSA) | Address-word conventions, with one documented deviation (below) |
+| WOTS+ | Hülsing — *W-OTS+: Shorter Signatures for Hash-Based Signature Schemes*, AFRICACRYPT 2013 | Winternitz chains, shipped standalone as the legacy v1 scheme |
+| RFC 8391 | *XMSS: eXtended Merkle Signature Scheme* | Baseline the stateful component departs from |
+
+### Deltas against the standard constructions
+
+Against SPHINCS+, the SPHINCS+C changes move work from the verifier to
+signer-side grinding:
+
+- **WOTS-C** drops the checksum chains. The signer grinds a counter until the
+  message digits sum to a fixed target (480 at 256s, 240 at 128s). The
+  verifier checks the target-sum equation.
+- **FORS-C** grinds until the last FORS tree index is zero, so the signature
+  reveals only `k − 1` trees.
+- Each signature adds a 4-byte grind counter and a per-signature randomizer.
+
+Against RFC 8391 XMSS, UXMSS differs in four ways:
+
+- The tree is unbalanced and sized to any `maxSignatures`, with no
+  power-of-two constraint.
+- The leaf index is implicit: it equals the auth-path length.
+- Leaves are WOTS-C, sharing chain machinery with the stateless side.
+- Hashes use SPHINCS-style string tags (`uxmss-*`) instead of the RFC 8391
+  ADRS structure.
+
+Documented FIPS 205 deviation: the signer does not serialize upper-layer
+hypertree coordinates. The verifier re-derives them — layer-0 coordinates come
+from the FORS digest, and each upper layer follows a fixed recurrence
+(`src/sphincs_plus_c/hypertree.rs`).
+
+## Parameters, sizes, and measured costs
+
+Four compile-time profiles ship. The cryptographic constants match the
+Solidity implementation. `src/profiles.rs` is the Rust source of truth.
+
+| Parameter | `256s` / `256s-sha2` | `128s-q18` / `128s-q20` |
+|---|---|---|
+| Scheme-hash suite | keccak-256 / SHA-256 | keccak-256 |
+| Hash entropy | 32 B | 16 B truncated (full 32-byte wire slots) |
+| Hypertree | height 64, 8 layers | height 18, 1 layer |
+| FORS-C | 22 trees, height 14 | 6 trees, height 24 |
+| WOTS-C | 64 chains, w = 16, target sum 480 | 32 chains, w = 16, target sum 240 |
+| Stateless signature budget | 2^20 | 2^18 (q18) / 2^20 (q20) |
+| FORS-C grind bound | 2^24 | 2^28 |
+
+`128s-q20` differs from `128s-q18` only in the stateless budget. The larger
+q20 budget still needs security-analysis backing before production use. The
+sha2 suite switches scheme hashes only — EVM-domain hashes (profile identity,
+commitments, canonical action hashes) stay keccak under every profile, so the
+128s and sha2 profiles change hashing work, not commitment framing.
+
+Key material is constant across profiles:
+
+| Item | Bytes | Layout |
+|---|---|---|
+| SHRINCS secret key | 264 | stateful(136) ‖ stateless(128): eight 32-byte seeds/roots + two 4-byte counters |
+| SHRINCS public bundle | 164 | statefulPublicKey(68) ‖ commitment(32) ‖ pkSeed(32) ‖ hypertreeRoot(32) |
+| publicKeyCommitment | 32 | the only on-chain key material |
+| Stateful public key | 68 | pkSeed(32) ‖ root(32) ‖ maxSignatures(4 BE) |
+| Stateless (SPHINCS+C) public key | 64 | pkSeed(32) ‖ root(32) |
+| WOTS+ v1 key (legacy) | 32 secret / 64 public | seed / public_seed(32) ‖ pk_hash(32) |
+
+### Per-variation sizes and costs
+
+Signature sizes are packed field bytes. The stateful signature has no single
+size: leaf `L` carries `L` auth nodes, so signatures grow 32 B per consumed
+leaf while sign time shrinks (the auth path rebuild covers fewer remaining
+leaves). Native times: measured 2026-08-20 on one core of an AMD Ryzen 9
+5950X, `--release`, default features, `maxSignatures` = 1024, stateful sign
+at leaf 1. One keygen derives both paths of a profile.
+
+| Variation | Path | Key size (secret / public) | Signature size | Keygen time | Sign time | Verify time | Solana verify cost (CU) |
+|---|---|---|---|---|---|---|---|
+| `shrincs-256s-keccak` | stateful | 264 B / 164 B | 2,084 + 32·L B (2,116 at L = 1) | 476 ms | 374 ms | 0.17 ms | 111,586 |
+| `shrincs-256s-keccak` | stateless | 264 B / 164 B | 29,092 B | 476 ms | ~1.3 s | 1.7 ms | 1,029,780 |
+| `shrincs-256s-sha2` | stateful | 264 B / 164 B | 2,084 + 32·L B | 133 ms | 101 ms | 0.05 ms | 101,909 |
+| `shrincs-256s-sha2` | stateless | 264 B / 164 B | 29,092 B | 133 ms | ~0.36 s | 0.48 ms | 931,804 |
+| `shrincs-128s-q18-keccak` | stateful | 264 B / 164 B | 1,060 + 32·L B (1,092 at L = 1) | 46.3 s | 176 ms | 0.08 ms | 58,461 |
+| `shrincs-128s-q18-keccak` | stateless | 264 B / 164 B | 5,704 B | 46.3 s | ~2.8 min | 0.17 ms | 106,555 † |
+| `shrincs-128s-q20-keccak` | stateful | 264 B / 164 B | 1,060 + 32·L B | 46.4 s | 177 ms | 0.08 ms | same as q18 (derived) |
+| `shrincs-128s-q20-keccak` | stateless | 264 B / 164 B | 5,704 B | 46.4 s | ~2.8 min | 0.17 ms | same as q18 (derived) |
+| `wotsplus` (v1, keccak, legacy) | one-time | 32 B / 64 B | 2,144 B | 0.42 ms | 0.20 ms | 0.24 ms | 298,064 |
+
+† Measured through the `SphincsPlusCVerify` instruction. A SHRINCS stateless
+signature is a SPHINCS+C signature plus a commitment check, and the hybrid
+`ShrincsVerifyStateless` cost was not recorded at 128s.
+
+Notes:
+
+- **Solana compute units** are measured in the SBF VM against the real
+  program binary (`docs/solidity-parity.md`). `128s-q20` shares every crypto
+  constant with `128s-q18`, so its cost is stated as derived, not measured.
+  The WOTS+ instruction pins keccak hashing, so its cost does not depend on
+  the compiled profile.
+- **WOTS+ v1 is legacy.** Do not use it for new integrations. Its row exists
+  for reference: it stays in the crate only to keep v1 wallets verifiable.
+  A 256s stateless signature (~30 KB) exceeds the 1,232-byte transaction MTU
+  and also needs `ComputeBudgetInstruction::request_heap_frame`. Real
+  deployments stage the payload in an account or use a 128s profile.
+- **Stateless sign times** carry `~` because FORS-C signing grinds a counter
+  (expected 2^14 tries at 256s, 2^24 at 128s). Each message is a fresh
+  geometric draw, so times vary run to run. The table shows means over 3
+  messages.
+- **Sign and keygen scale with `maxSignatures`**: the signer recomputes the
+  stateful auth path from seeds on every sign, so stateful sign time is the
+  same order as keygen at the same budget.
+- **128s trades signer time for on-chain cost.** The single-layer height-18
+  hypertree makes keygen build 2^18 WOTS-C leaves (~46 s), and each stateless
+  sign rebuilds it, grinds ~2^24 FORS-C tries, and builds six height-24 FORS
+  trees (~2.8 min). In exchange, 128s has the smallest signatures and the
+  cheapest verification. In-EVM 128s stateless signing is
+  compute-infeasible, so the Rust signer generates those vectors.
+- **ABI envelopes run larger than packed sizes.** The Rust `sign` envelope
+  (public key + signature under `abi.encode` framing) is 2,784 B at 256s
+  leaf 1 and 1,760 B at 128s leaf 1. A stateless signature blob alone is
+  91,200 B at 256s and 18,016 B at 128s — about 3.2× its packed size,
+  because `bytes`/`bytes[]` fields pay offset and length words.
+- The sha2 profile is faster on x86-64 CPUs with SHA extensions: SHA-256 is
+  hardware-accelerated there, and keccak is not.
+- Regenerate the native numbers with the committed probes:
+
+  ```bash
+  BENCH_LABEL=256s-keccak cargo run --release --example bench_table
+  BENCH_LABEL=256s-sha2   cargo run --release --example bench_table --features profile-256s-sha2
+  BENCH_LABEL=128s-q18    cargo run --release --example bench_table --features profile-128s-q18
+  BENCH_LABEL=128s-q20    cargo run --release --example bench_table --features profile-128s-q20
+  cargo run --release --example bench_wots
+  ```
+
+### EVM verify gas
+
+Measured in `hashsigs-solidity` (account-wrapper call gas, 2026-07-13). The
+stateful path is 8–14× cheaper than stateless. That asymmetry is the design
+point: everyday operations ride the bounded stateful path, and the stateless
+authority is reserved for recovery.
+
+| Call | 256s | 256s-sha2 | 128s-q18 / q20 |
+|---|---|---|---|
+| Stateful verify (wrapper call) | 190,792 | 281,063 | 117,759 |
+| Stateless verify (delegation) | 1,660,931 | 2,455,228 | 204,635 |
+
+The legacy standalone WOTS+ v1 verification is ~500k gas with its 2,144-byte
+signatures.
 
 ## Building
 
@@ -250,7 +458,7 @@ reruns the selected `test-fast.sh` area whenever something changes.
   signature codecs.
 - `verifier.rs` (`pub`) — `ShrincsVerifier`: `verify`, `verify_stateful`, and
   `verify_stateless`.
-- `uxmss.rs` (`pub(crate)`) — the stateful half (UXMSS over WOTS+):
+- `uxmss.rs` (`pub(crate)`) — the stateful half (UXMSS over WOTS-C):
   `SkSeed`/`PrfSeed`/`PkSeed`/`Root` newtypes, `PrivateKey`/`PublicKey`/`Key`,
   and stateful signing.
 - `dispatch.rs` — internal action-hash dispatch glue.
@@ -268,7 +476,7 @@ root.
 Two layers cover the wasm surface:
 
 1. **Rust host tests** (`cargo test --features wasm-bindings`): byte-length
-   validation and feature-gated conversion logic on the host. They don't run
+   validation and feature-gated conversion logic on the host. They do not run
    the exported bindings inside a wasm runtime.
 2. **TS packaging conformance** (`cd ts && npm test`, after `npm run build`):
    loads the built `dist/` package through both Node and browser loaders and
@@ -306,7 +514,7 @@ nothing in the library checks seed quality. See
 Messages are exactly 32 bytes. Callers pre-hash arbitrary data and pass the
 32-byte digest, matching how the on-chain verifier treats its hash argument
 as the signed message. A wrong-length message throws on sign and returns
-`false` on verify; verify never throws.
+`false` on verify. Verify never throws.
 
 ### SPHINCS+C (stateless, standalone)
 
@@ -568,11 +776,12 @@ RUST_BACKTRACE=1 cargo test-sbf -- --nocapture 2>&1 | grep "compute units:"
 
 ## Development Requirements
 
-- Rust 1.79 or later; the current local test pass was with Rust 1.95.0
+- Rust 1.79 or later. The most recent local test pass used Rust 1.95.0
 - Solana/Agave SBF cargo subcommands, including `cargo build-sbf` and
   `cargo test-sbf`, for Solana program development: https://solana.com/docs/intro/installation
 
-NOTE: if on Mac, do not use brew to install rust and instead use https://www.rust-lang.org/tools/install
+On Mac, do not install Rust with brew. Use
+https://www.rust-lang.org/tools/install instead.
 
 ## Project Structure
 
@@ -585,7 +794,7 @@ NOTE: if on Mac, do not use brew to install rust and instead use https://www.rus
 │   ├── abi.rs           # Solidity-compatible ABI encode/decode
 │   ├── profiles.rs      # compile-time parameter sets
 │   ├── treehash.rs      # Merkle tree hashing
-│   ├── wots_c/, wotsplus/  # WOTS-C / WOTS+ primitives
+│   ├── wots_c/, wotsplus/  # WOTS-C primitives / legacy v1 WOTS+
 │   ├── sphincs_plus_c/  # stateless SPHINCS+C scheme (fors_c, hypertree, key)
 │   ├── shrincs/         # composed SHRINCS keys, signer, verifier (flat)
 │   │   ├── key.rs       # Keys / Commitment / PublicKey, public API
@@ -593,8 +802,11 @@ NOTE: if on Mac, do not use brew to install rust and instead use https://www.rus
 │   │   ├── verifier.rs  # ShrincsVerifier, public API
 │   │   └── uxmss.rs     # stateful UXMSS half, crate-internal
 │   └── wasm/      # verifier / signer wasm-bindgen surface
+├── examples/      # bench_table.rs / bench_wots.rs timing probes (README table)
 ├── ts/            # @quip.network/hashsigs-wasm (loadShrincsWasm entry)
-├── solana/        # Solana program implementation
+├── py/            # Python package scaffold (hashsigs)
+├── solana/        # Solana verify program
+│   └── examples/shrincs-account/  # account-wrapper example program
 └── tests/         # Test vectors and unit tests
 ```
 

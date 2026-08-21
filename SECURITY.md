@@ -280,8 +280,12 @@ Guidance:
 
 ### WOTS+ robustness note
 
-The standalone `wotsplus` module still includes length-sensitive code paths that
-assume valid message sizing.
+The standalone `wotsplus` module is the legacy v1 scheme: do not use it for
+new integrations. Use SHRINCS. It remains only to keep v1 wallets
+verifiable.
+
+The module still includes length-sensitive code paths that assume valid
+message sizing.
 
 Security implication:
 
