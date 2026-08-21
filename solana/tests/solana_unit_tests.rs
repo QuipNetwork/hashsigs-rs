@@ -74,6 +74,34 @@ pub mod wotsplus_solana_test {
     }
 
     #[tokio::test]
+    async fn test_malformed_instruction_data_is_rejected() {
+        // The dispatcher maps every borsh parse failure to
+        // InvalidInstructionData; garbage and truncated instruction bytes
+        // must land there instead of panicking or being accepted.
+        let (program_test, program_id) = setup_test().await;
+        let mut context = program_test.start_with_context().await;
+
+        let cases: [Vec<u8>; 3] = [
+            Vec::new(),     // empty instruction data
+            vec![0xFF; 7],  // unknown discriminant plus junk
+            vec![0x00; 10], // GenerateKeyPair discriminant, truncated seed
+        ];
+        for data in cases {
+            let label = format!("{data:?}");
+            let transaction = execute_transaction(&mut context, &program_id.pubkey(), data)
+                .await
+                .unwrap();
+            let result = context.banks_client.process_transaction(transaction).await;
+            let err = result.expect_err("malformed instruction data must be rejected");
+            let debug = format!("{err:?}");
+            assert!(
+                debug.contains("InvalidInstructionData"),
+                "case {label}: expected InvalidInstructionData, got {debug}"
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn test_generate_key_pair() {
         let (program_test, program_id) = setup_test().await;
         let mut context = program_test.start_with_context().await;

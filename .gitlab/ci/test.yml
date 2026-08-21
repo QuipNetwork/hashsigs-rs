@@ -103,7 +103,14 @@ msrv:
 supply-chain:
   stage: test
   image: rust:1.95.0
-  extends: [.rust-cache, .mr-default-rules]
+  extends: .rust-cache
+  # Unlike the other static gates, this one also runs on tag pipelines:
+  # advisories are time-dependent, so a lockfile that was clean when the SHA
+  # merged can be freshly vulnerable by the time it is tagged for release.
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG
   before_script:
     - !reference [.install-cargo-deny, before_script]
   script:

@@ -125,6 +125,10 @@ pub use verifier::SphincsPlusCVerifier;
 
 /// Sign an arbitrary message at the SPHINCS+C layer.
 ///
+/// Returns `None` if FORS-C or WOTS-C grinding exhausts its counter budget
+/// (deterministic for a given key and message, and astronomically unlikely
+/// for honest inputs).
+///
 /// # Examples
 ///
 /// ```rust,no_run
@@ -154,6 +158,8 @@ pub fn sign(signing_key: &key::Key, message: &[u8]) -> Option<Signature> {
 /// Sign a 32-byte hash, returning the stateless signature the matching
 /// verifier accepts. Stateless: the key is not mutated. The bytes a
 /// [`SphincsPlusCVerifier`] takes are `signature.to_bytes()`.
+///
+/// Returns `None` under the same grinding-exhaustion conditions as [`sign`].
 pub fn sign_hash(signing_key: &key::Key, hash: &[u8; HASH_LEN]) -> Option<Signature> {
     sign(signing_key, &to_message(hash))
 }

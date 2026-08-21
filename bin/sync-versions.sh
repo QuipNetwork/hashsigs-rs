@@ -99,7 +99,38 @@ check_json() {
   fi
 }
 
+check_toml() {
+  local path="$1"
+  [[ -f "${path}" ]] || return 0
+  local lines
+  # Same guards as the root read above: fail with an actionable line on a
+  # missing/unreadable manifest, and refuse a manifest with two top-level
+  # version lines rather than trusting the first.
+  lines="$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' \
+    "${path}" 2>/dev/null || true)"
+  if [[ -z "${lines}" ]]; then
+    echo "could not read a version from ${path}" >&2
+    status=1
+    return 0
+  fi
+  if [[ "$(wc -l <<<"${lines}")" -ne 1 ]]; then
+    echo "expected exactly one version line in ${path}, found:" >&2
+    echo "${lines}" >&2
+    status=1
+    return 0
+  fi
+  if [[ "${lines}" != "${crate_version}" ]]; then
+    echo "version mismatch: ${path} is \"${lines}\", Cargo.toml is \"${crate_version}\"" >&2
+    status=1
+  fi
+}
+
 check_json "${root}/ts/package.json"
+# maturin derives the PyPI wheel version from py/Cargo.toml (py/pyproject.toml
+# declares `dynamic = ["version"]`), so the PyPI artifact is gated here exactly
+# like the npm one. Both sides are Cargo-format strings; maturin performs the
+# PEP 440 conversion (0.2.1-rc3 -> 0.2.1rc3) at build time.
+check_toml "${root}/py/Cargo.toml"
 
 # The caller named a version, so Cargo.toml gets checked too instead of being
 # taken as the truth everything else is measured against.

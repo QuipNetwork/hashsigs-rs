@@ -105,6 +105,10 @@ impl Signature {
         let signature_start = reader.decode_offset(0, 0)?;
         let decoded = Self::decode(&reader, signature_start)?;
         reader.finish()?;
+        // Reject non-canonical encodings (see `AbiReader::finish` docs).
+        if decoded.to_bytes() != data {
+            return None;
+        }
         Some(decoded)
     }
 }
@@ -142,6 +146,10 @@ pub fn decode_stateful_envelope(data: &[u8]) -> Option<(PublicKey, Signature)> {
         Signature::decode(&reader, signature_start)?,
     );
     reader.finish()?;
+    // Reject non-canonical encodings (see `AbiReader::finish` docs).
+    if encode_stateful_envelope(&decoded.0, &decoded.1) != data {
+        return None;
+    }
     Some(decoded)
 }
 
@@ -167,6 +175,10 @@ pub fn decode_stateless_envelope(data: &[u8]) -> Option<(PublicKey, StatelessSig
         StatelessSignature::decode(&reader, signature_start)?,
     );
     reader.finish()?;
+    // Reject non-canonical encodings (see `AbiReader::finish` docs).
+    if encode_stateless_envelope(&decoded.0, &decoded.1) != data {
+        return None;
+    }
     Some(decoded)
 }
 
@@ -251,6 +263,64 @@ mod tests {
         assert!(
             Signature::from_bytes(&encoded).is_none(),
             "trailing junk on the signature envelope must be rejected"
+        );
+    }
+
+    #[test]
+    fn from_bytes_rejects_interior_gap() {
+        let encoded = sample_stateful_signature().to_bytes();
+        let gapped = crate::test_support::insert_abi_head_gap(&encoded, 1, &[0]);
+        assert!(
+            Signature::from_bytes(&gapped).is_none(),
+            "an envelope with unread interior bytes must be rejected"
+        );
+    }
+
+    #[test]
+    fn stateful_envelope_rejects_interior_gap() {
+        let encoded = encode_stateful_envelope(&sample_public_key(), &sample_stateful_signature());
+        let gapped = crate::test_support::insert_abi_head_gap(&encoded, 2, &[0, 1]);
+        assert!(
+            decode_stateful_envelope(&gapped).is_none(),
+            "a stateful envelope with unread interior bytes must be rejected"
+        );
+    }
+
+    #[test]
+    fn stateful_envelope_rejects_reordered_tails() {
+        use crate::abi::word_from_usize;
+        let public_key = sample_public_key();
+        let signature = sample_stateful_signature();
+        let pk_body = public_key.encode_body();
+        let sig_body = signature.encode_body();
+        // Same decoded value, tails swapped: the pk offset points past the
+        // signature body and the signature offset points at the first tail.
+        // Every byte is still read, so only the canonical-form re-encode
+        // check can catch this reshaping.
+        let mut swapped = alloc::vec::Vec::new();
+        swapped.extend_from_slice(&word_from_usize(64 + sig_body.len()));
+        swapped.extend_from_slice(&word_from_usize(64));
+        swapped.extend_from_slice(&sig_body);
+        swapped.extend_from_slice(&pk_body);
+        assert_ne!(
+            swapped,
+            encode_stateful_envelope(&public_key, &signature),
+            "the reordered layout must differ from the canonical bytes"
+        );
+        assert!(
+            decode_stateful_envelope(&swapped).is_none(),
+            "a stateful envelope with reordered tails must be rejected"
+        );
+    }
+
+    #[test]
+    fn stateless_envelope_rejects_interior_gap() {
+        let encoded =
+            encode_stateless_envelope(&sample_public_key(), &sample_stateless_signature());
+        let gapped = crate::test_support::insert_abi_head_gap(&encoded, 2, &[0, 1]);
+        assert!(
+            decode_stateless_envelope(&gapped).is_none(),
+            "a stateless envelope with unread interior bytes must be rejected"
         );
     }
 

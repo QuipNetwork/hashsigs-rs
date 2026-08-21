@@ -35,12 +35,10 @@ use crate::sphincs_plus_c::{
     ActionContextDto, ShrincsPublicKeyDto, StatefulSignatureDto, StatelessSignatureDto,
 };
 
-// NOTE: The following is supposed to increase the stack size but it does not work in practice.
-/*
-#![allow(clippy::all)]
-#![cfg_attr(feature = "solana-runtime", feature(custom_stack_sizes))]
-#[cfg_attr(feature = "solana-runtime", stack_size = "32768")]
-*/
+// NOTE: raising the BPF stack size via attributes (nightly
+// `custom_stack_sizes` + `#[stack_size = "..."]`) was tried and does not work
+// in practice; on-chain builds use the core crate's `heap-buffers` feature to
+// keep the WOTS+ segment accumulator off the 4 KB stack instead.
 
 pub fn keccak256(data: &[u8]) -> [u8; 32] {
     keccak256_hash(data).to_bytes()
@@ -103,9 +101,17 @@ pub struct SignatureAccount {
 
 #[derive(Debug, BorshSerialize, BorshDeserialize)]
 pub enum WOTSPlusInstruction {
-    GenerateKeyPair {
-        private_seed: [u8; 32],
-    },
+    /// Demo-only (legacy WOTS+ v1): DO NOT submit on a real cluster. The
+    /// seed travels in instruction data, which is permanently public in the
+    /// transaction ledger, so anyone can recover every derived secret. Key
+    /// generation belongs off-chain; this instruction exists for CU
+    /// measurement in `solana-program-test` harnesses.
+    GenerateKeyPair { private_seed: [u8; 32] },
+    /// Demo-only (legacy WOTS+ v1): DO NOT submit on a real cluster. The
+    /// private key travels in instruction data, which is permanently public
+    /// in the transaction ledger — for a one-time signature scheme that is
+    /// total key compromise. Signing belongs off-chain; this instruction
+    /// exists for CU measurement in `solana-program-test` harnesses.
     Sign {
         private_key: [u8; 32],
         message: Vec<u8>,

@@ -1,6 +1,6 @@
 [package]
 name = "hashsigs-rs"
-version = "0.2.1-rc3"
+version = "0.2.1-rc4"
 edition = "2021"
 rust-version = "1.95"
 authors = ["Richard T. Carback III <rick.rust.cargo.383d5@passmail.net>"]
@@ -24,6 +24,10 @@ exclude = [
   ".gitlab-ci.yml",
   ".beads/",
   "bin/",
+  # npm packaging tree (py/ and solana/ are workspace members, excluded
+  # automatically; ts/ is not, and ~40 KB of TypeScript packaging
+  # infrastructure has no value to a Rust consumer).
+  "ts/",
   "AGENTS.md",
   "CLAUDE.md",
 ]

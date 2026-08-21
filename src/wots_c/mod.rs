@@ -219,6 +219,10 @@ impl Signature {
         let reader = AbiReader::new(data);
         let decoded = Self::decode(&reader, 0)?;
         reader.finish()?;
+        // Reject non-canonical encodings (see `AbiReader::finish` docs).
+        if decoded.to_bytes() != data {
+            return None;
+        }
         Some(decoded)
     }
 }
@@ -258,6 +262,18 @@ mod tests {
         let mut encoded = sample_signature().to_bytes();
         encoded.push(0x00);
         assert!(Signature::from_bytes(&encoded).is_none());
+    }
+
+    #[test]
+    fn from_bytes_rejects_interior_gap() {
+        // Head layout: randomizer offset (dynamic), counter (static),
+        // chains offset (dynamic).
+        let encoded = sample_signature().to_bytes();
+        let gapped = crate::test_support::insert_abi_head_gap(&encoded, 3, &[0, 2]);
+        assert!(
+            Signature::from_bytes(&gapped).is_none(),
+            "an encoding with unread interior bytes must be rejected"
+        );
     }
 
     fn test_address_word(step: u32) -> [u8; HASH_LEN] {

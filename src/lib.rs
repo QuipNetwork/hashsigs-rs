@@ -35,10 +35,11 @@
 //! `no_std + alloc` is the embedded baseline.
 
 #![cfg_attr(not(feature = "std"), no_std)]
-// The core crate contains no `unsafe`. Lock that in — except under
-// `wasm-bindings`, where wasm-bindgen's generated glue emits `unsafe` the crate
-// does not author.
-#![cfg_attr(not(feature = "wasm-bindings"), deny(unsafe_code))]
+// The core crate contains no `unsafe`. Lock that in crate-wide; the one
+// exception is the `wasm` module, whose wasm-bindgen glue emits `unsafe`
+// this crate does not author — it carries a scoped `allow` on its `mod`
+// declaration below (`deny`, unlike `forbid`, permits that override).
+#![deny(unsafe_code)]
 // Panic-prevention lints (review bead qg4): library code must not panic on
 // untrusted input. Scoped to non-test builds so `#[cfg(test)]` modules may use
 // unwrap/expect freely. The broader `indexing-slicing` and full `pedantic`
@@ -80,7 +81,10 @@ pub mod shrincs;
 pub mod sphincs_plus_c;
 pub(crate) mod treehash;
 pub mod verifier;
+// wasm-bindgen's expansion emits `unsafe` glue this crate does not author;
+// the `unsafe_code` exception is scoped to exactly this module.
 #[cfg(feature = "std")]
+#[cfg_attr(feature = "wasm-bindings", allow(unsafe_code))]
 pub mod wasm;
 pub mod wots_c;
 pub mod wotsplus;

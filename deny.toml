@@ -12,9 +12,9 @@ ignore = [
     # bincode unmaintained — transitive via the Solana dep tree only, no
     # upstream fix, no known vulnerability, not on any hashsigs code path.
     "RUSTSEC-2025-0141",
-    # libsecp256k1 unmaintained — transitive via the Solana dep tree only;
-    # hashsigs uses no secp256k1 functionality.
-    "RUSTSEC-2025-0161",
+    # libsecp256k1 (RUSTSEC-2025-0161, unmaintained) is dev-only via
+    # solana-program-test and is not flagged at that graph position, so it
+    # needs no entry here. SECURITY.md documents it.
 ]
 
 [licenses]

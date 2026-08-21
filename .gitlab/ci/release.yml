@@ -90,6 +90,15 @@ publish-npm:
         exit 1
       fi
       VERSION="${CI_COMMIT_TAG#v}"
+      # Retry-safety: a re-run after the staged release was approved must be
+      # green. `npm view` sees live versions only, so a retry while the stage
+      # is still awaiting 2FA approval still fails on the duplicate stage —
+      # that residual case needs the staging API and is tracked in
+      # hashsigs-rs-c7w.
+      if [ -n "$(npm view "$PKG@$VERSION" version 2>/dev/null || true)" ]; then
+        echo "$PKG@$VERSION is already live on npm; nothing to do."
+        exit 0
+      fi
       DIST_TAG="latest"
       case "$VERSION" in
         *-*)
@@ -119,10 +128,24 @@ publish-crates:
   rules:
     - if: $CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$/ # runs only on a semver version tag
   dependencies: [] # no artifacts consumed; `cargo publish` verifies from source
-  needs: [tag-gate, "release:validate"]
+  # Cross-registry ordering (see the .gitlab-ci.yml header): crates.io is the
+  # hardest registry to undo (yank-only, never re-uploadable), so it publishes
+  # only after npm and PyPI have succeeded. A transient failure on an
+  # easier-to-undo registry then strands nothing on crates.io.
+  needs: [tag-gate, "release:validate", publish-npm, publish-pypi]
   script:
     - |
       set -euo pipefail
+      VERSION="${CI_COMMIT_TAG#v}"
+      # Retry-safety: a re-run after a successful upload must be green, not a
+      # false-alarm "version already exists" failure. crates.io publishes are
+      # immediate, so presence on the registry means the publish happened.
+      if curl --fail --silent --output /dev/null \
+        --header "User-Agent: hashsigs-rs-release (https://gitlab.com/quip.network/hashsigs-rs)" \
+        "https://crates.io/api/v1/crates/hashsigs-rs/${VERSION}"; then
+        echo "hashsigs-rs ${VERSION} is already on crates.io; nothing to do."
+        exit 0
+      fi
       # sed instead of jq: the response is a single-key JSON object and the
       # rust image does not ship jq.
       # The User-Agent is load-bearing: crates.io's CDN rejects curl's
@@ -177,6 +200,18 @@ publish-pypi:
   script:
     - |
       set -euo pipefail
+      VERSION="${CI_COMMIT_TAG#v}"
+      # Retry-safety: a re-run after a successful upload must be green — PyPI
+      # filenames are spent forever, so maturin's "file already exists" on a
+      # retry is a false alarm. Query under the PEP 440 form maturin uploads
+      # (0.2.1-rc3 -> 0.2.1rc3). Exotic prerelease spellings PyPI normalizes
+      # further (e.g. -alpha -> a) would miss this precheck and merely fall
+      # back to today's red-retry behavior.
+      PYPI_VERSION="$(printf '%s' "$VERSION" | tr -d '-')"
+      if curl --fail --silent --output /dev/null "https://pypi.org/pypi/hashsigs/${PYPI_VERSION}/json"; then
+        echo "hashsigs ${PYPI_VERSION} is already on PyPI; nothing to do."
+        exit 0
+      fi
       # Exchange the GitLab OIDC token for a short-lived PyPI API token.
       # sed instead of jq: single-key JSON response, and the image has no jq.
       RESPONSE="$(curl --fail-with-body --silent --show-error \

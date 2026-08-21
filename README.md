@@ -10,7 +10,7 @@ Core Rust hash-signature workspace with:
 - `solana/`: verify-only Solana program, plus an account-wrapper example at
   `solana/examples/shrincs-account/`
 - `ts/`: `@quip.network/hashsigs-wasm`, the npm wrapper for the wasm build
-- `py/`: Python package scaffold (`hashsigs`). The binding API is under
+- `py/`: the Python package scaffold (`hashsigs`). The binding API is under
   construction
 
 This crate is the reference signer: it generates the golden vectors that
@@ -48,7 +48,7 @@ verifier.
 
 ### Components
 
-Dependencies point strictly downward. Neither path knows about the other.
+Dependencies point only downward. Neither path knows about the other.
 `shrincs` composes them at the API boundary.
 
 - `shrincs` — the hybrid: commitment scheme, stateful + stateless dispatch,
@@ -98,14 +98,14 @@ Against RFC 8391 XMSS, UXMSS differs in four ways:
   ADRS structure.
 
 Documented FIPS 205 deviation: the signer does not serialize upper-layer
-hypertree coordinates. The verifier re-derives them — layer-0 coordinates come
+hypertree coordinates. The verifier re-derives them. Layer-0 coordinates come
 from the FORS digest, and each upper layer follows a fixed recurrence
 (`src/sphincs_plus_c/hypertree.rs`).
 
 ## Parameters, sizes, and measured costs
 
 Four compile-time profiles ship. The cryptographic constants match the
-Solidity implementation. `src/profiles.rs` is the Rust source of truth.
+Solidity verifier. `src/profiles.rs` is the Rust source of truth.
 
 | Parameter | `256s` / `256s-sha2` | `128s-q18` / `128s-q20` |
 |---|---|---|
@@ -119,7 +119,7 @@ Solidity implementation. `src/profiles.rs` is the Rust source of truth.
 
 `128s-q20` differs from `128s-q18` only in the stateless budget. The larger
 q20 budget still needs security-analysis backing before production use. The
-sha2 suite switches scheme hashes only — EVM-domain hashes (profile identity,
+sha2 suite switches scheme hashes only. EVM-domain hashes (profile identity,
 commitments, canonical action hashes) stay keccak under every profile, so the
 128s and sha2 profiles change hashing work, not commitment framing.
 
@@ -136,10 +136,10 @@ Key material is constant across profiles:
 
 ### Per-variation sizes and costs
 
-Signature sizes are packed field bytes. The stateful signature has no single
+Signature sizes count packed field bytes. The stateful signature has no single
 size: leaf `L` carries `L` auth nodes, so signatures grow 32 B per consumed
-leaf while sign time shrinks (the auth path rebuild covers fewer remaining
-leaves). Native times: measured 2026-08-20 on one core of an AMD Ryzen 9
+leaf. Sign time shrinks as `L` grows, because the auth-path rebuild covers
+fewer remaining leaves. Native times: measured 2026-08-20 on one core of an AMD Ryzen 9
 5950X, `--release`, default features, `maxSignatures` = 1024, stateful sign
 at leaf 1. One keygen derives both paths of a profile.
 
@@ -161,9 +161,9 @@ signature is a SPHINCS+C signature plus a commitment check, and the hybrid
 
 Notes:
 
-- **Solana compute units** are measured in the SBF VM against the real
-  program binary (`docs/solidity-parity.md`). `128s-q20` shares every crypto
-  constant with `128s-q18`, so its cost is stated as derived, not measured.
+- **Solana compute units** come from the SBF VM running the real program
+  binary (`docs/solidity-parity.md`). `128s-q20` shares every crypto constant
+  with `128s-q18`, so the table lists its cost as derived, not measured.
   The WOTS+ instruction pins keccak hashing, so its cost does not depend on
   the compiled profile.
 - **WOTS+ v1 is legacy.** Do not use it for new integrations. Its row exists
@@ -175,11 +175,11 @@ Notes:
   (expected 2^14 tries at 256s, 2^24 at 128s). Each message is a fresh
   geometric draw, so times vary run to run. The table shows means over 3
   messages.
-- **Sign and keygen scale with `maxSignatures`**: the signer recomputes the
-  stateful auth path from seeds on every sign, so stateful sign time is the
+- **Sign and keygen scale with `maxSignatures`.** The signer recomputes the
+  stateful auth path from seeds on every sign. Stateful sign time is the
   same order as keygen at the same budget.
 - **128s trades signer time for on-chain cost.** The single-layer height-18
-  hypertree makes keygen build 2^18 WOTS-C leaves (~46 s), and each stateless
+  hypertree makes keygen build 2^18 WOTS-C leaves (~46 s). Each stateless
   sign rebuilds it, grinds ~2^24 FORS-C tries, and builds six height-24 FORS
   trees (~2.8 min). In exchange, 128s has the smallest signatures and the
   cheapest verification. In-EVM 128s stateless signing is
@@ -187,10 +187,10 @@ Notes:
 - **ABI envelopes run larger than packed sizes.** The Rust `sign` envelope
   (public key + signature under `abi.encode` framing) is 2,784 B at 256s
   leaf 1 and 1,760 B at 128s leaf 1. A stateless signature blob alone is
-  91,200 B at 256s and 18,016 B at 128s — about 3.2× its packed size,
+  91,200 B at 256s and 18,016 B at 128s, about 3.2× its packed size,
   because `bytes`/`bytes[]` fields pay offset and length words.
-- The sha2 profile is faster on x86-64 CPUs with SHA extensions: SHA-256 is
-  hardware-accelerated there, and keccak is not.
+- The sha2 profile is faster on x86-64 CPUs with SHA extensions, where
+  SHA-256 is hardware-accelerated and keccak is not.
 - Regenerate the native numbers with the committed probes:
 
   ```bash
@@ -206,7 +206,7 @@ Notes:
 Measured in `hashsigs-solidity` (account-wrapper call gas, 2026-07-13). The
 stateful path is 8–14× cheaper than stateless. That asymmetry is the design
 point: everyday operations ride the bounded stateful path, and the stateless
-authority is reserved for recovery.
+authority stays reserved for recovery.
 
 | Call | 256s | 256s-sha2 | 128s-q18 / q20 |
 |---|---|---|---|
@@ -237,13 +237,13 @@ cd solana
 cargo build-sbf
 ```
 
-## WASM Packaging
+## WASM packaging
 
 The crate exposes a noble-style SPHINCS+C/SHRINCS signer surface under
 `src/wasm/` behind the `wasm-bindings` feature. The supported build path is
 `bin/build-wasm.sh`, which runs `cargo build` for `wasm32-unknown-unknown` and
-then the `wasm-bindgen` CLI (not `wasm-pack`) for the `nodejs` and `web`
-targets.
+then the `wasm-bindgen` command-line tool (not `wasm-pack`) for the `nodejs`
+and `web` targets.
 
 Prerequisites:
 
@@ -274,8 +274,8 @@ Optional custom output directory:
 ./bin/build-wasm.sh /tmp/hashsigs-wasm
 ```
 
-The TypeScript package that wraps those bindings lives in `ts/` and is named
-`@quip.network/hashsigs-wasm`. After the wasm build:
+The TypeScript package that wraps those bindings,
+`@quip.network/hashsigs-wasm`, lives in `ts/`. After the wasm build:
 
 ```bash
 cd ts
@@ -309,10 +309,10 @@ Current WASM scope:
   - WOTS-specific wasm bindings
   - a separate `wasm-pack` / `pkg/<target>` layout
 
-## SHRINCS Profiles
+## SHRINCS profiles
 
-Rust currently supports the same SHRINCS profile identities as the active
-Solidity implementation:
+Rust supports the same SHRINCS profile identities as the active Solidity
+verifier:
 
 - `shrincs-256s-keccak`
 - `shrincs-256s-sha2`
@@ -332,7 +332,7 @@ emits the corresponding profile cfg plus generated identity constants.
 Profile identity follows the Solidity `SHRINCSParams` model:
 
 - `PROFILE_NAME` is the canonical suite-qualified profile string
-- `PROFILE_ID` is derived as `keccak256(PROFILE_NAME)`
+- `PROFILE_ID` equals `keccak256(PROFILE_NAME)`
 - Rust generates that identity at build time so the name and ID cannot drift
 
 EVM-domain hashes remain keccak under every profile so Rust stays aligned with
@@ -349,7 +349,7 @@ The ignored vector generator writes one golden file per compiled profile:
 - `tests/test_vectors/shrincs_sphincs_128s_q18_keccak.json`
 - `tests/test_vectors/shrincs_sphincs_128s_q20_keccak.json`
 
-### Testing Profiles
+### Testing profiles
 
 Run the default profile (`shrincs-256s-keccak`):
 
@@ -391,7 +391,7 @@ cargo test --no-default-features --features profile-128s-q18 generate_shrincs_sp
 cargo test --no-default-features --features profile-128s-q20 generate_shrincs_sphincs_vectors -- --ignored --nocapture
 ```
 
-### Fast Local Loops
+### Fast local loops
 
 During development, prefer a narrow local loop over rerunning the full matrix
 after every edit. `bin/test-fast.sh` wraps the common targeted commands:
@@ -437,7 +437,7 @@ For an automatic polling loop on file changes:
 `test-watch.sh` watches the crate's Rust, test, script, and build files and
 reruns the selected `test-fast.sh` area whenever something changes.
 
-## SHRINCS Layout
+## SHRINCS layout
 
 `src/shrincs/` is flat: it has no `core`, `components`, `signers`, or
 `verifiers` subdirectories. Its files:
@@ -467,11 +467,11 @@ reruns the selected `test-fast.sh` area whenever something changes.
 
 The stateless half, `sphincs_plus_c`, is a sibling top-level module at
 `src/sphincs_plus_c/`, not a child of `shrincs/`. FORS-C and hypertree logic
-live there (`fors_c.rs`, `hypertree.rs`); the scheme-neutral building blocks
+live there (`fors_c.rs`, `hypertree.rs`). The scheme-neutral building blocks
 (`hash/`, `abi.rs`, `buf.rs`, `profiles.rs`, `treehash.rs`) sit at the crate
 root.
 
-## WASM Testing
+## WASM testing
 
 Two layers cover the wasm surface:
 
@@ -566,13 +566,13 @@ is exactly `sphincsPlusC.verify(sig, msg, keys.stateless.publicKey)`.
 `shrincs.sign` is stateful:
 
 - each call consumes one one-time UXMSS leaf and advances `keys.stateful`
-  (`nextLeafIndex`, `remaining`) **in place** — the same object the caller
-  holds gets mutated, so the next `sign` call automatically uses the next
-  leaf. No new key object comes back.
+  (`nextLeafIndex`, `remaining`) **in place**: it mutates the same object the
+  caller holds, so the next `sign` call automatically uses the next leaf. No
+  new key object comes back.
 - once the stateful budget runs out, it throws an `Error` with
   `error.code === "ERR_STATEFUL_LEAVES_EXHAUSTED"`. Call `shrincs.signStateless`
   for unlimited recovery-path signing past that point, or `shrincs.reset(keys,
-  newSeed)` to start a fresh stateful chain — `reset` requires a new 32-byte
+  newSeed)` to start a fresh stateful chain. `reset` requires a new 32-byte
   seed (no library RNG, same rule as `keygen`), produces a new
   `publicKeyCommitment`, and leaves `keys.stateless` untouched.
 
@@ -640,9 +640,9 @@ Run all tests:
 cargo test
 ```
 
-Rust currently supports the SHRINCS keccak profiles (`256s`, `128s-q18`,
+Rust supports the SHRINCS keccak profiles (`256s`, `128s-q18`,
 `128s-q20`) and the `256s-sha2` profile. The SHA-256 suite switch applies only
-to SHRINCS scheme hashes (FORS-C, hypertree, WOTS-C, UXMSS); EVM-domain hashes
+to SHRINCS scheme hashes (FORS-C, hypertree, WOTS-C, UXMSS). EVM-domain hashes
 such as canonical action hashes and public-key commitments remain keccak to
 match the Solidity design.
 
@@ -710,9 +710,9 @@ For a quick local profile-matrix sweep, run:
 ```
 
 To cross-check Solidity-exported account vectors against the Rust verifier,
-generate the account-vector JSON in `hashsigs-solidity` first, then copy it
-into this Rust repository manually. The repos are separate, so this handoff is
-intentionally not automated.
+first generate the account-vector JSON in `hashsigs-solidity`. Then copy it
+into this Rust repository manually. The repos are separate, so this handoff
+is manual by design.
 
 ```bash
 # in hashsigs-solidity
@@ -774,16 +774,17 @@ Show compute units only:
 RUST_BACKTRACE=1 cargo test-sbf -- --nocapture 2>&1 | grep "compute units:"
 ```
 
-## Development Requirements
+## Development requirements
 
-- Rust 1.79 or later. The most recent local test pass used Rust 1.95.0
+- Rust 1.95 or later, matching `rust-version` in Cargo.toml, the
+  `rust-toolchain.toml` pin, and the CI `msrv` job
 - Solana/Agave SBF cargo subcommands, including `cargo build-sbf` and
   `cargo test-sbf`, for Solana program development: https://solana.com/docs/intro/installation
 
 On Mac, do not install Rust with brew. Use
 https://www.rust-lang.org/tools/install instead.
 
-## Project Structure
+## Project structure
 
 ```
 .
@@ -810,7 +811,7 @@ https://www.rust-lang.org/tools/install instead.
 └── tests/         # Test vectors and unit tests
 ```
 
-## SHRINCS Architecture
+## SHRINCS architecture
 
 `shrincs` composes two independent schemes rather than layering shared
 components:
@@ -831,4 +832,4 @@ Public API stability note: the stable public surface is
 
 ## License
 
-AGPL-3.0, see COPYING
+AGPL-3.0 (GNU Affero General Public License), see COPYING

@@ -68,6 +68,11 @@ variables:
   # Stay on 11.x: npm 12 needs Node >= 22.22, but Node is pinned to the 22.14.0
   # trusted-publishing floor. npm 11.18 engine is node >=22.9, so it's compatible.
   NPM_VERSION: "11.18.0"
+  # sha256 of https://nodejs.org/dist/v${NODE_VERSION}/SHASUMS256.txt, pinned
+  # like the tool tarballs above so the Node toolchain download is
+  # integrity-checked too (one pin covers every arch's tarball line).
+  # Verified by downloading the file (2026-08-21).
+  NODE_SHASUMS256_SHA256: "d67cdb735b1764bf5b553a0d9b067ed861b91a4d934afc20442c04f5234b55db"
   # Keep cargo home inside the project so GitLab cache can capture registry,
   # git checkouts, and installed binaries (e.g. wasm-bindgen). Use .cargo-home
   # (not .cargo) so the committed .cargo/config.toml tree is not mixed with the

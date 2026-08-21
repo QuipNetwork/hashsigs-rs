@@ -125,6 +125,9 @@ impl ShrincsSigner {
     /// The public key contains one stateful tree plus one stateless `PK.seed`
     /// and hypertree `PK.root`. The message-specific FORS root is derived
     /// during signing and authenticated by the hypertree.
+    ///
+    /// Returns `None` if `max_stateful_signatures` is 0 or exceeds the
+    /// stateful budget limit (4096).
     pub fn keygen(
         seed_material: &[u8],
         max_stateful_signatures: u32,
@@ -220,6 +223,10 @@ impl ShrincsSigner {
     }
 
     /// Sign the verifier's canonical stateful action hash and advance the leaf counter.
+    ///
+    /// Returns `None` if the public key's commitment field is not exactly
+    /// 32 bytes, if the stateful leaves are exhausted, or if WOTS-C
+    /// grinding fails.
     pub fn sign_stateful_action(
         signing_key: &mut Keys,
         public_key: &PublicKey,
@@ -231,6 +238,9 @@ impl ShrincsSigner {
     }
 
     /// Sign raw bytes with the next unused stateful leaf.
+    ///
+    /// Returns `None` if the stateful leaves are exhausted or if WOTS-C
+    /// grinding fails.
     pub fn sign_stateful_raw(
         signing_key: &mut Keys,
         message: &[u8],
@@ -324,6 +334,13 @@ mod tests {
                         return fixture_pair(entry);
                     }
                 }
+                // Loud fallback: a missing fixture file or entry silently
+                // shifting coverage to fresh keygen would mask a stale
+                // fixture set.
+                eprintln!(
+                    "shrincs test fixtures: no full-key entry for {seed_label:?}; \
+                     falling back to fresh keygen"
+                );
                 ShrincsSigner::keygen(seed_label.as_bytes(), max_stateful_signatures)
                     .unwrap_or_else(|| panic!("fresh keygen failed for seed label {seed_label:?}"))
             }
@@ -349,6 +366,11 @@ mod tests {
                         return fixture_pair(entry);
                     }
                 }
+                // Loud fallback, same rationale as fixture_or_fresh_full_key.
+                eprintln!(
+                    "shrincs test fixtures: no stateful-only entry for {seed_label:?}; \
+                     falling back to fresh keygen"
+                );
                 stateful_only_key(seed_label.as_bytes(), max_stateful_signatures)
             }
         }

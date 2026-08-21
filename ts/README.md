@@ -7,10 +7,10 @@ Solana verifiers.
 
 Two schemes ship in one package:
 
-- **SPHINCS+C** — a standalone stateless signature.
-- **SHRINCS** — a hybrid key: a cheap stateful fast path (UXMSS) plus a
-  stateless SPHINCS+C recovery path, both bound under one 32-byte public-key
-  commitment.
+- **SPHINCS+C**: a standalone stateless signature.
+- **SHRINCS**: a hybrid key. It binds a cheap stateful fast path (UXMSS, an
+  unbalanced XMSS-style Merkle tree) and a stateless SPHINCS+C recovery path
+  under one 32-byte public-key commitment.
 
 ## Install
 
@@ -22,8 +22,8 @@ npm install @quip.network/hashsigs-wasm
 
 `loadHashSigs()` awaits the wasm module once and resolves to
 `{ sphincsPlusC, shrincs, shrincsImportSigningKey }`. After that first `await`,
-every call is synchronous. Keys are decomposed nested objects (never a flat
-`secretKey`/`publicKey` field); every leaf and every argument is a
+every call is synchronous. Each key is a nested object, never a flat
+`secretKey`/`publicKey` field. Every leaf and every argument is a
 `Uint8Array`.
 
 ### SPHINCS+C (stateless)
@@ -63,32 +63,32 @@ const okRecovery = shrincs.verifyStateless(
 );
 ```
 
-A stateless SHRINCS signature is a SPHINCS+C signature:
+A stateless SHRINCS signature is a SPHINCS+C signature.
 `shrincs.signStateless` produces the same bytes as `sphincsPlusC.sign` under
-`keys.stateless`, and `shrincs.verifyStateless(sig, msg, keys.stateless.publicKey)`
+`keys.stateless`. `shrincs.verifyStateless(sig, msg, keys.stateless.publicKey)`
 is exactly `sphincsPlusC.verify(sig, msg, keys.stateless.publicKey)`.
 
 ## Seeds and messages
 
 - `keygen` and `reset` require a caller-supplied 32-byte seed. The library has
-  no RNG: pass `crypto.getRandomValues(new Uint8Array(32))` in the browser or
-  `crypto.randomBytes(32)`/webcrypto in Node. A weak seed produces a weak key,
-  and nothing here checks seed quality.
+  no random number generator: pass `crypto.getRandomValues(new Uint8Array(32))`
+  in the browser or `crypto.randomBytes(32)`/webcrypto in Node. A weak seed
+  produces a weak key. The library does not check seed quality.
 - Messages are exactly 32 bytes. Pre-hash arbitrary data and pass the digest,
   matching how the on-chain verifier treats its hash argument as the signed
-  message. A wrong-length message throws on sign and returns `false` on verify;
-  verify never throws.
+  message. A wrong-length message throws on sign and returns `false` on verify.
+  Verify never throws.
 
 ## Stateful signing and persistence
 
 `shrincs.sign` consumes one one-time UXMSS leaf per call and advances
-`keys.stateful` (`nextLeafIndex`, `remaining`) **in place** — the object the
-caller holds is mutated, so the next `sign` uses the next leaf. No new key
-object is returned.
+`keys.stateful` (`nextLeafIndex`, `remaining`) **in place**. The call mutates
+the object the caller holds, so the next `sign` uses the next leaf. The call
+does not return a new key object.
 
-Serialize `keys` to its 264-byte flat secret with `shrincsKeysToSecretBytes`
-and persist it after **every** stateful `sign()` call. Rebuild the keypair on
-restart with `shrincsImportSigningKey`:
+Serialize `keys` to its 264-byte flat secret with `shrincsKeysToSecretBytes`.
+Persist that secret after **every** stateful `sign()` call. Rebuild the
+keypair on restart with `shrincsImportSigningKey`:
 
 ```ts
 import { loadHashSigs, shrincsKeysToSecretBytes } from "@quip.network/hashsigs-wasm";
@@ -106,15 +106,15 @@ already-exhausted key: stateful signing then throws
 
 > **Footgun:** signing from a copy of `keys` taken before an earlier `sign`
 > call reuses a leaf, which breaks the one-time-signature security the scheme
-> depends on. Persist after every `sign`, and never sign again from an older
+> depends on. Persist after every `sign`. Never sign again from an older
 > snapshot.
 
 > **Performance:** every `shrincs.*` operation re-validates the full secret
-> key — it recomputes the UXMSS root (up to `maxSignatures` hashes) and the
-> SPHINCS+C root on each call. This is inherent to the stateless key-in /
-> key-out API: each call receives the secret bytes across the wasm boundary
-> and re-checks them, so per-call latency scales with `maxSignatures`. Choose
-> `maxSignatures` no larger than you need.
+> key. Each call recomputes the UXMSS root (up to `maxSignatures` hashes) and
+> the SPHINCS+C root. This is inherent to the stateless key-in / key-out API:
+> each call receives the secret bytes across the wasm boundary and re-checks
+> them. Per-call latency scales with `maxSignatures`. Choose `maxSignatures`
+> no larger than you need.
 
 When the stateful budget runs out, call `shrincs.signStateless` for unlimited
 recovery-path signing, or `shrincs.reset(keys, newSeed)` to start a fresh
@@ -136,12 +136,12 @@ stateful chain. `reset` requires a new 32-byte seed, produces a new
 | Method | Description |
 |---|---|
 | `keygen(seed, maxSignatures?)` | Derive a hybrid key. `maxSignatures` defaults to 1024. |
-| `sign(message, keys)` | Stateful sign; advances `keys.stateful` in place. Throws `ERR_STATEFUL_LEAVES_EXHAUSTED` when spent. |
+| `sign(message, keys)` | Stateful sign. Advances `keys.stateful` in place. Throws `ERR_STATEFUL_LEAVES_EXHAUSTED` when no leaves remain. |
 | `signStateless(message, keys)` | Recovery-path sign. Never mutates `keys`. |
 | `verify(signature, message, publicKeyCommitment)` | Verify the stateful commitment path. Returns a boolean. |
 | `verifyStateless(signature, message, statelessPublicKey)` | Verify the recovery path (a SPHINCS+C verify). |
 | `reset(keys, newSeed)` | Regenerate the stateful chain in place from a new 32-byte seed. |
-| `computePublicKeyCommitment(keys)` | The 32-byte commitment `keys` currently implies. |
+| `computePublicKeyCommitment(keys)` | The 32-byte commitment the `keys` state implies. |
 | `recoverPublicKeyCommitment(signature)` | The commitment a `shrincs.sign()` signature implies, `ecrecover`-style. |
 
 Standalone: `shrincsImportSigningKey(secretKey)` and `shrincsKeysToSecretBytes(keys)`.
@@ -170,13 +170,13 @@ interface ShrincsKeys {
 
 ## Error codes
 
-Thrown errors carry a stable `error.code` (typed as `ShrincsErrorCode`):
+Thrown errors carry a stable `error.code`, typed as `ShrincsErrorCode`:
 
 | Code | Cause |
 |---|---|
 | `ERR_BAD_LENGTH` | Wrong-length seed, message, or secret key (the most common caller mistake). |
 | `ERR_INVALID_INPUT` | `maxSignatures` out of range (0 or greater than 4096). |
-| `ERR_STATEFUL_LEAVES_EXHAUSTED` | The stateful budget is spent; use `signStateless` or `reset`. |
+| `ERR_STATEFUL_LEAVES_EXHAUSTED` | No stateful leaves remain. Use `signStateless` or `reset`. |
 | `ERR_IMPORT_INVALID` | Imported secret bytes fail root/commitment recomputation. |
 | `ERR_KEYGEN_FAILED` | Key derivation failed for the supplied inputs. |
 | `ERR_SIGNING_FAILED` | WOTS-C / FORS-C / hypertree grinding failed for the leaf/message. |
@@ -185,7 +185,7 @@ Thrown errors carry a stable `error.code` (typed as `ShrincsErrorCode`):
 
 Seed entropy and one-time-leaf handling are the caller's responsibility. See
 [SECURITY.md](https://gitlab.com/quip.network/hashsigs-rs/-/blob/main/SECURITY.md)
-for the operational rules around holding and persisting key material.
+for the operational rules for holding and persisting key material.
 
 ## License
 

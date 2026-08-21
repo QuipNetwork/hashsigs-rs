@@ -32,6 +32,10 @@ struct CountingAllocator;
 
 static ALLOCATIONS: AtomicU64 = AtomicU64::new(0);
 
+// SAFETY: every method delegates directly to `System`, so this allocator
+// upholds the `GlobalAlloc` contract exactly as `System` does. The atomic
+// counter is a side-effect-free observation that never touches pointers,
+// layouts, or aliasing.
 unsafe impl GlobalAlloc for CountingAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         ALLOCATIONS.fetch_add(1, Ordering::SeqCst);

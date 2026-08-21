@@ -11,6 +11,11 @@ default:
 # drift under --locked and so mutually-exclusive profile feature jobs do not
 # share a single target/ tree (profile features overwrite each other).
 # Applied via extends on Rust jobs only (not publish-npm).
+#
+# Trust note: the tool binaries cached in .cargo-home/bin are sha256-verified
+# on the cold download only; a warm cache hit trusts the cache, which shares
+# the runner's trust boundary. The version-string check on a cache hit is a
+# staleness guard, not an integrity check.
 .rust-cache:
   cache:
     key:
@@ -42,8 +47,16 @@ default:
         aarch64|arm64) NODE_ARCH=arm64 ;;
         *) echo "unsupported arch: $ARCH" >&2; exit 1 ;;
       esac
-      curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz" \
-        | tar -xJ -C /usr/local --strip-components=1
+      # Integrity: pin the sha256 of SHASUMS256.txt (covers every arch's
+      # tarball line with one variable), then verify the tarball against it —
+      # the same posture as the wasm-bindgen/cargo-deny pins below.
+      NODE_TARBALL="node-v${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz"
+      curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/${NODE_TARBALL}" -o "/tmp/${NODE_TARBALL}"
+      curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/SHASUMS256.txt" -o /tmp/node-shasums.txt
+      echo "${NODE_SHASUMS256_SHA256}  /tmp/node-shasums.txt" | sha256sum -c -
+      grep -F " ${NODE_TARBALL}" /tmp/node-shasums.txt | (cd /tmp && sha256sum -c -)
+      tar -xJ -C /usr/local --strip-components=1 -f "/tmp/${NODE_TARBALL}"
+      rm -f "/tmp/${NODE_TARBALL}" /tmp/node-shasums.txt
       node --version
       npm --version
       case "$(node --version)" in

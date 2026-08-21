@@ -123,6 +123,10 @@ impl LayerSignature {
         let reader = AbiReader::new(data);
         let decoded = Self::decode(&reader, 0)?;
         reader.finish()?;
+        // Reject non-canonical encodings (see `AbiReader::finish` docs).
+        if decoded.to_bytes() != data {
+            return None;
+        }
         Some(decoded)
     }
 }
@@ -863,6 +867,18 @@ mod tests {
         encoded.pop();
         encoded.extend_from_slice(&[0xAA, 0xBB]);
         assert!(LayerSignature::from_bytes(&encoded).is_none());
+    }
+
+    #[test]
+    fn layer_signature_from_bytes_rejects_interior_gap() {
+        // Head layout: pk-hash offset, WOTS-C signature offset, auth-path
+        // offset — all three dynamic.
+        let encoded = sample_layer_signature().to_bytes();
+        let gapped = crate::test_support::insert_abi_head_gap(&encoded, 3, &[0, 1, 2]);
+        assert!(
+            LayerSignature::from_bytes(&gapped).is_none(),
+            "an encoding with unread interior bytes must be rejected"
+        );
     }
 
     #[test]

@@ -78,6 +78,10 @@ impl core::fmt::Display for ErrorCode {
     }
 }
 
+// `core::error::Error` (stable since 1.81, `no_std`-clean) lets downstream
+// callers carry the code in `Box<dyn Error>` / `anyhow` chains.
+impl core::error::Error for ErrorCode {}
+
 #[cfg(test)]
 mod tests {
     use super::ErrorCode;

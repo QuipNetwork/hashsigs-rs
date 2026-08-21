@@ -42,8 +42,11 @@ use zeroize::Zeroize;
 #[cfg(feature = "wasm-bindings")]
 use wasm_bindgen::prelude::*;
 
+// Single source of truth for the budget cap: a wasm-local copy could drift
+// silently if core ever retunes the limit.
 #[cfg(any(test, feature = "wasm-bindings"))]
-const MAX_STATEFUL_SIGNATURES_LIMIT: usize = 4096;
+const MAX_STATEFUL_SIGNATURES_LIMIT: usize =
+    crate::shrincs::signer::MAX_STATEFUL_SIGNATURES_LIMIT as usize;
 
 /// Error carrier for the wasm boundary: a stable machine-readable `code` plus
 /// a human-readable `message`. Messages must never echo raw caller input

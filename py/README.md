@@ -1,5 +1,6 @@
 # hashsigs (Python)
 
-Python bindings for [hashsigs-rs](https://gitlab.com/quip.network/hashsigs-rs):
-SHRINCS and legacy WOTS+ hash-based signatures. Scaffold stage: the binding
-API is under construction and this package publishes nothing yet.
+Python bindings for [hashsigs-rs](https://gitlab.com/quip.network/hashsigs-rs),
+a Rust library for SHRINCS and legacy WOTS+ hash-based signatures. This
+package is at the scaffold stage. Published versions expose only
+`__version__`. The binding API is under construction.

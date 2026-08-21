@@ -108,6 +108,10 @@ impl Entry {
         let reader = AbiReader::new(data);
         let decoded = Self::decode(&reader, 0)?;
         reader.finish()?;
+        // Reject non-canonical encodings (see `AbiReader::finish` docs).
+        if decoded.to_bytes() != data {
+            return None;
+        }
         Some(decoded)
     }
 }
@@ -177,6 +181,10 @@ impl Signature {
         let reader = AbiReader::new(data);
         let decoded = Self::decode(&reader, 0)?;
         reader.finish()?;
+        // Reject non-canonical encodings (see `AbiReader::finish` docs).
+        if decoded.to_bytes() != data {
+            return None;
+        }
         Some(decoded)
     }
 }
@@ -521,6 +529,42 @@ fn fors_digest_bytes(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::vec;
+
+    fn sample_entry() -> Entry {
+        Entry {
+            secret_leaf: [0x88; HASH_LEN],
+            auth_path: vec![[0x99; HASH_LEN], [0xA0; HASH_LEN]],
+        }
+    }
+
+    #[test]
+    fn entry_from_bytes_rejects_interior_gap() {
+        // Head layout: secret-leaf offset and auth-path offset, both dynamic.
+        let encoded = sample_entry().to_bytes();
+        let gapped = crate::test_support::insert_abi_head_gap(&encoded, 2, &[0, 1]);
+        assert!(
+            Entry::from_bytes(&gapped).is_none(),
+            "an encoding with unread interior bytes must be rejected"
+        );
+    }
+
+    #[test]
+    fn signature_from_bytes_rejects_interior_gap() {
+        // Head layout: randomizer offset (dynamic), counter (static),
+        // entries offset (dynamic).
+        let signature = Signature {
+            randomizer: [0x77; HASH_LEN],
+            counter: 7,
+            entries: vec![sample_entry()],
+        };
+        let encoded = signature.to_bytes();
+        let gapped = crate::test_support::insert_abi_head_gap(&encoded, 3, &[0, 2]);
+        assert!(
+            Signature::from_bytes(&gapped).is_none(),
+            "an encoding with unread interior bytes must be rejected"
+        );
+    }
 
     #[test]
     fn selected_leaf_hash_reuse_matches_direct_leaf_hash() {
