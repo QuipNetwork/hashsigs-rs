@@ -124,6 +124,9 @@ wasm-bindgen-test = "0.3.50"
 # byte-identical output against hash_backend's default (non-`solana`-feature)
 # sha3/sha2 path. Dev-only — never ships in the published library artifact.
 solana-program = "4.0"
+# Compile-fail harness: proves assert_widths rejects a mismatched const
+# generic width at compile time (see tests/compile_fail.rs).
+trybuild = "1.0.120"
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 getrandom = { version = "0.3.3", features = ["wasm_js"] }
