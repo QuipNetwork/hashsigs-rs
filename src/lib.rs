@@ -75,6 +75,7 @@ mod trace_macros;
 pub(crate) mod abi;
 pub(crate) mod buf;
 pub mod error;
+pub mod profile;
 pub(crate) mod hash;
 pub(crate) mod profiles;
 pub mod shrincs;
