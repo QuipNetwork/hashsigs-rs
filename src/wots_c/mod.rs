@@ -34,22 +34,22 @@ use crate::abi::{
     collect_hash_words, encode_bytes, encode_dynamic_array, encode_tuple, word_from_u32, AbiReader,
     Field,
 };
-use crate::hash::suite::Keccak256Suite;
 use crate::hash::hash_node;
-use crate::profiles::NUM_WOTS_CHAINS;
+use crate::profile::Profile;
 use crate::HASH_LEN;
 
-pub(crate) use crate::profiles::WOTS_C_MAX_GRIND_COUNTER;
+/// Maximum grind counter for WOTS-C target-sum searches (stateful and
+/// stateless alike). Not a per-profile parameter: every profile uses this
+/// budget, so it is not part of `Profile`. Moved here from `crate::profiles`
+/// when the algorithms became generic over the profile.
+pub(crate) const WOTS_C_MAX_GRIND_COUNTER: u32 = 1 << 24;
 
-/// WOTS-C parameters. One construction, used by BOTH the stateful UXMSS leaves
-/// and the stateless hypertree nodes — they differ only in domain-separation
-/// tag, not in `w` / chain-count / target-sum. Solidity's SHRINCSParams names
-/// these per-tree (WOTS_*_STATEFUL / _STATELESS); unified here because every
-/// profile uses identical values for both. Byte-identical to the old split
-/// constants.
-pub(crate) const NUM_CHAINS: usize = NUM_WOTS_CHAINS as usize;
-pub(crate) const BASE: u32 = crate::profiles::WOTS_CHAIN_LEN as u32;
-pub(crate) const TARGET_SUM: u32 = crate::profiles::WOTS_TARGET_SUM;
+// WOTS-C parameters come from `P::NUM_WOTS_CHAINS`, `P::WOTS_CHAIN_LEN`, and
+// `P::WOTS_TARGET_SUM`. One construction, used by BOTH the stateful UXMSS
+// leaves and the stateless hypertree nodes — they differ only in
+// domain-separation tag, not in `w` / chain-count / target-sum. Solidity's
+// SHRINCSParams names these per-tree (WOTS_*_STATEFUL / _STATELESS); unified
+// here because every profile uses identical values for both.
 
 /// Value and step range for one WOTS-C chain walk.
 #[derive(Clone, Copy)]
@@ -64,7 +64,7 @@ pub(crate) struct ChainWalk {
 /// `tag` is the domain-separation string (`b"wots-c-chain"` or
 /// `b"uxmss-wots-chain"`). `address_word` builds the per-step address from
 /// `(chain_index, step)`.
-pub(crate) fn wots_chain_walk(
+pub(crate) fn wots_chain_walk<P: Profile>(
     tag: &[u8],
     pk_seed: &[u8; HASH_LEN],
     address_word: impl Fn(u32) -> [u8; HASH_LEN],
@@ -74,7 +74,7 @@ pub(crate) fn wots_chain_walk(
     for step_offset in 0..walk.steps {
         let step = walk.start + step_offset;
         let addr = address_word(step);
-        out = hash_node::<Keccak256Suite>(&[tag, pk_seed.as_ref(), addr.as_ref(), out.as_ref()]);
+        out = hash_node::<P>(&[tag, pk_seed.as_ref(), addr.as_ref(), out.as_ref()]);
     }
     out
 }
@@ -194,14 +194,14 @@ impl Signature {
     /// sits inside a larger encoded envelope, so exhaustion is the calling
     /// top-level decoder's responsibility (see `from_bytes` for the
     /// standalone entrypoint that does check).
-    pub(crate) fn decode(reader: &AbiReader, base: usize) -> Option<Self> {
+    pub(crate) fn decode<P: Profile>(reader: &AbiReader, base: usize) -> Option<Self> {
         Some(Self {
             randomizer: reader.decode_bytes32_field(base, base)?,
             counter: reader.read_u32(base.checked_add(32)?)?,
             chains: collect_hash_words(reader.decode_array_bytes(
                 base,
                 base.checked_add(64)?,
-                NUM_WOTS_CHAINS as usize,
+                P::NUM_WOTS_CHAINS as usize,
             )?)?,
         })
     }
@@ -216,9 +216,9 @@ impl Signature {
     /// This standalone entrypoint is the `to_bytes` round-trip counterpart, part
     /// of the public codec surface for external callers that hold an isolated
     /// WOTS-C signature blob.
-    pub fn from_bytes(data: &[u8]) -> Option<Self> {
+    pub fn from_bytes<P: Profile>(data: &[u8]) -> Option<Self> {
         let reader = AbiReader::new(data);
-        let decoded = Self::decode(&reader, 0)?;
+        let decoded = Self::decode::<P>(&reader, 0)?;
         reader.finish()?;
         // Reject non-canonical encodings (see `AbiReader::finish` docs).
         if decoded.to_bytes() != data {
@@ -232,13 +232,14 @@ impl TryFrom<&[u8]> for Signature {
     type Error = ();
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        Self::from_bytes(value).ok_or(())
+        Self::from_bytes::<crate::profile_active::ActiveProfile>(value).ok_or(())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::profile_active::ActiveProfile;
     use alloc::vec;
 
     fn sample_signature() -> Signature {
@@ -253,7 +254,7 @@ mod tests {
     fn to_bytes_from_bytes_round_trips() {
         let signature = sample_signature();
         let encoded = signature.to_bytes();
-        let decoded = Signature::from_bytes(&encoded).expect("valid encoding must decode");
+        let decoded = Signature::from_bytes::<ActiveProfile>(&encoded).expect("valid encoding must decode");
         assert_eq!(decoded, signature);
         assert_eq!(decoded.to_bytes(), encoded);
     }
@@ -262,7 +263,7 @@ mod tests {
     fn from_bytes_rejects_trailing_bytes() {
         let mut encoded = sample_signature().to_bytes();
         encoded.push(0x00);
-        assert!(Signature::from_bytes(&encoded).is_none());
+        assert!(Signature::from_bytes::<ActiveProfile>(&encoded).is_none());
     }
 
     #[test]
@@ -272,7 +273,7 @@ mod tests {
         let encoded = sample_signature().to_bytes();
         let gapped = crate::test_support::insert_abi_head_gap(&encoded, 3, &[0, 2]);
         assert!(
-            Signature::from_bytes(&gapped).is_none(),
+            Signature::from_bytes::<ActiveProfile>(&gapped).is_none(),
             "an encoding with unread interior bytes must be rejected"
         );
     }
@@ -291,8 +292,8 @@ mod tests {
             start: 0,
             steps: 5,
         };
-        let a = wots_chain_walk(b"test-chain", &pk_seed, test_address_word, walk);
-        let b = wots_chain_walk(b"test-chain", &pk_seed, test_address_word, walk);
+        let a = wots_chain_walk::<ActiveProfile>(b"test-chain", &pk_seed, test_address_word, walk);
+        let b = wots_chain_walk::<ActiveProfile>(b"test-chain", &pk_seed, test_address_word, walk);
         assert_eq!(a, b);
     }
 
@@ -306,7 +307,7 @@ mod tests {
         let pk_seed = [0x33u8; HASH_LEN];
         let value = [0x44u8; HASH_LEN];
 
-        let direct = wots_chain_walk(
+        let direct = wots_chain_walk::<ActiveProfile>(
             b"test-chain",
             &pk_seed,
             test_address_word,
@@ -316,7 +317,7 @@ mod tests {
                 steps: 7,
             },
         );
-        let midpoint = wots_chain_walk(
+        let midpoint = wots_chain_walk::<ActiveProfile>(
             b"test-chain",
             &pk_seed,
             test_address_word,
@@ -326,7 +327,7 @@ mod tests {
                 steps: 3,
             },
         );
-        let composed = wots_chain_walk(
+        let composed = wots_chain_walk::<ActiveProfile>(
             b"test-chain",
             &pk_seed,
             test_address_word,
@@ -344,7 +345,7 @@ mod tests {
         let pk_seed = [0x55u8; HASH_LEN];
         let value = [0x66u8; HASH_LEN];
 
-        let none = wots_chain_walk(
+        let none = wots_chain_walk::<ActiveProfile>(
             b"test-chain",
             &pk_seed,
             test_address_word,
@@ -356,7 +357,7 @@ mod tests {
         );
         assert_eq!(none, value, "zero steps must return the input unchanged");
 
-        let short = wots_chain_walk(
+        let short = wots_chain_walk::<ActiveProfile>(
             b"test-chain",
             &pk_seed,
             test_address_word,
@@ -366,7 +367,7 @@ mod tests {
                 steps: 4,
             },
         );
-        let full = wots_chain_walk(
+        let full = wots_chain_walk::<ActiveProfile>(
             b"test-chain",
             &pk_seed,
             test_address_word,

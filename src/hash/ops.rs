@@ -17,9 +17,11 @@
 
 //! Hashing, packing, and bit-layout helpers.
 
+use core::marker::PhantomData;
+
 use crate::hash::backend;
 use crate::hash::suite::HashSuite;
-use crate::profiles::{HASH_TRUNC_LEN, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN};
+use crate::profile::Profile;
 use crate::HASH_LEN;
 
 /// Scheme hash over the logical concatenation of `parts`. Hashing is vectored
@@ -34,15 +36,19 @@ pub(crate) fn keccak_packed(parts: &[&[u8]]) -> [u8; HASH_LEN] {
     backend::keccak256v(parts)
 }
 
-pub(crate) fn mask_hash(mut hash: [u8; HASH_LEN]) -> [u8; HASH_LEN] {
-    for byte in hash.iter_mut().skip(HASH_TRUNC_LEN) {
+/// Zero the low bytes a truncated profile does not use. Reads
+/// `P::HASH_TRUNC_LEN`, so this takes the profile rather than the suite.
+pub(crate) fn mask_hash<P: Profile>(mut hash: [u8; HASH_LEN]) -> [u8; HASH_LEN] {
+    for byte in hash.iter_mut().skip(P::HASH_TRUNC_LEN) {
         *byte = 0;
     }
     hash
 }
 
-pub(crate) fn hash_node<S: HashSuite>(parts: &[&[u8]]) -> [u8; HASH_LEN] {
-    mask_hash(hash_packed::<S>(parts))
+/// Scheme hash, truncated to the profile's node width. Needs both halves of
+/// the profile: `P::Suite` picks the hash, `P::HASH_TRUNC_LEN` the mask.
+pub(crate) fn hash_node<P: Profile>(parts: &[&[u8]]) -> [u8; HASH_LEN] {
+    mask_hash::<P>(hash_packed::<P::Suite>(parts))
 }
 
 /// Small deterministic KDF: `hash_packed(&[domain, seed, data])`. Domain tags
@@ -73,18 +79,31 @@ pub(crate) fn base_w_digit(w: u16, digest: &[u8], index: usize) -> u32 {
     }
 }
 
-pub(crate) fn wots_digest_bytes() -> usize {
-    let bits_per_digit = if WOTS_CHAIN_LEN == 256 { 8 } else { 4 };
-    (NUM_WOTS_CHAINS as usize * bits_per_digit).div_ceil(8)
-}
+/// Carrier for the per-profile WOTS digest-width assertion.
+///
+/// The check must be an associated const, not a bare `assert!` in a `const
+/// fn`: only an associated const is guaranteed to be evaluated at
+/// monomorphisation, so only this form turns a mis-tuned profile into a build
+/// failure rather than a runtime panic. Same pattern as
+/// `ShrincsCore::WIDTHS_AGREE`.
+struct DigestFits<P: Profile>(PhantomData<fn() -> P>);
 
-const _: () = {
-    let bits_per_digit = if WOTS_CHAIN_LEN == 256 { 8 } else { 4 };
-    assert!(
-        (NUM_WOTS_CHAINS as usize * bits_per_digit).div_ceil(8) <= HASH_LEN,
+impl<P: Profile> DigestFits<P> {
+    const CHECK: () = assert!(
+        wots_digest_bytes_of(P::WOTS_CHAIN_LEN, P::NUM_WOTS_CHAINS) <= HASH_LEN,
         "wots_digest_bytes() must stay within HASH_LEN=32; retune WOTS_CHAIN_LEN/NUM_WOTS_CHAINS"
     );
-};
+}
+
+const fn wots_digest_bytes_of(chain_len: u16, num_chains: u16) -> usize {
+    let bits_per_digit = if chain_len == 256 { 8 } else { 4 };
+    (num_chains as usize * bits_per_digit).div_ceil(8)
+}
+
+pub(crate) fn wots_digest_bytes<P: Profile>() -> usize {
+    let () = DigestFits::<P>::CHECK;
+    wots_digest_bytes_of(P::WOTS_CHAIN_LEN, P::NUM_WOTS_CHAINS)
+}
 
 pub(crate) fn read_bits32(input: &[u8], start_bit: usize, bit_len: u32) -> Option<u32> {
     if bit_len > 32 {

@@ -20,10 +20,15 @@
 //! Key = (pk_seed || hypertree_root) as two 32-byte words. Input is an arbitrary
 //! 32-byte hash. No SHRINCS commitment or action envelope.
 
+use crate::profile_active::{ActiveProfile, NUM_CHAINS};
 use crate::sphincs_plus_c::{self, PublicKey, Signature};
 use crate::HASH_LEN;
 
 /// Independent stateless-only verifier (Solidity `SPHINCSPlusCVerifier` shape).
+///
+/// Bound to `ActiveProfile`: this facade names one profile, unlike the
+/// algorithms it calls, which are generic over `P: Profile`. Task 5 repoints
+/// it at the default profile alias (or gives it its own profile parameter).
 #[derive(Debug, Clone, Copy)]
 pub struct SphincsPlusCVerifier;
 
@@ -62,7 +67,7 @@ impl SphincsPlusCVerifier {
         let Some(pk) = PublicKey::from_slices(&key[..32], &key[32..64]) else {
             return false;
         };
-        sphincs_plus_c::verify_hash(&pk, hash, signature)
+        sphincs_plus_c::verify_hash::<ActiveProfile, NUM_CHAINS>(&pk, hash, signature)
     }
 
     /// Verify with an already-decoded public key.
@@ -72,12 +77,12 @@ impl SphincsPlusCVerifier {
         hash: &[u8; HASH_LEN],
         signature: &Signature,
     ) -> bool {
-        sphincs_plus_c::verify_hash(pk, hash, signature)
+        sphincs_plus_c::verify_hash::<ActiveProfile, NUM_CHAINS>(pk, hash, signature)
     }
 
     /// Verify over arbitrary message bytes (non-verifier-interface helper).
     pub fn verify_message(&self, pk: &PublicKey, message: &[u8], signature: &Signature) -> bool {
-        sphincs_plus_c::verify(pk, message, signature)
+        sphincs_plus_c::verify::<ActiveProfile, NUM_CHAINS>(pk, message, signature)
     }
 }
 
@@ -94,7 +99,7 @@ impl crate::verifier::VerifierInterface for SphincsPlusCVerifier {
         if key.len() != 64 {
             return VerifyOutcome::Invalid;
         }
-        let Some(decoded) = Signature::from_bytes(signature) else {
+        let Some(decoded) = Signature::from_bytes::<ActiveProfile>(signature) else {
             return VerifyOutcome::Malformed;
         };
         if self.verify_signature(key, hash, &decoded) {
@@ -130,14 +135,17 @@ mod tests {
     #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
     fn signed_stateless_envelope(seed_label: &[u8], hash: [u8; HASH_LEN]) -> ([u8; 64], Vec<u8>) {
         use crate::hash::hash_packed;
-        use crate::hash::suite::Keccak256Suite;
+        use crate::profile::Profile;
+        use crate::profile_active::NUM_LAYERS;
         use crate::sphincs_plus_c;
+        type Suite = <ActiveProfile as Profile>::Suite;
 
-        let sk_seed = hash_packed::<Keccak256Suite>(&[b"sphincs-plus-c-verifier-sk", seed_label]);
-        let prf_seed = hash_packed::<Keccak256Suite>(&[b"sphincs-plus-c-verifier-prf", seed_label]);
-        let pk_seed = hash_packed::<Keccak256Suite>(&[b"sphincs-plus-c-verifier-pk", seed_label]);
-        let sk = sphincs_plus_c::keygen(sk_seed, prf_seed, pk_seed);
-        let signature = sphincs_plus_c::sign(&sk, &hash).expect("stateless sign");
+        let sk_seed = hash_packed::<Suite>(&[b"sphincs-plus-c-verifier-sk", seed_label]);
+        let prf_seed = hash_packed::<Suite>(&[b"sphincs-plus-c-verifier-prf", seed_label]);
+        let pk_seed = hash_packed::<Suite>(&[b"sphincs-plus-c-verifier-pk", seed_label]);
+        let sk = sphincs_plus_c::keygen::<ActiveProfile, NUM_LAYERS>(sk_seed, prf_seed, pk_seed);
+        let signature =
+            sphincs_plus_c::sign::<ActiveProfile, NUM_LAYERS>(&sk, &hash).expect("stateless sign");
         let envelope = signature.to_bytes();
         let key = key64(&sk.public_key);
         (key, envelope)

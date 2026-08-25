@@ -39,7 +39,7 @@ use alloc::vec::Vec;
 use super::fors_c;
 use super::hypertree::LayerSignature;
 use crate::abi::{encode_dynamic_array, encode_tuple, AbiReader, Field};
-use crate::profiles::NUM_HYPERTREE_LAYERS;
+use crate::profile::Profile;
 use crate::HASH_LEN;
 
 /// SPHINCS+C stateless signature: a FORS-C signature over the message,
@@ -85,15 +85,15 @@ impl Signature {
     /// `from_bytes`), so exhaustion is the calling top-level decoder's
     /// responsibility. Byte-identical to the historical
     /// `envelope::decode_stateless_signature`.
-    pub(crate) fn decode(reader: &AbiReader, base: usize) -> Option<Self> {
+    pub(crate) fn decode<P: Profile>(reader: &AbiReader, base: usize) -> Option<Self> {
         let fors_start = reader.decode_offset(base, base)?;
         Some(Self {
-            fors: fors_c::Signature::decode(reader, fors_start)?,
+            fors: fors_c::Signature::decode::<P>(reader, fors_start)?,
             hypertree: reader.decode_dynamic_array(
                 base,
                 base.checked_add(32)?,
-                NUM_HYPERTREE_LAYERS as usize,
-                LayerSignature::decode,
+                P::NUM_HYPERTREE_LAYERS as usize,
+                LayerSignature::decode::<P>,
             )?,
         })
     }
@@ -102,10 +102,10 @@ impl Signature {
     /// to the historical `envelope::decode_stateless_signature_envelope`,
     /// built as a top-level entrypoint: reads the outer offset, decodes the
     /// body at that offset, then rejects trailing bytes.
-    pub fn from_bytes(data: &[u8]) -> Option<Self> {
+    pub fn from_bytes<P: Profile>(data: &[u8]) -> Option<Self> {
         let reader = AbiReader::new(data);
         let signature_start = reader.decode_offset(0, 0)?;
-        let decoded = Self::decode(&reader, signature_start)?;
+        let decoded = Self::decode::<P>(&reader, signature_start)?;
         reader.finish()?;
         // Reject non-canonical encodings (see `AbiReader::finish` docs).
         if decoded.to_bytes() != data {
@@ -119,7 +119,7 @@ impl TryFrom<&[u8]> for Signature {
     type Error = ();
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        Self::from_bytes(value).ok_or(())
+        Self::from_bytes::<crate::profile_active::ActiveProfile>(value).ok_or(())
     }
 }
 
@@ -137,6 +137,7 @@ pub fn encode_public_key(pk_seed: [u8; HASH_LEN], hypertree_root: [u8; HASH_LEN]
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::profile_active::ActiveProfile;
     use crate::sphincs_plus_c::fors_c::Entry;
     use crate::wots_c::Signature as WotsCSignature;
     use alloc::vec;
@@ -160,7 +161,7 @@ mod tests {
             // One layer per profile layer: 8 at 256s, 1 at 128s. A fixed count
             // would exceed the decoder's `<= NUM_HYPERTREE_LAYERS` cap on the
             // single-layer 128s profiles.
-            hypertree: (0..NUM_HYPERTREE_LAYERS)
+            hypertree: (0..ActiveProfile::NUM_HYPERTREE_LAYERS)
                 .map(|layer| LayerSignature {
                     wots_c_pk_hash: [0xB1 ^ layer; HASH_LEN],
                     wots_c_signature: WotsCSignature {
@@ -178,7 +179,7 @@ mod tests {
     fn to_bytes_from_bytes_round_trips() {
         let signature = sample_signature();
         let encoded = signature.to_bytes();
-        let decoded = Signature::from_bytes(&encoded).expect("valid encoding must decode");
+        let decoded = Signature::from_bytes::<ActiveProfile>(&encoded).expect("valid encoding must decode");
         assert_eq!(decoded, signature);
         assert_eq!(decoded.to_bytes(), encoded);
     }
@@ -198,7 +199,7 @@ mod tests {
             hypertree: vec![],
         };
         let encoded = signature.to_bytes();
-        assert_eq!(Signature::from_bytes(&encoded), Some(signature));
+        assert_eq!(Signature::from_bytes::<ActiveProfile>(&encoded), Some(signature));
     }
 
     #[test]
@@ -206,7 +207,7 @@ mod tests {
         let mut encoded = sample_signature().to_bytes();
         encoded.extend_from_slice(&[0xAA, 0xBB]);
         assert!(
-            Signature::from_bytes(&encoded).is_none(),
+            Signature::from_bytes::<ActiveProfile>(&encoded).is_none(),
             "trailing junk on the signature envelope must be rejected"
         );
     }
@@ -216,7 +217,7 @@ mod tests {
         let encoded = sample_signature().to_bytes();
         let gapped = crate::test_support::insert_abi_head_gap(&encoded, 1, &[0]);
         assert!(
-            Signature::from_bytes(&gapped).is_none(),
+            Signature::from_bytes::<ActiveProfile>(&gapped).is_none(),
             "an envelope with unread interior bytes must be rejected"
         );
     }
@@ -248,7 +249,7 @@ mod tests {
     #[test]
     fn oversized_fors_entries_length_is_rejected() {
         // FORS entries are a dynamic struct array capped at NUM_FORS_TREES.
-        use crate::profiles::NUM_FORS_TREES;
+        let num_fors_trees = ActiveProfile::NUM_FORS_TREES;
         let mut encoded = sample_signature().to_bytes();
         // Outer head: one offset to the signature body.
         let sig_start = read_abi_usize(&encoded, 0);
@@ -256,9 +257,9 @@ mod tests {
         let fors_start = sig_start + read_abi_usize(&encoded, sig_start);
         // ForsSignature head: randomizer_off@0, counter@32, entries_off@64.
         let entries_start = fors_start + read_abi_usize(&encoded, fors_start + 64);
-        write_abi_usize(&mut encoded, entries_start, NUM_FORS_TREES as usize + 1);
+        write_abi_usize(&mut encoded, entries_start, num_fors_trees as usize + 1);
         assert!(
-            Signature::from_bytes(&encoded).is_none(),
+            Signature::from_bytes::<ActiveProfile>(&encoded).is_none(),
             "FORS entries length NUM_FORS_TREES+1 must be rejected"
         );
     }
@@ -283,7 +284,7 @@ mod tests {
         let first_elem_rel = read_abi_usize(&encoded, auth_start + 32);
         write_abi_usize(&mut encoded, auth_start + 64, first_elem_rel);
         assert!(
-            Signature::from_bytes(&encoded).is_none(),
+            Signature::from_bytes::<ActiveProfile>(&encoded).is_none(),
             "aliased bytes[] element offsets must be rejected"
         );
     }
