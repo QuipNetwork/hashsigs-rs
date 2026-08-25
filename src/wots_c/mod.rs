@@ -254,7 +254,8 @@ mod tests {
     fn to_bytes_from_bytes_round_trips() {
         let signature = sample_signature();
         let encoded = signature.to_bytes();
-        let decoded = Signature::from_bytes::<ActiveProfile>(&encoded).expect("valid encoding must decode");
+        let decoded =
+            Signature::from_bytes::<ActiveProfile>(&encoded).expect("valid encoding must decode");
         assert_eq!(decoded, signature);
         assert_eq!(decoded.to_bytes(), encoded);
     }

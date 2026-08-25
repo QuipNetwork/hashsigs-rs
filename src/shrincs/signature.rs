@@ -254,7 +254,8 @@ mod tests {
     fn to_bytes_from_bytes_round_trips() {
         let signature = sample_stateful_signature();
         let encoded = signature.to_bytes();
-        let decoded = Signature::from_bytes::<ActiveProfile>(&encoded).expect("valid encoding must decode");
+        let decoded =
+            Signature::from_bytes::<ActiveProfile>(&encoded).expect("valid encoding must decode");
         assert_eq!(decoded, signature);
         assert_eq!(decoded.to_bytes(), encoded);
     }
@@ -344,8 +345,8 @@ mod tests {
         let public_key = sample_public_key();
         let signature = sample_stateful_signature();
         let encoded = encode_stateful_envelope(&public_key, &signature);
-        let (decoded_key, decoded_sig) =
-            decode_stateful_envelope::<ActiveProfile>(&encoded).expect("valid envelope must decode");
+        let (decoded_key, decoded_sig) = decode_stateful_envelope::<ActiveProfile>(&encoded)
+            .expect("valid envelope must decode");
         assert_eq!(decoded_key, public_key);
         assert_eq!(decoded_sig, signature);
         // Canonical framing must re-encode byte-identical.
@@ -360,8 +361,8 @@ mod tests {
         let public_key = sample_public_key();
         let signature = sample_stateless_signature();
         let encoded = encode_stateless_envelope(&public_key, &signature);
-        let (decoded_key, decoded_sig) =
-            decode_stateless_envelope::<ActiveProfile>(&encoded).expect("valid envelope must decode");
+        let (decoded_key, decoded_sig) = decode_stateless_envelope::<ActiveProfile>(&encoded)
+            .expect("valid envelope must decode");
         assert_eq!(decoded_key, public_key);
         assert_eq!(decoded_sig, signature);
         assert_eq!(
@@ -375,7 +376,7 @@ mod tests {
         let mut public_key = sample_public_key();
         // Build a self-consistent commitment via the `Commitment::of` helper
         // instead of hand-rolling the keccak call.
-        let commitment = *crate::shrincs::key::Commitment::of(
+        let commitment = *crate::shrincs::key::Commitment::of::<ActiveProfile>(
             &public_key.stateful_public_key,
             &public_key.pk_seed.clone().try_into().unwrap(),
             &public_key.hypertree_root.clone().try_into().unwrap(),
@@ -386,7 +387,7 @@ mod tests {
         let envelope = encode_stateless_envelope(&public_key, &signature);
 
         let (delegate_key, delegate_signature) =
-            crate::shrincs::prepare_stateless_delegation(commitment, &envelope)
+            crate::shrincs::prepare_stateless_delegation::<ActiveProfile>(commitment, &envelope)
                 .expect("matching commitment must delegate");
         let mut expected_key = [0u8; 64];
         expected_key[..32].copy_from_slice(&public_key.pk_seed);
@@ -398,7 +399,11 @@ mod tests {
         let mut wrong_commitment = commitment;
         wrong_commitment[0] ^= 0x01;
         assert!(
-            crate::shrincs::prepare_stateless_delegation(wrong_commitment, &envelope).is_none()
+            crate::shrincs::prepare_stateless_delegation::<ActiveProfile>(
+                wrong_commitment,
+                &envelope
+            )
+            .is_none()
         );
     }
 

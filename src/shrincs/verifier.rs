@@ -76,11 +76,12 @@ pub const WOTS_CHAIN_LEN: u16 = ActiveProfile::WOTS_CHAIN_LEN;
 ///
 /// ```rust,no_run
 /// # fn main() -> Result<(), ()> {
+/// # use hashsigs_rs::profile_active::{ActiveProfile, NUM_CHAINS, NUM_LAYERS};
 /// use hashsigs_rs::shrincs::{sign, ShrincsSigner, ShrincsVerifier, VerifierInterface};
 ///
-/// let (mut keys, public_key) = ShrincsSigner::keygen(b"verify-seed", 4).ok_or(())?;
+/// let (mut keys, public_key) = ShrincsSigner::keygen::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(b"verify-seed", 4).ok_or(())?;
 /// let hash = [9u8; 32];
-/// let envelope = sign(&mut keys, &hash).ok_or(())?;
+/// let envelope = sign::<ActiveProfile, NUM_CHAINS>(&mut keys, &hash).ok_or(())?;
 /// let ok = ShrincsVerifier::new().verify(
 ///     &public_key.public_key_commitment,
 ///     &hash,
@@ -268,11 +269,9 @@ impl ShrincsVerifierExt for ShrincsVerifier {
         // straight back into the typed form `SphincsPlusCVerifier::verify`
         // expects (an encode-then-decode round trip the Solidity adapter
         // never pays).
-        let Some(delegate_signature) =
-            crate::sphincs_plus_c::Signature::from_bytes::<ActiveProfile>(
-                &delegate_signature_envelope,
-            )
-        else {
+        let Some(delegate_signature) = crate::sphincs_plus_c::Signature::from_bytes::<ActiveProfile>(
+            &delegate_signature_envelope,
+        ) else {
             // `prepare_stateless_delegation` only ever emits a canonically
             // re-encoded envelope for a delegation it accepted, so this
             // should be unreachable; fail closed as Malformed rather than
@@ -327,10 +326,12 @@ use crate::verifier::VerifierInterface as _;
 #[cfg(test)]
 mod interface_tests {
     use super::*;
+    use crate::profile_active::NUM_LAYERS;
     use crate::shrincs::{PublicKey, ShrincsSigner, StatelessSignature};
 
     fn keypair(seed: &[u8]) -> (crate::shrincs::Keys, PublicKey) {
-        ShrincsSigner::keygen(seed, 4).expect("keygen must succeed for a valid seed/budget")
+        ShrincsSigner::keygen::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(seed, 4)
+            .expect("keygen must succeed for a valid seed/budget")
     }
 
     fn commitment_of(public_key: &PublicKey) -> Vec<u8> {
@@ -358,8 +359,9 @@ mod interface_tests {
     fn verify_accepts_a_valid_stateful_signature_over_the_raw_hash() {
         let (mut signing_key, public_key) = keypair(b"verifier stateful accept seed");
         let hash = [0x42u8; HASH_LEN];
-        let signature = ShrincsSigner::sign_stateful_raw(&mut signing_key, &hash)
-            .expect("signing must succeed for a fresh key");
+        let signature =
+            ShrincsSigner::sign_stateful_raw::<ActiveProfile, NUM_CHAINS>(&mut signing_key, &hash)
+                .expect("signing must succeed for a fresh key");
         let envelope = encode_stateful_envelope(&public_key, &signature);
 
         let outcome = ShrincsVerifier::new().verify(&commitment_of(&public_key), &hash, &envelope);
@@ -370,8 +372,9 @@ mod interface_tests {
     fn verify_rejects_a_signature_over_a_different_hash() {
         let (mut signing_key, public_key) = keypair(b"verifier stateful reject seed");
         let hash = [0x11u8; HASH_LEN];
-        let signature = ShrincsSigner::sign_stateful_raw(&mut signing_key, &hash)
-            .expect("signing must succeed for a fresh key");
+        let signature =
+            ShrincsSigner::sign_stateful_raw::<ActiveProfile, NUM_CHAINS>(&mut signing_key, &hash)
+                .expect("signing must succeed for a fresh key");
         let envelope = encode_stateful_envelope(&public_key, &signature);
 
         let wrong_hash = [0x22u8; HASH_LEN];
@@ -384,8 +387,9 @@ mod interface_tests {
     fn verify_rejects_a_wrong_length_key() {
         let (mut signing_key, public_key) = keypair(b"verifier stateful wrong key seed");
         let hash = [0x33u8; HASH_LEN];
-        let signature = ShrincsSigner::sign_stateful_raw(&mut signing_key, &hash)
-            .expect("signing must succeed for a fresh key");
+        let signature =
+            ShrincsSigner::sign_stateful_raw::<ActiveProfile, NUM_CHAINS>(&mut signing_key, &hash)
+                .expect("signing must succeed for a fresh key");
         let envelope = encode_stateful_envelope(&public_key, &signature);
 
         let mut short_key = commitment_of(&public_key);
@@ -398,8 +402,9 @@ mod interface_tests {
     fn verify_reports_a_truncated_envelope_as_malformed() {
         let (mut signing_key, public_key) = keypair(b"verifier stateful malformed seed");
         let hash = [0x44u8; HASH_LEN];
-        let signature = ShrincsSigner::sign_stateful_raw(&mut signing_key, &hash)
-            .expect("signing must succeed for a fresh key");
+        let signature =
+            ShrincsSigner::sign_stateful_raw::<ActiveProfile, NUM_CHAINS>(&mut signing_key, &hash)
+                .expect("signing must succeed for a fresh key");
         let envelope = encode_stateful_envelope(&public_key, &signature);
 
         let outcome = ShrincsVerifier::new().verify(
@@ -422,8 +427,9 @@ mod interface_tests {
     fn verify_reports_a_mismatched_commitment_as_invalid_not_malformed() {
         let (mut signing_key, public_key) = keypair(b"verifier stateful wrong commitment seed");
         let hash = [0x5du8; HASH_LEN];
-        let signature = ShrincsSigner::sign_stateful_raw(&mut signing_key, &hash)
-            .expect("signing must succeed for a fresh key");
+        let signature =
+            ShrincsSigner::sign_stateful_raw::<ActiveProfile, NUM_CHAINS>(&mut signing_key, &hash)
+                .expect("signing must succeed for a fresh key");
         let envelope = encode_stateful_envelope(&public_key, &signature);
 
         // Structurally well-formed (correct-length, well-decoded) but wrong
@@ -441,8 +447,9 @@ mod interface_tests {
     fn verify_stateless_accepts_a_valid_stateless_signature_over_the_raw_hash() {
         let (signing_key, public_key) = keypair(b"verifier stateless accept seed");
         let hash = [0x66u8; HASH_LEN];
-        let signature: StatelessSignature = ShrincsSigner::sign_stateless_raw(&signing_key, &hash)
-            .expect("stateless signing must succeed for a fresh key");
+        let signature: StatelessSignature =
+            ShrincsSigner::sign_stateless_raw::<ActiveProfile, NUM_LAYERS>(&signing_key, &hash)
+                .expect("stateless signing must succeed for a fresh key");
         let envelope = encode_stateless_envelope(&public_key, &signature);
 
         let outcome = ShrincsVerifier::new().verify_stateless_signature(
@@ -457,8 +464,9 @@ mod interface_tests {
     fn verify_stateless_rejects_a_signature_over_a_different_hash() {
         let (signing_key, public_key) = keypair(b"verifier stateless reject seed");
         let hash = [0x77u8; HASH_LEN];
-        let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &hash)
-            .expect("stateless signing must succeed for a fresh key");
+        let signature =
+            ShrincsSigner::sign_stateless_raw::<ActiveProfile, NUM_LAYERS>(&signing_key, &hash)
+                .expect("stateless signing must succeed for a fresh key");
         let envelope = encode_stateless_envelope(&public_key, &signature);
 
         let wrong_hash = [0x88u8; HASH_LEN];
@@ -474,8 +482,9 @@ mod interface_tests {
     fn verify_stateless_rejects_a_wrong_length_key() {
         let (signing_key, public_key) = keypair(b"verifier stateless wrong key seed");
         let hash = [0x99u8; HASH_LEN];
-        let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &hash)
-            .expect("stateless signing must succeed for a fresh key");
+        let signature =
+            ShrincsSigner::sign_stateless_raw::<ActiveProfile, NUM_LAYERS>(&signing_key, &hash)
+                .expect("stateless signing must succeed for a fresh key");
         let envelope = encode_stateless_envelope(&public_key, &signature);
 
         let mut short_key = commitment_of(&public_key);
@@ -489,8 +498,9 @@ mod interface_tests {
     fn verify_stateless_reports_a_mismatched_commitment_as_invalid_not_malformed() {
         let (signing_key, public_key) = keypair(b"verifier stateless wrong commitment seed");
         let hash = [0xaau8; HASH_LEN];
-        let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &hash)
-            .expect("stateless signing must succeed for a fresh key");
+        let signature =
+            ShrincsSigner::sign_stateless_raw::<ActiveProfile, NUM_LAYERS>(&signing_key, &hash)
+                .expect("stateless signing must succeed for a fresh key");
         let envelope = encode_stateless_envelope(&public_key, &signature);
 
         let mut wrong_commitment = commitment_of(&public_key);
@@ -504,8 +514,9 @@ mod interface_tests {
     fn verify_stateless_reports_a_truncated_envelope_as_malformed() {
         let (signing_key, public_key) = keypair(b"verifier stateless malformed seed");
         let hash = [0xbbu8; HASH_LEN];
-        let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &hash)
-            .expect("stateless signing must succeed for a fresh key");
+        let signature =
+            ShrincsSigner::sign_stateless_raw::<ActiveProfile, NUM_LAYERS>(&signing_key, &hash)
+                .expect("stateless signing must succeed for a fresh key");
         let envelope = encode_stateless_envelope(&public_key, &signature);
 
         let outcome = ShrincsVerifier::new().verify_stateless_signature(

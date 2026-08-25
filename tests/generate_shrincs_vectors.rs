@@ -4,6 +4,7 @@
 
 use flate2::write::GzEncoder;
 use flate2::Compression;
+use hashsigs_rs::profile_active::{ActiveProfile, NUM_CHAINS, NUM_LAYERS};
 use hashsigs_rs::shrincs::{
     PublicKey, ShrincsSigner, Signature as StatefulSignature, StatelessSignature, HASH_LEN,
 };
@@ -31,19 +32,31 @@ const OUT_PATH: &str = "tests/test_vectors/shrincs_sphincs_256s_sha2.json.gz";
 #[test]
 #[ignore = "run explicitly to refresh Solidity SHRINCS vectors"]
 fn generate_shrincs_sphincs_vectors() {
-    let (mut stateful_key, stateful_public_key) =
-        ShrincsSigner::keygen(b"shrincs solidity vector stateful seed", 4)
-            .expect("stateful keygen");
+    let (mut stateful_key, stateful_public_key) = ShrincsSigner::keygen::<
+        ActiveProfile,
+        NUM_CHAINS,
+        NUM_LAYERS,
+    >(b"shrincs solidity vector stateful seed", 4)
+    .expect("stateful keygen");
     let stateful_message = hash_word(b"shrincs solidity stateful message").to_vec();
-    let stateful_signature = ShrincsSigner::sign_stateful_raw(&mut stateful_key, &stateful_message)
-        .expect("stateful signature");
+    let stateful_signature = ShrincsSigner::sign_stateful_raw::<ActiveProfile, NUM_CHAINS>(
+        &mut stateful_key,
+        &stateful_message,
+    )
+    .expect("stateful signature");
 
     let (stateless_key, stateless_public_key) =
-        ShrincsSigner::keygen(b"shrincs solidity vector stateless seed", 256)
-            .expect("stateless keygen");
+        ShrincsSigner::keygen::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(
+            b"shrincs solidity vector stateless seed",
+            256,
+        )
+        .expect("stateless keygen");
     let stateless_message = hash_word(b"shrincs solidity stateless message").to_vec();
-    let stateless_signature = ShrincsSigner::sign_stateless_raw(&stateless_key, &stateless_message)
-        .expect("stateless signature");
+    let stateless_signature = ShrincsSigner::sign_stateless_raw::<ActiveProfile, NUM_LAYERS>(
+        &stateless_key,
+        &stateless_message,
+    )
+    .expect("stateless signature");
 
     let mut wrong_stateful_message = stateful_message.clone();
     wrong_stateful_message[0] ^= 1;
@@ -128,8 +141,11 @@ fn write_gzip_json(path: &Path, json: &[u8]) {
 #[ignore = "run explicitly to refresh SHRINCSSignerKeygen anchors"]
 fn emit_keygen_goldens() {
     let profile = hashsigs_rs::shrincs::PROFILE_NAME;
-    let (signing_key, public_key) =
-        ShrincsSigner::keygen(b"solidity public key seed", 4).expect("keygen");
+    let (signing_key, public_key) = ShrincsSigner::keygen::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(
+        b"solidity public key seed",
+        4,
+    )
+    .expect("keygen");
 
     let sol_bytes32 = |label: &str, bytes: &[u8]| {
         println!(

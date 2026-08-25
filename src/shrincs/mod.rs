@@ -98,14 +98,22 @@ pub use key::{Commitment, Keys};
 pub use signer::{sign, ShrincsSigner, ShrincsSignerResult};
 pub use verifier::{ShrincsVerifier, ShrincsVerifierExt};
 
-pub use crate::hash::suite::HASH_SUITE_ID;
+/// Scheme-hash suite id of the profile this module's facades are bound to.
+/// Task 5 repoints this at the default profile alias.
+pub const HASH_SUITE_ID: u32 = crate::profile_active::ACTIVE_HASH_SUITE_ID;
 pub use crate::hash::suite::{HASH_SUITE_KECCAK_256, HASH_SUITE_SHA2_256};
 pub use crate::hash::{ADDRESS_TYPE_FORS_TREE, ADDRESS_TYPE_TREE, ADDRESS_TYPE_WOTS_HASH};
-pub use crate::profiles::{
-    FORS_C_MAX_GRIND_COUNTER, FORS_TREE_HEIGHT, HASH_TRUNC_LEN, HYPERTREE_HEIGHT, NUM_FORS_TREES,
-    NUM_HYPERTREE_LAYERS, NUM_WOTS_CHAINS, PROFILE_ID, PROFILE_NAME, STATELESS_SIGNATURE_LIMIT,
-    WOTS_CHAIN_LEN,
+// Parameter tuple of the profile this module's facades are bound to. Task 5
+// repoints these at the default profile alias.
+pub use crate::shrincs::verifier::{
+    FORS_TREE_HEIGHT, HASH_TRUNC_LEN, HYPERTREE_HEIGHT, NUM_FORS_TREES, NUM_HYPERTREE_LAYERS,
+    NUM_WOTS_CHAINS, PROFILE_NAME, STATELESS_SIGNATURE_LIMIT, WOTS_CHAIN_LEN,
 };
+pub const FORS_C_MAX_GRIND_COUNTER: u32 =
+    <crate::profile_active::ActiveProfile as Profile>::FORS_C_MAX_GRIND_COUNTER;
+// `PROFILE_ID` is the build-script-generated identity hash, not part of the
+// `Profile` trait; Task 5 moves it with the rest of `crate::profiles`.
+pub use crate::profiles::PROFILE_ID;
 pub use crate::HASH_LEN;
 pub use action_context::ActionContext;
 pub use key::PublicKey;

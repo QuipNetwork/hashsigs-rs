@@ -31,15 +31,6 @@ pub const HASH_SUITE_SHA2_256: u32 = 2;
 mod keccak;
 mod sha2;
 
-// `src/shrincs/mod.rs` and `src/shrincs/dispatch.rs` still read
-// `HASH_SUITE_ID` through this cfg-selected re-export. build.rs keeps
-// emitting `shrincs_hash_suite_sha2` until Task 6 retires it, so this stays
-// in place until Task 7 removes it.
-#[cfg(not(shrincs_hash_suite_sha2))]
-pub use keccak::HASH_SUITE_ID;
-#[cfg(shrincs_hash_suite_sha2)]
-pub use sha2::HASH_SUITE_ID;
-
 /// A scheme hash suite. Selected per profile as `Profile::Suite`, not by a
 /// global cfg, so that profiles using different suites coexist in one build.
 // Not yet consumed outside tests: `src/hash/ops.rs` starts reading this

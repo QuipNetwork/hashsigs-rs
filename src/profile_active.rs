@@ -32,14 +32,14 @@ use crate::hash::suite::HashSuite;
 use crate::profile::Profile;
 
 /// The profile selected by the build-script cfg, as a [`Profile`] type.
-pub(crate) struct ActiveProfile;
+pub struct ActiveProfile;
 
 /// Scheme hash suite for the active profile, selected by the same cfg
 /// `build.rs` already emits.
 #[cfg(not(shrincs_hash_suite_sha2))]
-type ActiveSuite = crate::hash::suite::Keccak256Suite;
+pub type ActiveSuite = crate::hash::suite::Keccak256Suite;
 #[cfg(shrincs_hash_suite_sha2)]
-type ActiveSuite = crate::hash::suite::Sha2256Suite;
+pub type ActiveSuite = crate::hash::suite::Sha2256Suite;
 
 impl Profile for ActiveProfile {
     type Suite = ActiveSuite;
@@ -59,10 +59,10 @@ impl Profile for ActiveProfile {
 
 /// `ActiveProfile::NUM_WOTS_CHAINS` as an array width. A plain `const`, not a
 /// generic expression, so it is legal in array-length position.
-pub(crate) const NUM_CHAINS: usize = crate::profiles::NUM_WOTS_CHAINS as usize;
+pub const NUM_CHAINS: usize = crate::profiles::NUM_WOTS_CHAINS as usize;
 
 /// `ActiveProfile::NUM_HYPERTREE_LAYERS` as an array width.
-pub(crate) const NUM_LAYERS: usize = crate::profiles::NUM_HYPERTREE_LAYERS as usize;
+pub const NUM_LAYERS: usize = crate::profiles::NUM_HYPERTREE_LAYERS as usize;
 
 /// Compile-time proof that the two width constants above agree with the
 /// trait constants, in the same associated-const form the core types use.
@@ -71,4 +71,4 @@ const _: () = crate::profile::assert_widths::<ActiveProfile, NUM_CHAINS, NUM_LAY
 /// The suite id of the active profile, for the sites that still fold it into
 /// a preimage or a wire field.
 #[allow(dead_code)]
-pub(crate) const ACTIVE_HASH_SUITE_ID: u32 = <ActiveSuite as HashSuite>::HASH_SUITE_ID;
+pub const ACTIVE_HASH_SUITE_ID: u32 = <ActiveSuite as HashSuite>::HASH_SUITE_ID;

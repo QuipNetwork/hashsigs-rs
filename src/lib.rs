@@ -75,11 +75,14 @@ mod trace_macros;
 pub(crate) mod abi;
 pub(crate) mod buf;
 pub mod error;
-pub mod profile;
 pub(crate) mod hash;
+pub mod profile;
 // Temporary bridge from the cfg-selected profile to `profile::Profile`.
-// Task 5 deletes this together with `profiles`.
-pub(crate) mod profile_active;
+// `pub` + `doc(hidden)` only because the integration tests and doctests need
+// a nameable profile type until Task 5 publishes the real ones; it is not a
+// supported public API. Task 5 deletes this together with `profiles`.
+#[doc(hidden)]
+pub mod profile_active;
 pub(crate) mod profiles;
 pub mod shrincs;
 pub mod sphincs_plus_c;

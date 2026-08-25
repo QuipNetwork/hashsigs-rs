@@ -89,8 +89,7 @@ impl<P: Profile, const NUM_LAYERS: usize> LayerWidthAgrees<P, NUM_LAYERS> {
 
 impl<P: Profile> SubtreeHeightFits<P> {
     const CHECK: () = assert!(
-        hypertree_subtree_height::<P>() > 0
-            && hypertree_subtree_height::<P>() < u32::BITS as usize,
+        hypertree_subtree_height::<P>() > 0 && hypertree_subtree_height::<P>() < u32::BITS as usize,
         "HYPERTREE_HEIGHT/NUM_HYPERTREE_LAYERS must yield a subtree height in 1..32"
     );
 }
@@ -905,7 +904,8 @@ mod tests {
     fn layer_signature_to_bytes_from_bytes_round_trips() {
         let layer = sample_layer_signature();
         let encoded = layer.to_bytes();
-        let decoded = LayerSignature::from_bytes::<ActiveProfile>(&encoded).expect("valid encoding must decode");
+        let decoded = LayerSignature::from_bytes::<ActiveProfile>(&encoded)
+            .expect("valid encoding must decode");
         assert_eq!(decoded, layer);
         assert_eq!(decoded.to_bytes(), encoded);
     }
@@ -938,7 +938,9 @@ mod tests {
     #[test]
     fn layer_signature_from_bytes_rejects_truncated() {
         let encoded = sample_layer_signature().to_bytes();
-        assert!(LayerSignature::from_bytes::<ActiveProfile>(&encoded[..encoded.len() - 1]).is_none());
+        assert!(
+            LayerSignature::from_bytes::<ActiveProfile>(&encoded[..encoded.len() - 1]).is_none()
+        );
         assert!(LayerSignature::from_bytes::<ActiveProfile>(&[]).is_none());
     }
 
@@ -958,8 +960,11 @@ mod tests {
     #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
     #[test]
     fn hypertree_sign_verify_round_trip() {
-        let key =
-            crate::sphincs_plus_c::keygen([0x11; HASH_LEN], [0x22; HASH_LEN], [0x33; HASH_LEN]);
+        let key = crate::sphincs_plus_c::keygen::<ActiveProfile, NUM_LAYERS>(
+            [0x11; HASH_LEN],
+            [0x22; HASH_LEN],
+            [0x33; HASH_LEN],
+        );
         let fors_root = [0xABu8; HASH_LEN];
         let seed = HypertreeSeed {
             tree_index: 0,
@@ -971,7 +976,7 @@ mod tests {
             seed.tree_index,
             seed.leaf_index,
         )
-            .expect("hypertree sign must succeed");
+        .expect("hypertree sign must succeed");
         assert_eq!(layers.len(), NUM_LAYERS);
         for layer in &layers {
             assert_eq!(
@@ -980,7 +985,8 @@ mod tests {
             );
             // Each layer body must be a self-contained, trailing-clean blob.
             let encoded = layer.to_bytes();
-            let decoded = LayerSignature::from_bytes::<ActiveProfile>(&encoded).expect("layer codec");
+            let decoded =
+                LayerSignature::from_bytes::<ActiveProfile>(&encoded).expect("layer codec");
             assert_eq!(decoded, *layer);
         }
         assert!(
@@ -1025,7 +1031,11 @@ mod tests {
         };
         // Empty layers: always wrong count for every profile.
         assert!(!verify_hypertree::<ActiveProfile, NUM_CHAINS>(
-            &pk_seed, &root, fors_root, seed, &[]
+            &pk_seed,
+            &root,
+            fors_root,
+            seed,
+            &[]
         ));
         // One too many synthetic layers.
         let extra = vec![sample_layer_signature(); NUM_LAYERS + 1];

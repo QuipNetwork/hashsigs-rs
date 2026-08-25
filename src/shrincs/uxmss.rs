@@ -825,7 +825,11 @@ fn stateful_auth_path<P: Profile, const NUM_CHAINS: usize>(
         path.push(stateful_empty_tail::<P>(pk_seed, leaf_index));
     }
     for previous_leaf in (1..leaf_index).rev() {
-        path.push(stateful_wots_pk_hash::<P, NUM_CHAINS>(sk_seed, pk_seed, previous_leaf));
+        path.push(stateful_wots_pk_hash::<P, NUM_CHAINS>(
+            sk_seed,
+            pk_seed,
+            previous_leaf,
+        ));
     }
     path
 }
@@ -923,7 +927,8 @@ mod stateful_core_tests {
         let pk = flat_public_key(&key);
         for leaf in [1u32, 4, max] {
             let message = b"uxmss core test message";
-            let sig = sign_stateful_raw_at_leaf::<ActiveProfile, NUM_CHAINS>(&key, leaf, message).expect("sign at leaf");
+            let sig = sign_stateful_raw_at_leaf::<ActiveProfile, NUM_CHAINS>(&key, leaf, message)
+                .expect("sign at leaf");
             assert_eq!(sig.auth_path.len(), leaf as usize, "leaf {leaf}");
             assert!(
                 verify_stateful_unsafe_raw::<ActiveProfile, NUM_CHAINS>(&pk, message, &sig),
@@ -938,11 +943,16 @@ mod stateful_core_tests {
         let key = test_key(b"tamper-auth", max);
         let pk = flat_public_key(&key);
         let message = b"tamper auth path";
-        let mut sig = sign_stateful_raw_at_leaf::<ActiveProfile, NUM_CHAINS>(&key, 4, message).expect("sign");
-        assert!(verify_stateful_unsafe_raw::<ActiveProfile, NUM_CHAINS>(&pk, message, &sig));
+        let mut sig =
+            sign_stateful_raw_at_leaf::<ActiveProfile, NUM_CHAINS>(&key, 4, message).expect("sign");
+        assert!(verify_stateful_unsafe_raw::<ActiveProfile, NUM_CHAINS>(
+            &pk, message, &sig
+        ));
 
         sig.auth_path[0][0] ^= 0x01;
-        assert!(!verify_stateful_unsafe_raw::<ActiveProfile, NUM_CHAINS>(&pk, message, &sig));
+        assert!(!verify_stateful_unsafe_raw::<ActiveProfile, NUM_CHAINS>(
+            &pk, message, &sig
+        ));
     }
 
     #[test]
@@ -951,11 +961,16 @@ mod stateful_core_tests {
         let key = test_key(b"tamper-chain", max);
         let pk = flat_public_key(&key);
         let message = b"tamper chain value";
-        let mut sig = sign_stateful_raw_at_leaf::<ActiveProfile, NUM_CHAINS>(&key, 2, message).expect("sign");
-        assert!(verify_stateful_unsafe_raw::<ActiveProfile, NUM_CHAINS>(&pk, message, &sig));
+        let mut sig =
+            sign_stateful_raw_at_leaf::<ActiveProfile, NUM_CHAINS>(&key, 2, message).expect("sign");
+        assert!(verify_stateful_unsafe_raw::<ActiveProfile, NUM_CHAINS>(
+            &pk, message, &sig
+        ));
 
         sig.chains[0][0] ^= 0x01;
-        assert!(!verify_stateful_unsafe_raw::<ActiveProfile, NUM_CHAINS>(&pk, message, &sig));
+        assert!(!verify_stateful_unsafe_raw::<ActiveProfile, NUM_CHAINS>(
+            &pk, message, &sig
+        ));
     }
 
     #[test]
@@ -964,11 +979,14 @@ mod stateful_core_tests {
         let key = test_key(b"short-path", max);
         let message = b"short auth path";
         let leaf_index = 4u32;
-        let sig = sign_stateful_raw_at_leaf::<ActiveProfile, NUM_CHAINS>(&key, leaf_index, message).expect("sign");
+        let sig = sign_stateful_raw_at_leaf::<ActiveProfile, NUM_CHAINS>(&key, leaf_index, message)
+            .expect("sign");
         let pk_seed = *key.public_key().pk_seed.as_bytes();
         let leaf_hash =
-            compact_stateful_wots_public_key_from_signature::<ActiveProfile, NUM_CHAINS>(pk_seed, leaf_index, message, &sig)
-                .expect("wots pk hash");
+            compact_stateful_wots_public_key_from_signature::<ActiveProfile, NUM_CHAINS>(
+                pk_seed, leaf_index, message, &sig,
+            )
+            .expect("wots pk hash");
 
         // One sibling short of what `leaf_index` requires: the length guard
         // must reject rather than silently reconstruct a wrong root.
@@ -985,13 +1003,21 @@ mod stateful_core_tests {
         let key = test_key(b"wrong-siblings", max);
         let message = b"wrong sibling values";
         let leaf_index = 4u32;
-        let sig = sign_stateful_raw_at_leaf::<ActiveProfile, NUM_CHAINS>(&key, leaf_index, message).expect("sign");
+        let sig = sign_stateful_raw_at_leaf::<ActiveProfile, NUM_CHAINS>(&key, leaf_index, message)
+            .expect("sign");
         let pk_seed = *key.public_key().pk_seed.as_bytes();
         let leaf_hash =
-            compact_stateful_wots_public_key_from_signature::<ActiveProfile, NUM_CHAINS>(pk_seed, leaf_index, message, &sig)
-                .expect("wots pk hash");
-        let true_root = root_from_unbalanced_path::<ActiveProfile>(pk_seed, leaf_index, leaf_hash, &sig.auth_path)
-            .expect("true root reconstructs");
+            compact_stateful_wots_public_key_from_signature::<ActiveProfile, NUM_CHAINS>(
+                pk_seed, leaf_index, message, &sig,
+            )
+            .expect("wots pk hash");
+        let true_root = root_from_unbalanced_path::<ActiveProfile>(
+            pk_seed,
+            leaf_index,
+            leaf_hash,
+            &sig.auth_path,
+        )
+        .expect("true root reconstructs");
         assert_eq!(true_root, key.public_key().root.as_bytes().to_owned());
 
         // Correct length, wrong values: reconstructs *a* root, but not the
@@ -999,8 +1025,9 @@ mod stateful_core_tests {
         // this into a rejection.
         let mut wrong_path = sig.auth_path.clone();
         wrong_path[0][0] ^= 0xff;
-        let wrong_root = root_from_unbalanced_path::<ActiveProfile>(pk_seed, leaf_index, leaf_hash, &wrong_path)
-            .expect("still reconstructs a root");
+        let wrong_root =
+            root_from_unbalanced_path::<ActiveProfile>(pk_seed, leaf_index, leaf_hash, &wrong_path)
+                .expect("still reconstructs a root");
         assert_ne!(wrong_root, true_root);
     }
 }

@@ -20,9 +20,8 @@
 use super::HASH_SUITE_SHA2_256;
 use crate::HASH_LEN;
 
-// Unused under the default (keccak) profile's cfg-selected re-export in
-// `mod.rs`; still reachable through `Sha2256Suite`. Task 7 removes this
-// item once no caller reads it directly.
+// Superseded by `Sha2256Suite::HASH_SUITE_ID`; kept as the module-local name
+// the suite impl reads. Task 7 removes it.
 #[allow(dead_code)]
 pub const HASH_SUITE_ID: u32 = HASH_SUITE_SHA2_256;
 

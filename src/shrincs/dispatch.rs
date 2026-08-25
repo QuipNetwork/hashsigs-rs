@@ -132,7 +132,8 @@ pub(crate) fn valid_public_key<P: Profile>(public_key: &PublicKey) -> bool {
         && public_key.public_key_commitment.len() == HASH_LEN
         && public_key.pk_seed.len() == HASH_LEN
         && public_key.hypertree_root.len() == HASH_LEN
-        && recompute_public_key_commitment::<P>(public_key) == word32(&public_key.public_key_commitment)
+        && recompute_public_key_commitment::<P>(public_key)
+            == word32(&public_key.public_key_commitment)
 }
 
 pub(crate) fn verify_stateful<P: Profile, const NUM_CHAINS: usize>(
@@ -240,7 +241,8 @@ mod tests {
     use crate::shrincs::signer::ShrincsSigner;
 
     fn keypair(seed: &[u8]) -> (crate::shrincs::Keys, PublicKey) {
-        ShrincsSigner::keygen::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(seed, 4).expect("keygen must succeed for a valid seed/budget")
+        ShrincsSigner::keygen::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(seed, 4)
+            .expect("keygen must succeed for a valid seed/budget")
     }
 
     fn sample_context() -> ActionContext {
@@ -294,7 +296,9 @@ mod tests {
         wrong_commitment.copy_from_slice(&public_key.public_key_commitment);
         wrong_commitment[0] ^= 0x01;
 
-        assert!(prepare_stateless_delegation::<ActiveProfile>(wrong_commitment, &envelope).is_none());
+        assert!(
+            prepare_stateless_delegation::<ActiveProfile>(wrong_commitment, &envelope).is_none()
+        );
     }
 
     #[test]

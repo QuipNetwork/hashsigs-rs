@@ -25,11 +25,12 @@
 //! ImportSigningKey,Reset,ComputePublicKeyCommitment,
 //! RecoverPublicKeyCommitment}`).
 
+#[cfg(any(test, feature = "wasm-bindings"))]
+use crate::profile_active::{ActiveProfile, NUM_CHAINS, NUM_LAYERS};
 use crate::shrincs::{
     encode_stateful_envelope, Keys, PublicKey, ShrincsSigner, ShrincsVerifier, HASH_LEN,
     STATEFUL_PUBLIC_KEY_BYTES,
 };
-#[cfg(any(test, feature = "wasm-bindings"))]
 use crate::verifier::VerifierInterface as _;
 use crate::ErrorCode;
 // The Uint8Array-native noble-style free functions (sphincsPlusC*/shrincs
@@ -227,12 +228,13 @@ pub fn sphincs_plus_c_sign(
 ) -> Result<alloc::vec::Vec<u8>, JsValue> {
     let full_key = deserialize_sphincs_plus_c_signing_key(secret_key).map_err(js_error)?;
     let hash = message_hash(message).map_err(js_error)?;
-    let signature = crate::sphincs_plus_c::sign(&full_key, &hash).ok_or_else(|| {
-        js_error(WasmErr {
-            code: ErrorCode::SigningFailed.as_str(),
-            message: "stateless signing failed for the supplied key/message".into(),
-        })
-    })?;
+    let signature = crate::sphincs_plus_c::sign::<ActiveProfile, NUM_LAYERS>(&full_key, &hash)
+        .ok_or_else(|| {
+            js_error(WasmErr {
+                code: ErrorCode::SigningFailed.as_str(),
+                message: "stateless signing failed for the supplied key/message".into(),
+            })
+        })?;
     Ok(signature.to_bytes())
 }
 
@@ -268,7 +270,7 @@ fn serialize_shrincs_signing_key(key: &Keys) -> alloc::vec::Vec<u8> {
 /// trusting it (this only checks the length and slices the fields).
 #[cfg(any(test, feature = "wasm-bindings"))]
 fn deserialize_shrincs_signing_key(bytes: &[u8]) -> Result<Keys, WasmErr> {
-    Keys::from_bytes(bytes).ok_or_else(|| WasmErr {
+    Keys::from_bytes::<ActiveProfile>(bytes).ok_or_else(|| WasmErr {
         code: ErrorCode::BadLength.as_str(),
         message: format!("shrincs secretKey must be 264 bytes, got {}", bytes.len()),
     })
@@ -354,7 +356,8 @@ pub fn shrincs_keygen(seed: &[u8], max_signatures: u32) -> Result<WasmShrincsKey
             message: format!("maxSignatures must be in 1..={MAX_STATEFUL_SIGNATURES_LIMIT}"),
         }));
     }
-    let result = ShrincsSigner::keygen(&seed, max_signatures);
+    let result =
+        ShrincsSigner::keygen::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(&seed, max_signatures);
     seed.zeroize();
     let (signing_key, public_key) = result.ok_or_else(|| {
         js_error(WasmErr {
@@ -387,14 +390,15 @@ pub fn shrincs_keygen(seed: &[u8], max_signatures: u32) -> Result<WasmShrincsKey
 pub fn shrincs_import_signing_key(secret_key: &[u8]) -> Result<WasmShrincsKeys, JsValue> {
     let candidate = deserialize_shrincs_signing_key(secret_key).map_err(js_error)?;
     let (signing_key, public_key) =
-        ShrincsSigner::import_signing_key(candidate).ok_or_else(|| {
-            js_error(WasmErr {
-                code: ErrorCode::ImportInvalid.as_str(),
-                message: "secretKey failed validation: counter out of range or roots do not \
+        ShrincsSigner::import_signing_key::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(candidate)
+            .ok_or_else(|| {
+                js_error(WasmErr {
+                    code: ErrorCode::ImportInvalid.as_str(),
+                    message: "secretKey failed validation: counter out of range or roots do not \
                       match the seeds"
-                    .into(),
-            })
-        })?;
+                        .into(),
+                })
+            })?;
     Ok(WasmShrincsKeys {
         signing_key,
         public_key,
@@ -423,14 +427,15 @@ pub fn shrincs_import_signing_key(secret_key: &[u8]) -> Result<WasmShrincsKeys, 
 pub fn shrincs_sign(message: &[u8], secret_key: &mut [u8]) -> Result<alloc::vec::Vec<u8>, JsValue> {
     let candidate = deserialize_shrincs_signing_key(secret_key).map_err(js_error)?;
     let (mut signing_key, public_key) =
-        ShrincsSigner::import_signing_key(candidate).ok_or_else(|| {
-            js_error(WasmErr {
-                code: ErrorCode::ImportInvalid.as_str(),
-                message: "secretKey failed validation: counter out of range or roots do not \
+        ShrincsSigner::import_signing_key::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(candidate)
+            .ok_or_else(|| {
+                js_error(WasmErr {
+                    code: ErrorCode::ImportInvalid.as_str(),
+                    message: "secretKey failed validation: counter out of range or roots do not \
                           match the seeds"
-                    .into(),
-            })
-        })?;
+                        .into(),
+                })
+            })?;
     // Pre-check exhaustion explicitly. Core signals BOTH exhaustion and
     // (astronomically rare) WOTS-C grinding failure as `None`; without this
     // check the two are conflated under one misleading error code.
@@ -442,12 +447,14 @@ pub fn shrincs_sign(message: &[u8], secret_key: &mut [u8]) -> Result<alloc::vec:
         }));
     }
     let hash = message_hash(message).map_err(js_error)?;
-    let signature = ShrincsSigner::sign_stateful_raw(&mut signing_key, &hash).ok_or_else(|| {
-        js_error(WasmErr {
-            code: ErrorCode::SigningFailed.as_str(),
-            message: "stateful signing failed for the supplied key/message".into(),
-        })
-    })?;
+    let signature =
+        ShrincsSigner::sign_stateful_raw::<ActiveProfile, NUM_CHAINS>(&mut signing_key, &hash)
+            .ok_or_else(|| {
+                js_error(WasmErr {
+                    code: ErrorCode::SigningFailed.as_str(),
+                    message: "stateful signing failed for the supplied key/message".into(),
+                })
+            })?;
     secret_key.copy_from_slice(&serialize_shrincs_signing_key(&signing_key));
     // Return the PublicKey-carrying envelope, not the bare signature:
     // `shrincsVerify` pins only the 32-byte commitment, so the signature
@@ -474,21 +481,24 @@ pub fn shrincs_sign_stateless(
 ) -> Result<alloc::vec::Vec<u8>, JsValue> {
     let candidate = deserialize_shrincs_signing_key(secret_key).map_err(js_error)?;
     let (signing_key, _public_key) =
-        ShrincsSigner::import_signing_key(candidate).ok_or_else(|| {
-            js_error(WasmErr {
-                code: ErrorCode::ImportInvalid.as_str(),
-                message: "secretKey failed validation: counter out of range or roots do not \
+        ShrincsSigner::import_signing_key::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(candidate)
+            .ok_or_else(|| {
+                js_error(WasmErr {
+                    code: ErrorCode::ImportInvalid.as_str(),
+                    message: "secretKey failed validation: counter out of range or roots do not \
                           match the seeds"
-                    .into(),
-            })
-        })?;
+                        .into(),
+                })
+            })?;
     let hash = message_hash(message).map_err(js_error)?;
-    let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &hash).ok_or_else(|| {
-        js_error(WasmErr {
-            code: ErrorCode::SigningFailed.as_str(),
-            message: "stateless signing failed for the supplied key/message".into(),
-        })
-    })?;
+    let signature =
+        ShrincsSigner::sign_stateless_raw::<ActiveProfile, NUM_LAYERS>(&signing_key, &hash)
+            .ok_or_else(|| {
+                js_error(WasmErr {
+                    code: ErrorCode::SigningFailed.as_str(),
+                    message: "stateless signing failed for the supplied key/message".into(),
+                })
+            })?;
     // A SHRINCS stateless signature IS a SPHINCS+C signature over the message,
     // signed under the keypair's embedded stateless key. Return exactly what
     // `sphincsPlusCSign` returns (the signature-only encoding) so
@@ -556,15 +566,16 @@ pub fn shrincs_reset(secret_key: &mut [u8], new_seed: &[u8]) -> Result<(), JsVal
     })?;
     let candidate = deserialize_shrincs_signing_key(secret_key).map_err(js_error)?;
     let (mut keys, _public_key) =
-        ShrincsSigner::import_signing_key(candidate).ok_or_else(|| {
-            js_error(WasmErr {
-                code: ErrorCode::ImportInvalid.as_str(),
-                message: "secretKey failed validation: counter out of range or roots do not \
+        ShrincsSigner::import_signing_key::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(candidate)
+            .ok_or_else(|| {
+                js_error(WasmErr {
+                    code: ErrorCode::ImportInvalid.as_str(),
+                    message: "secretKey failed validation: counter out of range or roots do not \
                       match the seeds"
-                    .into(),
-            })
-        })?;
-    keys.reset(&new_seed);
+                        .into(),
+                })
+            })?;
+    keys.reset::<ActiveProfile, NUM_CHAINS>(&new_seed);
     secret_key.copy_from_slice(&serialize_shrincs_signing_key(&keys));
     Ok(())
 }
@@ -586,15 +597,20 @@ pub fn shrincs_compute_public_key_commitment(
     secret_key: &[u8],
 ) -> Result<alloc::vec::Vec<u8>, JsValue> {
     let candidate = deserialize_shrincs_signing_key(secret_key).map_err(js_error)?;
-    let (keys, _public_key) = ShrincsSigner::import_signing_key(candidate).ok_or_else(|| {
-        js_error(WasmErr {
-            code: ErrorCode::ImportInvalid.as_str(),
-            message: "secretKey failed validation: counter out of range or roots do not \
+    let (keys, _public_key) =
+        ShrincsSigner::import_signing_key::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(candidate)
+            .ok_or_else(|| {
+                js_error(WasmErr {
+                    code: ErrorCode::ImportInvalid.as_str(),
+                    message: "secretKey failed validation: counter out of range or roots do not \
                       match the seeds"
-                .into(),
-        })
-    })?;
-    Ok(keys.recompute_commitment().as_bytes().to_vec())
+                        .into(),
+                })
+            })?;
+    Ok(keys
+        .recompute_commitment::<ActiveProfile>()
+        .as_bytes()
+        .to_vec())
 }
 
 /// Recover the 32-byte `publicKeyCommitment` a `shrincsSign` envelope
@@ -613,7 +629,7 @@ pub fn shrincs_compute_public_key_commitment(
 pub fn shrincs_recover_public_key_commitment(
     signature: &[u8],
 ) -> Result<alloc::vec::Vec<u8>, JsValue> {
-    Keys::recover_commitment(signature)
+    Keys::recover_commitment::<ActiveProfile>(signature)
         .map(|commitment| commitment.as_bytes().to_vec())
         .ok_or_else(malformed_envelope)
 }
@@ -664,7 +680,11 @@ mod tests {
     }
 
     fn signing_key_and_public_key() -> (Keys, SignerPublicKey) {
-        ShrincsSigner::keygen(b"wasm verifier test seed", 4).unwrap()
+        ShrincsSigner::keygen::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(
+            b"wasm verifier test seed",
+            4,
+        )
+        .unwrap()
     }
 
     #[cfg(all(feature = "wasm-bindings", target_arch = "wasm32"))]
@@ -673,7 +693,9 @@ mod tests {
     #[cfg(all(feature = "wasm-bindings", target_arch = "wasm32"))]
     fn stateful_signing_key_and_public_key() -> (Keys, SignerPublicKey) {
         match TestKeyMode::from_env() {
-            TestKeyMode::Fresh => stateful_only_key(b"wasm verifier test seed", 4),
+            TestKeyMode::Fresh => {
+                stateful_only_key::<ActiveProfile, NUM_CHAINS>(b"wasm verifier test seed", 4)
+            }
             TestKeyMode::Fixture => {
                 let path = stateful_signer_fixture_path();
                 if path.is_file() {
@@ -688,7 +710,7 @@ mod tests {
                     }
                 }
 
-                stateful_only_key(b"wasm verifier test seed", 4)
+                stateful_only_key::<ActiveProfile, NUM_CHAINS>(b"wasm verifier test seed", 4)
             }
         }
     }

@@ -36,12 +36,13 @@ pub fn to_message(hash: &[u8; HASH_LEN]) -> [u8; HASH_LEN] {
 ///
 /// ```rust,no_run
 /// # fn main() -> Result<(), ()> {
+/// # use hashsigs_rs::profile_active::{ActiveProfile, NUM_CHAINS, NUM_LAYERS};
 /// use hashsigs_rs::sphincs_plus_c::{keygen, sign, verify};
 ///
-/// let key = keygen([1u8; 32], [2u8; 32], [3u8; 32]);
+/// let key = keygen::<ActiveProfile, NUM_LAYERS>([1u8; 32], [2u8; 32], [3u8; 32]);
 /// let message = b"hello";
-/// let sig = sign(&key, message).ok_or(())?;
-/// assert!(verify(&key.public_key, message, &sig));
+/// let sig = sign::<ActiveProfile, NUM_LAYERS>(&key, message).ok_or(())?;
+/// assert!(verify::<ActiveProfile, NUM_CHAINS>(&key.public_key, message, &sig));
 /// # Ok(())
 /// # }
 /// ```
@@ -73,7 +74,12 @@ pub(crate) fn verify_raw<P: Profile, const NUM_CHAINS: usize>(
         return false;
     }
     let Some((fors_root, seed_tree_index, seed_leaf_index)) =
-        fors_c::verify_fors_c_and_return_root::<P>(pk_seed, hypertree_root, message, &signature.fors)
+        fors_c::verify_fors_c_and_return_root::<P>(
+            pk_seed,
+            hypertree_root,
+            message,
+            &signature.fors,
+        )
     else {
         return false;
     };
@@ -142,10 +148,11 @@ pub use verifier::SphincsPlusCVerifier;
 ///
 /// ```rust,no_run
 /// # fn main() -> Result<(), ()> {
+/// # use hashsigs_rs::profile_active::{ActiveProfile, NUM_CHAINS, NUM_LAYERS};
 /// use hashsigs_rs::sphincs_plus_c::{keygen, sign};
 ///
-/// let key = keygen([1u8; 32], [2u8; 32], [3u8; 32]);
-/// let sig = sign(&key, b"hello").ok_or(())?;
+/// let key = keygen::<ActiveProfile, NUM_LAYERS>([1u8; 32], [2u8; 32], [3u8; 32]);
+/// let sig = sign::<ActiveProfile, NUM_LAYERS>(&key, b"hello").ok_or(())?;
 /// assert!(!sig.to_bytes().is_empty());
 /// # Ok(())
 /// # }
@@ -190,9 +197,10 @@ pub fn sign_hash<P: Profile, const NUM_LAYERS: usize>(
 /// # Examples
 ///
 /// ```rust,no_run
+/// # use hashsigs_rs::profile_active::{ActiveProfile, NUM_CHAINS, NUM_LAYERS};
 /// use hashsigs_rs::sphincs_plus_c::keygen;
 ///
-/// let key = keygen([1u8; 32], [2u8; 32], [3u8; 32]);
+/// let key = keygen::<ActiveProfile, NUM_LAYERS>([1u8; 32], [2u8; 32], [3u8; 32]);
 /// assert_eq!(key.to_bytes().len(), 128);
 /// ```
 pub fn keygen<P: Profile, const NUM_LAYERS: usize>(
@@ -225,9 +233,10 @@ pub(crate) fn keygen_from_master_seed<P: Profile, const NUM_LAYERS: usize>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::profile_active::{ActiveProfile, NUM_CHAINS, NUM_LAYERS};
     #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
     use crate::hash::{derive32, hash_packed};
+    #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
+    use crate::profile_active::{ActiveProfile, NUM_CHAINS, NUM_LAYERS};
 
     /// Scheme hash suite of the active profile: what every test fixture below
     /// derives its seeds with.
@@ -253,7 +262,9 @@ mod tests {
         let message = hash_packed::<Suite>(&[b"sphincs-plus-c-rt-message"]);
         let sig = sign::<ActiveProfile, NUM_LAYERS>(&sk, &message).expect("sign");
         assert!(verify::<ActiveProfile, NUM_CHAINS>(&pk, &message, &sig));
-        assert!(verify_hash::<ActiveProfile, NUM_CHAINS>(&pk, &message, &sig));
+        assert!(verify_hash::<ActiveProfile, NUM_CHAINS>(
+            &pk, &message, &sig
+        ));
         // verifier key shape: pk_seed || hypertree_root
         let mut key = [0u8; 64];
         key[..32].copy_from_slice(pk.pk_seed.as_bytes());
