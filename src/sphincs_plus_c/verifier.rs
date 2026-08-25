@@ -130,11 +130,12 @@ mod tests {
     #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
     fn signed_stateless_envelope(seed_label: &[u8], hash: [u8; HASH_LEN]) -> ([u8; 64], Vec<u8>) {
         use crate::hash::hash_packed;
+        use crate::hash::suite::Keccak256Suite;
         use crate::sphincs_plus_c;
 
-        let sk_seed = hash_packed(&[b"sphincs-plus-c-verifier-sk", seed_label]);
-        let prf_seed = hash_packed(&[b"sphincs-plus-c-verifier-prf", seed_label]);
-        let pk_seed = hash_packed(&[b"sphincs-plus-c-verifier-pk", seed_label]);
+        let sk_seed = hash_packed::<Keccak256Suite>(&[b"sphincs-plus-c-verifier-sk", seed_label]);
+        let prf_seed = hash_packed::<Keccak256Suite>(&[b"sphincs-plus-c-verifier-prf", seed_label]);
+        let pk_seed = hash_packed::<Keccak256Suite>(&[b"sphincs-plus-c-verifier-pk", seed_label]);
         let sk = sphincs_plus_c::keygen(sk_seed, prf_seed, pk_seed);
         let signature = sphincs_plus_c::sign(&sk, &hash).expect("stateless sign");
         let envelope = signature.to_bytes();

@@ -34,6 +34,7 @@ use crate::abi::{
     collect_hash_words, encode_bytes, encode_dynamic_array, encode_tuple, word_from_u32, AbiReader,
     Field,
 };
+use crate::hash::suite::Keccak256Suite;
 use crate::hash::hash_node;
 use crate::profiles::NUM_WOTS_CHAINS;
 use crate::HASH_LEN;
@@ -73,7 +74,7 @@ pub(crate) fn wots_chain_walk(
     for step_offset in 0..walk.steps {
         let step = walk.start + step_offset;
         let addr = address_word(step);
-        out = hash_node(&[tag, pk_seed.as_ref(), addr.as_ref(), out.as_ref()]);
+        out = hash_node::<Keccak256Suite>(&[tag, pk_seed.as_ref(), addr.as_ref(), out.as_ref()]);
     }
     out
 }

@@ -39,6 +39,7 @@ use crate::abi::{
     collect_hash_words, encode_bytes, encode_dynamic_array, encode_tuple, word_from_u32, AbiReader,
     Field,
 };
+use crate::hash::suite::Keccak256Suite;
 use crate::hash::{fors_address_word, hash_node, hash_packed, read_bits32, read_bits64};
 use crate::profiles::{
     FORS_C_MAX_GRIND_COUNTER, FORS_TREE_HEIGHT, HYPERTREE_HEIGHT, NUM_FORS_TREES,
@@ -280,7 +281,7 @@ fn fors_public_key_hash(pk_seed: &[u8], roots: &[[u8; HASH_LEN]; SIGNED_TREES]) 
     for (part, root) in parts[2..].iter_mut().zip(roots) {
         *part = root.as_ref();
     }
-    hash_node(&parts)
+    hash_node::<Keccak256Suite>(&parts)
 }
 
 pub(crate) fn signer_fors_digest(
@@ -332,7 +333,7 @@ pub(crate) fn fors_leaf_secret(
 ) -> [u8; HASH_LEN] {
     let tree_leaf = (u64::from(coords.fors_tree) << FORS_TREE_HEIGHT) + u64::from(coords.leaf);
     let address_word = fors_address_word(coords.tree_index, coords.leaf_index, 0, tree_leaf);
-    hash_packed(&[
+    hash_packed::<Keccak256Suite>(&[
         b"fors-sk".as_ref(),
         sk_seed.as_ref(),
         pk_seed.as_ref(),
@@ -356,7 +357,7 @@ fn fors_leaf_hash_from_secret(
 ) -> [u8; HASH_LEN] {
     let tree_leaf = (u64::from(coords.fors_tree) << FORS_TREE_HEIGHT) + u64::from(coords.leaf);
     let address_word = fors_address_word(coords.tree_index, coords.leaf_index, 0, tree_leaf);
-    hash_node(&[
+    hash_node::<Keccak256Suite>(&[
         b"fors-leaf".as_ref(),
         pk_seed.as_ref(),
         address_word.as_ref(),
@@ -400,7 +401,7 @@ pub(crate) fn fors_tree_root_and_auth_path(
                 node_height,
                 parent_low_index,
             );
-            hash_node(&[
+            hash_node::<Keccak256Suite>(&[
                 b"fors-node".as_ref(),
                 pk_seed.as_ref(),
                 address_word.as_ref(),
@@ -440,7 +441,7 @@ fn fors_entry_root32(
                 node_height,
                 parent_low_index,
             );
-            hash_node(&[b"fors-node", pk_seed, &address_word, left, right])
+            hash_node::<Keccak256Suite>(&[b"fors-node", pk_seed, &address_word, left, right])
         },
     )
 }
@@ -453,7 +454,7 @@ fn hash_fors_leaf32(
     if pk_seed.len() != HASH_LEN || sk.len() != HASH_LEN {
         return None;
     }
-    Some(hash_node(&[b"fors-leaf", pk_seed, &address_word, sk]))
+    Some(hash_node::<Keccak256Suite>(&[b"fors-leaf", pk_seed, &address_word, sk]))
 }
 
 fn fors_digest(
@@ -491,7 +492,7 @@ fn fors_digest_bytes(
     let counter_be = counter.to_be_bytes();
     let mut out = [0u8; FORS_DIGEST_BYTES];
     if FORS_DIGEST_BYTES <= HASH_LEN {
-        let word = hash_packed(&[
+        let word = hash_packed::<Keccak256Suite>(&[
             b"fors-digest",
             pk_seed,
             hypertree_root,
@@ -509,7 +510,7 @@ fn fors_digest_bytes(
     let mut filled = 0usize;
     let mut block_counter = 0u32;
     while filled < FORS_DIGEST_BYTES {
-        let digest_word = hash_packed(&[
+        let digest_word = hash_packed::<Keccak256Suite>(&[
             b"fors-digest",
             pk_seed,
             hypertree_root,
@@ -671,7 +672,7 @@ pub(crate) fn sign_fors_c(signing_key: &Key, message: &[u8]) -> Option<SignedFor
     // This is the FORS-C local message randomizer. It is deterministic for the
     // same stateless PRF seed and message, matching the SPHINCS-style separation
     // between SK.seed-derived signing secrets and SK.prf-derived randomness.
-    let randomizer = hash_packed(&[
+    let randomizer = hash_packed::<Keccak256Suite>(&[
         b"fors-randomizer",
         signing_key.secret().as_prf_seed().as_bytes(),
         message,
@@ -821,6 +822,7 @@ mod measurement_tests {
     use super::super::key::{Key, PkSeed, PrfSeed, PrivateKey, PublicKey, Root, SkSeed};
     use super::{signer_fors_digest, SigningForsDigest};
     use crate::hash::hash_packed;
+    use crate::hash::suite::Keccak256Suite;
     use crate::profiles::FORS_C_MAX_GRIND_COUNTER;
     use crate::HASH_LEN;
 
@@ -830,7 +832,7 @@ mod measurement_tests {
             crate::profiles::PROFILE_NAME
         );
         fn d(domain: &[u8], seed: &[u8]) -> [u8; HASH_LEN] {
-            hash_packed(&[domain, seed, &[]])
+            hash_packed::<Keccak256Suite>(&[domain, seed, &[]])
         }
         let key = Key::new(
             PrivateKey::new(
@@ -920,11 +922,11 @@ mod measurement_tests {
 
         for i in 0..samples {
             let counter_bytes = i.to_be_bytes();
-            let message = hash_packed(&[
+            let message = hash_packed::<Keccak256Suite>(&[
                 b"fors-success-rate-measurement".as_ref(),
                 counter_bytes.as_ref(),
             ]);
-            let randomizer = hash_packed(&[
+            let randomizer = hash_packed::<Keccak256Suite>(&[
                 b"fors-randomizer".as_ref(),
                 signing_key.secret().as_prf_seed().as_bytes().as_ref(),
                 message.as_ref(),

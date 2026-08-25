@@ -27,6 +27,7 @@ use alloc::vec::Vec;
 use super::action_context::ActionContext;
 use super::key::{encode_stateful_public_key, Commitment, PublicKey};
 use super::signature::Signature;
+use crate::hash::suite::Keccak256Suite;
 use crate::hash::{derive32, word32};
 use crate::shrincs::uxmss;
 use crate::sphincs_plus_c::Signature as StatelessSignature;
@@ -162,9 +163,9 @@ impl ShrincsSigner {
         max: u32,
         stateless: sphincs_plus_c::Key,
     ) -> (Keys, PublicKey) {
-        let stateful_sk_seed = derive32(b"shrincs-stateful-sk-seed", seed, &[]);
-        let stateful_prf_seed = derive32(b"shrincs-stateful-prf-seed", seed, &[]);
-        let stateful_pk_seed = derive32(b"shrincs-stateful-pk-seed", seed, &[]);
+        let stateful_sk_seed = derive32::<Keccak256Suite>(b"shrincs-stateful-sk-seed", seed, &[]);
+        let stateful_prf_seed = derive32::<Keccak256Suite>(b"shrincs-stateful-prf-seed", seed, &[]);
+        let stateful_pk_seed = derive32::<Keccak256Suite>(b"shrincs-stateful-pk-seed", seed, &[]);
         let stateful_root = uxmss::stateful_subtree_root(
             &stateful_sk_seed,
             &stateful_pk_seed,
@@ -406,19 +407,19 @@ mod tests {
         use crate::profiles::HASH_TRUNC_LEN;
         let seed = b"128s stateful truncation seed";
         let max = 4u32;
-        let stateful_sk_seed = derive32(b"shrincs-stateful-sk-seed", seed, &[]);
-        let stateful_prf_seed = derive32(b"shrincs-stateful-prf-seed", seed, &[]);
-        let stateful_pk_seed = derive32(b"shrincs-stateful-pk-seed", seed, &[]);
+        let stateful_sk_seed = derive32::<Keccak256Suite>(b"shrincs-stateful-sk-seed", seed, &[]);
+        let stateful_prf_seed = derive32::<Keccak256Suite>(b"shrincs-stateful-prf-seed", seed, &[]);
+        let stateful_pk_seed = derive32::<Keccak256Suite>(b"shrincs-stateful-pk-seed", seed, &[]);
         let stateful_root = uxmss::stateful_subtree_root(
             &stateful_sk_seed,
             &stateful_pk_seed,
             INITIAL_STATEFUL_LEAF_INDEX,
             max,
         );
-        let pk_seed = derive32(b"shrincs-pk-seed", seed, &[]);
+        let pk_seed = derive32::<Keccak256Suite>(b"shrincs-pk-seed", seed, &[]);
         // Placeholder: a real hypertree root is infeasible here and irrelevant to
         // the stateful path, but it is still committed by the public key.
-        let hypertree_root = derive32(b"placeholder-hypertree-root", seed, &[]);
+        let hypertree_root = derive32::<Keccak256Suite>(b"placeholder-hypertree-root", seed, &[]);
 
         let stateful = uxmss::Key::new(
             uxmss::PrivateKey::new(
@@ -434,8 +435,8 @@ mod tests {
         );
         let stateless = sphincs_plus_c::Key::new(
             sphincs_plus_c::PrivateKey::new(
-                sphincs_plus_c::SkSeed::new(derive32(b"shrincs-stateless-sk-seed", seed, &[])),
-                sphincs_plus_c::PrfSeed::new(derive32(b"shrincs-stateless-prf-seed", seed, &[])),
+                sphincs_plus_c::SkSeed::new(derive32::<Keccak256Suite>(b"shrincs-stateless-sk-seed", seed, &[])),
+                sphincs_plus_c::PrfSeed::new(derive32::<Keccak256Suite>(b"shrincs-stateless-prf-seed", seed, &[])),
             ),
             sphincs_plus_c::PublicKey {
                 pk_seed: sphincs_plus_c::PkSeed::new(pk_seed),
@@ -449,7 +450,7 @@ mod tests {
             hypertree_root,
         );
         let expected = word32(&public_key.public_key_commitment).unwrap();
-        let message = hash_packed(&[b"128s stateful message"]);
+        let message = hash_packed::<Keccak256Suite>(&[b"128s stateful message"]);
 
         let signature =
             ShrincsSigner::sign_stateful_raw_at_leaf(&signing_key, 2, &message).unwrap();
@@ -524,7 +525,7 @@ mod tests {
     fn generated_stateful_signature_verifies() {
         let (mut signing_key, public_key) = fixture_or_stateful_only_key("stateful signer seed", 4);
         let expected = expected_key(&public_key);
-        let message = hash_packed(&[b"stateful test message"]);
+        let message = hash_packed::<Keccak256Suite>(&[b"stateful test message"]);
         let signature = ShrincsSigner::sign_stateful_raw(&mut signing_key, &message).unwrap();
 
         // Positive example matching `lib.rs`: a signer-generated signature must
@@ -560,7 +561,7 @@ mod tests {
         let (signing_key, public_key) =
             fixture_or_stateful_only_key("explicit leaf helper seed", 4);
         let expected = expected_key(&public_key);
-        let message = hash_packed(&[b"explicit leaf test message"]);
+        let message = hash_packed::<Keccak256Suite>(&[b"explicit leaf test message"]);
         let signature =
             ShrincsSigner::sign_stateful_raw_at_leaf(&signing_key, 2, &message).unwrap();
 
@@ -579,7 +580,7 @@ mod tests {
         use crate::sphincs_plus_c::{self};
         let (signing_key, public_key) =
             fixture_or_fresh_full_key("sphincs-plus-c hybrid cross-check", 4);
-        let message = hash_packed(&[b"sphincs-plus-c-hybrid-cross"]);
+        let message = hash_packed::<Keccak256Suite>(&[b"sphincs-plus-c-hybrid-cross"]);
         let spk = signing_key.stateless().clone();
         let sig = sphincs_plus_c::sign(&spk, &message).expect("independent sign");
         let pk = spk.public_key;
@@ -600,7 +601,7 @@ mod tests {
     #[test]
     fn generated_stateless_raw_signature_verifies() {
         let (signing_key, public_key) = ShrincsSigner::keygen(b"stateless signer seed", 2).unwrap();
-        let message = hash_packed(&[b"stateless test"]);
+        let message = hash_packed::<Keccak256Suite>(&[b"stateless test"]);
         let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &message).unwrap();
         let expected = expected_key(&public_key);
 
@@ -633,7 +634,7 @@ mod tests {
         use crate::verifier::{VerifierInterface, VerifyOutcome};
         let (mut keys, public_key) =
             ShrincsSigner::keygen(b"signer iface shrincs seed", 4).expect("keygen");
-        let hash = hash_packed(&[b"signer-interface-round-trip"]);
+        let hash = hash_packed::<Keccak256Suite>(&[b"signer-interface-round-trip"]);
         let key = public_key.public_key_commitment.clone();
 
         assert_eq!(
@@ -664,7 +665,7 @@ mod tests {
         let (mut signing_key, public_key) =
             fixture_or_stateful_only_key("stateful exhaustion seed", 1);
         let expected = expected_key(&public_key);
-        let message = hash_packed(&[b"first and only stateful signature"]);
+        let message = hash_packed::<Keccak256Suite>(&[b"first and only stateful signature"]);
 
         let signature = ShrincsSigner::sign_stateful_raw(&mut signing_key, &message).unwrap();
         assert_eq!(
@@ -688,8 +689,8 @@ mod tests {
         let (mut signing_key, public_key) =
             fixture_or_stateful_only_key("stateful negative seed", 4);
         let expected = expected_key(&public_key);
-        let message = hash_packed(&[b"stateful valid message"]);
-        let wrong_message = hash_packed(&[b"stateful wrong message"]);
+        let message = hash_packed::<Keccak256Suite>(&[b"stateful valid message"]);
+        let wrong_message = hash_packed::<Keccak256Suite>(&[b"stateful wrong message"]);
         let signature = ShrincsSigner::sign_stateful_raw(&mut signing_key, &message).unwrap();
         let verifier = ShrincsVerifier::new();
 
@@ -737,8 +738,8 @@ mod tests {
     #[test]
     fn stateless_signature_rejects_wrong_message_and_tampered_hypertree_path() {
         let (signing_key, public_key) = fixture_or_fresh_full_key("stateless negative seed", 2);
-        let message = hash_packed(&[b"stateless valid message"]);
-        let wrong_message = hash_packed(&[b"stateless wrong message"]);
+        let message = hash_packed::<Keccak256Suite>(&[b"stateless valid message"]);
+        let wrong_message = hash_packed::<Keccak256Suite>(&[b"stateless wrong message"]);
         let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &message).unwrap();
         let expected = expected_key(&public_key);
         let verifier = ShrincsVerifier::new();
@@ -766,7 +767,7 @@ mod tests {
     #[test]
     fn stateless_signature_rejects_malformed_lengths() {
         let (signing_key, public_key) = fixture_or_fresh_full_key("stateless malformed seed", 2);
-        let message = hash_packed(&[b"stateless malformed message"]);
+        let message = hash_packed::<Keccak256Suite>(&[b"stateless malformed message"]);
         let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &message).unwrap();
         let expected = expected_key(&public_key);
         let verifier = ShrincsVerifier::new();
@@ -799,7 +800,7 @@ mod tests {
         let (mut signing_key, mut public_key) =
             fixture_or_stateful_only_key("public key negative seed", 4);
         let expected = expected_key(&public_key);
-        let message = hash_packed(&[b"public key commitment message"]);
+        let message = hash_packed::<Keccak256Suite>(&[b"public key commitment message"]);
         let signature = ShrincsSigner::sign_stateful_raw(&mut signing_key, &message).unwrap();
 
         public_key.stateful_public_key[0] ^= 1;
@@ -952,7 +953,7 @@ mod tests {
         let (signing_key, public_key) = stateful_only_key(b"stateful boundary seed", budget);
         let expected = expected_key(&public_key);
         let verifier = ShrincsVerifier::new();
-        let message = hash_packed(&[b"stateful boundary message"]);
+        let message = hash_packed::<Keccak256Suite>(&[b"stateful boundary message"]);
 
         // Leaf 1: the first live leaf.
         let leaf_one = ShrincsSigner::sign_stateful_raw_at_leaf(&signing_key, 1, &message).unwrap();

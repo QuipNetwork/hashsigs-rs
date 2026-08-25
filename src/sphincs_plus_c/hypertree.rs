@@ -33,6 +33,7 @@ use super::key::Key;
 use crate::abi::{
     collect_hash_words, encode_bytes, encode_dynamic_array, encode_tuple, AbiReader, Field,
 };
+use crate::hash::suite::Keccak256Suite;
 use crate::hash::{
     base_w_digit, derive32, hash_node, hash_packed, hypertree_address_word, word32,
     wots_address_base, wots_chain_address_word, wots_digest_bytes,
@@ -214,7 +215,7 @@ pub(crate) fn stateless_wots_message_digest(
     counter: u32,
     message: &[u8; HASH_LEN],
 ) -> [u8; HASH_LEN] {
-    hash_packed(&[
+    hash_packed::<Keccak256Suite>(&[
         b"wots-c-msg".as_ref(),
         pk_seed.as_ref(),
         expected_pk_hash.as_ref(),
@@ -238,7 +239,7 @@ pub(crate) fn stateless_wots_public_key_hash(
     for (part, endpoint) in parts[2..used].iter_mut().zip(endpoints) {
         *part = endpoint.as_ref();
     }
-    hash_node(&parts[..used])
+    hash_node::<Keccak256Suite>(&parts[..used])
 }
 
 fn verify_wots_c32(
@@ -397,7 +398,7 @@ fn hypertree_root_from_path32(
         |level, parent_index, left, right| {
             let address_word =
                 hypertree_address_word(path.layer, path.tree_index, level, u64::from(parent_index));
-            hash_node(&[
+            hash_node::<Keccak256Suite>(&[
                 b"hypertree-node".as_ref(),
                 pk_seed.as_ref(),
                 address_word.as_ref(),
@@ -589,7 +590,7 @@ fn hypertree_layer_seeds(
     // still deriving the entire stateless tree from one SK.seed-style seed.
     let mut seeds = [[0u8; HASH_LEN]; NUM_HYPERTREE_LAYERS as usize];
     for (layer, seed) in seeds.iter_mut().enumerate() {
-        *seed = derive32(b"hypertree-layer-seed", stateless_sk_seed, &[layer as u8]);
+        *seed = derive32::<Keccak256Suite>(b"hypertree-layer-seed", stateless_sk_seed, &[layer as u8]);
     }
     seeds
 }
@@ -626,7 +627,7 @@ fn hypertree_subtree(
         },
         |node_height, parent_index, left, right| {
             let address_word = hypertree_address_word(layer, tree, node_height, parent_index);
-            hash_node(&[
+            hash_node::<Keccak256Suite>(&[
                 b"hypertree-node".as_ref(),
                 pk_seed.as_ref(),
                 address_word.as_ref(),
@@ -651,8 +652,8 @@ fn hypertree_leaf_seeds(
     let mut leaf_context = [0u8; 12];
     leaf_context[..8].copy_from_slice(&tree.to_be_bytes());
     leaf_context[8..].copy_from_slice(&leaf.to_be_bytes());
-    let leaf_seed = Zeroizing::new(derive32(b"hypertree-leaf-seed", layer_seed, &leaf_context));
-    let sk_seed = Zeroizing::new(derive32(b"hypertree-wots-sk-seed", &*leaf_seed, &[]));
+    let leaf_seed = Zeroizing::new(derive32::<Keccak256Suite>(b"hypertree-leaf-seed", layer_seed, &leaf_context));
+    let sk_seed = Zeroizing::new(derive32::<Keccak256Suite>(b"hypertree-wots-sk-seed", &*leaf_seed, &[]));
     (leaf_seed, sk_seed)
 }
 
@@ -721,7 +722,7 @@ fn sign_stateless_wots_c(
     // The WOTS-C challenge signs the current root for this layer. The expected
     // WOTS public-key hash is included in the digest, binding the challenge to
     // the key whose Merkle path is supplied next.
-    let randomizer = hash_packed(&[b"wots-c-randomizer", seeds.prf_seed, message]);
+    let randomizer = hash_packed::<Keccak256Suite>(&[b"wots-c-randomizer", seeds.prf_seed, message]);
     let digest_bytes = wots_digest_bytes();
 
     let result = crate::wots_c::grind_digit_sum(
@@ -771,7 +772,7 @@ fn sign_stateless_wots_c(
 fn stateless_wots_c_secret(sk_seed: &[u8; HASH_LEN], chain: u32) -> [u8; HASH_LEN] {
     // Each chain gets an independent starting secret derived from the WOTS secret
     // seed and the chain number.
-    hash_packed(&[b"wots-c-secret", sk_seed, &chain.to_be_bytes()])
+    hash_packed::<Keccak256Suite>(&[b"wots-c-secret", sk_seed, &chain.to_be_bytes()])
 }
 
 /// ADRS coordinates for one stateless WOTS-C chain step-walk.

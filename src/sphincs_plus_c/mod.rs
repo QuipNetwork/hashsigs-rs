@@ -199,9 +199,10 @@ pub fn keygen(
 /// serialized bytes — do NOT rename them. Shared with `ShrincsSigner::keygen`'s
 /// stateless half so the same master seed yields matching key material.
 pub(crate) fn keygen_from_master_seed(seed: &[u8]) -> key::Key {
-    let sk = crate::hash::derive32(b"shrincs-stateless-sk-seed", seed, &[]);
-    let prf = crate::hash::derive32(b"shrincs-stateless-prf-seed", seed, &[]);
-    let pk = crate::hash::derive32(b"shrincs-pk-seed", seed, &[]);
+    use crate::hash::suite::Keccak256Suite;
+    let sk = crate::hash::derive32::<Keccak256Suite>(b"shrincs-stateless-sk-seed", seed, &[]);
+    let prf = crate::hash::derive32::<Keccak256Suite>(b"shrincs-stateless-prf-seed", seed, &[]);
+    let pk = crate::hash::derive32::<Keccak256Suite>(b"shrincs-pk-seed", seed, &[]);
     keygen(sk, prf, pk)
 }
 
@@ -209,15 +210,17 @@ pub(crate) fn keygen_from_master_seed(seed: &[u8]) -> key::Key {
 mod tests {
     use super::*;
     #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
+    use crate::hash::suite::Keccak256Suite;
+    #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
     use crate::hash::{derive32, hash_packed};
 
     /// Independent keygen at the SPHINCS+C layer (no SHRINCS hybrid fields).
     #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
     fn independent_keygen(seed: &[u8]) -> (Key, PublicKey) {
         let key = keygen(
-            derive32(b"shrincs-stateless-sk-seed", seed, &[]),
-            derive32(b"shrincs-stateless-prf-seed", seed, &[]),
-            derive32(b"shrincs-pk-seed", seed, &[]),
+            derive32::<Keccak256Suite>(b"shrincs-stateless-sk-seed", seed, &[]),
+            derive32::<Keccak256Suite>(b"shrincs-stateless-prf-seed", seed, &[]),
+            derive32::<Keccak256Suite>(b"shrincs-pk-seed", seed, &[]),
         );
         let public_key = key.public_key;
         (key, public_key)
@@ -227,7 +230,7 @@ mod tests {
     #[test]
     fn sphincs_plus_c_sign_verify_round_trip() {
         let (sk, pk) = independent_keygen(b"sphincs-plus-c independent rt");
-        let message = hash_packed(&[b"sphincs-plus-c-rt-message"]);
+        let message = hash_packed::<Keccak256Suite>(&[b"sphincs-plus-c-rt-message"]);
         let sig = sign(&sk, &message).expect("sign");
         assert!(verify(&pk, &message, &sig));
         assert!(verify_hash(&pk, &message, &sig));
@@ -254,7 +257,7 @@ mod tests {
     fn sign_hash_round_trips_through_the_verifier_interface() {
         use crate::verifier::{VerifierInterface, VerifyOutcome};
         let (sk, pk) = independent_keygen(b"sphincs sign_hash round trip");
-        let hash = hash_packed(&[b"sphincs-plus-c sign_hash rt"]);
+        let hash = hash_packed::<Keccak256Suite>(&[b"sphincs-plus-c sign_hash rt"]);
         let signature = sign_hash(&sk, &hash).expect("sign_hash");
         let mut key = [0u8; 64];
         key[..32].copy_from_slice(pk.pk_seed.as_bytes());
@@ -293,7 +296,7 @@ mod tests {
         };
 
         let (sk, pk) = independent_keygen(b"sphincs-plus-c cu estimator");
-        let message = hash_packed(&[b"sphincs-plus-c-cu-message"]);
+        let message = hash_packed::<Keccak256Suite>(&[b"sphincs-plus-c-cu-message"]);
         let sig = sign(&sk, &message).expect("sign");
 
         metrics::reset();

@@ -18,14 +18,14 @@
 //! Hashing, packing, and bit-layout helpers.
 
 use crate::hash::backend;
-use crate::hash::suite::scheme_hash_parts;
+use crate::hash::suite::HashSuite;
 use crate::profiles::{HASH_TRUNC_LEN, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN};
 use crate::HASH_LEN;
 
 /// Scheme hash over the logical concatenation of `parts`. Hashing is vectored
 /// (incremental absorb / Solana `hashv`), so no packed buffer is allocated.
-pub(crate) fn hash_packed(parts: &[&[u8]]) -> [u8; HASH_LEN] {
-    scheme_hash_parts(parts)
+pub(crate) fn hash_packed<S: HashSuite>(parts: &[&[u8]]) -> [u8; HASH_LEN] {
+    S::scheme_hash_parts(parts)
 }
 
 /// EVM-domain keccak over preimage parts (action hashes, commitments).
@@ -41,16 +41,16 @@ pub(crate) fn mask_hash(mut hash: [u8; HASH_LEN]) -> [u8; HASH_LEN] {
     hash
 }
 
-pub(crate) fn hash_node(parts: &[&[u8]]) -> [u8; HASH_LEN] {
-    mask_hash(hash_packed(parts))
+pub(crate) fn hash_node<S: HashSuite>(parts: &[&[u8]]) -> [u8; HASH_LEN] {
+    mask_hash(hash_packed::<S>(parts))
 }
 
 /// Small deterministic KDF: `hash_packed(&[domain, seed, data])`. Domain tags
 /// separate the different seeds derived from the same master input. Shared by
 /// SHRINCS key generation and the SPHINCS+C hypertree layer-seed derivation so
 /// the two sides can't drift apart.
-pub(crate) fn derive32(domain: &[u8], seed: &[u8], data: &[u8]) -> [u8; HASH_LEN] {
-    hash_packed(&[domain, seed, data])
+pub(crate) fn derive32<S: HashSuite>(domain: &[u8], seed: &[u8], data: &[u8]) -> [u8; HASH_LEN] {
+    hash_packed::<S>(&[domain, seed, data])
 }
 
 pub(crate) fn word32(input: &[u8]) -> Option<[u8; HASH_LEN]> {
@@ -117,6 +117,22 @@ fn read_bits(input: &[u8], start_bit: usize, bit_len: u32) -> Option<u64> {
 mod tests {
     use super::*;
     use crate::hash::address::{address_word32, AddressWord32};
+    use crate::hash::suite::{Keccak256Suite, Sha2256Suite};
+
+    #[test]
+    fn hash_packed_follows_the_suite_type() {
+        let parts: &[&[u8]] = &[b"domain", b"payload"];
+        assert_ne!(
+            hash_packed::<Keccak256Suite>(parts),
+            hash_packed::<Sha2256Suite>(parts)
+        );
+    }
+
+    #[test]
+    fn evm_domain_hash_stays_on_keccak() {
+        let parts: &[&[u8]] = &[b"domain", b"payload"];
+        assert_eq!(keccak_packed(parts), hash_packed::<Keccak256Suite>(parts));
+    }
 
     #[test]
     fn address_word_matches_solidity_layout() {

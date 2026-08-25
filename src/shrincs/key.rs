@@ -29,6 +29,7 @@
 use alloc::vec::Vec;
 
 use crate::abi::{encode_bytes, encode_tuple, AbiReader, Field};
+use crate::hash::suite::Keccak256Suite;
 use crate::hash::{derive32, keccak_packed, word32};
 use crate::profiles::PROFILE_NAME;
 use crate::shrincs::uxmss::{
@@ -231,9 +232,9 @@ impl Keys {
     /// fresh entropy.
     pub fn reset(&mut self, new_seed: &[u8]) {
         let max = self.stateful.public_key().max_signatures;
-        let sk = derive32(b"shrincs-stateful-sk-seed", new_seed, &[]);
-        let prf = derive32(b"shrincs-stateful-prf-seed", new_seed, &[]);
-        let pk = derive32(b"shrincs-stateful-pk-seed", new_seed, &[]);
+        let sk = derive32::<Keccak256Suite>(b"shrincs-stateful-sk-seed", new_seed, &[]);
+        let prf = derive32::<Keccak256Suite>(b"shrincs-stateful-prf-seed", new_seed, &[]);
+        let pk = derive32::<Keccak256Suite>(b"shrincs-stateful-pk-seed", new_seed, &[]);
         let root = stateful_subtree_root(&sk, &pk, INITIAL_STATEFUL_LEAF_INDEX, max);
         self.stateful = uxmss::Key::new(
             uxmss::PrivateKey::new(uxmss::SkSeed::new(sk), uxmss::PrfSeed::new(prf)),

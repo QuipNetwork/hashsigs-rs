@@ -25,6 +25,7 @@
 use alloc::vec::Vec;
 
 use super::signature::Signature;
+use crate::hash::suite::Keccak256Suite;
 use crate::hash::{base_w16_digit, hash_node, hash_packed, word32};
 use crate::wots_c::{wots_chain_walk, ChainWalk, WOTS_C_MAX_GRIND_COUNTER};
 use crate::HASH_LEN;
@@ -121,7 +122,7 @@ pub(crate) fn stateful_parent_hash(
     left: [u8; HASH_LEN],
     right: [u8; HASH_LEN],
 ) -> [u8; HASH_LEN] {
-    hash_node(&[
+    hash_node::<Keccak256Suite>(&[
         b"uxmss-node".as_ref(),
         pk_seed.as_ref(),
         left_leaf_index.to_be_bytes().as_ref(),
@@ -131,7 +132,7 @@ pub(crate) fn stateful_parent_hash(
 }
 
 pub(crate) fn stateful_empty_tail(pk_seed: &[u8; HASH_LEN], leaf_index: u32) -> [u8; HASH_LEN] {
-    hash_packed(&[
+    hash_packed::<Keccak256Suite>(&[
         b"uxmss-empty-tail".as_ref(),
         pk_seed.as_ref(),
         leaf_index.to_be_bytes().as_ref(),
@@ -144,7 +145,7 @@ fn compact_stateful_wots_public_key_from_signature(
     message: &[u8],
     signature: &Signature,
 ) -> Option<[u8; HASH_LEN]> {
-    let digest = hash_packed(&[
+    let digest = hash_packed::<Keccak256Suite>(&[
         b"uxmss-wots-digits".as_ref(),
         pk_seed.as_ref(),
         leaf_index.to_be_bytes().as_ref(),
@@ -187,7 +188,7 @@ fn compact_stateful_wots_public_key_from_signature(
     for (part, segment) in parts[3..].iter_mut().zip(segments.iter()) {
         *part = segment.as_ref();
     }
-    Some(hash_node(&parts))
+    Some(hash_node::<Keccak256Suite>(&parts))
 }
 
 fn root_from_unbalanced_path(
@@ -653,7 +654,7 @@ fn sign_stateful_wots_c(
     // The randomizer is one fixed 32-byte value for this leaf/message pair. The
     // counter changes the digest derived from that randomizer; the randomizer
     // itself does not change inside the grinding loop.
-    let randomizer = hash_packed(&[
+    let randomizer = hash_packed::<Keccak256Suite>(&[
         b"uxmss-wots-randomizer",
         prf_seed,
         &leaf_index.to_be_bytes(),
@@ -664,7 +665,7 @@ fn sign_stateful_wots_c(
         WOTS_C_MAX_GRIND_COUNTER,
         crate::wots_c::TARGET_SUM,
         |counter| {
-            let digest = hash_packed(&[
+            let digest = hash_packed::<Keccak256Suite>(&[
                 b"uxmss-wots-digits",
                 pk_seed,
                 &leaf_index.to_be_bytes(),
@@ -726,7 +727,7 @@ fn stateful_chain_secret(
     // The private chain start is deterministic from the stateful secret seed,
     // public seed, leaf, and chain. Including the public seed keeps the same
     // secret seed from producing interchangeable chains under a different key.
-    hash_packed(&[
+    hash_packed::<Keccak256Suite>(&[
         b"uxmss-wots-chain-secret",
         sk_seed,
         pk_seed,
@@ -775,7 +776,7 @@ fn stateful_wots_pk_hash(
     for (part, endpoint) in parts[3..].iter_mut().zip(endpoints.iter()) {
         *part = endpoint.as_ref();
     }
-    hash_node(&parts)
+    hash_node::<Keccak256Suite>(&parts)
 }
 
 fn stateful_auth_path(
@@ -863,9 +864,9 @@ mod stateful_core_tests {
     /// Build a small-tree stateful key directly, bypassing the stateless half
     /// entirely (uxmss has no dependency on sphincs_plus_c).
     fn test_key(seed_label: &[u8], max_signatures: u32) -> Key {
-        let sk_seed = derive32(b"test-uxmss-sk-seed", seed_label, &[]);
-        let prf_seed = derive32(b"test-uxmss-prf-seed", seed_label, &[]);
-        let pk_seed = derive32(b"test-uxmss-pk-seed", seed_label, &[]);
+        let sk_seed = derive32::<Keccak256Suite>(b"test-uxmss-sk-seed", seed_label, &[]);
+        let prf_seed = derive32::<Keccak256Suite>(b"test-uxmss-prf-seed", seed_label, &[]);
+        let pk_seed = derive32::<Keccak256Suite>(b"test-uxmss-pk-seed", seed_label, &[]);
         let root = stateful_subtree_root(
             &sk_seed,
             &pk_seed,

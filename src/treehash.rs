@@ -225,6 +225,7 @@ pub(crate) fn naive_tree_root_and_auth_path(
 mod tests {
     use super::*;
     use crate::hash::hash_node;
+    use crate::hash::suite::Keccak256Suite;
     #[cfg(not(target_arch = "wasm32"))]
     use proptest::prelude::*;
 
@@ -234,7 +235,7 @@ mod tests {
         left: [u8; HASH_LEN],
         right: [u8; HASH_LEN],
     ) -> [u8; HASH_LEN] {
-        hash_node(&[
+        hash_node::<Keccak256Suite>(&[
             b"treehash-test-node".as_ref(),
             &node_height.to_be_bytes(),
             &parent_index.to_be_bytes(),
@@ -244,7 +245,7 @@ mod tests {
     }
 
     fn test_leaf(seed: u64, index: u32) -> [u8; HASH_LEN] {
-        hash_node(&[
+        hash_node::<Keccak256Suite>(&[
             b"treehash-test-leaf".as_ref(),
             &seed.to_be_bytes(),
             &index.to_be_bytes(),
