@@ -110,3 +110,18 @@ This file records changes to this project, in the
   `sphincs_plus_c::LayerSignature`, `fors_c::Entry`, `fors_c::Signature`, and
   `sphincs_plus_c::Signature`. Callers must use the explicit
   `from_bytes::<P>` constructor for the profile they target.
+
+### Fixed
+
+- The `hashsigs` wheel carries a `manylinux` platform tag again. The build
+  moved from the maturin command line to `python -m build`, which builds the
+  wheel from the sdist and so proves the sdist is complete. The two entry
+  points disagree on one default. The command line tags the wheel for the
+  lowest compatible `manylinux`. The PEP 517 hook it exposes defaults to
+  `--compatibility off`, which produces a bare `linux_x86_64` tag. PyPI
+  rejects that tag with a 400, because it makes no promise about the glibc the
+  extensions need. `py/hashsigs_build.py` now passes `--compatibility pypi`,
+  and every build path inherits it. `bin/check-wheel.py` checks the platform
+  tag and the extension count. The release job, the merge request gate, and
+  `make check-python-dists` all call it, so a wheel PyPI would reject now
+  fails on a merge request instead of at upload.

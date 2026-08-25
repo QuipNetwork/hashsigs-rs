@@ -74,7 +74,7 @@ check-npm-dists:
 # sdist, so this covers the source-install path as well as the wheel.
 check-python-dists:
 	python3 -m build --outdir target/dist .
-	python3 -c "import zipfile,glob; z=zipfile.ZipFile(glob.glob('target/dist/*.whl')[0]); n=[x for x in z.namelist() if x.endswith('.so')]; assert len(n)==7, f'wheel built from the sdist has {len(n)} extensions, expected 7'"
+	python3 bin/check-wheel.py target/dist
 	python3 -m pip install --quiet --force-reinstall target/dist/*.whl
 	cd py && python3 -m pytest tests/ -q
 

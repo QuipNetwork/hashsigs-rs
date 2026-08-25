@@ -237,16 +237,12 @@ publish-pypi:
       # No flags: build the sdist, then build the wheel from it. The wheel
       # PyPI receives is therefore one a source install could reproduce.
       /tmp/pypi-venv/bin/python -m build --outdir /tmp/dist .
-      # Refuse to upload a wheel that lost its extensions: the failure is
-      # silent otherwise, and a published filename is spent forever.
-      /tmp/pypi-venv/bin/python - <<'PY'
-      import glob, sys, zipfile
-      wheel = glob.glob("/tmp/dist/*.whl")[0]
-      names = [n for n in zipfile.ZipFile(wheel).namelist() if n.endswith(".so")]
-      if len(names) != 7:
-          sys.exit(f"{wheel} carries {len(names)} extensions, expected 7: {names}")
-      print(f"{wheel} carries every extension")
-      PY
+      # Refuse to upload a wheel that lost its extensions or that PyPI will
+      # reject on its platform tag. Both failures are silent until too late:
+      # a published filename is spent forever, and a bare linux tag 400s only
+      # after the upload starts. Shared with `make check-python-dists` so the
+      # publish path and the dry-run gate agree on what a good wheel is.
+      /tmp/pypi-venv/bin/python bin/check-wheel.py /tmp/dist
       TWINE_USERNAME=__token__ TWINE_PASSWORD="$MATURIN_PYPI_TOKEN" \
         /tmp/pypi-venv/bin/twine upload --non-interactive /tmp/dist/*
 

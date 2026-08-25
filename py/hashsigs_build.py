@@ -14,7 +14,8 @@ checkout to lean on, so the staging has to be plain Python that works from the
 sdist layout alone. That is why the profile table lives in ``py/profiles.json``
 rather than in ``bin/packages.sh``: the sdist has no ``bin/``.
 
-Everything else is delegated to maturin unchanged.
+Everything else is delegated to maturin unchanged, except the linux platform
+tag: see ``_with_pypi_compatibility``.
 
 Requires a Rust toolchain on the build machine, which is inherent to installing
 a Rust extension from source.
@@ -358,9 +359,33 @@ def stage() -> None:
 # would ship compiled objects in a source distribution.
 
 
+# maturin's PEP 517 hook defaults to `--compatibility off`, which tags the
+# wheel `linux_x86_64`. PyPI rejects that tag outright: a bare linux tag makes
+# no promise about the glibc the extensions need. The maturin *CLI* defaults
+# the other way, so `maturin publish` produced an uploadable wheel and
+# `python -m build` silently did not. Every wheel this backend builds is meant
+# for PyPI, so the default belongs here rather than in each caller's flags.
+#
+# `pypi` rather than a pinned `manylinux_2_34`: it states the requirement
+# (must be uploadable) instead of hardcoding a glibc floor that tracks whichever
+# image the release runner happens to use.
+def _with_pypi_compatibility(config_settings):
+    settings = dict(config_settings or {})
+    # A caller that passes build args is driving the platform tag on purpose --
+    # cross-compiling, or targeting musl. Do not second-guess it.
+    if "maturin.build-args" in settings or "build-args" in settings:
+        return settings
+    if os.getenv("MATURIN_PEP517_ARGS"):
+        return settings
+    settings["maturin.build-args"] = ["--compatibility", "pypi"]
+    return settings
+
+
 def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
     stage()
-    return _maturin_build_wheel(wheel_directory, config_settings, metadata_directory)
+    return _maturin_build_wheel(
+        wheel_directory, _with_pypi_compatibility(config_settings), metadata_directory
+    )
 
 
 def build_sdist(sdist_directory, config_settings=None):
