@@ -59,3 +59,10 @@ const _: () = assert!(
 
 /// `shrincs-256s-sha2` instantiated.
 pub type Shrincs = crate::shrincs::ShrincsCore<Profile256sSha2, 64, 8>;
+
+/// Drift guard for the literals above: forces `assert_widths` to run against
+/// this alias's own `64, 8`, independently of `Profile256sSha2::NUM_WOTS_CHAINS`
+/// and `NUM_HYPERTREE_LAYERS`, so a hand-edit to either side that goes out of
+/// sync is a compile error rather than a latent bug caught only when
+/// `Shrincs::new()` happens to be called.
+const _: () = crate::profile::assert_widths::<Profile256sSha2, 64, 8>();

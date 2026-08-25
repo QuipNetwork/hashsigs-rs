@@ -60,10 +60,15 @@ pub const NUM_CHAINS: usize = <SelectedProfile as Profile>::NUM_WOTS_CHAINS as u
 /// `SelectedProfile::NUM_HYPERTREE_LAYERS` as an array width.
 pub const NUM_LAYERS: usize = <SelectedProfile as Profile>::NUM_HYPERTREE_LAYERS as usize;
 
-/// Compile-time proof that the two width constants above agree with the trait
-/// constants, in the same associated-const form the core types use.
-const _: () = crate::profile::assert_widths::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>();
-
+// NUM_CHAINS and NUM_LAYERS above are defined directly from
+// `<SelectedProfile as Profile>::NUM_WOTS_CHAINS`/`NUM_HYPERTREE_LAYERS`, so
+// they cannot disagree with those trait constants by construction -- an
+// `assert_widths` check against them here would compare a value to itself
+// and could never fail. The real drift risk is each profile module's own
+// alias, which repeats the widths as independent literals
+// (`pub type Shrincs = ShrincsCore<P, N, M>`); that is guarded per profile,
+// beside each alias, in `src/profiles/p*.rs`.
+//
 // The `PROFILE_NAME`/`PROFILE_ID` agreement guard now lives per profile, in
 // each profile module, so it covers every compiled profile rather than only the
 // selected one.

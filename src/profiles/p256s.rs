@@ -59,3 +59,10 @@ const _: () = assert!(
 /// `NUM_WOTS_CHAINS` and `NUM_HYPERTREE_LAYERS` as `usize` array widths;
 /// `assert_widths` rejects a mismatch at compile time.
 pub type Shrincs = crate::shrincs::ShrincsCore<Profile256s, 64, 8>;
+
+/// Drift guard for the literals above: forces `assert_widths` to run against
+/// this alias's own `64, 8`, independently of `Profile256s::NUM_WOTS_CHAINS`
+/// and `NUM_HYPERTREE_LAYERS`, so a hand-edit to either side that goes out of
+/// sync is a compile error rather than a latent bug caught only when
+/// `Shrincs::new()` happens to be called.
+const _: () = crate::profile::assert_widths::<Profile256s, 64, 8>();
