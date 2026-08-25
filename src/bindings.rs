@@ -19,7 +19,8 @@
 //!
 //! Every function here is generic over `P: Profile` plus that profile's two
 //! array widths, and none of them mention any binding framework. The concrete
-//! exports are stamped out over one profile by [`crate::wasm::export`] for
+//! exports are stamped out over one profile by the `crate::wasm::export` module
+//! (private, and compiled only under the `wasm-bindings` feature) for
 //! WebAssembly and by the `hashsigs-py-common` crate for Python; this module
 //! is where the logic lives exactly once.
 //!

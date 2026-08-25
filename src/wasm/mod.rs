@@ -27,7 +27,8 @@
 //!
 //! It is split in two. [`crate::bindings`] holds every operation generic over
 //! `P: Profile` and that profile's two array widths, with no `wasm_bindgen` in
-//! sight, shared with the Python bindings. [`export`] holds the macro that
+//! sight, shared with the Python bindings. The private `export` submodule holds
+//! the macro that
 //! stamps those operations out as concrete `#[wasm_bindgen]` items for one
 //! profile. This module invokes that macro exactly once, over the
 //! build-selected profile.
