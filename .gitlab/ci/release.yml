@@ -171,11 +171,15 @@ publish-crates:
         https://crates.io/api/v1/trusted_publishing/tokens \
         || echo "WARN: token revocation failed; the token expires within 30 minutes"
 
-# Publish the Python wheel + sdist via PyPI Trusted Publishing (OIDC). The
-# py/ crate is currently a stub that exposes only __version__; publishing it
-# is deliberate, to prove this pipe end to end before the bindings land.
-# Every stub release is a prerelease, so default pip resolution never picks
-# it. maturin both builds and uploads, so no twine is needed.
+# Publish the Python wheel via PyPI Trusted Publishing (OIDC). maturin both
+# builds and uploads, so no twine is needed.
+#
+# WHEEL ONLY (--no-sdist). The wheel carries one compiled extension per
+# profile, staged into the package tree by bin/build-python.sh before maturin
+# runs. maturin knows nothing about that script, so an sdist would rebuild
+# with the root extension alone and install a package whose `hashsigs._ext`
+# is empty -- broken at import, not at build. Publishing no sdist is better
+# than publishing one that installs broken.
 publish-pypi:
   stage: publish
   image: rust:1.95.0
@@ -231,7 +235,12 @@ publish-pypi:
       # trimmed workspace forces cargo to prune the packaged Cargo.lock, and
       # --locked forbids that. tag-gate and release:validate already enforce
       # the lock on this SHA.
-      /tmp/pypi-venv/bin/maturin publish -m py/Cargo.toml --non-interactive
+      # Build the six per-profile extensions and stage them into the package
+      # tree. Without this the wheel ships only the version module.
+      bash bin/build-python.sh
+      # --release: maturin build/publish default to debug, and a debug
+      # extension must never reach PyPI.
+      /tmp/pypi-venv/bin/maturin publish --release -m py/Cargo.toml --non-interactive --no-sdist
 
 # The dry-run gate. Runs on merge request pipelines, on the default branch,
 # and on every tag, using the same build path the publish jobs use. A push to

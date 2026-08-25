@@ -180,3 +180,32 @@ ts-conformance:
     - export PATH="${CARGO_HOME}/bin:${PATH}"
     - cd ts && npm ci
     - npm run build
+
+# The Python bindings, against the BUILT wheel rather than the source tree:
+# the per-profile extensions only exist once bin/build-python.sh has staged
+# them, and the package resolves its profile manifest from the installed
+# location.
+#
+# Like the wasm build, this compiles one artifact per profile, so the cargo
+# step costs roughly six times a single-profile build. The suite drives the
+# full signing surface on the default profile, checks profile identity on all
+# six, and signs on the 256s pair only -- 128s keygen costs tens of seconds.
+py-tests:
+  stage: test
+  image: rust:1.95.0
+  extends: .rust-cache
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq python3-venv > /dev/null
+    - python3 -m venv /tmp/py-venv
+    - /tmp/py-venv/bin/pip install --quiet maturin==1.14.1 pytest
+  script:
+    - bash bin/build-python.sh
+    # --release: maturin defaults to a debug build, which would ship an
+    # unoptimized extension and test signing at a fraction of real speed.
+    - /tmp/py-venv/bin/maturin build --release -m py/Cargo.toml --out /tmp/wheels
+    - /tmp/py-venv/bin/pip install --quiet --force-reinstall /tmp/wheels/*.whl
+    # Run from py/ so the installed package is imported, never py/python/.
+    - cd py && /tmp/py-venv/bin/python -m pytest tests/ -q

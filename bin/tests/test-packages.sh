@@ -75,6 +75,21 @@ for profile in "${PROFILES[@]}"; do
   fi
   seen_names+=("${shrincs_name}")
 
+  # Python: the module stem the wheel exposes, and the crate that builds its
+  # extension. One Cargo package builds at most one cdylib, so a profile with
+  # no crate of its own has no extension and cannot ship.
+  py_module="$(PROFILE_PYTHON_MODULE "${profile}")"
+  [[ -n "${py_module}" ]] ||
+    fail "no python module mapped for profile ${profile}"
+  py_crate_dir="${SCRIPT_DIR}/../py/profiles/${py_module}"
+  [[ -f "${py_crate_dir}/Cargo.toml" ]] ||
+    fail "profile ${profile} maps to python module ${py_module}, but ${py_crate_dir}/Cargo.toml does not exist"
+  grep -q "^name = \"${ext_module_name:=_hashsigs_${py_module}}\"" "${py_crate_dir}/Cargo.toml" ||
+    fail "${py_crate_dir}/Cargo.toml must declare [lib] name = \"_hashsigs_${py_module}\"; CPython imports an extension by matching the file stem to its init symbol"
+  grep -q "\"${feature}\"" "${py_crate_dir}/Cargo.toml" ||
+    fail "${py_crate_dir}/Cargo.toml does not enable ${feature}, so it would build some other profile under the ${profile} name"
+  unset ext_module_name
+
   module="$(PROFILE_RUST_MODULE "${profile}")"
   [[ -n "${module}" ]] || fail "no rust module mapped for profile ${profile}"
   module_file="${SCRIPT_DIR}/../src/profiles/${module##*::}.rs"

@@ -18,7 +18,7 @@
 //! The `#[wasm_bindgen]` export layer, stamped out over one profile.
 //!
 //! [`wasm_profile_surface!`] emits the concrete exported functions and structs
-//! that delegate to [`crate::wasm::core`]. It exists because
+//! that delegate to [`crate::bindings`]. It exists because
 //! `#[wasm_bindgen]` cannot annotate a generic function: the export boundary
 //! demands concrete monomorphic types, so a profile-generic surface has to be
 //! monomorphized somewhere, and a macro is the way to do that without copying
@@ -78,7 +78,7 @@ macro_rules! wasm_profile_surface {
 
             #[wasm_bindgen(getter, js_name = publicKey)]
             pub fn public_key(&self) -> alloc::vec::Vec<u8> {
-                $crate::wasm::core::encode_sphincs_plus_c_public_key(&self.signing_key)
+                $crate::bindings::encode_sphincs_plus_c_public_key(&self.signing_key)
             }
         }
 
@@ -99,7 +99,7 @@ macro_rules! wasm_profile_surface {
         #[wasm_bindgen(js_name = sphincsPlusCKeygen)]
         pub fn sphincs_plus_c_keygen(seed: &[u8]) -> Result<WasmSphincsPlusCKeys, JsValue> {
             let signing_key =
-                $crate::wasm::core::sphincs_plus_c_keygen::<$profile, PROFILE_NUM_LAYERS>(seed)
+                $crate::bindings::sphincs_plus_c_keygen::<$profile, PROFILE_NUM_LAYERS>(seed)
                     .map_err($crate::wasm::js_error)?;
             Ok(WasmSphincsPlusCKeys { signing_key })
         }
@@ -121,7 +121,7 @@ macro_rules! wasm_profile_surface {
             message: &[u8],
             secret_key: &[u8],
         ) -> Result<alloc::vec::Vec<u8>, JsValue> {
-            $crate::wasm::core::sphincs_plus_c_sign::<$profile, PROFILE_NUM_LAYERS>(
+            $crate::bindings::sphincs_plus_c_sign::<$profile, PROFILE_NUM_LAYERS>(
                 message, secret_key,
             )
             .map_err($crate::wasm::js_error)
@@ -135,7 +135,7 @@ macro_rules! wasm_profile_surface {
         /// plain boolean `verify`.
         #[wasm_bindgen(js_name = sphincsPlusCVerify)]
         pub fn sphincs_plus_c_verify(signature: &[u8], message: &[u8], public_key: &[u8]) -> bool {
-            $crate::wasm::core::sphincs_plus_c_verify::<$profile, PROFILE_NUM_CHAINS>(
+            $crate::bindings::sphincs_plus_c_verify::<$profile, PROFILE_NUM_CHAINS>(
                 signature, message, public_key,
             )
         }
@@ -155,12 +155,12 @@ macro_rules! wasm_profile_surface {
         impl WasmShrincsKeys {
             #[wasm_bindgen(getter, js_name = secretKey)]
             pub fn secret_key(&self) -> alloc::vec::Vec<u8> {
-                $crate::wasm::core::serialize_shrincs_signing_key(&self.signing_key)
+                $crate::bindings::serialize_shrincs_signing_key(&self.signing_key)
             }
 
             #[wasm_bindgen(getter, js_name = publicKey)]
             pub fn public_key(&self) -> alloc::vec::Vec<u8> {
-                $crate::wasm::core::encode_public_key_flat(&self.public_key)
+                $crate::bindings::encode_public_key_flat(&self.public_key)
             }
 
             #[wasm_bindgen(getter, js_name = publicKeyCommitment)]
@@ -173,7 +173,7 @@ macro_rules! wasm_profile_surface {
             /// take. The stateless half of the hybrid key.
             #[wasm_bindgen(getter, js_name = statelessPublicKey)]
             pub fn stateless_public_key(&self) -> alloc::vec::Vec<u8> {
-                $crate::wasm::core::encode_stateless_public_key(&self.public_key)
+                $crate::bindings::encode_stateless_public_key(&self.public_key)
             }
         }
 
@@ -197,7 +197,7 @@ macro_rules! wasm_profile_surface {
             seed: &[u8],
             max_signatures: u32,
         ) -> Result<WasmShrincsKeys, JsValue> {
-            let (signing_key, public_key) = $crate::wasm::core::shrincs_keygen::<
+            let (signing_key, public_key) = $crate::bindings::shrincs_keygen::<
                 $profile,
                 PROFILE_NUM_CHAINS,
                 PROFILE_NUM_LAYERS,
@@ -226,7 +226,7 @@ macro_rules! wasm_profile_surface {
         ///   recomputed roots do not match the seeds
         #[wasm_bindgen(js_name = shrincsImportSigningKey)]
         pub fn shrincs_import_signing_key(secret_key: &[u8]) -> Result<WasmShrincsKeys, JsValue> {
-            let (signing_key, public_key) = $crate::wasm::core::import_secret_key::<
+            let (signing_key, public_key) = $crate::bindings::import_secret_key::<
                 $profile,
                 PROFILE_NUM_CHAINS,
                 PROFILE_NUM_LAYERS,
@@ -263,7 +263,7 @@ macro_rules! wasm_profile_surface {
             message: &[u8],
             secret_key: &mut [u8],
         ) -> Result<alloc::vec::Vec<u8>, JsValue> {
-            $crate::wasm::core::shrincs_sign::<$profile, PROFILE_NUM_CHAINS, PROFILE_NUM_LAYERS>(
+            $crate::bindings::shrincs_sign::<$profile, PROFILE_NUM_CHAINS, PROFILE_NUM_LAYERS>(
                 message, secret_key,
             )
             .map_err($crate::wasm::js_error)
@@ -285,7 +285,7 @@ macro_rules! wasm_profile_surface {
             message: &[u8],
             secret_key: &[u8],
         ) -> Result<alloc::vec::Vec<u8>, JsValue> {
-            $crate::wasm::core::shrincs_sign_stateless::<
+            $crate::bindings::shrincs_sign_stateless::<
                 $profile,
                 PROFILE_NUM_CHAINS,
                 PROFILE_NUM_LAYERS,
@@ -306,7 +306,7 @@ macro_rules! wasm_profile_surface {
             message: &[u8],
             public_key_commitment: &[u8],
         ) -> bool {
-            $crate::wasm::core::shrincs_verify::<$profile, PROFILE_NUM_CHAINS>(
+            $crate::bindings::shrincs_verify::<$profile, PROFILE_NUM_CHAINS>(
                 signature,
                 message,
                 public_key_commitment,
@@ -345,7 +345,7 @@ macro_rules! wasm_profile_surface {
         /// - `ERR_IMPORT_INVALID` when the secret fails root/counter validation
         #[wasm_bindgen(js_name = shrincsReset)]
         pub fn shrincs_reset(secret_key: &mut [u8], new_seed: &[u8]) -> Result<(), JsValue> {
-            $crate::wasm::core::shrincs_reset::<$profile, PROFILE_NUM_CHAINS, PROFILE_NUM_LAYERS>(
+            $crate::bindings::shrincs_reset::<$profile, PROFILE_NUM_CHAINS, PROFILE_NUM_LAYERS>(
                 secret_key, new_seed,
             )
             .map_err($crate::wasm::js_error)
@@ -366,7 +366,7 @@ macro_rules! wasm_profile_surface {
         pub fn shrincs_compute_public_key_commitment(
             secret_key: &[u8],
         ) -> Result<alloc::vec::Vec<u8>, JsValue> {
-            $crate::wasm::core::shrincs_compute_public_key_commitment::<
+            $crate::bindings::shrincs_compute_public_key_commitment::<
                 $profile,
                 PROFILE_NUM_CHAINS,
                 PROFILE_NUM_LAYERS,
@@ -389,7 +389,7 @@ macro_rules! wasm_profile_surface {
         pub fn shrincs_recover_public_key_commitment(
             signature: &[u8],
         ) -> Result<alloc::vec::Vec<u8>, JsValue> {
-            $crate::wasm::core::shrincs_recover_public_key_commitment::<$profile>(signature)
+            $crate::bindings::shrincs_recover_public_key_commitment::<$profile>(signature)
                 .map_err($crate::wasm::js_error)
         }
     };

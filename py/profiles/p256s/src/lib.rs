@@ -15,17 +15,15 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! The `hashsigs` package's root extension: version metadata only.
+//! The `256s-keccak` SHRINCS profile as a Python extension module.
 //!
-//! The signing surface lives in one extension per profile, under
-//! `hashsigs._ext`, built from the crates in `py/profiles/`. This module is
-//! what maturin compiles for the wheel, and it carries the version so
-//! `hashsigs.__version__` comes from the same Cargo manifest maturin derives
-//! the wheel version from, rather than a second copy in Python.
-use pyo3::prelude::*;
+//! One Cargo package builds at most one `cdylib`, so each profile needs its
+//! own crate. Everything below the macro lives once, in `hashsigs-py-common`
+//! and `hashsigs_rs::bindings`.
 
-#[pymodule]
-fn _hashsigs(module: &Bound<'_, PyModule>) -> PyResult<()> {
-    module.add("__version__", env!("CARGO_PKG_VERSION"))?;
-    Ok(())
-}
+hashsigs_py_common::python_profile_surface!(
+    _hashsigs_p256s,
+    hashsigs_rs::profiles::p256s::Profile256s,
+    64,
+    8
+);

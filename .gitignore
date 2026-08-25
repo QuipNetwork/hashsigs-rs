@@ -19,6 +19,20 @@ ts/dist
 ts/src/profiles
 ts/src/index.ts
 
+# generated Python package pieces, written by bin/build-python.sh and
+# bin/gen-python-profiles.py: the compiled per-profile extensions, the profile
+# modules that bind them, and the package roots that re-export the default.
+# The hand-written sources under py/python/hashsigs are _api.py, _errors.py and
+# py.typed.
+py/python/hashsigs/_ext/
+py/python/hashsigs/profiles/
+py/python/hashsigs/__init__.py
+
+# Python bytecode and test caches.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
 # local prompt/planning scratch - not committed
 _prompt_planning/
 

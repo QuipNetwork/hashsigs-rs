@@ -20,6 +20,18 @@ This file records changes to this project, in the
   `ts/src/api.ts` holds the profile-independent surface, and the per-profile
   loaders and entry points are generated from the profile list by
   `ts/scripts/gen-profile-entries.mjs`.
+- The `hashsigs` PyPI distribution has a signing API. It previously exposed
+  only `__version__`. `hashsigs.shrincs` and `hashsigs.sphincs_plus_c` cover
+  keygen, stateful and stateless signing, verification, key import and export,
+  and stateful-chain reset, over decomposed key objects rather than opaque
+  blobs. Every failure raises `HashSigsError` with a stable `code`.
+- Every SHRINCS profile ships in that one distribution, each as its own module:
+  `from hashsigs.profiles import p128s_q18`, and five siblings. The package
+  root stays the default profile. Each module carries its own compiled
+  extension under `hashsigs._ext`, built from a crate in `py/profiles/`,
+  because one Cargo package builds at most one cdylib. Importing a profile
+  maps only that profile's code, at the cost of a wheel roughly six times the
+  size of a single-profile build.
 - Two SHRINCS profiles, `shrincs-128s-q18-sha2` and `shrincs-128s-q20-sha2`,
   behind the `profile-128s-q18-sha2` and `profile-128s-q20-sha2` features.
   Each is the exact numeric twin of the keccak profile of the same name and
@@ -36,8 +48,7 @@ This file records changes to this project, in the
   distribution, and `@quip.network/hashsigs-wasm` each carry every profile,
   and each profile is imported on its own path. `bin/packages.sh` no longer
   declares `SIBLING_PROFILES`, `PYPI_SIBLINGS`, or `NPM_SIBLINGS`; it declares
-  `PROFILES` instead. The Rust and npm import paths work today. The PyPI
-  subpaths need a Python API, which does not exist yet.
+  `PROFILES` instead. All three ecosystems now work this way.
 - The six `profile-*` Cargo features (`profile-256s`, `profile-256s-sha2`,
   `profile-128s-q18`, `profile-128s-q20`, `profile-128s-q18-sha2`,
   `profile-128s-q20-sha2`) are additive. Enabling more than
@@ -59,6 +70,18 @@ This file records changes to this project, in the
   than always naming the `256s` profile. When more than one profile feature is
   enabled, a fixed priority order decides which one that is. Name a profile
   module's own alias to pin one explicitly.
+
+- The PyPI release publishes a wheel and skips the source distribution. The
+  wheel's per-profile extensions are staged into the package tree by
+  `bin/build-python.sh` before maturin runs, and maturin knows nothing about
+  that script, so an sdist would rebuild with the version module alone and
+  install a package that fails at import. Publishing no sdist is better than
+  publishing one that installs broken.
+- The profile-generic binding core moved from `src/wasm/core.rs` to
+  `src/bindings.rs` and is now `#[doc(hidden)] pub`. Both the WebAssembly
+  surface and the Python extension crates build on it, and the Python crates
+  are separate packages, so they cannot reach a `pub(crate)` module. It is not
+  a stable API.
 
 ### Removed
 

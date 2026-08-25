@@ -15,17 +15,22 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Profile-generic body of the wasm surface.
+//! Profile-generic body shared by every foreign-function surface.
 //!
 //! Every function here is generic over `P: Profile` plus that profile's two
-//! array widths, and none of them mention `wasm_bindgen` or `JsValue`. The
-//! concrete `#[wasm_bindgen]` exports are stamped out over one profile by
-//! [`crate::wasm::export`]; this module is where the logic lives exactly once.
+//! array widths, and none of them mention any binding framework. The concrete
+//! exports are stamped out over one profile by [`crate::wasm::export`] for
+//! WebAssembly and by the `hashsigs-py-common` crate for Python; this module
+//! is where the logic lives exactly once.
 //!
-//! The split exists because `#[wasm_bindgen]` cannot be applied to a generic
-//! function: the export boundary needs concrete monomorphic types. Keeping the
-//! logic generic and the export layer declarative is what lets the same code
-//! serve six profiles.
+//! The split exists because neither `#[wasm_bindgen]` nor `#[pyfunction]` can
+//! be applied to a generic function: an export boundary needs concrete
+//! monomorphic types. Keeping the logic generic and each export layer
+//! declarative is what lets the same code serve six profiles in two languages.
+//!
+//! NOT A STABLE API. This module is `pub` only so the `py/` binding crates,
+//! which cannot be part of this crate because they each build their own
+//! cdylib, can reach it. Nothing outside this repository should depend on it.
 //!
 //! These functions deliberately bypass the `ShrincsVerifier` and
 //! `SphincsPlusCVerifier` facades and call the generic free functions those
@@ -33,10 +38,11 @@
 //! through them would silently pin every verify to that one profile no matter
 //! which `P` the caller asked for.
 
-// Under a plain `cargo test` without `wasm-bindings`, the export layer that
-// consumes most of these is absent, so all but the directly-tested functions
-// read as dead. They are still compiled, which is the point: the cross-profile
-// tests in the parent module type-check them at several profiles.
+// Under a plain `cargo test` the in-crate export layer that consumes most of
+// these is absent, so all but the directly-tested functions read as dead
+// within this crate. They are still compiled, which is the point: the
+// cross-profile tests in `crate::wasm` type-check them at several profiles,
+// and the `py/` crates consume them from outside.
 #![cfg_attr(not(feature = "wasm-bindings"), allow(dead_code))]
 
 use crate::profile::Profile;
@@ -48,16 +54,17 @@ use zeroize::Zeroize;
 
 /// Single source of truth for the budget cap: a wasm-local copy could drift
 /// silently if core ever retunes the limit.
-pub(crate) const MAX_STATEFUL_SIGNATURES_LIMIT: usize =
+pub const MAX_STATEFUL_SIGNATURES_LIMIT: usize =
     crate::shrincs::signer::MAX_STATEFUL_SIGNATURES_LIMIT as usize;
 
-/// Error carrier for the wasm boundary: a stable machine-readable `code` plus
-/// a human-readable `message`. Messages must never echo raw caller input
-/// (seeds and other secrets would leak into logs/telemetry).
+/// Error carrier for a foreign-function boundary: a stable machine-readable
+/// `code` plus a human-readable `message`. Each surface maps this onto its own
+/// language's error type. Messages must never echo raw caller input (seeds and
+/// other secrets would leak into logs/telemetry).
 #[derive(Debug)]
-pub(crate) struct WasmErr {
-    pub(crate) code: &'static str,
-    pub(crate) message: String,
+pub struct BindingError {
+    pub code: &'static str,
+    pub message: String,
 }
 
 // ── Length-checked field parsers ────────────────────────────────────────
@@ -65,14 +72,14 @@ pub(crate) struct WasmErr {
 // flat key layouts below.
 
 /// 32-byte fixed-width field, byte version of `parse_word32`.
-pub(crate) fn bytes_word32(input: &[u8]) -> Result<[u8; HASH_LEN], WasmErr> {
+pub fn bytes_word32(input: &[u8]) -> Result<[u8; HASH_LEN], BindingError> {
     bytes_fixed::<HASH_LEN>(input)
 }
 
 /// Byte version of `parse_fixed_hex`: exact-length check, no hex decoding.
-pub(crate) fn bytes_fixed<const N: usize>(input: &[u8]) -> Result<[u8; N], WasmErr> {
+pub fn bytes_fixed<const N: usize>(input: &[u8]) -> Result<[u8; N], BindingError> {
     if input.len() != N {
-        return Err(WasmErr {
+        return Err(BindingError {
             code: ErrorCode::BadLength.as_str(),
             message: format!(
                 "expected {N} bytes for fixed-width field, got {}",
@@ -90,8 +97,8 @@ pub(crate) fn bytes_fixed<const N: usize>(input: &[u8]) -> Result<[u8; N], WasmE
 /// pass the 32-byte digest, matching the on-chain / envelope verifier, which
 /// treats its `hash` argument as the signed message. A wrong length is an
 /// error (for signing) or a rejected verify.
-pub(crate) fn message_hash(message: &[u8]) -> Result<[u8; HASH_LEN], WasmErr> {
-    bytes_word32(message).map_err(|_| WasmErr {
+pub fn message_hash(message: &[u8]) -> Result<[u8; HASH_LEN], BindingError> {
+    bytes_word32(message).map_err(|_| BindingError {
         code: ErrorCode::BadLength.as_str(),
         message: format!("message must be exactly 32 bytes, got {}", message.len()),
     })
@@ -101,10 +108,10 @@ pub(crate) fn message_hash(message: &[u8]) -> Result<[u8; HASH_LEN], WasmErr> {
 /// ‖ pkSeed(32) ‖ hypertreeRoot(32)`, 128 bytes total (the field order of
 /// `sphincs_plus_c::Key::to_bytes`). The layout carries no profile-dependent
 /// width, so this needs no `P`.
-pub(crate) fn deserialize_sphincs_plus_c_signing_key(
+pub fn deserialize_sphincs_plus_c_signing_key(
     bytes: &[u8],
-) -> Result<crate::sphincs_plus_c::Key, WasmErr> {
-    crate::sphincs_plus_c::Key::from_bytes(bytes).ok_or_else(|| WasmErr {
+) -> Result<crate::sphincs_plus_c::Key, BindingError> {
+    crate::sphincs_plus_c::Key::from_bytes(bytes).ok_or_else(|| BindingError {
         code: ErrorCode::BadLength.as_str(),
         message: format!("SPHINCS+C secretKey must be 128 bytes, got {}", bytes.len()),
     })
@@ -112,9 +119,7 @@ pub(crate) fn deserialize_sphincs_plus_c_signing_key(
 
 /// `pkSeed ‖ hypertreeRoot` (64 bytes), the verifier-interface public key
 /// shape the SPHINCS+C verify entry points expect.
-pub(crate) fn encode_sphincs_plus_c_public_key(
-    key: &crate::sphincs_plus_c::Key,
-) -> alloc::vec::Vec<u8> {
+pub fn encode_sphincs_plus_c_public_key(key: &crate::sphincs_plus_c::Key) -> alloc::vec::Vec<u8> {
     let mut out = alloc::vec::Vec::with_capacity(64);
     out.extend_from_slice(key.public_key.pk_seed.as_bytes());
     out.extend_from_slice(key.public_key.root.as_bytes());
@@ -126,15 +131,15 @@ pub(crate) fn encode_sphincs_plus_c_public_key(
 /// nextStatefulLeafIndex(u32 BE) ‖ statelessSkSeed(32) ‖ statelessPrfSeed(32)
 /// ‖ pkSeed(32) ‖ hypertreeRoot(32)`, 264 bytes total — `Keys::to_bytes`'s
 /// flat layout (`stateful(136) ‖ stateless(128)`).
-pub(crate) fn serialize_shrincs_signing_key(key: &Keys) -> alloc::vec::Vec<u8> {
+pub fn serialize_shrincs_signing_key(key: &Keys) -> alloc::vec::Vec<u8> {
     key.to_bytes().to_vec()
 }
 
 /// Deserialize the flat layout above WITHOUT validating the roots — callers
 /// MUST run the result through `ShrincsSigner::import_signing_key` before
 /// trusting it (this only checks the length and slices the fields).
-pub(crate) fn deserialize_shrincs_signing_key<P: Profile>(bytes: &[u8]) -> Result<Keys, WasmErr> {
-    Keys::from_bytes::<P>(bytes).ok_or_else(|| WasmErr {
+pub fn deserialize_shrincs_signing_key<P: Profile>(bytes: &[u8]) -> Result<Keys, BindingError> {
+    Keys::from_bytes::<P>(bytes).ok_or_else(|| BindingError {
         code: ErrorCode::BadLength.as_str(),
         message: format!("shrincs secretKey must be 264 bytes, got {}", bytes.len()),
     })
@@ -144,7 +149,7 @@ pub(crate) fn deserialize_shrincs_signing_key<P: Profile>(bytes: &[u8]) -> Resul
 /// publicKeyCommitment(32) ‖ pkSeed(32) ‖ hypertreeRoot(32)`, 164 bytes.
 /// Not ABI-encoded (unlike `envelope::encode_*`) — a plain fixed-layout byte
 /// bundle for the noble-style keygen/import return value.
-pub(crate) fn encode_public_key_flat(public_key: &PublicKey) -> alloc::vec::Vec<u8> {
+pub fn encode_public_key_flat(public_key: &PublicKey) -> alloc::vec::Vec<u8> {
     let mut out = alloc::vec::Vec::with_capacity(STATEFUL_PUBLIC_KEY_BYTES + HASH_LEN * 3);
     out.extend_from_slice(&public_key.stateful_public_key);
     out.extend_from_slice(&public_key.public_key_commitment);
@@ -155,7 +160,7 @@ pub(crate) fn encode_public_key_flat(public_key: &PublicKey) -> alloc::vec::Vec<
 
 /// The 64-byte stateless public key (`pkSeed ‖ hypertreeRoot`) — the
 /// SPHINCS+C key the stateless verify entry points take.
-pub(crate) fn encode_stateless_public_key(public_key: &PublicKey) -> alloc::vec::Vec<u8> {
+pub fn encode_stateless_public_key(public_key: &PublicKey) -> alloc::vec::Vec<u8> {
     let mut out = alloc::vec::Vec::with_capacity(64);
     out.extend_from_slice(&public_key.pk_seed);
     out.extend_from_slice(&public_key.hypertree_root);
@@ -165,9 +170,9 @@ pub(crate) fn encode_stateless_public_key(public_key: &PublicKey) -> alloc::vec:
 // ── SPHINCS+C ───────────────────────────────────────────────────────────
 
 /// Derive a SPHINCS+C keypair from a 32-byte seed under profile `P`.
-pub(crate) fn sphincs_plus_c_keygen<P: Profile, const NUM_LAYERS: usize>(
+pub fn sphincs_plus_c_keygen<P: Profile, const NUM_LAYERS: usize>(
     seed: &[u8],
-) -> Result<crate::sphincs_plus_c::Key, WasmErr> {
+) -> Result<crate::sphincs_plus_c::Key, BindingError> {
     let mut seed = bytes_fixed::<32>(seed)?;
     let signing_key = crate::sphincs_plus_c::keygen_from_master_seed::<P, NUM_LAYERS>(&seed);
     seed.zeroize();
@@ -175,23 +180,25 @@ pub(crate) fn sphincs_plus_c_keygen<P: Profile, const NUM_LAYERS: usize>(
 }
 
 /// Sign a 32-byte message with a 128-byte SPHINCS+C secret key under `P`.
-pub(crate) fn sphincs_plus_c_sign<P: Profile, const NUM_LAYERS: usize>(
+pub fn sphincs_plus_c_sign<P: Profile, const NUM_LAYERS: usize>(
     message: &[u8],
     secret_key: &[u8],
-) -> Result<alloc::vec::Vec<u8>, WasmErr> {
+) -> Result<alloc::vec::Vec<u8>, BindingError> {
     let full_key = deserialize_sphincs_plus_c_signing_key(secret_key)?;
     let hash = message_hash(message)?;
     let signature =
-        crate::sphincs_plus_c::sign::<P, NUM_LAYERS>(&full_key, &hash).ok_or_else(|| WasmErr {
-            code: ErrorCode::SigningFailed.as_str(),
-            message: "stateless signing failed for the supplied key/message".into(),
+        crate::sphincs_plus_c::sign::<P, NUM_LAYERS>(&full_key, &hash).ok_or_else(|| {
+            BindingError {
+                code: ErrorCode::SigningFailed.as_str(),
+                message: "stateless signing failed for the supplied key/message".into(),
+            }
         })?;
     Ok(signature.to_bytes())
 }
 
 /// Verify a SPHINCS+C stateless signature envelope under `P`. Never fails
 /// loudly: a malformed envelope or wrong-length key is simply `false`.
-pub(crate) fn sphincs_plus_c_verify<P: Profile, const NUM_CHAINS: usize>(
+pub fn sphincs_plus_c_verify<P: Profile, const NUM_CHAINS: usize>(
     signature: &[u8],
     message: &[u8],
     public_key: &[u8],
@@ -216,20 +223,20 @@ pub(crate) fn sphincs_plus_c_verify<P: Profile, const NUM_CHAINS: usize>(
 // ── SHRINCS ─────────────────────────────────────────────────────────────
 
 /// Derive a SHRINCS keypair from a 32-byte seed and a stateful leaf budget.
-pub(crate) fn shrincs_keygen<P: Profile, const NUM_CHAINS: usize, const NUM_LAYERS: usize>(
+pub fn shrincs_keygen<P: Profile, const NUM_CHAINS: usize, const NUM_LAYERS: usize>(
     seed: &[u8],
     max_signatures: u32,
-) -> Result<(Keys, PublicKey), WasmErr> {
+) -> Result<(Keys, PublicKey), BindingError> {
     let mut seed = bytes_fixed::<32>(seed)?;
     if max_signatures == 0 || max_signatures > MAX_STATEFUL_SIGNATURES_LIMIT as u32 {
-        return Err(WasmErr {
+        return Err(BindingError {
             code: ErrorCode::InvalidInput.as_str(),
             message: format!("maxSignatures must be in 1..={MAX_STATEFUL_SIGNATURES_LIMIT}"),
         });
     }
     let result = ShrincsSigner::keygen::<P, NUM_CHAINS, NUM_LAYERS>(&seed, max_signatures);
     seed.zeroize();
-    result.ok_or_else(|| WasmErr {
+    result.ok_or_else(|| BindingError {
         code: ErrorCode::KeygenFailed.as_str(),
         message: "key generation failed for the supplied inputs".into(),
     })
@@ -237,8 +244,8 @@ pub(crate) fn shrincs_keygen<P: Profile, const NUM_CHAINS: usize, const NUM_LAYE
 
 /// The `ERR_IMPORT_INVALID` error every import path below raises. One
 /// definition so the six call sites cannot drift in wording.
-fn import_invalid() -> WasmErr {
-    WasmErr {
+fn import_invalid() -> BindingError {
+    BindingError {
         code: ErrorCode::ImportInvalid.as_str(),
         message: "secretKey failed validation: counter out of range or roots do not \
                   match the seeds"
@@ -248,9 +255,9 @@ fn import_invalid() -> WasmErr {
 
 /// Length-check a 264-byte secret key and revalidate it against its seeds.
 /// Every entry point that accepts a persisted secret key goes through here.
-pub(crate) fn import_secret_key<P: Profile, const NUM_CHAINS: usize, const NUM_LAYERS: usize>(
+pub fn import_secret_key<P: Profile, const NUM_CHAINS: usize, const NUM_LAYERS: usize>(
     secret_key: &[u8],
-) -> Result<(Keys, PublicKey), WasmErr> {
+) -> Result<(Keys, PublicKey), BindingError> {
     let candidate = deserialize_shrincs_signing_key::<P>(secret_key)?;
     ShrincsSigner::import_signing_key::<P, NUM_CHAINS, NUM_LAYERS>(candidate)
         .ok_or_else(import_invalid)
@@ -258,24 +265,24 @@ pub(crate) fn import_secret_key<P: Profile, const NUM_CHAINS: usize, const NUM_L
 
 /// Sign a 32-byte message with the next unused stateful leaf, advancing
 /// `secret_key` in place. Returns the commitment-path envelope.
-pub(crate) fn shrincs_sign<P: Profile, const NUM_CHAINS: usize, const NUM_LAYERS: usize>(
+pub fn shrincs_sign<P: Profile, const NUM_CHAINS: usize, const NUM_LAYERS: usize>(
     message: &[u8],
     secret_key: &mut [u8],
-) -> Result<alloc::vec::Vec<u8>, WasmErr> {
+) -> Result<alloc::vec::Vec<u8>, BindingError> {
     let (mut signing_key, public_key) = import_secret_key::<P, NUM_CHAINS, NUM_LAYERS>(secret_key)?;
     // Pre-check exhaustion explicitly. Core signals BOTH exhaustion and
     // (astronomically rare) WOTS-C grinding failure as `None`; without this
     // check the two are conflated under one misleading error code.
     if signing_key.stateful().next_leaf_index() > signing_key.stateful().public_key().max_signatures
     {
-        return Err(WasmErr {
+        return Err(BindingError {
             code: ErrorCode::StatefulLeavesExhausted.as_str(),
             message: "no unused stateful leaf available for this key".into(),
         });
     }
     let hash = message_hash(message)?;
     let signature = ShrincsSigner::sign_stateful_raw::<P, NUM_CHAINS>(&mut signing_key, &hash)
-        .ok_or_else(|| WasmErr {
+        .ok_or_else(|| BindingError {
             code: ErrorCode::SigningFailed.as_str(),
             message: "stateful signing failed for the supplied key/message".into(),
         })?;
@@ -288,18 +295,14 @@ pub(crate) fn shrincs_sign<P: Profile, const NUM_CHAINS: usize, const NUM_LAYERS
 
 /// Sign a 32-byte message via the stateless recovery path: consumes no leaf
 /// and never mutates `secret_key`.
-pub(crate) fn shrincs_sign_stateless<
-    P: Profile,
-    const NUM_CHAINS: usize,
-    const NUM_LAYERS: usize,
->(
+pub fn shrincs_sign_stateless<P: Profile, const NUM_CHAINS: usize, const NUM_LAYERS: usize>(
     message: &[u8],
     secret_key: &[u8],
-) -> Result<alloc::vec::Vec<u8>, WasmErr> {
+) -> Result<alloc::vec::Vec<u8>, BindingError> {
     let (signing_key, _public_key) = import_secret_key::<P, NUM_CHAINS, NUM_LAYERS>(secret_key)?;
     let hash = message_hash(message)?;
     let signature = ShrincsSigner::sign_stateless_raw::<P, NUM_LAYERS>(&signing_key, &hash)
-        .ok_or_else(|| WasmErr {
+        .ok_or_else(|| BindingError {
             code: ErrorCode::SigningFailed.as_str(),
             message: "stateless signing failed for the supplied key/message".into(),
         })?;
@@ -312,7 +315,7 @@ pub(crate) fn shrincs_sign_stateless<
 
 /// Verify a stateful SHRINCS envelope against a 32-byte commitment under `P`.
 /// Never fails loudly — a malformed envelope or commitment mismatch is `false`.
-pub(crate) fn shrincs_verify<P: Profile, const NUM_CHAINS: usize>(
+pub fn shrincs_verify<P: Profile, const NUM_CHAINS: usize>(
     signature: &[u8],
     message: &[u8],
     public_key_commitment: &[u8],
@@ -342,12 +345,12 @@ pub(crate) fn shrincs_verify<P: Profile, const NUM_CHAINS: usize>(
 
 /// Regenerate a fresh stateful chain for a 264-byte secret key, mutating it
 /// in place. The stateless half and `maxSignatures` are untouched.
-pub(crate) fn shrincs_reset<P: Profile, const NUM_CHAINS: usize, const NUM_LAYERS: usize>(
+pub fn shrincs_reset<P: Profile, const NUM_CHAINS: usize, const NUM_LAYERS: usize>(
     secret_key: &mut [u8],
     new_seed: &[u8],
-) -> Result<(), WasmErr> {
+) -> Result<(), BindingError> {
     // Fail fast on a wrong-length seed, symmetric with keygen.
-    let new_seed = bytes_word32(new_seed).map_err(|_| WasmErr {
+    let new_seed = bytes_word32(new_seed).map_err(|_| BindingError {
         code: ErrorCode::BadLength.as_str(),
         message: format!("newSeed must be exactly 32 bytes, got {}", new_seed.len()),
     })?;
@@ -358,13 +361,13 @@ pub(crate) fn shrincs_reset<P: Profile, const NUM_CHAINS: usize, const NUM_LAYER
 }
 
 /// Recompute the 32-byte commitment a 264-byte secret key currently implies.
-pub(crate) fn shrincs_compute_public_key_commitment<
+pub fn shrincs_compute_public_key_commitment<
     P: Profile,
     const NUM_CHAINS: usize,
     const NUM_LAYERS: usize,
 >(
     secret_key: &[u8],
-) -> Result<alloc::vec::Vec<u8>, WasmErr> {
+) -> Result<alloc::vec::Vec<u8>, BindingError> {
     let (keys, _public_key) = import_secret_key::<P, NUM_CHAINS, NUM_LAYERS>(secret_key)?;
     Ok(keys.recompute_commitment::<P>().as_bytes().to_vec())
 }
@@ -372,12 +375,12 @@ pub(crate) fn shrincs_compute_public_key_commitment<
 /// Recover the 32-byte commitment a stateful envelope implies, ecrecover
 /// style. The envelope's own commitment field is never trusted — only the
 /// value recomputed from the carried public key is returned.
-pub(crate) fn shrincs_recover_public_key_commitment<P: Profile>(
+pub fn shrincs_recover_public_key_commitment<P: Profile>(
     signature: &[u8],
-) -> Result<alloc::vec::Vec<u8>, WasmErr> {
+) -> Result<alloc::vec::Vec<u8>, BindingError> {
     Keys::recover_commitment::<P>(signature)
         .map(|commitment| commitment.as_bytes().to_vec())
-        .ok_or_else(|| WasmErr {
+        .ok_or_else(|| BindingError {
             code: ErrorCode::EnvelopeMalformed.as_str(),
             message: "signature envelope could not be decoded".into(),
         })

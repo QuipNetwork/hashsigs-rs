@@ -19,6 +19,9 @@
 
 use crate::HASH_LEN;
 
+/// Unused in a build that enables only sha2 profiles, which the wasm and
+/// Python packages produce one of per artifact. See `Keccak256Suite`.
+#[allow(dead_code)]
 pub fn scheme_hash_parts(parts: &[&[u8]]) -> [u8; HASH_LEN] {
     crate::hash::backend::keccak256v(parts)
 }

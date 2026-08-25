@@ -86,6 +86,8 @@ pub mod verifier;
 // the `unsafe_code` exception is scoped to exactly this module.
 #[cfg(feature = "std")]
 #[cfg_attr(feature = "wasm-bindings", allow(unsafe_code))]
+#[doc(hidden)]
+pub mod bindings;
 pub mod wasm;
 pub mod wots_c;
 pub mod wotsplus;

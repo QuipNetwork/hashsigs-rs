@@ -105,6 +105,18 @@ PROFILE_SHRINCS_NAME() {
   esac
 }
 
+# Map a profile to its Python module stem. The module under
+# `hashsigs.profiles` takes this name, and its compiled extension is
+# `_hashsigs_<stem>`. It matches the Rust profile module under `src/profiles/`,
+# so one profile has one spelling on both sides of the binding.
+PROFILE_PYTHON_MODULE() {
+  local p="${1//-/_}"
+  case "$1" in
+  256s-keccak) echo "p256s" ;;
+  *) echo "p${p%_keccak}" ;;
+  esac
+}
+
 # The import path each ecosystem exposes for a profile. Used by the packaging
 # checks so a profile cannot ship without a way to reach it.
 PROFILE_RUST_MODULE() {
