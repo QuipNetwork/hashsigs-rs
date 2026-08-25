@@ -211,7 +211,19 @@ py-tests:
     - /tmp/py-venv/bin/python -m build --outdir /tmp/dist .
     # The wheel came from the sdist, so a source file missing from the sdist
     # shows up as a missing extension here.
-    - /tmp/py-venv/bin/python -c "import zipfile,glob; z=zipfile.ZipFile(glob.glob('/tmp/dist/*.whl')[0]); n=[x for x in z.namelist() if x.endswith('.so')]; assert len(n) == 7, f'wheel built from the sdist has {len(n)} extensions, expected 7: {n}'; print('sdist rebuild carries every extension')"
+    # A block scalar, not a plain one: the message below contains a
+    # colon-space, which YAML reads as a mapping key inside a plain scalar and
+    # rejects the whole file over. That is a pipeline that fails before it
+    # starts a single job, so the shape matters as much as the check.
+    - |
+      /tmp/py-venv/bin/python - <<'PY'
+      import glob, sys, zipfile
+      wheel = glob.glob("/tmp/dist/*.whl")[0]
+      names = [n for n in zipfile.ZipFile(wheel).namelist() if n.endswith(".so")]
+      if len(names) != 7:
+          sys.exit(f"{wheel} carries {len(names)} extensions, expected 7: {names}")
+      print("sdist rebuild carries every extension")
+      PY
     - /tmp/py-venv/bin/pip install --quiet --force-reinstall /tmp/dist/*.whl
     # Run from py/ so the installed package is imported, never py/python/.
     - cd py && /tmp/py-venv/bin/python -m pytest tests/ -q
