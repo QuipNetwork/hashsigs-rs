@@ -507,7 +507,8 @@ fn fors_digest<P: Profile>(
 }
 
 /// FORS message digest, MGF1-style: block `i` is
-/// `H("fors-digest" ‖ pk_seed ‖ root ‖ randomizer ‖ counter ‖ message [‖ i])`,
+/// `H("fors-digest" ‖ PROFILE_ID ‖ pk_seed ‖ root ‖ randomizer ‖ counter
+/// ‖ message [‖ i])`,
 /// with the block counter suffix only in the multi-block (>32 byte) regime.
 /// The preimage parts are fed to the hash vectored, byte-identical to the
 /// previously packed `base` buffer.
@@ -526,6 +527,7 @@ fn fors_digest_bytes<P: Profile>(
     if digest_len <= HASH_LEN {
         let word = hash_packed::<P::Suite>(&[
             b"fors-digest",
+            &P::PROFILE_ID,
             pk_seed,
             hypertree_root,
             randomizer,
@@ -544,6 +546,7 @@ fn fors_digest_bytes<P: Profile>(
     while filled < digest_len {
         let digest_word = hash_packed::<P::Suite>(&[
             b"fors-digest",
+            &P::PROFILE_ID,
             pk_seed,
             hypertree_root,
             randomizer,

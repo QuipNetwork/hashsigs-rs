@@ -43,11 +43,11 @@ impl SphincsPlusCVerifier {
         Self
     }
 
-    /// `keccak256("quip.sphincsplusc-verifier.v1")`. Mirrors
+    /// `keccak256("quip.sphincsplusc-verifier.v2")`. Mirrors
     /// `SPHINCSPlusCVerifier.VERSION_TAG`: names this verifier's key/envelope
     /// format family, not the compiled parameter profile.
     pub fn version_tag() -> [u8; HASH_LEN] {
-        crate::hash::keccak_packed(&[b"quip.sphincsplusc-verifier.v1"])
+        crate::hash::keccak_packed(&[b"quip.sphincsplusc-verifier.v2"])
     }
 
     /// Verify a decoded SPHINCS+C signature over a 32-byte hash.
@@ -123,13 +123,13 @@ mod tests {
 
     #[test]
     fn version_tag_matches_pinned_solidity_constant() {
-        // keccak256("quip.sphincsplusc-verifier.v1"), computed independently
+        // keccak256("quip.sphincsplusc-verifier.v2"), computed independently
         // and pinned here so drift in either the literal string or the hash
         // routine fails loud instead of silently matching itself.
         const EXPECTED: [u8; HASH_LEN] = [
-            0xb3, 0xee, 0x3b, 0x4a, 0x95, 0x9f, 0xcc, 0xaf, 0x76, 0xdc, 0xbb, 0x8f, 0x88, 0x7c,
-            0x05, 0xff, 0xe4, 0xbd, 0x73, 0xd8, 0x80, 0x32, 0xd7, 0xe2, 0xe5, 0xfd, 0xc8, 0x3a,
-            0x67, 0x17, 0x29, 0xa8,
+            0xdb, 0xbf, 0xc8, 0x63, 0x63, 0xbe, 0x4e, 0x77, 0x6c, 0xc0, 0x1a, 0xbc, 0xad, 0xa7,
+            0x50, 0xa9, 0xb3, 0xef, 0xb0, 0x7b, 0xaa, 0x69, 0xe3, 0x5e, 0x26, 0x5f, 0x87, 0xf2,
+            0xea, 0x99, 0x69, 0x30,
         ];
         assert_eq!(SphincsPlusCVerifier::version_tag(), EXPECTED);
     }
