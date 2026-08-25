@@ -104,12 +104,13 @@ from the FORS digest, and each upper layer follows a fixed recurrence
 
 ## Parameters, sizes, and measured costs
 
-Four compile-time profiles ship. The cryptographic constants match the
-Solidity verifier. `src/profiles/` is the Rust source of truth.
+Six compile-time profiles ship: three parameter sets, each in a keccak and a
+sha2 variant. The cryptographic constants match the Solidity verifier.
+`src/profiles/` is the Rust source of truth.
 
-| Parameter | `256s` / `256s-sha2` | `128s-q18` / `128s-q20` |
+| Parameter | `256s` / `256s-sha2` | `128s-q18` / `128s-q20` and their sha2 twins |
 |---|---|---|
-| Scheme-hash suite | keccak-256 / SHA-256 | keccak-256 |
+| Scheme-hash suite | keccak-256 / SHA-256 | keccak-256 / SHA-256 |
 | Hash entropy | 32 B | 16 B truncated (full 32-byte wire slots) |
 | Hypertree | height 64, 8 layers | height 18, 1 layer |
 | FORS-C | 22 trees, height 14 | 6 trees, height 24 |
@@ -119,7 +120,8 @@ Solidity verifier. `src/profiles/` is the Rust source of truth.
 
 `128s-q20` differs from `128s-q18` only in the stateless budget. The larger
 q20 budget still needs security-analysis backing before production use. The
-sha2 suite switches scheme hashes only. EVM-domain hashes (profile identity,
+sha2 suite switches scheme hashes only, so `128s-q18-sha2` shares every row
+of this table with `128s-q18`, and `128s-q20-sha2` with `128s-q20`. EVM-domain hashes (profile identity,
 commitments, canonical action hashes) stay keccak under every profile, so the
 128s and sha2 profiles change hashing work, not commitment framing.
 
@@ -139,25 +141,37 @@ Key material is constant across profiles:
 Signature sizes count packed field bytes. The stateful signature has no single
 size: leaf `L` carries `L` auth nodes, so signatures grow 32 B per consumed
 leaf. Sign time shrinks as `L` grows, because the auth-path rebuild covers
-fewer remaining leaves. Native times: measured 2026-08-20 on one core of an AMD Ryzen 9
-5950X, `--release`, default features, `maxSignatures` = 1024, stateful sign
-at leaf 1. One keygen derives both paths of a profile.
+fewer remaining leaves. Native times: measured 2026-08-25 on one core of an AMD Ryzen 9
+5950X, `--release`, `maxSignatures` = 1024, stateful sign at leaf 1. One
+keygen derives both paths of a profile. Every row comes from the same sweep,
+so the rows are comparable to each other.
+
+This table lists all six published profiles.
 
 | Variation | Path | Key size (secret / public) | Signature size | Keygen time | Sign time | Verify time | Solana verify cost (CU) |
 |---|---|---|---|---|---|---|---|
-| `shrincs-256s-keccak` | stateful | 264 B / 164 B | 2,084 + 32·L B (2,116 at L = 1) | 476 ms | 374 ms | 0.17 ms | 111,586 |
-| `shrincs-256s-keccak` | stateless | 264 B / 164 B | 29,092 B | 476 ms | ~1.3 s | 1.7 ms | 1,029,780 |
-| `shrincs-256s-sha2` | stateful | 264 B / 164 B | 2,084 + 32·L B | 133 ms | 101 ms | 0.05 ms | 101,909 |
-| `shrincs-256s-sha2` | stateless | 264 B / 164 B | 29,092 B | 133 ms | ~0.36 s | 0.48 ms | 931,804 |
-| `shrincs-128s-q18-keccak` | stateful | 264 B / 164 B | 1,060 + 32·L B (1,092 at L = 1) | 46.3 s | 176 ms | 0.08 ms | 58,461 |
-| `shrincs-128s-q18-keccak` | stateless | 264 B / 164 B | 5,704 B | 46.3 s | ~2.8 min | 0.17 ms | 106,555 † |
-| `shrincs-128s-q20-keccak` | stateful | 264 B / 164 B | 1,060 + 32·L B | 46.4 s | 177 ms | 0.08 ms | same as q18 (derived) |
-| `shrincs-128s-q20-keccak` | stateless | 264 B / 164 B | 5,704 B | 46.4 s | ~2.8 min | 0.17 ms | same as q18 (derived) |
-| `wotsplus` (v1, keccak, legacy) | one-time | 32 B / 64 B | 2,144 B | 0.42 ms | 0.20 ms | 0.24 ms | 298,064 |
+| `shrincs-256s-keccak` | stateful | 264 B / 164 B | 2,084 + 32·L B (2,116 at L = 1) | 440 ms | 350 ms | 0.16 ms | 111,586 |
+| `shrincs-256s-keccak` | stateless | 264 B / 164 B | 29,092 B | 440 ms | ~1.2 s | 1.5 ms | 1,029,780 |
+| `shrincs-256s-sha2` | stateful | 264 B / 164 B | 2,084 + 32·L B (2,116 at L = 1) | 117 ms | 91 ms | 0.05 ms | 101,909 |
+| `shrincs-256s-sha2` | stateless | 264 B / 164 B | 29,092 B | 117 ms | ~0.33 s | 0.43 ms | 931,804 |
+| `shrincs-128s-q18-keccak` | stateful | 264 B / 164 B | 1,060 + 32·L B (1,092 at L = 1) | 45.2 s | 172 ms | 0.08 ms | 58,461 |
+| `shrincs-128s-q18-keccak` | stateless | 264 B / 164 B | 5,704 B | 45.2 s | ~2.8 min | 0.17 ms | 106,555 † |
+| `shrincs-128s-q20-keccak` | stateful | 264 B / 164 B | 1,060 + 32·L B (1,092 at L = 1) | 44.9 s | 173 ms | 0.08 ms | same as q18 (derived) |
+| `shrincs-128s-q20-keccak` | stateless | 264 B / 164 B | 5,704 B | 44.9 s | ~2.8 min | 0.17 ms | same as q18 (derived) |
+| `shrincs-128s-q18-sha2` | stateful | 264 B / 164 B | 1,060 + 32·L B (1,092 at L = 1) | 12.8 s | 46 ms | 0.02 ms | not measured ‡ |
+| `shrincs-128s-q18-sha2` | stateless | 264 B / 164 B | 5,704 B | 12.8 s | ~47 s | 0.04 ms | not measured ‡ |
+| `shrincs-128s-q20-sha2` | stateful | 264 B / 164 B | 1,060 + 32·L B (1,092 at L = 1) | 13.3 s | 47 ms | 0.02 ms | not measured ‡ |
+| `shrincs-128s-q20-sha2` | stateless | 264 B / 164 B | 5,704 B | 13.3 s | ~51 s | 0.04 ms | not measured ‡ |
+| `wotsplus` (v1, keccak, legacy) | one-time | 32 B / 64 B | 2,144 B | 0.41 ms | 0.20 ms | 0.23 ms | 298,064 |
 
 † Measured through the `SphincsPlusCVerify` instruction. A SHRINCS stateless
 signature is a SPHINCS+C signature plus a commitment check, and the hybrid
 `ShrincsVerifyStateless` cost was not recorded at 128s.
+
+‡ No SBF run has recorded these two profiles. The program builds against them
+through `--features hashsigs-rs/profile-128s-q18-sha2`, so the figure is
+missing, not unavailable. Do not read the keccak twin's cost across: the
+SHA-256 syscall and the keccak syscall have different costs.
 
 Notes:
 
@@ -179,25 +193,36 @@ Notes:
   stateful auth path from seeds on every sign. Stateful sign time is the
   same order as keygen at the same budget.
 - **128s trades signer time for on-chain cost.** The single-layer height-18
-  hypertree makes keygen build 2^18 WOTS-C leaves (~46 s). Each stateless
-  sign rebuilds it, grinds ~2^24 FORS-C tries, and builds six height-24 FORS
-  trees (~2.8 min). In exchange, 128s has the smallest signatures and the
-  cheapest verification. In-EVM 128s stateless signing is
-  compute-infeasible, so the Rust signer generates those vectors.
+  hypertree makes keygen build 2^18 WOTS-C leaves (~45 s under keccak, ~13 s
+  under sha2). Each stateless sign rebuilds it, grinds ~2^24 FORS-C tries,
+  and builds six height-24 FORS trees (~2.8 min under keccak, ~50 s under
+  sha2). In exchange, 128s has the smallest signatures and the cheapest
+  verification. In-EVM 128s stateless signing is compute-infeasible, so the
+  Rust signer generates those vectors.
 - **ABI envelopes run larger than packed sizes.** The Rust `sign` envelope
   (public key + signature under `abi.encode` framing) is 2,784 B at 256s
   leaf 1 and 1,760 B at 128s leaf 1. A stateless signature blob alone is
   91,200 B at 256s and 18,016 B at 128s, about 3.2× its packed size,
   because `bytes`/`bytes[]` fields pay offset and length words.
-- The sha2 profile is faster on x86-64 CPUs with SHA extensions, where
-  SHA-256 is hardware-accelerated and keccak is not.
-- Regenerate the native numbers with the committed probes:
+- **The sha2 profiles are faster to sign and more expensive to verify
+  on-chain.** They are faster on x86-64 CPUs with SHA extensions, where
+  SHA-256 is hardware-accelerated and keccak is not: about 3.5× on this
+  host. The EVM inverts that trade. `keccak256` is a native opcode, and
+  SHA-256 is a precompile that charges more per word, so a sha2 profile
+  costs more gas than its keccak twin. Pick sha2 when the signer is the
+  bottleneck, and keccak when the verifier is.
+- Regenerate the native numbers with the committed probes. Pass
+  `--no-default-features` so one profile is selected and no other. The
+  `profile-*` features are additive, and leaving the default on would keep
+  measuring `256s`.
 
   ```bash
-  BENCH_LABEL=256s-keccak cargo run --release --example bench_table
-  BENCH_LABEL=256s-sha2   cargo run --release --example bench_table --features profile-256s-sha2
-  BENCH_LABEL=128s-q18    cargo run --release --example bench_table --features profile-128s-q18
-  BENCH_LABEL=128s-q20    cargo run --release --example bench_table --features profile-128s-q20
+  BENCH_LABEL=256s-keccak   cargo run --release --example bench_table
+  BENCH_LABEL=256s-sha2     cargo run --release --example bench_table --no-default-features --features profile-256s-sha2
+  BENCH_LABEL=128s-q18      cargo run --release --example bench_table --no-default-features --features profile-128s-q18
+  BENCH_LABEL=128s-q20      cargo run --release --example bench_table --no-default-features --features profile-128s-q20
+  BENCH_LABEL=128s-q18-sha2 cargo run --release --example bench_table --no-default-features --features profile-128s-q18-sha2
+  BENCH_LABEL=128s-q20-sha2 cargo run --release --example bench_table --no-default-features --features profile-128s-q20-sha2
   cargo run --release --example bench_wots
   ```
 
@@ -208,10 +233,20 @@ stateful path is 8–14× cheaper than stateless. That asymmetry is the design
 point: everyday operations ride the bounded stateful path, and the stateless
 authority stays reserved for recovery.
 
-| Call | 256s | 256s-sha2 | 128s-q18 / q20 |
-|---|---|---|---|
-| Stateful verify (wrapper call) | 190,792 | 281,063 | 117,759 |
-| Stateless verify (delegation) | 1,660,931 | 2,455,228 | 204,635 |
+| Call | 256s | 256s-sha2 | 128s-q18 / q20 | 128s-q18-sha2 / q20-sha2 |
+|---|---|---|---|---|
+| Stateful verify (wrapper call) | 190,792 | 281,063 | 117,759 | not measured § |
+| Stateless verify (delegation) | 1,660,931 | 2,455,228 | 204,635 | not measured § |
+
+§ The wrapper-call figures need the account-wrapper vectors, which do not
+exist for the two 128s sha2 profiles yet. Instead this run measures the raw
+stateless verifier directly, on the same call under each profile
+(`SHRINCSSphincs128sVectors.testMeasureStateless128sVerifyGas`, 2026-08-25):
+242,552 gas under `128s-q18` and `128s-q20`, and 317,515 gas under
+`128s-q18-sha2` and `128s-q20-sha2`. That is the raw verifier, not the
+wrapper call, so compare it only against the other number in this footnote.
+The 1.31× ratio is the SHA-256 precompile against the `keccak256` opcode, and
+it matches the direction of the preceding 256s pair.
 
 The legacy standalone WOTS+ v1 verification is ~500k gas with its 2,144-byte
 signatures.
@@ -318,14 +353,21 @@ verifier:
 - `shrincs-256s-sha2`
 - `shrincs-128s-q18-keccak`
 - `shrincs-128s-q20-keccak`
+- `shrincs-128s-q18-sha2`
+- `shrincs-128s-q20-sha2`
 
 Each profile selects a compile-time parameter tuple and profile identity.
 The scheme-hash suite follows the profile:
 
 - `256s-keccak`, `128s-q18-keccak`, `128s-q20-keccak`: internal scheme hashes use keccak
-- `256s-sha2`: internal scheme hashes use SHA-256
+- `256s-sha2`, `128s-q18-sha2`, `128s-q20-sha2`: internal scheme hashes use SHA-256
 
-The four `profile-*` Cargo features are additive: enabling more than one
+Each sha2 profile is the exact numeric twin of the keccak profile of the same
+name. The two differ only in the scheme hash suite and the identity string,
+so a sha2 profile shares every key size, signature size, and tree shape with
+its twin.
+
+The six `profile-*` Cargo features are additive: enabling more than one
 compiles more than one profile into the same build. Each profile is a type
 that carries the `Profile` trait, named by its own module under
 `hashsigs_rs::profiles`:
@@ -345,7 +387,8 @@ features are on, and emits a cfg for each enabled one. Rust-side surfaces
 that still name exactly one profile (the non-generic `ShrincsVerifier`, the
 wasm bindings, the golden-vector generator, and `hashsigs_rs::Shrincs`) bind
 to a single profile chosen by a fixed priority order: `profile-256s`,
-`profile-256s-sha2`, `profile-128s-q18`, `profile-128s-q20`. Naming a profile
+`profile-256s-sha2`, `profile-128s-q18`, `profile-128s-q20`,
+`profile-128s-q18-sha2`, `profile-128s-q20-sha2`. Naming a profile
 feature explicitly overrides the default (`profile-256s`), and enabling
 several, or building with `--all-features`, resolves deterministically to
 the first name in that order that is enabled.
@@ -369,6 +412,11 @@ The ignored vector generator writes one golden file per compiled profile:
 - `tests/test_vectors/shrincs_sphincs_256s_sha2.json`
 - `tests/test_vectors/shrincs_sphincs_128s_q18_keccak.json`
 - `tests/test_vectors/shrincs_sphincs_128s_q20_keccak.json`
+- `tests/test_vectors/shrincs_sphincs_128s_q18_sha2.json`
+- `tests/test_vectors/shrincs_sphincs_128s_q20_sha2.json`
+
+The committed copies carry a `.gz` suffix. The generator writes the plain
+`.json`, and the test loader reads either.
 
 ### Testing profiles
 
@@ -384,7 +432,16 @@ Run a specific non-default profile:
 cargo test --no-default-features --features profile-256s-sha2
 cargo test --no-default-features --features profile-128s-q18
 cargo test --no-default-features --features profile-128s-q20
+cargo test --release --lib --no-default-features --features profile-128s-q18-sha2
+cargo test --release --lib --no-default-features --features profile-128s-q20-sha2
 ```
+
+The two 128s sha2 profiles run `--lib`, not the whole suite. Their
+integration tests pin bytes against account-wrapper vectors, a separate
+family generated in hashsigs-solidity, and that family does not exist for
+these two profiles yet. Raise them to a full `cargo test` once
+`tests/test_vectors/shrincs_account_wrapper_vectors_128s_q{18,20}_sha2.json.gz`
+land.
 
 For a fast compile-only check:
 
@@ -393,15 +450,19 @@ cargo test --no-run
 cargo test --no-run --no-default-features --features profile-256s-sha2
 cargo test --no-run --no-default-features --features profile-128s-q18
 cargo test --no-run --no-default-features --features profile-128s-q20
+cargo test --no-run --no-default-features --features profile-128s-q18-sha2
+cargo test --no-run --no-default-features --features profile-128s-q20-sha2
 ```
 
-The four profile features:
+The six profile features:
 
 - default build selects `shrincs-256s-keccak`
 - `profile-256s`
 - `profile-256s-sha2`
 - `profile-128s-q18`
 - `profile-128s-q20`
+- `profile-128s-q18-sha2`
+- `profile-128s-q20-sha2`
 
 Enabling more than one, or running `cargo test --all-features`, compiles
 every enabled profile into the build and tests it. `cargo test --all-features`
@@ -414,6 +475,8 @@ cargo test generate_shrincs_sphincs_vectors -- --ignored --nocapture
 cargo test --no-default-features --features profile-256s-sha2 generate_shrincs_sphincs_vectors -- --ignored --nocapture
 cargo test --no-default-features --features profile-128s-q18 generate_shrincs_sphincs_vectors -- --ignored --nocapture
 cargo test --no-default-features --features profile-128s-q20 generate_shrincs_sphincs_vectors -- --ignored --nocapture
+cargo test --no-default-features --features profile-128s-q18-sha2 generate_shrincs_sphincs_vectors -- --ignored --nocapture
+cargo test --no-default-features --features profile-128s-q20-sha2 generate_shrincs_sphincs_vectors -- --ignored --nocapture
 ```
 
 ### Fast local loops
@@ -665,8 +728,9 @@ Run all tests:
 cargo test
 ```
 
-Rust supports the SHRINCS keccak profiles (`256s`, `128s-q18`,
-`128s-q20`) and the `256s-sha2` profile. The SHA-256 suite switch applies only
+Rust supports the three SHRINCS keccak profiles (`256s`, `128s-q18`,
+`128s-q20`) and their three sha2 twins (`256s-sha2`, `128s-q18-sha2`,
+`128s-q20-sha2`). The SHA-256 suite switch applies only
 to SHRINCS scheme hashes (FORS-C, hypertree, WOTS-C, UXMSS). EVM-domain hashes
 such as canonical action hashes and public-key commitments remain keccak to
 match the Solidity design.
