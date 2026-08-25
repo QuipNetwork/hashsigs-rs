@@ -335,7 +335,10 @@ use hashsigs_rs::profiles::p256s::Shrincs as Shrincs256s;
 use hashsigs_rs::profiles::p128s_q18::Shrincs as Shrincs128sQ18;
 ```
 
-`hashsigs_rs::Shrincs` remains an alias for the `256s` profile.
+`hashsigs_rs::Shrincs` follows the profile the build binds to, so under
+`--features profile-128s-q18` it is the q18 type, not the `256s` one. Name a
+profile module's own alias, such as `hashsigs_rs::profiles::p256s::Shrincs`, to
+pin one profile explicitly.
 
 `build.rs` generates profile identity for every profile regardless of which
 features are on, and emits a cfg for each enabled one. Rust-side surfaces

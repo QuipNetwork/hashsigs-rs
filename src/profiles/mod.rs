@@ -75,6 +75,81 @@ mod tests {
         assert_eq!(Profile256sSha2::NUM_WOTS_CHAINS, 64);
         assert_eq!(Profile256sSha2::HASH_TRUNC_LEN, 32);
     }
+
+    /// Every compiled profile's identity and suite, not only the selected one.
+    ///
+    /// The per-module guards run against whichever profile the build binds to,
+    /// so a non-selected profile could carry another profile's `PROFILE_ID` or
+    /// hash suite and still build clean and pass every other test. `PROFILE_ID`
+    /// is the value the Solidity contracts compare against, and the suite
+    /// decides the scheme hash, so both are ABI-bearing for a consumer that
+    /// pins a non-default profile.
+    #[test]
+    fn every_profile_owns_its_identity_and_suite() {
+        use crate::hash::backend::keccak256;
+        use crate::hash::suite::{HashSuite, HASH_SUITE_KECCAK_256, HASH_SUITE_SHA2_256};
+        use crate::profiles::p128s_q18::Profile128sQ18;
+        use crate::profiles::p128s_q20::Profile128sQ20;
+        use crate::profiles::p256s::Profile256s;
+        use crate::profiles::p256s_sha2::Profile256sSha2;
+
+        fn check<P: Profile>(name: &str, suite_id: u32) {
+            assert_eq!(P::PROFILE_NAME, name, "PROFILE_NAME");
+            assert_eq!(
+                P::PROFILE_ID,
+                keccak256(name.as_bytes()),
+                "PROFILE_ID is not keccak256({name})"
+            );
+            assert_eq!(
+                <P::Suite as HashSuite>::HASH_SUITE_ID,
+                suite_id,
+                "hash suite for {name}"
+            );
+        }
+
+        check::<Profile256s>("shrincs-256s-keccak", HASH_SUITE_KECCAK_256);
+        check::<Profile256sSha2>("shrincs-256s-sha2", HASH_SUITE_SHA2_256);
+        check::<Profile128sQ18>("shrincs-128s-q18-keccak", HASH_SUITE_KECCAK_256);
+        check::<Profile128sQ20>("shrincs-128s-q20-keccak", HASH_SUITE_KECCAK_256);
+    }
+
+    /// Each profile module's public alias must name its OWN profile type.
+    ///
+    /// `WIDTHS_AGREE` compares widths, and the profiles pair up on width (256s
+    /// with 256s-sha2 at 64/8, q18 with q20 at 32/1), so either member of a
+    /// pair can be substituted into the other's alias without any width guard
+    /// firing. This pins the type parameter itself.
+    #[test]
+    fn every_alias_names_its_own_profile() {
+        use crate::profiles::p128s_q18::Profile128sQ18;
+        use crate::profiles::p128s_q20::Profile128sQ20;
+        use crate::profiles::p256s::Profile256s;
+        use crate::profiles::p256s_sha2::Profile256sSha2;
+
+        fn name_of<P: Profile, const C: usize, const L: usize>(
+            _: core::marker::PhantomData<crate::shrincs::ShrincsCore<P, C, L>>,
+        ) -> &'static str {
+            P::PROFILE_NAME
+        }
+        use core::marker::PhantomData as Pd;
+
+        assert_eq!(
+            name_of(Pd::<crate::profiles::p256s::Shrincs>),
+            Profile256s::PROFILE_NAME
+        );
+        assert_eq!(
+            name_of(Pd::<crate::profiles::p256s_sha2::Shrincs>),
+            Profile256sSha2::PROFILE_NAME
+        );
+        assert_eq!(
+            name_of(Pd::<crate::profiles::p128s_q18::Shrincs>),
+            Profile128sQ18::PROFILE_NAME
+        );
+        assert_eq!(
+            name_of(Pd::<crate::profiles::p128s_q20::Shrincs>),
+            Profile128sQ20::PROFILE_NAME
+        );
+    }
 }
 
 // The acceptance criterion for the whole plan: two profiles that differ only

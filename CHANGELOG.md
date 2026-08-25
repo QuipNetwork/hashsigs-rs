@@ -14,9 +14,10 @@ This file records changes to this project, in the
   every profile in one build.
 - A `Profile` trait and per-profile types are now public, under
   `hashsigs_rs::profiles`, such as `hashsigs_rs::profiles::p256s::Shrincs`.
-  `hashsigs_rs::Shrincs` remains an alias for the `256s` profile. A fixed
-  priority order now resolves it when the build enables more than one
-  profile feature.
+  `hashsigs_rs::Shrincs` now follows the profile the build binds to, rather
+  than always naming the `256s` profile. When more than one profile feature is
+  enabled, a fixed priority order decides which one that is. Name a profile
+  module's own alias to pin one explicitly.
 
 ### Removed
 

@@ -107,8 +107,10 @@ pub const HASH_LEN: usize = 32;
 /// about which parameter set this build carries. Name a profile module's own
 /// alias (for example `profiles::p256s::Shrincs`) to pin one explicitly.
 ///
-/// TRANSITIONAL: `build.rs` still selects exactly one profile per build. When
-/// Task 6 lifts that, this alias goes away and callers name a profile directly.
+/// This alias exists because `build.rs` still binds each build to exactly one
+/// profile for the surfaces that are not generic over a profile. If those
+/// surfaces ever take their own profile parameter, this alias is removable and
+/// callers name a profile module directly.
 pub type Shrincs = shrincs::ShrincsCore<
     profiles::selected::SelectedProfile,
     { profiles::selected::NUM_CHAINS },
