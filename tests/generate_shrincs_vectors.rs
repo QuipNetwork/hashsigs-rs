@@ -14,10 +14,12 @@ use std::io::Write;
 use std::path::Path;
 use std::process::Command;
 
-// Output path per compiled profile, mirroring the profile the crate was built
-// with. The default build keeps the original filename. Emitting the
-// non-default profiles requires building this test crate with
-// `--features <profile>`; note that 128s stateless generation is
+// Output path for the profile this build is BOUND to, not merely one it
+// compiled: features are additive, so several profiles can be compiled at once
+// while exactly one drives these cfgs. The default build keeps the original
+// filename. Emitting the non-default profiles requires building this test crate
+// with `--features <profile>`, which selects that profile even with the default
+// features left on; note that 128s stateless generation is
 // the heavy, cache-backed regeneration event (2^24-leaf FORS trees, 2^18-leaf
 // hypertree) rather than an in-line run.
 #[cfg(shrincs_default_profile_256s)]
