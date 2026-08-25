@@ -20,7 +20,11 @@ struct ProfileIdentity {
 
 /// Every profile, in the fixed priority order that picks the default profile
 /// when more than one profile feature is enabled.
-const PROFILES: [ProfileIdentity; 4] = [
+/// New profiles are appended, never inserted: the order is what `default_profile`
+/// falls back to when several profile features are on at once, so inserting one
+/// ahead of an existing entry would silently re-point an existing multi-profile
+/// build at a different profile.
+const PROFILES: [ProfileIdentity; 6] = [
     ProfileIdentity {
         module: "p256s",
         feature_env: "CARGO_FEATURE_PROFILE_256S",
@@ -44,6 +48,18 @@ const PROFILES: [ProfileIdentity; 4] = [
         feature_env: "CARGO_FEATURE_PROFILE_128S_Q20",
         default_cfg: "shrincs_default_profile_128s_q20",
         profile_name: "shrincs-128s-q20-keccak",
+    },
+    ProfileIdentity {
+        module: "p128s_q18_sha2",
+        feature_env: "CARGO_FEATURE_PROFILE_128S_Q18_SHA2",
+        default_cfg: "shrincs_default_profile_128s_q18_sha2",
+        profile_name: "shrincs-128s-q18-sha2",
+    },
+    ProfileIdentity {
+        module: "p128s_q20_sha2",
+        feature_env: "CARGO_FEATURE_PROFILE_128S_Q20_SHA2",
+        default_cfg: "shrincs_default_profile_128s_q20_sha2",
+        profile_name: "shrincs-128s-q20-sha2",
     },
 ];
 
@@ -87,7 +103,8 @@ fn default_profile() -> &'static ProfileIdentity {
         .unwrap_or_else(|| {
             panic!(
                 "select a SHRINCS profile feature \
-                 (profile-256s, profile-128s-q18, profile-128s-q20, or profile-256s-sha2)"
+                 (profile-256s, profile-256s-sha2, profile-128s-q18, \
+                  profile-128s-q20, profile-128s-q18-sha2, or profile-128s-q20-sha2)"
             )
         })
 }

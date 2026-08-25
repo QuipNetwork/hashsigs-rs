@@ -373,7 +373,12 @@ mod tests {
     use super::*;
     use crate::shrincs::{ShrincsSigner, PROFILE_NAME};
 
-    #[cfg(any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20))]
+    #[cfg(any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    ))]
     fn full_key_fixture_specs() -> Vec<(&'static str, u32)> {
         vec![
             ("deterministic keygen seed", 4),
@@ -381,7 +386,12 @@ mod tests {
         ]
     }
 
-    #[cfg(not(any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20)))]
+    #[cfg(not(any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    )))]
     fn full_key_fixture_specs() -> Vec<(&'static str, u32)> {
         vec![
             ("stateless negative seed", 2),

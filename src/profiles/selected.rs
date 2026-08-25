@@ -42,8 +42,12 @@ use crate::profile::Profile;
 
 #[cfg(shrincs_default_profile_128s_q18)]
 pub use crate::profiles::p128s_q18::Profile128sQ18 as SelectedProfile;
+#[cfg(shrincs_default_profile_128s_q18_sha2)]
+pub use crate::profiles::p128s_q18_sha2::Profile128sQ18Sha2 as SelectedProfile;
 #[cfg(shrincs_default_profile_128s_q20)]
 pub use crate::profiles::p128s_q20::Profile128sQ20 as SelectedProfile;
+#[cfg(shrincs_default_profile_128s_q20_sha2)]
+pub use crate::profiles::p128s_q20_sha2::Profile128sQ20Sha2 as SelectedProfile;
 #[cfg(shrincs_default_profile_256s)]
 pub use crate::profiles::p256s::Profile256s as SelectedProfile;
 #[cfg(shrincs_default_profile_256s_sha2)]

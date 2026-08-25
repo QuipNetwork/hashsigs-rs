@@ -233,18 +233,38 @@ pub(crate) fn keygen_from_master_seed<P: Profile, const NUM_LAYERS: usize>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(not(any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20)))]
+    #[cfg(not(any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    )))]
     use crate::hash::{derive32, hash_packed};
-    #[cfg(not(any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20)))]
+    #[cfg(not(any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    )))]
     use crate::profiles::selected::{SelectedProfile, NUM_CHAINS, NUM_LAYERS};
 
     /// Scheme hash suite of the active profile: what every test fixture below
     /// derives its seeds with.
-    #[cfg(not(any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20)))]
+    #[cfg(not(any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    )))]
     type Suite = <SelectedProfile as Profile>::Suite;
 
     /// Independent keygen at the SPHINCS+C layer (no SHRINCS hybrid fields).
-    #[cfg(not(any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20)))]
+    #[cfg(not(any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    )))]
     fn independent_keygen(seed: &[u8]) -> (Key, PublicKey) {
         let key = keygen::<SelectedProfile, NUM_LAYERS>(
             derive32::<Suite>(b"shrincs-stateless-sk-seed", seed, &[]),
@@ -255,7 +275,12 @@ mod tests {
         (key, public_key)
     }
 
-    #[cfg(not(any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20)))]
+    #[cfg(not(any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    )))]
     #[test]
     fn sphincs_plus_c_sign_verify_round_trip() {
         let (sk, pk) = independent_keygen(b"sphincs-plus-c independent rt");
@@ -283,7 +308,12 @@ mod tests {
     // hash with the free function and verifying the resulting bytes through
     // the opaque `VerifierInterface` must round-trip. The stateless key is not
     // mutated (no `&mut`), which is the point of the free-function shape.
-    #[cfg(not(any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20)))]
+    #[cfg(not(any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    )))]
     #[test]
     fn sign_hash_round_trips_through_the_verifier_interface() {
         use crate::verifier::{VerifierInterface, VerifyOutcome};
@@ -316,7 +346,12 @@ mod tests {
     #[cfg(all(
         feature = "std",
         not(feature = "parallel"),
-        not(any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20))
+        not(any(
+            shrincs_default_profile_128s_q18,
+            shrincs_default_profile_128s_q20,
+            shrincs_default_profile_128s_q18_sha2,
+            shrincs_default_profile_128s_q20_sha2
+        ))
     ))]
     #[test]
     fn stateless_verify_hash_count_matches_model_and_reports_cu_floor() {

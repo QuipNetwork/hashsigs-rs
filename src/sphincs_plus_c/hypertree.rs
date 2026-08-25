@@ -951,7 +951,12 @@ mod tests {
     /// Full hypertree sign→verify round-trip at a non-zero bottom leaf.
     /// Gated off the 128s profiles: a single-layer height-18 subtree is too
     /// large for a unit-test budget (same gate as `sphincs_plus_c` round-trip).
-    #[cfg(not(any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20)))]
+    #[cfg(not(any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    )))]
     #[test]
     fn hypertree_sign_verify_round_trip() {
         let key = crate::sphincs_plus_c::keygen::<SelectedProfile, NUM_LAYERS>(

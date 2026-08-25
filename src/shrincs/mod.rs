@@ -161,14 +161,24 @@ mod profile_tests {
         assert_eq!(super::PROFILE_ID, expected);
     }
 
-    #[cfg(any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20))]
+    #[cfg(any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    ))]
     #[test]
     fn active_128_profile_uses_raised_fors_grind_budget() {
         assert_eq!(super::FORS_TREE_HEIGHT, 24);
         assert_eq!(super::FORS_C_MAX_GRIND_COUNTER, 1 << 28);
     }
 
-    #[cfg(not(any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20)))]
+    #[cfg(not(any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    )))]
     #[test]
     fn active_non_128_profile_keeps_default_fors_grind_budget() {
         assert_eq!(super::FORS_C_MAX_GRIND_COUNTER, 1 << 24);

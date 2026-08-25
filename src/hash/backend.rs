@@ -40,7 +40,12 @@ pub(crate) fn keccak256v(parts: &[&[u8]]) -> [u8; HASH_LEN] {
         test,
         feature = "std",
         not(feature = "parallel"),
-        not(any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20))
+        not(any(
+            shrincs_default_profile_128s_q18,
+            shrincs_default_profile_128s_q20,
+            shrincs_default_profile_128s_q18_sha2,
+            shrincs_default_profile_128s_q20_sha2
+        ))
     ))]
     metrics::record(parts);
     #[cfg(any(target_os = "solana", feature = "solana"))]
@@ -68,16 +73,28 @@ pub(crate) fn keccak256(data: &[u8]) -> [u8; HASH_LEN] {
     keccak256v(&[data])
 }
 
-/// SHA-256 over the concatenation of `parts` (scheme-hash suite for
-/// `profile-256s-sha2`). Vectored like `keccak256v`.
+/// SHA-256 over the concatenation of `parts` (scheme-hash suite for the
+/// `*-sha2` profiles). Vectored like `keccak256v`.
 #[inline]
-#[cfg_attr(not(feature = "profile-256s-sha2"), allow(dead_code))]
+#[cfg_attr(
+    not(any(
+        feature = "profile-256s-sha2",
+        feature = "profile-128s-q18-sha2",
+        feature = "profile-128s-q20-sha2"
+    )),
+    allow(dead_code)
+)]
 pub(crate) fn sha256v(parts: &[&[u8]]) -> [u8; HASH_LEN] {
     #[cfg(all(
         test,
         feature = "std",
         not(feature = "parallel"),
-        not(any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20))
+        not(any(
+            shrincs_default_profile_128s_q18,
+            shrincs_default_profile_128s_q20,
+            shrincs_default_profile_128s_q18_sha2,
+            shrincs_default_profile_128s_q20_sha2
+        ))
     ))]
     metrics::record(parts);
     #[cfg(any(target_os = "solana", feature = "solana"))]
@@ -110,7 +127,12 @@ pub(crate) fn sha256v(parts: &[&[u8]]) -> [u8; HASH_LEN] {
     test,
     feature = "std",
     not(feature = "parallel"),
-    not(any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20))
+    not(any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    ))
 ))]
 pub(crate) mod metrics {
     use core::cell::Cell;

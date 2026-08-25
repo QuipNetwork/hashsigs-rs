@@ -283,6 +283,16 @@ fn vectors_filename() -> &'static str {
     "tests/test_vectors/shrincs_account_wrapper_vectors_128s_q20_keccak.json"
 }
 
+#[cfg(shrincs_default_profile_128s_q18_sha2)]
+fn vectors_filename() -> &'static str {
+    "tests/test_vectors/shrincs_account_wrapper_vectors_128s_q18_sha2.json"
+}
+
+#[cfg(shrincs_default_profile_128s_q20_sha2)]
+fn vectors_filename() -> &'static str {
+    "tests/test_vectors/shrincs_account_wrapper_vectors_128s_q20_sha2.json"
+}
+
 pub(crate) fn load_vectors() -> Value {
     let path = vectors_path();
     let encoded = read_json_or_gzip(&path).unwrap_or_else(|error| {

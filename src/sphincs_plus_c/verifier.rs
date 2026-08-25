@@ -113,7 +113,12 @@ impl crate::verifier::VerifierInterface for SphincsPlusCVerifier {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(not(any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20)))]
+    #[cfg(not(any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    )))]
     use crate::verifier::{VerifierInterface, VerifyOutcome};
 
     #[test]
@@ -132,7 +137,12 @@ mod tests {
     /// Build a 64-byte `pk_seed || hypertree_root` key and a signed hash +
     /// stateless envelope for `VerifierInterface` tests. Gated off the 128s
     /// profiles because independent SPHINCS+C keygen/sign grinds too hard.
-    #[cfg(not(any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20)))]
+    #[cfg(not(any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    )))]
     fn signed_stateless_envelope(seed_label: &[u8], hash: [u8; HASH_LEN]) -> ([u8; 64], Vec<u8>) {
         use crate::hash::hash_packed;
         use crate::profile::Profile;
@@ -151,7 +161,12 @@ mod tests {
         (key, envelope)
     }
 
-    #[cfg(not(any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20)))]
+    #[cfg(not(any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    )))]
     fn key64(pk: &crate::sphincs_plus_c::PublicKey) -> [u8; 64] {
         let mut key = [0u8; 64];
         key[..32].copy_from_slice(pk.pk_seed.as_bytes());
@@ -159,7 +174,12 @@ mod tests {
         key
     }
 
-    #[cfg(not(any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20)))]
+    #[cfg(not(any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    )))]
     #[test]
     fn verify_accepts_valid_64_byte_key_and_stateless_envelope() {
         let hash = [0x42u8; HASH_LEN];
@@ -169,7 +189,12 @@ mod tests {
         assert_eq!(outcome, VerifyOutcome::Valid);
     }
 
-    #[cfg(not(any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20)))]
+    #[cfg(not(any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    )))]
     #[test]
     fn verify_rejects_wrong_length_key() {
         let hash = [0x43u8; HASH_LEN];
@@ -184,7 +209,12 @@ mod tests {
         assert_eq!(outcome, VerifyOutcome::Invalid);
     }
 
-    #[cfg(not(any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20)))]
+    #[cfg(not(any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    )))]
     #[test]
     fn verify_reports_malformed_envelope() {
         let hash = [0x44u8; HASH_LEN];

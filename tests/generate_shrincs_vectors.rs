@@ -30,6 +30,10 @@ const OUT_PATH: &str = "tests/test_vectors/shrincs_sphincs_128s_q18_keccak.json.
 const OUT_PATH: &str = "tests/test_vectors/shrincs_sphincs_128s_q20_keccak.json.gz";
 #[cfg(shrincs_default_profile_256s_sha2)]
 const OUT_PATH: &str = "tests/test_vectors/shrincs_sphincs_256s_sha2.json.gz";
+#[cfg(shrincs_default_profile_128s_q18_sha2)]
+const OUT_PATH: &str = "tests/test_vectors/shrincs_sphincs_128s_q18_sha2.json.gz";
+#[cfg(shrincs_default_profile_128s_q20_sha2)]
+const OUT_PATH: &str = "tests/test_vectors/shrincs_sphincs_128s_q20_sha2.json.gz";
 
 #[test]
 #[ignore = "run explicitly to refresh Solidity SHRINCS vectors"]

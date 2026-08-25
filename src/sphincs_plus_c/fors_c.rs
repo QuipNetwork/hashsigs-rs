@@ -870,7 +870,12 @@ fn winning_fors_counter_and_digest<P: Profile>(
 
 #[cfg(all(
     test,
-    any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20)
+    any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    )
 ))]
 mod measurement_tests {
     use super::super::key::{Key, PkSeed, PrfSeed, PrivateKey, PublicKey, Root, SkSeed};

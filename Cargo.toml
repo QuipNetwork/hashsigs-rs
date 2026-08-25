@@ -63,9 +63,11 @@ solana = ["dep:solana-program"]
 #
 # Counts stay compile-time constants (no runtime params struct): each profile
 # is a type implementing `Profile`, and the algorithms are generic over it.
-# `profile-256s-sha2` uses SHA-256 for the internal scheme hashes while keeping
-# EVM-domain hashes (profile identity, commitments, canonical action hashes) on
-# keccak to match Solidity.
+# The `*-sha2` profiles (`profile-256s-sha2`, `profile-128s-q18-sha2`,
+# `profile-128s-q20-sha2`) use SHA-256 for the internal scheme hashes while
+# keeping EVM-domain hashes (profile identity, commitments, canonical action
+# hashes) on keccak to match Solidity. Each is the exact numeric twin of the
+# keccak profile it is named after.
 #
 # The non-generic facades (`ShrincsVerifier`, the wasm bindings, the
 # golden-vector tests) still bind to one profile, which build.rs picks.
@@ -75,13 +77,18 @@ solana = ["dep:solana-program"]
 # the default enabled) still BINDS to q18 instead of silently testing 256s.
 # Naming a profile explicitly overrides the default; naming several, or
 # `--all-features`, falls back to the fixed order profile-256s,
-# profile-256s-sha2, profile-128s-q18, profile-128s-q20 so the choice stays
-# deterministic. Every enabled profile compiles either way.
+# profile-256s-sha2, profile-128s-q18, profile-128s-q20, profile-128s-q18-sha2,
+# profile-128s-q20-sha2 so the choice stays deterministic. New profiles are
+# appended to that order, never inserted, so an existing multi-profile build
+# keeps binding to the profile it bound to before. Every enabled profile
+# compiles either way.
 default-profile-256s = ["profile-256s"]
 profile-256s = []
 profile-128s-q18 = []
 profile-128s-q20 = []
 profile-256s-sha2 = []
+profile-128s-q18-sha2 = []
+profile-128s-q20-sha2 = []
 # Heap-back the WOTS+ segment accumulator instead of using a stack array.
 # Solana BPF stack frames are 4 KB, well under SIGNATURE_SIZE, so on-chain
 # builds must opt in. Native and wasm builds keep the stack array.

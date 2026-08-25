@@ -32,8 +32,12 @@ pub(crate) mod identity {
 
 #[cfg(feature = "profile-128s-q18")]
 pub mod p128s_q18;
+#[cfg(feature = "profile-128s-q18-sha2")]
+pub mod p128s_q18_sha2;
 #[cfg(feature = "profile-128s-q20")]
 pub mod p128s_q20;
+#[cfg(feature = "profile-128s-q20-sha2")]
+pub mod p128s_q20_sha2;
 #[cfg(feature = "profile-256s")]
 pub mod p256s;
 #[cfg(feature = "profile-256s-sha2")]
@@ -49,7 +53,9 @@ pub mod selected;
     feature = "profile-256s",
     feature = "profile-256s-sha2",
     feature = "profile-128s-q18",
-    feature = "profile-128s-q20"
+    feature = "profile-128s-q20",
+    feature = "profile-128s-q18-sha2",
+    feature = "profile-128s-q20-sha2"
 ))]
 mod tests {
     use crate::profile::Profile;
@@ -57,7 +63,9 @@ mod tests {
     #[test]
     fn every_profile_keeps_its_documented_values() {
         use crate::profiles::p128s_q18::Profile128sQ18;
+        use crate::profiles::p128s_q18_sha2::Profile128sQ18Sha2;
         use crate::profiles::p128s_q20::Profile128sQ20;
+        use crate::profiles::p128s_q20_sha2::Profile128sQ20Sha2;
         use crate::profiles::p256s::Profile256s;
         use crate::profiles::p256s_sha2::Profile256sSha2;
 
@@ -74,6 +82,52 @@ mod tests {
 
         assert_eq!(Profile256sSha2::NUM_WOTS_CHAINS, 64);
         assert_eq!(Profile256sSha2::HASH_TRUNC_LEN, 32);
+
+        assert_eq!(Profile128sQ18Sha2::NUM_WOTS_CHAINS, 32);
+        assert_eq!(Profile128sQ18Sha2::HASH_TRUNC_LEN, 16);
+        assert_eq!(Profile128sQ18Sha2::STATELESS_SIGNATURE_LIMIT, 262_144);
+        assert_eq!(Profile128sQ18Sha2::FORS_C_MAX_GRIND_COUNTER, 1 << 28);
+        assert_eq!(Profile128sQ20Sha2::STATELESS_SIGNATURE_LIMIT, 1_048_576);
+    }
+
+    /// Each `*-sha2` profile is the exact numeric twin of its keccak profile.
+    ///
+    /// The assertions above pin a few values per profile by hand; this pins
+    /// every numeric parameter of a twin pair against the other member, which
+    /// is the property the sha2 profiles are defined by. A transcription slip
+    /// in one constant compiles clean and changes the bytes the profile
+    /// produces, so nothing else in the crate would catch it.
+    #[test]
+    fn every_sha2_profile_is_the_numeric_twin_of_its_keccak_profile() {
+        use crate::profiles::p128s_q18::Profile128sQ18;
+        use crate::profiles::p128s_q18_sha2::Profile128sQ18Sha2;
+        use crate::profiles::p128s_q20::Profile128sQ20;
+        use crate::profiles::p128s_q20_sha2::Profile128sQ20Sha2;
+        use crate::profiles::p256s::Profile256s;
+        use crate::profiles::p256s_sha2::Profile256sSha2;
+
+        /// Every numeric parameter a profile declares, in declaration order, as
+        /// one comparable tuple, so a twin pair is checked in a single
+        /// assertion rather than one constant at a time.
+        #[allow(clippy::type_complexity)]
+        fn params<P: Profile>() -> (usize, u64, u8, u8, u8, u8, u16, u16, u32, u32) {
+            (
+                P::HASH_TRUNC_LEN,
+                P::STATELESS_SIGNATURE_LIMIT,
+                P::HYPERTREE_HEIGHT,
+                P::NUM_HYPERTREE_LAYERS,
+                P::FORS_TREE_HEIGHT,
+                P::NUM_FORS_TREES,
+                P::WOTS_CHAIN_LEN,
+                P::NUM_WOTS_CHAINS,
+                P::FORS_C_MAX_GRIND_COUNTER,
+                P::WOTS_TARGET_SUM,
+            )
+        }
+
+        assert_eq!(params::<Profile256sSha2>(), params::<Profile256s>());
+        assert_eq!(params::<Profile128sQ18Sha2>(), params::<Profile128sQ18>());
+        assert_eq!(params::<Profile128sQ20Sha2>(), params::<Profile128sQ20>());
     }
 
     /// Every compiled profile's identity and suite, not only the selected one.
@@ -89,7 +143,9 @@ mod tests {
         use crate::hash::backend::keccak256;
         use crate::hash::suite::{HashSuite, HASH_SUITE_KECCAK_256, HASH_SUITE_SHA2_256};
         use crate::profiles::p128s_q18::Profile128sQ18;
+        use crate::profiles::p128s_q18_sha2::Profile128sQ18Sha2;
         use crate::profiles::p128s_q20::Profile128sQ20;
+        use crate::profiles::p128s_q20_sha2::Profile128sQ20Sha2;
         use crate::profiles::p256s::Profile256s;
         use crate::profiles::p256s_sha2::Profile256sSha2;
 
@@ -111,18 +167,22 @@ mod tests {
         check::<Profile256sSha2>("shrincs-256s-sha2", HASH_SUITE_SHA2_256);
         check::<Profile128sQ18>("shrincs-128s-q18-keccak", HASH_SUITE_KECCAK_256);
         check::<Profile128sQ20>("shrincs-128s-q20-keccak", HASH_SUITE_KECCAK_256);
+        check::<Profile128sQ18Sha2>("shrincs-128s-q18-sha2", HASH_SUITE_SHA2_256);
+        check::<Profile128sQ20Sha2>("shrincs-128s-q20-sha2", HASH_SUITE_SHA2_256);
     }
 
     /// Each profile module's public alias must name its OWN profile type.
     ///
-    /// `WIDTHS_AGREE` compares widths, and the profiles pair up on width (256s
-    /// with 256s-sha2 at 64/8, q18 with q20 at 32/1), so either member of a
-    /// pair can be substituted into the other's alias without any width guard
-    /// firing. This pins the type parameter itself.
+    /// `WIDTHS_AGREE` compares widths, and the profiles group by width (256s
+    /// with 256s-sha2 at 64/8; q18, q20 and both their sha2 twins at 32/1), so
+    /// any member of a group can be substituted into another's alias without
+    /// any width guard firing. This pins the type parameter itself.
     #[test]
     fn every_alias_names_its_own_profile() {
         use crate::profiles::p128s_q18::Profile128sQ18;
+        use crate::profiles::p128s_q18_sha2::Profile128sQ18Sha2;
         use crate::profiles::p128s_q20::Profile128sQ20;
+        use crate::profiles::p128s_q20_sha2::Profile128sQ20Sha2;
         use crate::profiles::p256s::Profile256s;
         use crate::profiles::p256s_sha2::Profile256sSha2;
 
@@ -148,6 +208,14 @@ mod tests {
         assert_eq!(
             name_of(Pd::<crate::profiles::p128s_q20::Shrincs>),
             Profile128sQ20::PROFILE_NAME
+        );
+        assert_eq!(
+            name_of(Pd::<crate::profiles::p128s_q18_sha2::Shrincs>),
+            Profile128sQ18Sha2::PROFILE_NAME
+        );
+        assert_eq!(
+            name_of(Pd::<crate::profiles::p128s_q20_sha2::Shrincs>),
+            Profile128sQ20Sha2::PROFILE_NAME
         );
     }
 }
