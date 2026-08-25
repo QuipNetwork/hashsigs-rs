@@ -49,6 +49,49 @@ pub(crate) mod test_fixtures;
 #[cfg(test)]
 mod vector_conformance;
 
+use crate::profile::{assert_widths, Profile};
+use core::marker::PhantomData;
+
+/// A SHRINCS instance for one profile.
+///
+/// `NUM_CHAINS` and `NUM_LAYERS` repeat `P::NUM_WOTS_CHAINS` and
+/// `P::NUM_HYPERTREE_LAYERS` as `usize` array widths, because a trait
+/// associated constant cannot be an array length on stable Rust. The
+/// constructor rejects a mismatch.
+pub struct ShrincsCore<P: Profile, const NUM_CHAINS: usize, const NUM_LAYERS: usize> {
+    _profile: PhantomData<fn() -> P>,
+}
+
+impl<P: Profile, const NUM_CHAINS: usize, const NUM_LAYERS: usize>
+    ShrincsCore<P, NUM_CHAINS, NUM_LAYERS>
+{
+    /// Compile-time width check, forced into a const context.
+    ///
+    /// A plain `const fn` call would NOT fail compilation: `const fn` means
+    /// "callable in a const context", not "always evaluated in one". Called
+    /// from a runtime path the assertion is an ordinary runtime panic. Only
+    /// an associated const is guaranteed to be evaluated at monomorphisation.
+    /// Do not inline this back into a direct call.
+    const WIDTHS_AGREE: () = assert_widths::<P, NUM_CHAINS, NUM_LAYERS>();
+
+    /// Create an instance. Fails to compile when the const generic widths
+    /// disagree with the profile's own constants.
+    pub const fn new() -> Self {
+        let () = Self::WIDTHS_AGREE;
+        Self {
+            _profile: PhantomData,
+        }
+    }
+}
+
+impl<P: Profile, const NUM_CHAINS: usize, const NUM_LAYERS: usize> Default
+    for ShrincsCore<P, NUM_CHAINS, NUM_LAYERS>
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub use crate::verifier::{VerifierInterface, VerifyOutcome};
 pub use dispatch::prepare_stateless_delegation;
 pub use key::{Commitment, Keys};
