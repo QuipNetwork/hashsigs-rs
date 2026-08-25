@@ -14,7 +14,7 @@ build-test:
     # run rather than a check: it is the only profile whose scheme hashes are
     # SHA-256, and its committed vectors anchor the Solidity sha2 verifier.
     - cargo test --locked --features profile-256s-sha2
-    # All four profiles compile into one build; this is the only job that
+    # All six profiles compile into one build; this is the only job that
     # proves they coexist, including profiles::tests::profiles_that_differ_only_by_suite_coexist.
     - cargo test --locked --all-features
     # Default-profile wasm build (no profile-* feature). ts-conformance rebuilds
@@ -35,6 +35,12 @@ test-128s:
   script:
     - cargo test --locked --release --features profile-128s-q18
     - cargo test --locked --release --features profile-128s-q20
+    # The sha2 twins of those two are compiled, not tested: their golden vectors
+    # are not generated yet, so the vector-conformance tests would fail on a
+    # missing file rather than on a real defect. Raise these to `cargo test`
+    # once tests/test_vectors/shrincs_sphincs_128s_q{18,20}_sha2.json.gz exist.
+    - cargo check --locked --release --all-targets --features profile-128s-q18-sha2
+    - cargo check --locked --release --all-targets --features profile-128s-q20-sha2
 
 # Solana workspace member is not a default member of the root package, so it
 # never ran under bare `cargo test`. solana-program-test spins up a validator

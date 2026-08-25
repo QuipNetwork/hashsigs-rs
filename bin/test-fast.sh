@@ -33,6 +33,8 @@ Fast local-loop test entrypoints:
   sha2-compile          cargo test --no-run --features profile-256s-sha2
   q18-compile           cargo test --no-run --features profile-128s-q18
   q20-compile           cargo test --no-run --features profile-128s-q20
+  q18-sha2-compile      cargo test --no-run --features profile-128s-q18-sha2
+  q20-sha2-compile      cargo test --no-run --features profile-128s-q20-sha2
   full                  cargo test
 
 Profiles:
@@ -40,6 +42,8 @@ Profiles:
   256s-sha2             use --no-default-features --features profile-256s-sha2
   128s-q18              use --no-default-features --features profile-128s-q18
   128s-q20              use --no-default-features --features profile-128s-q20
+  128s-q18-sha2         use --no-default-features --features profile-128s-q18-sha2
+  128s-q20-sha2         use --no-default-features --features profile-128s-q20-sha2
 
 Examples:
   ./bin/test-fast.sh signer-stateful
@@ -82,6 +86,12 @@ case "$profile" in
     ;;
   128s-q20)
     profile_args=(--no-default-features --features profile-128s-q20)
+    ;;
+  128s-q18-sha2)
+    profile_args=(--no-default-features --features profile-128s-q18-sha2)
+    ;;
+  128s-q20-sha2)
+    profile_args=(--no-default-features --features profile-128s-q20-sha2)
     ;;
   *)
     echo "error: unknown profile '$profile'" >&2
@@ -216,6 +226,12 @@ case "$area" in
     ;;
   q20-compile)
     cargo test --no-run --no-default-features --features profile-128s-q20 "$@"
+    ;;
+  q18-sha2-compile)
+    cargo test --no-run --no-default-features --features profile-128s-q18-sha2 "$@"
+    ;;
+  q20-sha2-compile)
+    cargo test --no-run --no-default-features --features profile-128s-q20-sha2 "$@"
     ;;
   full)
     cargo_test "$@"

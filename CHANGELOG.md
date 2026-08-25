@@ -5,10 +5,20 @@ This file records changes to this project, in the
 
 ## Unreleased
 
+### Added
+
+- Two SHRINCS profiles, `shrincs-128s-q18-sha2` and `shrincs-128s-q20-sha2`,
+  behind the `profile-128s-q18-sha2` and `profile-128s-q20-sha2` features.
+  Each is the exact numeric twin of the keccak profile of the same name and
+  differs only in the scheme hash suite (SHA-256 instead of keccak-256) and in
+  the profile identity string. Golden vectors for the two are not generated
+  yet, so CI compiles them rather than running the vector-conformance suite.
+
 ### Changed
 
-- The four `profile-*` Cargo features (`profile-256s`, `profile-256s-sha2`,
-  `profile-128s-q18`, `profile-128s-q20`) are additive. Enabling more than
+- The six `profile-*` Cargo features (`profile-256s`, `profile-256s-sha2`,
+  `profile-128s-q18`, `profile-128s-q20`, `profile-128s-q18-sha2`,
+  `profile-128s-q20-sha2`) are additive. Enabling more than
   one now compiles more than one profile into the same build, instead of
   build.rs panicking on two. `cargo test --all-features` compiles and tests
   every profile in one build.
