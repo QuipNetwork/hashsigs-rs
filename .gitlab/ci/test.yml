@@ -14,6 +14,9 @@ build-test:
     # run rather than a check: it is the only profile whose scheme hashes are
     # SHA-256, and its committed vectors anchor the Solidity sha2 verifier.
     - cargo test --locked --features profile-256s-sha2
+    # All six profiles compile into one build; this is the only job that
+    # proves they coexist, including profiles::tests::profiles_that_differ_only_by_suite_coexist.
+    - cargo test --locked --all-features
     # Default-profile wasm build (no profile-* feature). ts-conformance rebuilds
     # only when packaging via npm run build → build-wasm.sh.
     - cargo build --locked --release --target wasm32-unknown-unknown --features wasm-bindings
@@ -32,6 +35,19 @@ test-128s:
   script:
     - cargo test --locked --release --features profile-128s-q18
     - cargo test --locked --release --features profile-128s-q20
+    # The sha2 twins run the library suite, which includes the SPHINCS
+    # vector-conformance tests against their committed golden vectors (171
+    # passed under each). Their integration tests are held back: the ERC-7913
+    # adapter pins bytes against account-wrapper vectors, a separate family
+    # generated in hashsigs-solidity and copied here, which does not exist for
+    # these two profiles. --all-targets is still checked so the integration
+    # tests keep compiling. Raise --lib to a full `cargo test` once
+    # tests/test_vectors/shrincs_account_wrapper_vectors_128s_q{18,20}_sha2.json.gz
+    # land.
+    - cargo test --locked --release --lib --features profile-128s-q18-sha2
+    - cargo test --locked --release --lib --features profile-128s-q20-sha2
+    - cargo check --locked --release --all-targets --features profile-128s-q18-sha2
+    - cargo check --locked --release --all-targets --features profile-128s-q20-sha2
 
 # Solana workspace member is not a default member of the root package, so it
 # never ran under bare `cargo test`. solana-program-test spins up a validator
@@ -46,9 +62,10 @@ test-solana:
   script:
     - cargo test --locked -p hashsigs-rs-solana
 
-# Static clippy gate. Profile features are mutually exclusive, so lint each
-# feature set CI tests in a separate invocation (not --all-features). Also lint
-# the non-default Solana workspace member. Formatting is enforced separately by
+# Static clippy gate. The profile features are additive, so one --all-features
+# invocation lints every profile plus wasm-bindings, solana, heap-buffers, and
+# parallel together. Also lint the non-default Solana workspace member, which
+# the profile features do not apply to. Formatting is enforced separately by
 # the `fmt` job below.
 clippy:
   stage: test
@@ -60,10 +77,8 @@ clippy:
   before_script:
     - rustup component add clippy
   script:
-    - cargo clippy --all-targets --features wasm-bindings --locked -- -D warnings
     - cargo clippy --all-targets -p hashsigs-rs-solana --locked -- -D warnings
-    - cargo clippy --all-targets --features profile-128s-q18 --locked -- -D warnings
-    - cargo clippy --all-targets --features profile-256s-sha2 --locked -- -D warnings
+    - cargo clippy --all-targets --all-features --locked -- -D warnings
 
 # Formatting gate. rustfmt only parses (no compile), so this is fast and needs
 # no build cache. The tree is fully rustfmt-clean; this keeps it that way.
@@ -132,16 +147,25 @@ semver:
   script:
     - export PATH="${CARGO_HOME}/bin:${PATH}"
     # Never let the tool pick features: its default heuristic enables every
-    # feature at once, and the four SHRINCS profile features are mutually
-    # exclusive (build.rs panics). --default-features keeps each version on
-    # its own default profile; the additive host-compatible features are
-    # added explicitly. Features absent from the baseline warn, not error.
+    # feature at once, which compiles all four SHRINCS profiles and binds the
+    # single-profile surfaces to whichever the priority order picks. That
+    # changes what the comparison measures between runs. --default-features
+    # keeps each version on its own default profile; the additive
+    # host-compatible features are added explicitly. Features absent from the
+    # baseline warn, not error.
     - cargo semver-checks check-release --default-features --features solana --features heap-buffers --features wasm-bindings --features parallel
 
 # Conformance test against the BUILT package (dist/): loaders, exports map,
 # ESM/CJS scoping, base64-inline path — the layer cargo tests never touch.
 # npm run build already runs build-wasm.sh + npm test once; do not invoke them
 # again here.
+#
+# This builds one wasm binary per published profile (six), each preceded by a
+# `cargo clean -p hashsigs-rs` because the cdylib output path is shared, so the
+# wasm compile step costs roughly six times a single-profile build. The test
+# suite itself stays cheap: it drives the full crypto surface only on the 256s
+# profiles and identity-checks the rest, because 128s keygen through wasm
+# takes about 53 seconds.
 ts-conformance:
   stage: test
   image: rust:1.95.0
@@ -156,3 +180,49 @@ ts-conformance:
     - export PATH="${CARGO_HOME}/bin:${PATH}"
     - cd ts && npm ci
     - npm run build
+
+# The Python bindings, against the BUILT wheel rather than the source tree:
+# the per-profile extensions only exist once bin/build-python.sh has staged
+# them, and the package resolves its profile manifest from the installed
+# location.
+#
+# Like the wasm build, this compiles one artifact per profile, so the cargo
+# step costs roughly six times a single-profile build. The suite drives the
+# full signing surface on the default profile, checks profile identity on all
+# six, and signs on the 256s pair only -- 128s keygen costs tens of seconds.
+py-tests:
+  stage: test
+  image: rust:1.95.0
+  extends: .rust-cache
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  before_script:
+    - !reference [.install-python-build, before_script]
+  script:
+    # `build` with no flags builds the sdist and then builds the wheel FROM
+    # that sdist, so this one command covers the source-install path that
+    # `pip install --no-binary` takes. Both go through py/hashsigs_build.py,
+    # the PEP 517 backend that compiles one extension per profile before
+    # handing off to maturin; a bare `maturin build` skips it and produces a
+    # wheel with no extensions.
+    - /tmp/py-venv/bin/python -m build --outdir /tmp/dist .
+    # The wheel came from the sdist, so a source file missing from the sdist
+    # shows up as a missing extension here.
+    # A block scalar, not a plain one: the message below contains a
+    # colon-space, which YAML reads as a mapping key inside a plain scalar and
+    # rejects the whole file over. That is a pipeline that fails before it
+    # starts a single job, so the shape matters as much as the check.
+    - |
+      /tmp/py-venv/bin/python - <<'PY'
+      import glob, sys, zipfile
+      wheel = glob.glob("/tmp/dist/*.whl")[0]
+      names = [n for n in zipfile.ZipFile(wheel).namelist() if n.endswith(".so")]
+      if len(names) != 7:
+          sys.exit(f"{wheel} carries {len(names)} extensions, expected 7: {names}")
+      print("sdist rebuild carries every extension")
+      PY
+    - /tmp/py-venv/bin/pip install --quiet --force-reinstall /tmp/dist/*.whl
+    # Run from py/ so the installed package is imported, never py/python/.
+    - cd py && /tmp/py-venv/bin/python -m pytest tests/ -q
+

@@ -1,0 +1,59 @@
+[build-system]
+requires = ["maturin>=1.14,<2"]
+# An in-tree backend that wraps maturin. It builds one extension per SHRINCS
+# profile and stages them into the package before handing off, because maturin
+# builds exactly one Cargo package and one Cargo package builds at most one
+# cdylib. Going through this backend -- `pip install .`, `python -m build` --
+# is the only way to get a complete wheel; a bare `maturin build` skips it and
+# produces a package whose `hashsigs._ext` is empty.
+build-backend = "hashsigs_build"
+backend-path = ["py"]
+
+[project]
+name = "hashsigs"
+description = "Hash-based signatures: SHRINCS and SPHINCS+C, backed by hashsigs-rs. Every SHRINCS profile ships in this one distribution, each on its own import path."
+readme = "py/README.md"
+license = "AGPL-3.0-or-later"
+requires-python = ">=3.9"
+authors = [{ name = "Richard T. Carback III", email = "rick.carback@gmail.com" }]
+keywords = ["cryptography", "wots", "shrincs", "signature"]
+classifiers = [
+  "Programming Language :: Rust",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Topic :: Security :: Cryptography",
+]
+# Version comes from py/Cargo.toml so the workspace has one source of truth.
+dynamic = ["version"]
+
+[project.urls]
+Repository = "https://gitlab.com/quip.network/hashsigs-rs"
+
+[tool.maturin]
+# This file sits at the REPOSITORY root, not in py/, on purpose. maturin
+# resolves `include` paths and `python-source` against the directory holding
+# pyproject.toml, and that directory becomes the source distribution's root,
+# while path dependencies are vendored at their workspace-relative locations.
+# Rooting here is what makes those two agree: `py/profiles/p256s` in the
+# repository is `py/profiles/p256s` in the sdist, so the crate's own
+# `path = "../../.."` back to hashsigs-rs resolves in both. With pyproject.toml
+# in py/, the profile crates landed at the sdist root instead and their path
+# dependencies pointed above it.
+manifest-path = "py/Cargo.toml"
+python-source = "py/python"
+module-name = "hashsigs._hashsigs"
+include = [
+  # Wheel: the staged extensions and the generated profile modules. Written by
+  # the build backend before maturin runs; see py/hashsigs_build.py.
+  { path = "py/python/hashsigs/_ext/*.abi3.so", format = "wheel" },
+  { path = "py/python/hashsigs/profiles/profiles.json", format = "wheel" },
+  { path = "py/python/hashsigs/py.typed", format = "wheel" },
+  # Sdist: the six per-profile extension crates. maturin vendors hashsigs-rs
+  # and py/common automatically, because py/Cargo.toml depends on them by
+  # path, but nothing depends on these -- they are separate cdylib packages
+  # the backend builds directly, so they have to be named here.
+  { path = "py/profiles/*/Cargo.toml", format = "sdist" },
+  { path = "py/profiles/*/src/*.rs", format = "sdist" },
+  # Sdist: the profile table and the backend that reads it.
+  { path = "py/profiles.json", format = "sdist" },
+  { path = "py/hashsigs_build.py", format = "sdist" },
+]

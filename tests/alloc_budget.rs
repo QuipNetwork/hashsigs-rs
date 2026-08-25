@@ -25,6 +25,7 @@
 //! A counting global allocator wraps the system allocator; signing/keygen run
 //! before the measured window (signing allocates wire types by design).
 
+use hashsigs_rs::profiles::selected::{SelectedProfile, NUM_CHAINS, NUM_LAYERS};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -86,7 +87,12 @@ fn assert_verify_budget(what: &str, allocs: u64) {
 }
 
 #[cfg_attr(
-    any(shrincs_profile_128s_q18, shrincs_profile_128s_q20),
+    any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    ),
     ignore = "128s signing grinds ~2^24 counters; the allocation budget is profile-independent and enforced by the 256s lanes"
 )]
 #[cfg_attr(
@@ -97,12 +103,20 @@ fn assert_verify_budget(what: &str, allocs: u64) {
 fn stateless_verify_stays_within_allocation_budget() {
     let _guard = MEASURE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     // SPHINCS+C layer: independent keypair, arbitrary 32-byte message.
-    let sk = hashsigs_rs::sphincs_plus_c::keygen([0x11; 32], [0x22; 32], [0x33; 32]);
+    let sk = hashsigs_rs::sphincs_plus_c::keygen::<SelectedProfile, NUM_LAYERS>(
+        [0x11; 32], [0x22; 32], [0x33; 32],
+    );
     let message = [0x44u8; 32];
-    let sig = hashsigs_rs::sphincs_plus_c::sign(&sk, &message).expect("sign");
+    let sig = hashsigs_rs::sphincs_plus_c::sign::<SelectedProfile, NUM_LAYERS>(&sk, &message)
+        .expect("sign");
 
-    let (valid, allocs) =
-        measured(|| hashsigs_rs::sphincs_plus_c::verify(&sk.public_key, &message, &sig));
+    let (valid, allocs) = measured(|| {
+        hashsigs_rs::sphincs_plus_c::verify::<SelectedProfile, NUM_CHAINS>(
+            &sk.public_key,
+            &message,
+            &sig,
+        )
+    });
     assert!(valid);
     assert_verify_budget("SPHINCS+C stateless verify", allocs);
 
@@ -111,7 +125,11 @@ fn stateless_verify_stays_within_allocation_budget() {
     use hashsigs_rs::shrincs::{ActionContext, ShrincsSigner, ShrincsVerifier};
 
     let (signing_key, public_key) =
-        ShrincsSigner::keygen(b"alloc-budget shrincs key", 1).expect("keygen");
+        ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(
+            b"alloc-budget shrincs key",
+            1,
+        )
+        .expect("keygen");
     let verifier = ShrincsVerifier::new();
     let commitment: [u8; 32] = public_key
         .public_key_commitment
@@ -126,8 +144,11 @@ fn stateless_verify_stays_within_allocation_budget() {
         payload_hash: [0x55; 32],
     };
     let action_message = verifier.stateless_action_message_hash(commitment, &context);
-    let action_sig =
-        ShrincsSigner::sign_stateless_raw(&signing_key, &action_message).expect("sign");
+    let action_sig = ShrincsSigner::sign_stateless_raw::<SelectedProfile, NUM_LAYERS>(
+        &signing_key,
+        &action_message,
+    )
+    .expect("sign");
 
     let (valid, allocs) =
         measured(|| verifier.verify_stateless(commitment, &public_key, &context, &action_sig));
@@ -136,7 +157,12 @@ fn stateless_verify_stays_within_allocation_budget() {
 }
 
 #[cfg_attr(
-    any(shrincs_profile_128s_q18, shrincs_profile_128s_q20),
+    any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    ),
     ignore = "128s signing grinds ~2^24 counters; the allocation budget is profile-independent and enforced by the 256s lanes"
 )]
 #[cfg_attr(
@@ -150,8 +176,12 @@ fn stateful_verify_stays_within_allocation_budget() {
     // zero-alloc budget applies as for the stateless path.
     use hashsigs_rs::shrincs::{ActionContext, ShrincsSigner, ShrincsVerifier};
 
-    let (mut signing_key, public_key) =
-        ShrincsSigner::keygen(b"alloc-budget shrincs stateful key", 4).expect("keygen");
+    let (mut signing_key, public_key) = ShrincsSigner::keygen::<
+        SelectedProfile,
+        NUM_CHAINS,
+        NUM_LAYERS,
+    >(b"alloc-budget shrincs stateful key", 4)
+    .expect("keygen");
     let verifier = ShrincsVerifier::new();
     let commitment: [u8; 32] = public_key
         .public_key_commitment
@@ -165,8 +195,12 @@ fn stateful_verify_stays_within_allocation_budget() {
         action_type: [0x64; 32],
         payload_hash: [0x65; 32],
     };
-    let action_sig =
-        ShrincsSigner::sign_stateful_action(&mut signing_key, &public_key, &context).expect("sign");
+    let action_sig = ShrincsSigner::sign_stateful_action::<SelectedProfile, NUM_CHAINS>(
+        &mut signing_key,
+        &public_key,
+        &context,
+    )
+    .expect("sign");
 
     let (valid, allocs) =
         measured(|| verifier.verify_stateful(commitment, &public_key, &context, &action_sig));

@@ -2,7 +2,8 @@
 
 # Manual / scheduled mirror of the CI profile matrix (see .gitlab-ci.yml):
 # - build-test: default 256s-keccak + profile-256s-sha2 (debug/test profile)
-# - test-128s:  profile-128s-q18 + profile-128s-q20 (release)
+# - test-128s:  profile-128s-q18 + profile-128s-q20 (release), plus a
+#               compile-only check of their sha2 twins
 # Keep --locked flags and profile feature names aligned with those jobs.
 
 set -euo pipefail
@@ -24,3 +25,13 @@ cargo test --locked --release --features profile-128s-q18
 
 echo "==> cargo test --locked --release --features profile-128s-q20"
 cargo test --locked --release --features profile-128s-q20
+
+# The sha2 twins of the two profiles above are compiled, not tested: their
+# golden vectors are not generated yet, so the vector-conformance tests would
+# fail on a missing file rather than on a real defect. Raise these to
+# `cargo test` once tests/test_vectors/shrincs_sphincs_128s_q{18,20}_sha2.json.gz
+# exist.
+for feature in profile-128s-q18-sha2 profile-128s-q20-sha2; do
+  echo "==> cargo check --locked --release --all-targets --features ${feature}"
+  cargo check --locked --release --all-targets --features "${feature}"
+done

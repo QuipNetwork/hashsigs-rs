@@ -9,10 +9,33 @@ node_modules
 tests/test_vectors/shrincs_stateful_k_gas_vector.json
 
 # generated wasm-bindgen output + build artifacts for the ts/
-# package (built in CI)
+# package (built in CI). ts/src/profiles/ holds one directory per profile,
+# each carrying that profile's wasm-bindgen output, its generated loader pair
+# and entry point, and its inlined base64 -- all written by bin/build-wasm.sh
+# and ts/scripts/gen-*.mjs. ts/src/index.ts is generated too: it re-exports
+# whichever profile bin/packages.sh names as the default. The only
+# hand-written sources under ts/src are api.ts and the tests.
 ts/dist
-ts/src/nodejs
-ts/src/web
+ts/src/profiles
+ts/src/index.ts
+
+# generated Python package pieces, staged by py/hashsigs_build.py (the PEP 517
+# backend) before it hands off to maturin: the compiled per-profile extensions,
+# the profile modules that bind them, and the package roots that re-export the
+# default. The hand-written sources under py/python/hashsigs are _api.py,
+# _errors.py and py.typed.
+py/python/hashsigs/_ext/
+py/python/hashsigs/profiles/
+py/python/hashsigs/__init__.py
+# The root extension. A local `maturin develop` drops it beside the sources
+# rather than in _ext/ above, so `git add -A` would otherwise commit a binary.
+py/python/hashsigs/_hashsigs*.so
+py/python/hashsigs/_hashsigs*.pyd
+
+# Python bytecode and test caches.
+__pycache__/
+*.py[cod]
+.pytest_cache/
 
 # local prompt/planning scratch - not committed
 _prompt_planning/

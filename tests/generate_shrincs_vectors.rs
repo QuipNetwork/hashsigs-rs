@@ -4,6 +4,7 @@
 
 use flate2::write::GzEncoder;
 use flate2::Compression;
+use hashsigs_rs::profiles::selected::{SelectedProfile, NUM_CHAINS, NUM_LAYERS};
 use hashsigs_rs::shrincs::{
     PublicKey, ShrincsSigner, Signature as StatefulSignature, StatelessSignature, HASH_LEN,
 };
@@ -13,37 +14,55 @@ use std::io::Write;
 use std::path::Path;
 use std::process::Command;
 
-// Output path per compiled profile, mirroring the profile the crate was built
-// with. The default build keeps the original filename. Emitting the
-// non-default profiles requires building this test crate with
-// `--features <profile>`; note that 128s stateless generation is
+// Output path for the profile this build is BOUND to, not merely one it
+// compiled: features are additive, so several profiles can be compiled at once
+// while exactly one drives these cfgs. The default build keeps the original
+// filename. Emitting the non-default profiles requires building this test crate
+// with `--features <profile>`, which selects that profile even with the default
+// features left on; note that 128s stateless generation is
 // the heavy, cache-backed regeneration event (2^24-leaf FORS trees, 2^18-leaf
 // hypertree) rather than an in-line run.
-#[cfg(shrincs_profile_256s)]
+#[cfg(shrincs_default_profile_256s)]
 const OUT_PATH: &str = "tests/test_vectors/shrincs_sphincs_256s_keccak.json.gz";
-#[cfg(shrincs_profile_128s_q18)]
+#[cfg(shrincs_default_profile_128s_q18)]
 const OUT_PATH: &str = "tests/test_vectors/shrincs_sphincs_128s_q18_keccak.json.gz";
-#[cfg(shrincs_profile_128s_q20)]
+#[cfg(shrincs_default_profile_128s_q20)]
 const OUT_PATH: &str = "tests/test_vectors/shrincs_sphincs_128s_q20_keccak.json.gz";
-#[cfg(shrincs_profile_256s_sha2)]
+#[cfg(shrincs_default_profile_256s_sha2)]
 const OUT_PATH: &str = "tests/test_vectors/shrincs_sphincs_256s_sha2.json.gz";
+#[cfg(shrincs_default_profile_128s_q18_sha2)]
+const OUT_PATH: &str = "tests/test_vectors/shrincs_sphincs_128s_q18_sha2.json.gz";
+#[cfg(shrincs_default_profile_128s_q20_sha2)]
+const OUT_PATH: &str = "tests/test_vectors/shrincs_sphincs_128s_q20_sha2.json.gz";
 
 #[test]
 #[ignore = "run explicitly to refresh Solidity SHRINCS vectors"]
 fn generate_shrincs_sphincs_vectors() {
-    let (mut stateful_key, stateful_public_key) =
-        ShrincsSigner::keygen(b"shrincs solidity vector stateful seed", 4)
-            .expect("stateful keygen");
+    let (mut stateful_key, stateful_public_key) = ShrincsSigner::keygen::<
+        SelectedProfile,
+        NUM_CHAINS,
+        NUM_LAYERS,
+    >(b"shrincs solidity vector stateful seed", 4)
+    .expect("stateful keygen");
     let stateful_message = hash_word(b"shrincs solidity stateful message").to_vec();
-    let stateful_signature = ShrincsSigner::sign_stateful_raw(&mut stateful_key, &stateful_message)
-        .expect("stateful signature");
+    let stateful_signature = ShrincsSigner::sign_stateful_raw::<SelectedProfile, NUM_CHAINS>(
+        &mut stateful_key,
+        &stateful_message,
+    )
+    .expect("stateful signature");
 
     let (stateless_key, stateless_public_key) =
-        ShrincsSigner::keygen(b"shrincs solidity vector stateless seed", 256)
-            .expect("stateless keygen");
+        ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(
+            b"shrincs solidity vector stateless seed",
+            256,
+        )
+        .expect("stateless keygen");
     let stateless_message = hash_word(b"shrincs solidity stateless message").to_vec();
-    let stateless_signature = ShrincsSigner::sign_stateless_raw(&stateless_key, &stateless_message)
-        .expect("stateless signature");
+    let stateless_signature = ShrincsSigner::sign_stateless_raw::<SelectedProfile, NUM_LAYERS>(
+        &stateless_key,
+        &stateless_message,
+    )
+    .expect("stateless signature");
 
     let mut wrong_stateful_message = stateful_message.clone();
     wrong_stateful_message[0] ^= 1;
@@ -129,7 +148,11 @@ fn write_gzip_json(path: &Path, json: &[u8]) {
 fn emit_keygen_goldens() {
     let profile = hashsigs_rs::shrincs::PROFILE_NAME;
     let (signing_key, public_key) =
-        ShrincsSigner::keygen(b"solidity public key seed", 4).expect("keygen");
+        ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(
+            b"solidity public key seed",
+            4,
+        )
+        .expect("keygen");
 
     let sol_bytes32 = |label: &str, bytes: &[u8]| {
         println!(

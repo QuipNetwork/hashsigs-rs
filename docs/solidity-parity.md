@@ -9,10 +9,14 @@ account-wrapper audit. A 2026-07-24 pass refreshed the module paths for the
 ## At parity
 
 - Crypto core: verify and rotation paths for WOTS-C, FORS-C, the hypertree,
-  UXMSS, SPHINCS+C, and SHRINCS. The four profiles, the commitment scheme,
+  UXMSS, SPHINCS+C, and SHRINCS. The six profiles, the commitment scheme,
   the four canonical message hashes, and the keccak and sha2 hash suites
   are also at parity. Rust-anchored vectors, consumed on both sides,
-  cross-pin the core (256s keccak and sha2).
+  cross-pin the core (256s keccak and sha2, and both 128s sha2 twins).
+  `shrincs-128s-q18-sha2` and `shrincs-128s-q20-sha2` carry matching
+  `contracts/profiles/` libraries, matching `PROFILE_ID` values, and the
+  Rust-generated SPHINCS stateless vectors that
+  `SHRINCSSphincs128sVectors.t.sol` verifies under each.
 - Layering: the scheme-neutral building blocks (`src/hash/`, `src/abi.rs`,
   `src/buf.rs`, `src/profiles.rs`, `src/treehash.rs`) sit at the crate
   root. `src/sphincs_plus_c/` owns FORS-C and the hypertree (`fors_c` ↔
@@ -126,11 +130,18 @@ a pure signature primitive with no rotation conventions.
 
 All figures come from the real program binary in the SBF virtual machine.
 
-| Instruction | 256s | 256s-sha2 | 128s-q18 |
-|---|---|---|---|
-| SPHINCS+C stateless verify | 1,028,136 | 930,115 | 106,555 |
-| SHRINCS stateless verify | 1,029,780 | 931,804 | — |
-| SHRINCS stateful verify | 111,586 | 101,909 | 58,461 |
+| Instruction | 256s | 256s-sha2 | 128s-q18 | 128s-q18-sha2 |
+|---|---|---|---|---|
+| SPHINCS+C stateless verify | 1,028,136 | 930,115 | 106,555 | — |
+| SHRINCS stateless verify | 1,029,780 | 931,804 | — | — |
+| SHRINCS stateful verify | 111,586 | 101,909 | 58,461 | — |
+
+No SBF run has covered `128s-q18-sha2` or `128s-q20-sha2`. The program builds
+against them through `--features hashsigs-rs/profile-128s-q18-sha2`, so these
+cells are unmeasured rather than unavailable. Do not copy the keccak twin's
+figure across: the SHA-256 syscall and the keccak syscall charge differently.
+`128s-q20` and `128s-q20-sha2` share every crypto constant with their q18
+counterparts, so their costs derive rather than needing their own run.
 
 WOTS+ v1 verify (legacy scheme, not for new integrations): 298,064 CU. The
 instruction pins keccak hashing, so the figure does not depend on the

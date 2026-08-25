@@ -8,8 +8,9 @@ default:
   tags: [linux, x86_64]
 
 # Shared cargo/target cache keyed on Cargo.lock + job name so stale deps cannot
-# drift under --locked and so mutually-exclusive profile feature jobs do not
-# share a single target/ tree (profile features overwrite each other).
+# drift under --locked and so jobs that select different profiles do not share a
+# single target/ tree. The profile features are additive, but each job still
+# builds with a different selected profile, so their artefacts differ.
 # Applied via extends on Rust jobs only (not publish-npm).
 #
 # Trust note: the tool binaries cached in .cargo-home/bin are sha256-verified
@@ -63,6 +64,22 @@ default:
         v${NODE_MAJOR}.*) ;;
         *) echo "expected Node ${NODE_MAJOR}.x, got $(node --version)" >&2; exit 1 ;;
       esac
+
+# Python packaging tooling, in a virtual environment at /tmp/py-venv.
+#
+# A venv rather than the system interpreter: Debian marks that one externally
+# managed, so a bare `pip install` refuses to run, and these checks install the
+# wheel they just built, which does not belong in system site-packages.
+#
+# Shared rather than copied into each job. Both `py-tests` and
+# `release:validate` reach `python3 -m build` through the Makefile, and when
+# only one of them carried the setup, a Makefile change that moved the build
+# off maturin passed py-tests and failed release:validate at the publish gate.
+.install-python-build:
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq python3-venv > /dev/null
+    - python3 -m venv /tmp/py-venv
+    - /tmp/py-venv/bin/pip install --quiet build pytest
 
 # Download the prebuilt wasm-bindgen CLI (musl) instead of compiling from
 # source via `cargo install`. Version is pinned in WASM_BINDGEN_VERSION;

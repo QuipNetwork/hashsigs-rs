@@ -17,6 +17,7 @@
 
 //! Test-only fixture helpers for expensive SHRINCS key material.
 
+use crate::profiles::selected::{SelectedProfile, NUM_CHAINS, NUM_LAYERS};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -118,7 +119,7 @@ impl From<SigningKeyDto> for Keys {
                 root: sphincs_plus_c::Root::new(value.hypertree_root),
             },
         );
-        Keys::new(stateless, stateful)
+        Keys::new::<SelectedProfile>(stateless, stateful)
     }
 }
 
@@ -372,7 +373,12 @@ mod tests {
     use super::*;
     use crate::shrincs::{ShrincsSigner, PROFILE_NAME};
 
-    #[cfg(any(shrincs_profile_128s_q18, shrincs_profile_128s_q20))]
+    #[cfg(any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    ))]
     fn full_key_fixture_specs() -> Vec<(&'static str, u32)> {
         vec![
             ("deterministic keygen seed", 4),
@@ -380,7 +386,12 @@ mod tests {
         ]
     }
 
-    #[cfg(not(any(shrincs_profile_128s_q18, shrincs_profile_128s_q20)))]
+    #[cfg(not(any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    )))]
     fn full_key_fixture_specs() -> Vec<(&'static str, u32)> {
         vec![
             ("stateless negative seed", 2),
@@ -421,7 +432,7 @@ mod tests {
         let entries = full_key_fixture_specs()
             .into_iter()
             .map(|(seed_label, max_stateful_signatures)| {
-                let (signing_key, public_key) = ShrincsSigner::keygen(
+                let (signing_key, public_key) = ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(
                     seed_label.as_bytes(),
                     max_stateful_signatures,
                 )
@@ -451,8 +462,10 @@ mod tests {
         let entries = stateful_signer_fixture_specs()
             .into_iter()
             .map(|(seed_label, max_stateful_signatures)| {
-                let (signing_key, public_key) =
-                    stateful_only_key(seed_label.as_bytes(), max_stateful_signatures);
+                let (signing_key, public_key) = stateful_only_key::<SelectedProfile, NUM_CHAINS>(
+                    seed_label.as_bytes(),
+                    max_stateful_signatures,
+                );
                 KeyFixtureEntry {
                     seed_label: seed_label.to_string(),
                     signing_key: SigningKeyDto::from(&signing_key),

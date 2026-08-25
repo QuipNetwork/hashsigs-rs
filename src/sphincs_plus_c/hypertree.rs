@@ -37,29 +37,62 @@ use crate::hash::{
     base_w_digit, derive32, hash_node, hash_packed, hypertree_address_word, word32,
     wots_address_base, wots_chain_address_word, wots_digest_bytes,
 };
-use crate::profiles::{HYPERTREE_HEIGHT, NUM_HYPERTREE_LAYERS, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN};
-use crate::wots_c::{wots_chain_walk, ChainWalk, Signature, TARGET_SUM, WOTS_C_MAX_GRIND_COUNTER};
+use crate::profile::Profile;
+use crate::wots_c::{wots_chain_walk, ChainWalk, Signature, WOTS_C_MAX_GRIND_COUNTER};
 use crate::HASH_LEN;
+use core::marker::PhantomData;
 use zeroize::Zeroizing;
 
 /// Hypertree subtree height: one auth-path node per level per layer. Matches
 /// the historical `envelope::HYPERTREE_SUBTREE_HEIGHT`, moved here with the
 /// codec it bounds.
-const HYPERTREE_SUBTREE_HEIGHT: usize =
-    (HYPERTREE_HEIGHT as usize) / (NUM_HYPERTREE_LAYERS as usize);
+pub(crate) const fn hypertree_subtree_height<P: Profile>() -> usize {
+    (P::HYPERTREE_HEIGHT as usize) / (P::NUM_HYPERTREE_LAYERS as usize)
+}
 
-// `hypertree_subtree`'s `selected_leaf`/`subtree_height` guards (and thus
-// `hypertree_public_root`'s `None` fallback, see its doc comment) are only
-// reachable for a profile whose height/layer ratio is degenerate. Every
-// shipping profile keeps a positive subtree height that fits in a `u32`
-// shift; enforce that at compile time so a misconfigured profile fails the
-// build instead of silently minting an all-zero public root.
-const _: () = {
-    assert!(
-        HYPERTREE_SUBTREE_HEIGHT > 0 && HYPERTREE_SUBTREE_HEIGHT < u32::BITS as usize,
+/// Carrier for the per-profile subtree-height assertion.
+///
+/// `hypertree_subtree`'s `selected_leaf`/`subtree_height` guards (and thus
+/// `hypertree_public_root`'s `None` fallback, see its doc comment) are only
+/// reachable for a profile whose height/layer ratio is degenerate. Every
+/// shipping profile keeps a positive subtree height that fits in a `u32`
+/// shift; enforce that at compile time so a misconfigured profile fails the
+/// build instead of silently minting an all-zero public root.
+///
+/// This has to be an associated const rather than a bare `assert!` in the
+/// `const fn` above: only an associated const is evaluated at
+/// monomorphisation. Same pattern as `ShrincsCore::WIDTHS_AGREE`.
+struct SubtreeHeightFits<P: Profile>(PhantomData<fn() -> P>);
+
+/// Carrier for the chain-width agreement check on the functions that size a
+/// fixed array by `NUM_CHAINS`. Associated-const form for the same reason as
+/// `SubtreeHeightFits`.
+struct ChainWidthAgrees<P: Profile, const NUM_CHAINS: usize>(PhantomData<fn() -> P>);
+
+impl<P: Profile, const NUM_CHAINS: usize> ChainWidthAgrees<P, NUM_CHAINS> {
+    const CHECK: () = assert!(
+        P::NUM_WOTS_CHAINS as usize == NUM_CHAINS,
+        "NUM_CHAINS const generic parameter disagrees with the profile"
+    );
+}
+
+/// Carrier for the layer-width agreement check, for the functions that size a
+/// fixed array by `NUM_LAYERS`.
+struct LayerWidthAgrees<P: Profile, const NUM_LAYERS: usize>(PhantomData<fn() -> P>);
+
+impl<P: Profile, const NUM_LAYERS: usize> LayerWidthAgrees<P, NUM_LAYERS> {
+    const CHECK: () = assert!(
+        P::NUM_HYPERTREE_LAYERS as usize == NUM_LAYERS,
+        "NUM_LAYERS const generic parameter disagrees with the profile"
+    );
+}
+
+impl<P: Profile> SubtreeHeightFits<P> {
+    const CHECK: () = assert!(
+        hypertree_subtree_height::<P>() > 0 && hypertree_subtree_height::<P>() < u32::BITS as usize,
         "HYPERTREE_HEIGHT/NUM_HYPERTREE_LAYERS must yield a subtree height in 1..32"
     );
-};
+}
 
 /// One hypertree layer's signature: the WOTS-C signature proving
 /// `current_root -> wots_c_pk_hash`, plus the Merkle auth path from
@@ -101,16 +134,16 @@ impl LayerSignature {
     /// inside a larger encoded envelope, so exhaustion is the calling
     /// top-level decoder's responsibility (see `from_bytes` for the
     /// standalone entrypoint that does check).
-    pub(crate) fn decode(reader: &AbiReader, base: usize) -> Option<Self> {
+    pub(crate) fn decode<P: Profile>(reader: &AbiReader, base: usize) -> Option<Self> {
         let wots_head = base.checked_add(32)?;
         let wots_start = reader.decode_offset(base, wots_head)?;
         Some(Self {
             wots_c_pk_hash: reader.decode_bytes32_field(base, base)?,
-            wots_c_signature: Signature::decode(reader, wots_start)?,
+            wots_c_signature: Signature::decode::<P>(reader, wots_start)?,
             auth_path: collect_hash_words(reader.decode_array_bytes(
                 base,
                 base.checked_add(64)?,
-                HYPERTREE_SUBTREE_HEIGHT,
+                hypertree_subtree_height::<P>(),
             )?)?,
         })
     }
@@ -119,23 +152,15 @@ impl LayerSignature {
     /// to the historical `envelope::decode_hypertree_layer_signature`, built
     /// as a top-level entrypoint: a fresh `AbiReader` at base 0, rejecting
     /// trailing bytes.
-    pub fn from_bytes(data: &[u8]) -> Option<Self> {
+    pub fn from_bytes<P: Profile>(data: &[u8]) -> Option<Self> {
         let reader = AbiReader::new(data);
-        let decoded = Self::decode(&reader, 0)?;
+        let decoded = Self::decode::<P>(&reader, 0)?;
         reader.finish()?;
         // Reject non-canonical encodings (see `AbiReader::finish` docs).
         if decoded.to_bytes() != data {
             return None;
         }
         Some(decoded)
-    }
-}
-
-impl TryFrom<&[u8]> for LayerSignature {
-    type Error = ();
-
-    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        Self::from_bytes(value).ok_or(())
     }
 }
 
@@ -146,17 +171,17 @@ pub(crate) struct HypertreeSeed {
     pub leaf_index: u32,
 }
 
-pub(crate) fn verify_hypertree(
+pub(crate) fn verify_hypertree<P: Profile, const NUM_CHAINS: usize>(
     pk_seed: &[u8; HASH_LEN],
     expected_hypertree_root: &[u8; HASH_LEN],
     fors_root: [u8; HASH_LEN],
     seed: HypertreeSeed,
     layers: &[LayerSignature],
 ) -> bool {
-    if layers.len() != NUM_HYPERTREE_LAYERS as usize {
+    if layers.len() != P::NUM_HYPERTREE_LAYERS as usize {
         return false;
     }
-    let subtree_height = u32::from(HYPERTREE_HEIGHT / NUM_HYPERTREE_LAYERS);
+    let subtree_height = u32::from(P::HYPERTREE_HEIGHT / P::NUM_HYPERTREE_LAYERS);
     if subtree_height == 0 || subtree_height >= u32::BITS {
         return false;
     }
@@ -177,7 +202,7 @@ pub(crate) fn verify_hypertree(
             tree: expected_tree_index,
             keypair: expected_leaf_index,
         };
-        if !verify_wots_c32(
+        if !verify_wots_c32::<P, NUM_CHAINS>(
             pk_seed,
             coords,
             &layer_signature.wots_c_pk_hash,
@@ -186,7 +211,7 @@ pub(crate) fn verify_hypertree(
         ) {
             return false;
         }
-        let Some(next_root) = hypertree_root_from_path32(
+        let Some(next_root) = hypertree_root_from_path32::<P>(
             subtree_height,
             pk_seed,
             HypertreePath {
@@ -207,14 +232,14 @@ pub(crate) fn verify_hypertree(
     expected_tree_index == 0 && *expected_hypertree_root == current_root
 }
 
-pub(crate) fn stateless_wots_message_digest(
+pub(crate) fn stateless_wots_message_digest<P: Profile>(
     pk_seed: &[u8; HASH_LEN],
     expected_pk_hash: &[u8; HASH_LEN],
     randomizer: &[u8; HASH_LEN],
     counter: u32,
     message: &[u8; HASH_LEN],
 ) -> [u8; HASH_LEN] {
-    hash_packed(&[
+    hash_packed::<P::Suite>(&[
         b"wots-c-msg".as_ref(),
         pk_seed.as_ref(),
         expected_pk_hash.as_ref(),
@@ -224,35 +249,39 @@ pub(crate) fn stateless_wots_message_digest(
     ])
 }
 
-pub(crate) fn stateless_wots_public_key_hash(
+pub(crate) fn stateless_wots_public_key_hash<P: Profile>(
     pk_seed: &[u8; HASH_LEN],
     endpoints: &[[u8; HASH_LEN]],
 ) -> [u8; HASH_LEN] {
     // Vectored preimage: tag ‖ pk_seed ‖ endpoint_0 ‖ … — byte-identical to
     // the packed form without materializing a chains-wide buffer.
-    const MAX_PARTS: usize = NUM_WOTS_CHAINS as usize + 2;
-    let mut parts: [&[u8]; MAX_PARTS] = [&[]; MAX_PARTS];
-    parts[0] = b"wots-c-pk";
-    parts[1] = pk_seed.as_ref();
-    let used = 2 + endpoints.len().min(NUM_WOTS_CHAINS as usize);
-    for (part, endpoint) in parts[2..used].iter_mut().zip(endpoints) {
-        *part = endpoint.as_ref();
-    }
-    hash_node(&parts[..used])
+    //
+    // The endpoints go in as one flat slice rather than one slice per chain.
+    // `[[u8; HASH_LEN]]` is contiguous, so `as_flattened` is the same bytes in
+    // the same order, and both backends hash the plain concatenation of the
+    // parts. The array-of-slices form this replaces needed a
+    // `NUM_WOTS_CHAINS + 2` array length, which is a generic const expression
+    // and not expressible on stable Rust once the chain count comes from `P`.
+    let used = endpoints.len().min(P::NUM_WOTS_CHAINS as usize);
+    hash_node::<P>(&[
+        b"wots-c-pk".as_ref(),
+        pk_seed.as_ref(),
+        endpoints[..used].as_flattened(),
+    ])
 }
 
-fn verify_wots_c32(
+fn verify_wots_c32<P: Profile, const NUM_CHAINS: usize>(
     pk_seed: &[u8; HASH_LEN],
     coords: WotsKeypair,
     expected_pk_hash: &[u8; HASH_LEN],
     message: [u8; HASH_LEN],
     signature: &Signature,
 ) -> bool {
-    let chain_count = NUM_WOTS_CHAINS as usize;
-    if signature.chains.len() != chain_count || wots_digest_bytes() > HASH_LEN {
+    let () = ChainWidthAgrees::<P, NUM_CHAINS>::CHECK;
+    if signature.chains.len() != NUM_CHAINS || wots_digest_bytes::<P>() > HASH_LEN {
         return false;
     }
-    let digest = stateless_wots_message_digest(
+    let digest = stateless_wots_message_digest::<P>(
         pk_seed,
         expected_pk_hash,
         &signature.randomizer,
@@ -266,16 +295,16 @@ fn verify_wots_c32(
     // accumulate the digit sum. Must stay sequential so a missing/overflowing
     // chain fails closed before any chain walk runs.
     let mut digit_sum = 0u32;
-    let mut digits = [0u32; NUM_WOTS_CHAINS as usize];
+    let mut digits = [0u32; NUM_CHAINS];
     for (chain_index, digit_slot) in digits.iter_mut().enumerate() {
-        let digit = base_w_digit(WOTS_CHAIN_LEN, &digest, chain_index);
+        let digit = base_w_digit(P::WOTS_CHAIN_LEN, &digest, chain_index);
         let Some(next_sum) = digit_sum.checked_add(digit) else {
             return false;
         };
         digit_sum = next_sum;
         *digit_slot = digit;
     }
-    if digit_sum != TARGET_SUM {
+    if digit_sum != P::WOTS_TARGET_SUM {
         return false;
     }
 
@@ -283,11 +312,11 @@ fn verify_wots_c32(
     // fixed-capacity segment buffer (stack by default, Solana heap — see
     // `buf`). Chain order must match the signer's so the pk-hash preimage is
     // byte-identical, which is why segments are stored in index order.
-    let mut segments = crate::buf::node_buf::<{ NUM_WOTS_CHAINS as usize }>();
+    let mut segments = crate::buf::node_buf::<NUM_CHAINS>();
     let segment_at = |chain_index: usize| -> Option<[u8; HASH_LEN]> {
         let chain_value = signature.chains.get(chain_index).copied()?;
-        Some(wots_chain32_no_mask_base(
-            WOTS_CHAIN_LEN,
+        Some(wots_chain32_no_mask_base::<P>(
+            P::WOTS_CHAIN_LEN,
             *pk_seed,
             AddressBaseChain {
                 address_base,
@@ -326,7 +355,7 @@ fn verify_wots_c32(
         return false;
     }
 
-    let computed_pk_hash = stateless_wots_public_key_hash(pk_seed, segments.as_ref());
+    let computed_pk_hash = stateless_wots_public_key_hash::<P>(pk_seed, segments.as_ref());
     computed_pk_hash == *expected_pk_hash
 }
 
@@ -338,12 +367,12 @@ struct AddressBaseChain {
 }
 
 /// Stateless hypertree WOTS-C chain walk (`b"wots-c-chain"` + ADRS word).
-fn stateless_wots_chain_from_address_base(
+fn stateless_wots_chain_from_address_base<P: Profile>(
     pk_seed: &[u8; HASH_LEN],
     addr: AddressBaseChain,
     walk: ChainWalk,
 ) -> [u8; HASH_LEN] {
-    wots_chain_walk(
+    wots_chain_walk::<P>(
         b"wots-c-chain",
         pk_seed,
         |step| wots_chain_address_word(addr.address_base, addr.chain_index, step),
@@ -351,7 +380,7 @@ fn stateless_wots_chain_from_address_base(
     )
 }
 
-fn wots_chain32_no_mask_base(
+fn wots_chain32_no_mask_base<P: Profile>(
     w: u16,
     pk_seed: [u8; HASH_LEN],
     addr: AddressBaseChain,
@@ -359,7 +388,7 @@ fn wots_chain32_no_mask_base(
     digit: u32,
 ) -> [u8; HASH_LEN] {
     let steps = u32::from(w - 1) - digit;
-    stateless_wots_chain_from_address_base(
+    stateless_wots_chain_from_address_base::<P>(
         &pk_seed,
         addr,
         ChainWalk {
@@ -378,7 +407,7 @@ struct HypertreePath {
     leaf_index: u32,
 }
 
-fn hypertree_root_from_path32(
+fn hypertree_root_from_path32<P: Profile>(
     height: u32,
     pk_seed: &[u8],
     path: HypertreePath,
@@ -397,7 +426,7 @@ fn hypertree_root_from_path32(
         |level, parent_index, left, right| {
             let address_word =
                 hypertree_address_word(path.layer, path.tree_index, level, u64::from(parent_index));
-            hash_node(&[
+            hash_node::<P>(&[
                 b"hypertree-node".as_ref(),
                 pk_seed.as_ref(),
                 address_word.as_ref(),
@@ -460,7 +489,7 @@ struct HypertreeSubtree {
     auth_path: Vec<[u8; HASH_LEN]>,
 }
 
-pub(crate) fn sign_hypertree(
+pub(crate) fn sign_hypertree<P: Profile, const NUM_LAYERS: usize>(
     signing_key: &Key,
     fors_root: [u8; HASH_LEN],
     bottom_tree: u64,
@@ -471,13 +500,13 @@ pub(crate) fn sign_hypertree(
             "stateless trace: hypertree start bottom_tree={} bottom_leaf={} layers={}",
             bottom_tree,
             bottom_leaf,
-            NUM_HYPERTREE_LAYERS
+            P::NUM_HYPERTREE_LAYERS
         );
     }
     // Layer 0 starts at the FORS-selected coordinate. Every higher layer must
     // follow the verifier's recurrence, so the signature cannot choose arbitrary
     // upper-layer tree/leaf positions.
-    let subtree_height = u32::from(HYPERTREE_HEIGHT / NUM_HYPERTREE_LAYERS);
+    let subtree_height = u32::from(P::HYPERTREE_HEIGHT / P::NUM_HYPERTREE_LAYERS);
     // Mirror the verifier's guard so a retuned profile fails closed instead of
     // panicking on the shift below.
     if subtree_height == 0 || subtree_height >= u32::BITS {
@@ -487,8 +516,9 @@ pub(crate) fn sign_hypertree(
     // `stateless_sk_seed` is the shared SK.seed-style master for FORS-C and
     // hypertree WOTS-C signing secrets.
     // `pk_seed` is the global public seed used for stateless hashing.
-    let layer_seeds = hypertree_layer_seeds(signing_key.secret().as_sk_seed().as_bytes());
-    let mut layers = Vec::with_capacity(NUM_HYPERTREE_LAYERS as usize);
+    let layer_seeds =
+        hypertree_layer_seeds::<P, NUM_LAYERS>(signing_key.secret().as_sk_seed().as_bytes());
+    let mut layers = Vec::with_capacity(NUM_LAYERS);
 
     // `current` is the value being authenticated by the current layer. At layer
     // 0 it is the FORS aggregate root. After each layer, it becomes that layer's
@@ -497,7 +527,7 @@ pub(crate) fn sign_hypertree(
     let mut tree = bottom_tree;
     let mut leaf = bottom_leaf;
 
-    for layer in 0..u32::from(NUM_HYPERTREE_LAYERS) {
+    for layer in 0..u32::from(P::NUM_HYPERTREE_LAYERS) {
         if stateless_trace_enabled() {
             hashsigs_println!(
                 "stateless trace: hypertree layer={} tree={} leaf={}",
@@ -509,7 +539,7 @@ pub(crate) fn sign_hypertree(
         // Build the whole subtree once, then reuse the selected leaf hash for
         // signing and extract the auth path and next root from the same node
         // table instead of recomputing them separately.
-        let subtree = hypertree_subtree(
+        let subtree = hypertree_subtree::<P>(
             signing_key.public_key.pk_seed.as_bytes(),
             &layer_seeds[layer as usize],
             layer,
@@ -521,14 +551,14 @@ pub(crate) fn sign_hypertree(
             tree,
             keypair: leaf,
         };
-        let (_, sk_seed) = hypertree_leaf_seeds(&layer_seeds[layer as usize], tree, leaf);
+        let (_, sk_seed) = hypertree_leaf_seeds::<P>(&layer_seeds[layer as usize], tree, leaf);
         let seeds = WotsSeeds {
             pk_seed: signing_key.public_key.pk_seed.as_bytes(),
             sk_seed: &sk_seed,
             prf_seed: signing_key.secret().as_prf_seed().as_bytes(),
         };
         let wots_c_signature =
-            sign_stateless_wots_c(&seeds, &coords, &subtree.selected_leaf_hash, &current)?;
+            sign_stateless_wots_c::<P>(&seeds, &coords, &subtree.selected_leaf_hash, &current)?;
 
         // The auth path proves that this WOTS public-key hash belongs to the
         // current layer's XMSS-like subtree at `tree`.
@@ -561,7 +591,7 @@ pub(crate) fn sign_hypertree(
     Some(layers)
 }
 
-pub(crate) fn hypertree_public_root(
+pub(crate) fn hypertree_public_root<P: Profile, const NUM_LAYERS: usize>(
     stateless_sk_seed: &[u8; HASH_LEN],
     pk_seed: &[u8; HASH_LEN],
 ) -> [u8; HASH_LEN] {
@@ -570,9 +600,9 @@ pub(crate) fn hypertree_public_root(
     // therefore zero for the public root.
     //A full bottom-layer position needs 64 bits: [ L7 ][ L6 ][ L5 ][ L4 ][ L3 ][ L2 ][ L1 ][ L0 ]
     // Lowest layer has 2^64/2^8 = 2^56 subtrees so 7 of 8 bits are used for the tree index
-    let layer_seeds = hypertree_layer_seeds(stateless_sk_seed);
-    let top_layer = u32::from(NUM_HYPERTREE_LAYERS - 1);
-    match hypertree_subtree(pk_seed, &layer_seeds[top_layer as usize], top_layer, 0, 0) {
+    let layer_seeds = hypertree_layer_seeds::<P, NUM_LAYERS>(stateless_sk_seed);
+    let top_layer = u32::from(P::NUM_HYPERTREE_LAYERS - 1);
+    match hypertree_subtree::<P>(pk_seed, &layer_seeds[top_layer as usize], top_layer, 0, 0) {
         Some(subtree) => subtree.root,
         None => {
             // Internal invariant: leaf 0 is always in range for the top-layer
@@ -582,26 +612,28 @@ pub(crate) fn hypertree_public_root(
     }
 }
 
-fn hypertree_layer_seeds(
+fn hypertree_layer_seeds<P: Profile, const NUM_LAYERS: usize>(
     stateless_sk_seed: &[u8; HASH_LEN],
-) -> [[u8; HASH_LEN]; NUM_HYPERTREE_LAYERS as usize] {
+) -> [[u8; HASH_LEN]; NUM_LAYERS] {
+    let () = LayerWidthAgrees::<P, NUM_LAYERS>::CHECK;
     // One seed per hypertree layer keeps the subtrees domain-separated while
     // still deriving the entire stateless tree from one SK.seed-style seed.
-    let mut seeds = [[0u8; HASH_LEN]; NUM_HYPERTREE_LAYERS as usize];
+    let mut seeds = [[0u8; HASH_LEN]; NUM_LAYERS];
     for (layer, seed) in seeds.iter_mut().enumerate() {
-        *seed = derive32(b"hypertree-layer-seed", stateless_sk_seed, &[layer as u8]);
+        *seed = derive32::<P::Suite>(b"hypertree-layer-seed", stateless_sk_seed, &[layer as u8]);
     }
     seeds
 }
 
-fn hypertree_subtree(
+fn hypertree_subtree<P: Profile>(
     pk_seed: &[u8; HASH_LEN],
     layer_seed: &[u8; HASH_LEN],
     layer: u32,
     tree: u64,
     selected_leaf: u32,
 ) -> Option<HypertreeSubtree> {
-    let subtree_height = u32::from(HYPERTREE_HEIGHT / NUM_HYPERTREE_LAYERS);
+    let () = SubtreeHeightFits::<P>::CHECK;
+    let subtree_height = u32::from(P::HYPERTREE_HEIGHT / P::NUM_HYPERTREE_LAYERS);
     if subtree_height == 0 || subtree_height >= u32::BITS {
         return None;
     }
@@ -612,7 +644,7 @@ fn hypertree_subtree(
 
     // Generate the selected leaf once so the returned hash matches the value
     // folded into the tree (same leaf secret derivation path).
-    let selected_leaf_hash = hypertree_leaf(pk_seed, layer_seed, layer, tree, selected_leaf);
+    let selected_leaf_hash = hypertree_leaf::<P>(pk_seed, layer_seed, layer, tree, selected_leaf);
 
     let (root, auth_path) = crate::treehash::treehash_root_and_auth_path(
         subtree_height,
@@ -621,12 +653,12 @@ fn hypertree_subtree(
             if leaf == selected_leaf {
                 selected_leaf_hash
             } else {
-                hypertree_leaf(pk_seed, layer_seed, layer, tree, leaf)
+                hypertree_leaf::<P>(pk_seed, layer_seed, layer, tree, leaf)
             }
         },
         |node_height, parent_index, left, right| {
             let address_word = hypertree_address_word(layer, tree, node_height, parent_index);
-            hash_node(&[
+            hash_node::<P>(&[
                 b"hypertree-node".as_ref(),
                 pk_seed.as_ref(),
                 address_word.as_ref(),
@@ -643,7 +675,7 @@ fn hypertree_subtree(
     })
 }
 
-fn hypertree_leaf_seeds(
+fn hypertree_leaf_seeds<P: Profile>(
     layer_seed: &[u8; HASH_LEN],
     tree: u64,
     leaf: u32,
@@ -651,12 +683,20 @@ fn hypertree_leaf_seeds(
     let mut leaf_context = [0u8; 12];
     leaf_context[..8].copy_from_slice(&tree.to_be_bytes());
     leaf_context[8..].copy_from_slice(&leaf.to_be_bytes());
-    let leaf_seed = Zeroizing::new(derive32(b"hypertree-leaf-seed", layer_seed, &leaf_context));
-    let sk_seed = Zeroizing::new(derive32(b"hypertree-wots-sk-seed", &*leaf_seed, &[]));
+    let leaf_seed = Zeroizing::new(derive32::<P::Suite>(
+        b"hypertree-leaf-seed",
+        layer_seed,
+        &leaf_context,
+    ));
+    let sk_seed = Zeroizing::new(derive32::<P::Suite>(
+        b"hypertree-wots-sk-seed",
+        &*leaf_seed,
+        &[],
+    ));
     (leaf_seed, sk_seed)
 }
 
-fn hypertree_leaf(
+fn hypertree_leaf<P: Profile>(
     pk_seed: &[u8; HASH_LEN],
     layer_seed: &[u8; HASH_LEN],
     layer: u32,
@@ -666,13 +706,13 @@ fn hypertree_leaf(
     // A hypertree leaf is the public hash of the stateless WOTS-C keypair at this
     // coordinate. No per-leaf secret is stored; it is derived from `layer_seed`.
     // The derived seed and WOTS secret seed are zeroized on drop.
-    let (_leaf_seed, sk_seed) = hypertree_leaf_seeds(layer_seed, tree, leaf);
+    let (_leaf_seed, sk_seed) = hypertree_leaf_seeds::<P>(layer_seed, tree, leaf);
     let coords = WotsKeypair {
         layer,
         tree,
         keypair: leaf,
     };
-    stateless_wots_c_public_key(pk_seed, &sk_seed, &coords)
+    stateless_wots_c_public_key::<P>(pk_seed, &sk_seed, &coords)
 }
 
 /// Builds a `Vec` of length `n` where element `i` is `f(i)`, collected in
@@ -690,29 +730,29 @@ fn map_chains<T>(n: usize, f: impl Fn(usize) -> T) -> Vec<T> {
     (0..n).map(f).collect()
 }
 
-fn stateless_wots_c_public_key(
+fn stateless_wots_c_public_key<P: Profile>(
     pk_seed: &[u8; HASH_LEN],
     sk_seed: &[u8; HASH_LEN],
     coords: &WotsKeypair,
 ) -> [u8; HASH_LEN] {
-    let chain_count = usize::from(NUM_WOTS_CHAINS);
+    let chain_count = usize::from(P::NUM_WOTS_CHAINS);
     let endpoint_at = |chain: usize| -> [u8; HASH_LEN] {
-        let secret = Zeroizing::new(stateless_wots_c_secret(sk_seed, chain as u32));
-        stateless_wots_c_chain(
+        let secret = Zeroizing::new(stateless_wots_c_secret::<P>(sk_seed, chain as u32));
+        stateless_wots_c_chain::<P>(
             pk_seed,
             &coords.chain(chain as u32),
             *secret,
             0,
-            u32::from(WOTS_CHAIN_LEN - 1),
+            u32::from(P::WOTS_CHAIN_LEN - 1),
         )
     };
 
     let endpoints: Vec<[u8; HASH_LEN]> = map_chains(chain_count, endpoint_at);
 
-    stateless_wots_public_key_hash(pk_seed, &endpoints)
+    stateless_wots_public_key_hash::<P>(pk_seed, &endpoints)
 }
 
-fn sign_stateless_wots_c(
+fn sign_stateless_wots_c<P: Profile>(
     seeds: &WotsSeeds,
     coords: &WotsKeypair,
     pk_hash: &[u8; HASH_LEN],
@@ -721,14 +761,14 @@ fn sign_stateless_wots_c(
     // The WOTS-C challenge signs the current root for this layer. The expected
     // WOTS public-key hash is included in the digest, binding the challenge to
     // the key whose Merkle path is supplied next.
-    let randomizer = hash_packed(&[b"wots-c-randomizer", seeds.prf_seed, message]);
-    let digest_bytes = wots_digest_bytes();
+    let randomizer = hash_packed::<P::Suite>(&[b"wots-c-randomizer", seeds.prf_seed, message]);
+    let digest_bytes = wots_digest_bytes::<P>();
 
     let result = crate::wots_c::grind_digit_sum(
         WOTS_C_MAX_GRIND_COUNTER,
-        TARGET_SUM,
+        P::WOTS_TARGET_SUM,
         |counter| {
-            let digest = stateless_wots_message_digest(
+            let digest = stateless_wots_message_digest::<P>(
                 seeds.pk_seed,
                 pk_hash,
                 &randomizer,
@@ -736,10 +776,10 @@ fn sign_stateless_wots_c(
                 message,
             );
             let digest = &digest[..digest_bytes];
-            let mut digits = Vec::with_capacity(NUM_WOTS_CHAINS as usize);
+            let mut digits = Vec::with_capacity(P::NUM_WOTS_CHAINS as usize);
             let mut digit_sum = 0u32;
-            for index in 0..NUM_WOTS_CHAINS as usize {
-                let value = base_w_digit(WOTS_CHAIN_LEN, digest, index);
+            for index in 0..P::NUM_WOTS_CHAINS as usize {
+                let value = base_w_digit(P::WOTS_CHAIN_LEN, digest, index);
                 digit_sum = digit_sum.checked_add(value)?;
                 digits.push(value);
             }
@@ -747,8 +787,9 @@ fn sign_stateless_wots_c(
         },
         |digits| {
             let chain_at = |chain: usize, digit: u32| -> [u8; HASH_LEN] {
-                let secret = Zeroizing::new(stateless_wots_c_secret(seeds.sk_seed, chain as u32));
-                stateless_wots_c_chain(
+                let secret =
+                    Zeroizing::new(stateless_wots_c_secret::<P>(seeds.sk_seed, chain as u32));
+                stateless_wots_c_chain::<P>(
                     seeds.pk_seed,
                     &coords.chain(chain as u32),
                     *secret,
@@ -768,10 +809,10 @@ fn sign_stateless_wots_c(
     })
 }
 
-fn stateless_wots_c_secret(sk_seed: &[u8; HASH_LEN], chain: u32) -> [u8; HASH_LEN] {
+fn stateless_wots_c_secret<P: Profile>(sk_seed: &[u8; HASH_LEN], chain: u32) -> [u8; HASH_LEN] {
     // Each chain gets an independent starting secret derived from the WOTS secret
     // seed and the chain number.
-    hash_packed(&[b"wots-c-secret", sk_seed, &chain.to_be_bytes()])
+    hash_packed::<P::Suite>(&[b"wots-c-secret", sk_seed, &chain.to_be_bytes()])
 }
 
 /// ADRS coordinates for one stateless WOTS-C chain step-walk.
@@ -784,9 +825,12 @@ struct StatelessWotsChainCtx<'a> {
 }
 
 /// Stateless hypertree WOTS-C chain walk with full ADRS coordinates.
-fn stateless_wots_chain(ctx: &StatelessWotsChainCtx<'_>, walk: ChainWalk) -> [u8; HASH_LEN] {
+fn stateless_wots_chain<P: Profile>(
+    ctx: &StatelessWotsChainCtx<'_>,
+    walk: ChainWalk,
+) -> [u8; HASH_LEN] {
     use crate::hash::{address_word32, AddressWord32};
-    wots_chain_walk(
+    wots_chain_walk::<P>(
         b"wots-c-chain",
         ctx.pk_seed,
         |step| {
@@ -803,7 +847,7 @@ fn stateless_wots_chain(ctx: &StatelessWotsChainCtx<'_>, walk: ChainWalk) -> [u8
     )
 }
 
-fn stateless_wots_c_chain(
+fn stateless_wots_c_chain<P: Profile>(
     pk_seed: &[u8; HASH_LEN],
     coords: &WotsChain,
     value: [u8; HASH_LEN],
@@ -817,7 +861,7 @@ fn stateless_wots_c_chain(
         keypair: coords.keypair,
         chain_index: coords.chain,
     };
-    stateless_wots_chain(
+    stateless_wots_chain::<P>(
         &ctx,
         ChainWalk {
             value,
@@ -830,6 +874,7 @@ fn stateless_wots_c_chain(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::profiles::selected::{SelectedProfile, NUM_CHAINS, NUM_LAYERS};
     use crate::wots_c::Signature as WotsCSignature;
     use alloc::vec;
 
@@ -851,7 +896,8 @@ mod tests {
     fn layer_signature_to_bytes_from_bytes_round_trips() {
         let layer = sample_layer_signature();
         let encoded = layer.to_bytes();
-        let decoded = LayerSignature::from_bytes(&encoded).expect("valid encoding must decode");
+        let decoded = LayerSignature::from_bytes::<SelectedProfile>(&encoded)
+            .expect("valid encoding must decode");
         assert_eq!(decoded, layer);
         assert_eq!(decoded.to_bytes(), encoded);
     }
@@ -861,12 +907,12 @@ mod tests {
         let mut encoded = sample_layer_signature().to_bytes();
         encoded.push(0x00);
         assert!(
-            LayerSignature::from_bytes(&encoded).is_none(),
+            LayerSignature::from_bytes::<SelectedProfile>(&encoded).is_none(),
             "trailing junk on a standalone layer body must be rejected"
         );
         encoded.pop();
         encoded.extend_from_slice(&[0xAA, 0xBB]);
-        assert!(LayerSignature::from_bytes(&encoded).is_none());
+        assert!(LayerSignature::from_bytes::<SelectedProfile>(&encoded).is_none());
     }
 
     #[test]
@@ -876,7 +922,7 @@ mod tests {
         let encoded = sample_layer_signature().to_bytes();
         let gapped = crate::test_support::insert_abi_head_gap(&encoded, 3, &[0, 1, 2]);
         assert!(
-            LayerSignature::from_bytes(&gapped).is_none(),
+            LayerSignature::from_bytes::<SelectedProfile>(&gapped).is_none(),
             "an encoding with unread interior bytes must be rejected"
         );
     }
@@ -884,45 +930,66 @@ mod tests {
     #[test]
     fn layer_signature_from_bytes_rejects_truncated() {
         let encoded = sample_layer_signature().to_bytes();
-        assert!(LayerSignature::from_bytes(&encoded[..encoded.len() - 1]).is_none());
-        assert!(LayerSignature::from_bytes(&[]).is_none());
+        assert!(
+            LayerSignature::from_bytes::<SelectedProfile>(&encoded[..encoded.len() - 1]).is_none()
+        );
+        assert!(LayerSignature::from_bytes::<SelectedProfile>(&[]).is_none());
     }
 
     #[test]
-    fn layer_signature_try_from_delegates_to_from_bytes() {
+    fn layer_signature_from_bytes_round_trips_and_rejects_truncation() {
         let layer = sample_layer_signature();
         let encoded = layer.to_bytes();
-        let decoded =
-            LayerSignature::try_from(encoded.as_slice()).expect("valid encoding must decode");
+        let decoded = LayerSignature::from_bytes::<SelectedProfile>(encoded.as_slice())
+            .expect("valid encoding must decode");
         assert_eq!(decoded, layer);
-        assert!(LayerSignature::try_from(&encoded[..encoded.len() - 1]).is_err());
+        assert!(
+            LayerSignature::from_bytes::<SelectedProfile>(&encoded[..encoded.len() - 1]).is_none()
+        );
     }
 
     /// Full hypertree sign→verify round-trip at a non-zero bottom leaf.
     /// Gated off the 128s profiles: a single-layer height-18 subtree is too
     /// large for a unit-test budget (same gate as `sphincs_plus_c` round-trip).
-    #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
+    #[cfg(not(any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    )))]
     #[test]
     fn hypertree_sign_verify_round_trip() {
-        let key =
-            crate::sphincs_plus_c::keygen([0x11; HASH_LEN], [0x22; HASH_LEN], [0x33; HASH_LEN]);
+        let key = crate::sphincs_plus_c::keygen::<SelectedProfile, NUM_LAYERS>(
+            [0x11; HASH_LEN],
+            [0x22; HASH_LEN],
+            [0x33; HASH_LEN],
+        );
         let fors_root = [0xABu8; HASH_LEN];
         let seed = HypertreeSeed {
             tree_index: 0,
             leaf_index: 3,
         };
-        let layers = sign_hypertree(&key, fors_root, seed.tree_index, seed.leaf_index)
-            .expect("hypertree sign must succeed");
-        assert_eq!(layers.len(), NUM_HYPERTREE_LAYERS as usize);
+        let layers = sign_hypertree::<SelectedProfile, NUM_LAYERS>(
+            &key,
+            fors_root,
+            seed.tree_index,
+            seed.leaf_index,
+        )
+        .expect("hypertree sign must succeed");
+        assert_eq!(layers.len(), NUM_LAYERS);
         for layer in &layers {
-            assert_eq!(layer.auth_path.len(), HYPERTREE_SUBTREE_HEIGHT);
+            assert_eq!(
+                layer.auth_path.len(),
+                hypertree_subtree_height::<SelectedProfile>()
+            );
             // Each layer body must be a self-contained, trailing-clean blob.
             let encoded = layer.to_bytes();
-            let decoded = LayerSignature::from_bytes(&encoded).expect("layer codec");
+            let decoded =
+                LayerSignature::from_bytes::<SelectedProfile>(&encoded).expect("layer codec");
             assert_eq!(decoded, *layer);
         }
         assert!(
-            verify_hypertree(
+            verify_hypertree::<SelectedProfile, NUM_CHAINS>(
                 key.public_key.pk_seed.as_bytes(),
                 key.public_key.root.as_bytes(),
                 fors_root,
@@ -932,7 +999,7 @@ mod tests {
             "fresh hypertree signature must verify against keygen root"
         );
         // Wrong FORS root must not verify.
-        assert!(!verify_hypertree(
+        assert!(!verify_hypertree::<SelectedProfile, NUM_CHAINS>(
             key.public_key.pk_seed.as_bytes(),
             key.public_key.root.as_bytes(),
             [0xCDu8; HASH_LEN],
@@ -940,7 +1007,7 @@ mod tests {
             &layers,
         ));
         // Wrong leaf index must not verify (auth path is leaf-bound).
-        assert!(!verify_hypertree(
+        assert!(!verify_hypertree::<SelectedProfile, NUM_CHAINS>(
             key.public_key.pk_seed.as_bytes(),
             key.public_key.root.as_bytes(),
             fors_root,
@@ -962,9 +1029,17 @@ mod tests {
             leaf_index: 0,
         };
         // Empty layers: always wrong count for every profile.
-        assert!(!verify_hypertree(&pk_seed, &root, fors_root, seed, &[]));
+        assert!(!verify_hypertree::<SelectedProfile, NUM_CHAINS>(
+            &pk_seed,
+            &root,
+            fors_root,
+            seed,
+            &[]
+        ));
         // One too many synthetic layers.
-        let extra = vec![sample_layer_signature(); NUM_HYPERTREE_LAYERS as usize + 1];
-        assert!(!verify_hypertree(&pk_seed, &root, fors_root, seed, &extra));
+        let extra = vec![sample_layer_signature(); NUM_LAYERS + 1];
+        assert!(!verify_hypertree::<SelectedProfile, NUM_CHAINS>(
+            &pk_seed, &root, fors_root, seed, &extra
+        ));
     }
 }

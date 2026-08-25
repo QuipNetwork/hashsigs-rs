@@ -49,20 +49,78 @@ pub(crate) mod test_fixtures;
 #[cfg(test)]
 mod vector_conformance;
 
+use crate::profile::assert_widths;
+pub use crate::profile::Profile;
+use core::marker::PhantomData;
+
+/// A SHRINCS instance for one profile.
+///
+/// `NUM_CHAINS` and `NUM_LAYERS` repeat `P::NUM_WOTS_CHAINS` and
+/// `P::NUM_HYPERTREE_LAYERS` as `usize` array widths, because a trait
+/// associated constant cannot be an array length on stable Rust. The
+/// constructor rejects a mismatch.
+pub struct ShrincsCore<P: Profile, const NUM_CHAINS: usize, const NUM_LAYERS: usize> {
+    _profile: PhantomData<fn() -> P>,
+}
+
+impl<P: Profile, const NUM_CHAINS: usize, const NUM_LAYERS: usize>
+    ShrincsCore<P, NUM_CHAINS, NUM_LAYERS>
+{
+    /// Compile-time width check, forced into a const context.
+    ///
+    /// A plain `const fn` call would NOT fail compilation: `const fn` means
+    /// "callable in a const context", not "always evaluated in one". Called
+    /// from a runtime path the assertion is an ordinary runtime panic. Only
+    /// an associated const is guaranteed to be evaluated at monomorphisation.
+    /// Do not inline this back into a direct call.
+    ///
+    /// `pub(crate)` so each profile module can force it against its own alias
+    /// with `const _: () = Shrincs::WIDTHS_AGREE;`. That makes the alias itself
+    /// the operand, which a guard spelling the widths out again does not do.
+    pub(crate) const WIDTHS_AGREE: () = assert_widths::<P, NUM_CHAINS, NUM_LAYERS>();
+
+    /// Create an instance. Fails to compile when the const generic widths
+    /// disagree with the profile's own constants.
+    pub const fn new() -> Self {
+        let () = Self::WIDTHS_AGREE;
+        Self {
+            _profile: PhantomData,
+        }
+    }
+}
+
+impl<P: Profile, const NUM_CHAINS: usize, const NUM_LAYERS: usize> Default
+    for ShrincsCore<P, NUM_CHAINS, NUM_LAYERS>
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(feature = "profile-256s")]
+pub use crate::profiles::p256s::Profile256s;
 pub use crate::verifier::{VerifierInterface, VerifyOutcome};
 pub use dispatch::prepare_stateless_delegation;
 pub use key::{Commitment, Keys};
 pub use signer::{sign, ShrincsSigner, ShrincsSignerResult};
 pub use verifier::{ShrincsVerifier, ShrincsVerifierExt};
 
-pub use crate::hash::suite::HASH_SUITE_ID;
+/// Scheme-hash suite id of the profile this module's facades are bound to.
+pub const HASH_SUITE_ID: u32 = crate::profiles::selected::SELECTED_HASH_SUITE_ID;
 pub use crate::hash::suite::{HASH_SUITE_KECCAK_256, HASH_SUITE_SHA2_256};
 pub use crate::hash::{ADDRESS_TYPE_FORS_TREE, ADDRESS_TYPE_TREE, ADDRESS_TYPE_WOTS_HASH};
-pub use crate::profiles::{
-    FORS_C_MAX_GRIND_COUNTER, FORS_TREE_HEIGHT, HASH_TRUNC_LEN, HYPERTREE_HEIGHT, NUM_FORS_TREES,
-    NUM_HYPERTREE_LAYERS, NUM_WOTS_CHAINS, PROFILE_ID, PROFILE_NAME, STATELESS_SIGNATURE_LIMIT,
-    WOTS_CHAIN_LEN,
+// Parameter tuple of the profile this module's facades are bound to, read off
+// `crate::profiles::selected::SelectedProfile`.
+pub use crate::shrincs::verifier::{
+    FORS_TREE_HEIGHT, HASH_TRUNC_LEN, HYPERTREE_HEIGHT, NUM_FORS_TREES, NUM_HYPERTREE_LAYERS,
+    NUM_WOTS_CHAINS, PROFILE_NAME, STATELESS_SIGNATURE_LIMIT, WOTS_CHAIN_LEN,
 };
+pub const FORS_C_MAX_GRIND_COUNTER: u32 =
+    <crate::profiles::selected::SelectedProfile as Profile>::FORS_C_MAX_GRIND_COUNTER;
+// `PROFILE_ID` is `<SelectedProfile as Profile>::PROFILE_ID`, the identity hash
+// the build script generated for that profile. Each profile module proves at
+// compile time that the name hashed there is its own `PROFILE_NAME`.
+pub use crate::profiles::selected::PROFILE_ID;
 pub use crate::HASH_LEN;
 pub use action_context::ActionContext;
 pub use key::PublicKey;
@@ -99,20 +157,30 @@ pub(crate) use signer::public_key_from_components;
 mod profile_tests {
     #[test]
     fn active_profile_id_matches_keccak_of_profile_name() {
-        let expected = crate::hash::backend::keccak256(crate::profiles::PROFILE_NAME.as_bytes());
-        assert_eq!(crate::profiles::PROFILE_ID, expected);
+        let expected = crate::hash::backend::keccak256(super::PROFILE_NAME.as_bytes());
+        assert_eq!(super::PROFILE_ID, expected);
     }
 
-    #[cfg(any(feature = "profile-128s-q18", feature = "profile-128s-q20"))]
+    #[cfg(any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    ))]
     #[test]
     fn active_128_profile_uses_raised_fors_grind_budget() {
-        assert_eq!(crate::profiles::FORS_TREE_HEIGHT, 24);
-        assert_eq!(crate::profiles::FORS_C_MAX_GRIND_COUNTER, 1 << 28);
+        assert_eq!(super::FORS_TREE_HEIGHT, 24);
+        assert_eq!(super::FORS_C_MAX_GRIND_COUNTER, 1 << 28);
     }
 
-    #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
+    #[cfg(not(any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    )))]
     #[test]
     fn active_non_128_profile_keeps_default_fors_grind_budget() {
-        assert_eq!(crate::profiles::FORS_C_MAX_GRIND_COUNTER, 1 << 24);
+        assert_eq!(super::FORS_C_MAX_GRIND_COUNTER, 1 << 24);
     }
 }

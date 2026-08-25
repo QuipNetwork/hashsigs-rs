@@ -19,8 +19,10 @@
 
 set -euo pipefail
 
-# Invariant test for bin/packages.sh. A profile with no sibling package is a
-# profile that never gets built, and nothing else in the tree would say so.
+# Invariant test for bin/packages.sh. Each ecosystem ships one artifact
+# carrying every profile, so the failure this guards is a profile that is
+# listed as shipped but has no cargo feature to compile it or no module to
+# import it by. Nothing else in the tree would say so.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source-path=SCRIPTDIR/..
@@ -33,31 +35,108 @@ fail() {
 }
 
 [[ -n "${DEFAULT_PROFILE}" ]] || fail "DEFAULT_PROFILE is empty"
-[[ ${#SIBLING_PROFILES[@]} -eq 3 ]] ||
-  fail "expected 3 sibling profiles, got ${#SIBLING_PROFILES[@]}"
-[[ ${#PYPI_SIBLINGS[@]} -eq ${#SIBLING_PROFILES[@]} ]] ||
-  fail "PYPI_SIBLINGS (${#PYPI_SIBLINGS[@]}) does not match SIBLING_PROFILES (${#SIBLING_PROFILES[@]})"
-[[ ${#NPM_SIBLINGS[@]} -eq ${#SIBLING_PROFILES[@]} ]] ||
-  fail "NPM_SIBLINGS (${#NPM_SIBLINGS[@]}) does not match SIBLING_PROFILES (${#SIBLING_PROFILES[@]})"
+[[ ${#PROFILES[@]} -eq 6 ]] ||
+  fail "expected 6 profiles, got ${#PROFILES[@]}"
 [[ ${#TRIPLES[@]} -eq 6 ]] || fail "expected 6 target triples, got ${#TRIPLES[@]}"
 
-# Equal lengths are not enough. Every later script zips these arrays by
-# index, so entry i of each must describe SIBLING_PROFILES[i]. Reordering
-# one array and not the other keeps the counts correct and ships the wrong
-# package name under a profile's feature flags.
-for i in "${!SIBLING_PROFILES[@]}"; do
-  sibling_profile="${SIBLING_PROFILES[${i}]}"
-  [[ "${PYPI_SIBLINGS[${i}]}" == "hashsigs-profile-${sibling_profile}" ]] ||
-    fail "PYPI_SIBLINGS[${i}] is ${PYPI_SIBLINGS[${i}]}, expected hashsigs-profile-${sibling_profile}"
-  [[ "${NPM_SIBLINGS[${i}]}" == "${NPM_BASE}-${sibling_profile}" ]] ||
-    fail "NPM_SIBLINGS[${i}] is ${NPM_SIBLINGS[${i}]}, expected ${NPM_BASE}-${sibling_profile}"
+# The sibling-package model is gone. Leaving one of its arrays behind would
+# leave a publish script iterating a package set that is no longer published.
+for stale in SIBLING_PROFILES PYPI_SIBLINGS NPM_SIBLINGS; do
+  [[ -z "${!stale+set}" ]] ||
+    fail "${stale} still exists; the sibling-package model was replaced by one distribution per ecosystem"
 done
 
-for profile in "${DEFAULT_PROFILE}" "${SIBLING_PROFILES[@]}"; do
+# The default profile must be one of the shipped profiles, not a seventh name.
+printf '%s\n' "${PROFILES[@]}" | grep -qx "${DEFAULT_PROFILE}" ||
+  fail "DEFAULT_PROFILE (${DEFAULT_PROFILE}) is not in PROFILES"
+
+# Every shipped profile needs both halves: a cargo feature that compiles it,
+# and a module a caller can import it by. A profile missing either one is
+# listed as shipped and is not reachable.
+seen_names=()
+for profile in "${PROFILES[@]}"; do
   feature="$(PROFILE_FEATURE "${profile}")"
   [[ -n "${feature}" ]] || fail "no cargo feature mapped for profile ${profile}"
   grep -q "^${feature} = " "${SCRIPT_DIR}/../Cargo.toml" ||
     fail "cargo feature ${feature} (profile ${profile}) is not declared in Cargo.toml"
+
+  # The SHRINCS profile name a binary built for this profile reports. Only
+  # shape is checked here -- that a name exists, is unique, and is prefixed
+  # `shrincs-`. Whether it is the RIGHT name is checked where the answer
+  # actually lives: the npm conformance suite loads each built binary and
+  # compares `profileName()` against this table.
+  shrincs_name="$(PROFILE_SHRINCS_NAME "${profile}")"
+  [[ -n "${shrincs_name}" ]] ||
+    fail "no SHRINCS profile name mapped for profile ${profile}"
+  [[ "${shrincs_name}" == shrincs-* ]] ||
+    fail "profile ${profile} maps to SHRINCS name ${shrincs_name}, which is not prefixed 'shrincs-'"
+  if printf '%s\n' "${seen_names[@]:-}" | grep -qx "${shrincs_name}"; then
+    fail "SHRINCS name ${shrincs_name} is mapped by more than one profile"
+  fi
+  seen_names+=("${shrincs_name}")
+
+  # Python: the module stem the wheel exposes, and the crate that builds its
+  # extension. One Cargo package builds at most one cdylib, so a profile with
+  # no crate of its own has no extension and cannot ship.
+  py_module="$(PROFILE_PYTHON_MODULE "${profile}")"
+  [[ -n "${py_module}" ]] ||
+    fail "no python module mapped for profile ${profile}"
+  py_crate_dir="${SCRIPT_DIR}/../py/profiles/${py_module}"
+  [[ -f "${py_crate_dir}/Cargo.toml" ]] ||
+    fail "profile ${profile} maps to python module ${py_module}, but ${py_crate_dir}/Cargo.toml does not exist"
+  grep -q "^name = \"${ext_module_name:=_hashsigs_${py_module}}\"" "${py_crate_dir}/Cargo.toml" ||
+    fail "${py_crate_dir}/Cargo.toml must declare [lib] name = \"_hashsigs_${py_module}\"; CPython imports an extension by matching the file stem to its init symbol"
+  grep -q "\"${feature}\"" "${py_crate_dir}/Cargo.toml" ||
+    fail "${py_crate_dir}/Cargo.toml does not enable ${feature}, so it would build some other profile under the ${profile} name"
+  unset ext_module_name
+
+  module="$(PROFILE_RUST_MODULE "${profile}")"
+  [[ -n "${module}" ]] || fail "no rust module mapped for profile ${profile}"
+  module_file="${SCRIPT_DIR}/../src/profiles/${module##*::}.rs"
+  [[ -f "${module_file}" ]] ||
+    fail "profile ${profile} maps to ${module}, but ${module_file} does not exist"
 done
+
+# py/profiles.json restates this file's table for the Python distribution,
+# because the PEP 517 backend reads it from an unpacked sdist where bin/ does
+# not exist. Two tables of the same truth need a guard, or a profile added here
+# quietly fails to ship in the wheel.
+PY_TABLE="${SCRIPT_DIR}/../py/profiles.json"
+[[ -f "${PY_TABLE}" ]] || fail "${PY_TABLE} is missing; the Python build reads its profile list from it"
+
+# Each profile's fields, computed here so the checker never has to re-enter
+# bash to read this file back.
+expected_rows=()
+for profile in "${PROFILES[@]}"; do
+  expected_rows+=("${profile}|$(PROFILE_SHRINCS_NAME "${profile}")|$(PROFILE_PYTHON_MODULE "${profile}")|$(PROFILE_FEATURE "${profile}")")
+done
+
+python3 - "${PY_TABLE}" "${DEFAULT_PROFILE}" "${expected_rows[@]}" <<'PYEOF' || fail "py/profiles.json disagrees with bin/packages.sh"
+import json
+import sys
+
+table_path, default, *rows = sys.argv[1:]
+table = json.load(open(table_path))
+
+if table["default"] != default:
+    sys.exit(f'default is {table["default"]!r}, packages.sh says {default!r}')
+
+if len(table["profiles"]) != len(rows):
+    sys.exit(f'lists {len(table["profiles"])} profiles, packages.sh lists {len(rows)}')
+
+for entry, row in zip(table["profiles"], rows):
+    key, name, module, feature = row.split("|")
+    want = {
+        "key": key,
+        "name": name,
+        "module": module,
+        "feature": feature,
+        "ext": f"_hashsigs_{module}",
+        "crate": "hashsigs-py-" + module.replace("_", "-"),
+    }
+    for field, value in want.items():
+        if entry.get(field) != value:
+            sys.exit(f'{key}: {field}={entry.get(field)!r}, expected {value!r}')
+PYEOF
 
 echo "packages.sh invariants OK"

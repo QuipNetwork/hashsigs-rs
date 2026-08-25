@@ -1,13 +1,16 @@
 //! Peak-memory probe for 256s keygen + one stateless sign.
 //! Run: cargo run --example measure_mem --release --locked
 
+use hashsigs_rs::profiles::selected::{SelectedProfile, NUM_CHAINS, NUM_LAYERS};
 use hashsigs_rs::shrincs::ShrincsSigner;
 
 fn main() {
     let seed = b"perf-lane-memory-measure-seed";
-    let (sk, _pk) = ShrincsSigner::keygen(seed, 4).expect("keygen");
+    let (sk, _pk) =
+        ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(seed, 4).expect("keygen");
     let msg = b"memory measure message";
-    let _sig = ShrincsSigner::sign_stateless_raw(&sk, msg).expect("sign");
+    let _sig =
+        ShrincsSigner::sign_stateless_raw::<SelectedProfile, NUM_LAYERS>(&sk, msg).expect("sign");
     // Touch so nothing is optimized away.
     println!("ok seed_len={} msg_len={}", seed.len(), msg.len());
 }

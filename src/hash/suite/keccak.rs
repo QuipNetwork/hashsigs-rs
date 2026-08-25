@@ -17,11 +17,11 @@
 
 //! Keccak-256 scheme-hash suite (HASH_SUITE_ID = 1).
 
-use super::HASH_SUITE_KECCAK_256;
 use crate::HASH_LEN;
 
-pub const HASH_SUITE_ID: u32 = HASH_SUITE_KECCAK_256;
-
+/// Unused in a build that enables only sha2 profiles, which the wasm and
+/// Python packages produce one of per artifact. See `Keccak256Suite`.
+#[allow(dead_code)]
 pub fn scheme_hash_parts(parts: &[&[u8]]) -> [u8; HASH_LEN] {
     crate::hash::backend::keccak256v(parts)
 }

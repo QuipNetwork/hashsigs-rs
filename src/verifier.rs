@@ -53,12 +53,13 @@ pub enum VerifyOutcome {
 ///
 /// ```rust,no_run
 /// # fn main() -> Result<(), ()> {
+/// # use hashsigs_rs::profiles::selected::{SelectedProfile, NUM_CHAINS, NUM_LAYERS};
 /// use hashsigs_rs::shrincs::{sign, ShrincsSigner, ShrincsVerifier};
 /// use hashsigs_rs::{VerifierInterface, VerifyOutcome};
 ///
-/// let (mut keys, public_key) = ShrincsSigner::keygen(b"iface-seed", 4).ok_or(())?;
+/// let (mut keys, public_key) = ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(b"iface-seed", 4).ok_or(())?;
 /// let hash = [3u8; 32];
-/// let envelope = sign(&mut keys, &hash).ok_or(())?;
+/// let envelope = sign::<SelectedProfile, NUM_CHAINS>(&mut keys, &hash).ok_or(())?;
 /// let outcome = ShrincsVerifier::new().verify(
 ///     &public_key.public_key_commitment,
 ///     &hash,

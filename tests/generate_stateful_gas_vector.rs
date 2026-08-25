@@ -15,6 +15,7 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+use hashsigs_rs::profiles::selected::{SelectedProfile, NUM_CHAINS, NUM_LAYERS};
 use hashsigs_rs::shrincs::{
     ActionContext, PublicKey, ShrincsSigner, ShrincsVerifier, Signature as StatefulSignature,
     HASH_LEN,
@@ -35,11 +36,12 @@ const ACCOUNT_ADDRESS: [u8; 20] = [
 #[test]
 #[ignore = "run explicitly to refresh Solidity kth stateful gas vector"]
 fn generate_stateful_k_gas_vector() {
-    let (mut signing_key, public_key) = ShrincsSigner::keygen(
-        b"shrincs stateful kth gas vector seed",
-        TARGET_SIGNATURE_NUMBER,
-    )
-    .expect("stateful keygen");
+    let (mut signing_key, public_key) =
+        ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(
+            b"shrincs stateful kth gas vector seed",
+            TARGET_SIGNATURE_NUMBER,
+        )
+        .expect("stateful keygen");
     let message = hash_word(b"shrincs stateful kth gas vector message").to_vec();
     let action_type = hash_word(b"measure");
     let payload_hash = hash_word(b"measurement payload");
@@ -58,8 +60,12 @@ fn generate_stateful_k_gas_vector() {
     let mut signature = None;
     for _ in 0..TARGET_SIGNATURE_NUMBER {
         signature = Some(
-            ShrincsSigner::sign_stateful_action(&mut signing_key, &public_key, &context)
-                .expect("stateful signature"),
+            ShrincsSigner::sign_stateful_action::<SelectedProfile, NUM_CHAINS>(
+                &mut signing_key,
+                &public_key,
+                &context,
+            )
+            .expect("stateful signature"),
         );
     }
     let signature = signature.expect("kth signature");

@@ -55,6 +55,7 @@ fn solidity_exported_stateful_action_vector_verifies_in_rust() {
     ));
 }
 
+#[cfg(any(shrincs_default_profile_256s, shrincs_default_profile_256s_sha2))]
 #[test]
 fn solidity_exported_stateless_action_vector_verifies_in_rust() {
     let vectors = load_vectors();
@@ -88,4 +89,154 @@ fn solidity_exported_stateless_action_vector_verifies_in_rust() {
         &vector.context,
         &vector.signature,
     ));
+}
+
+// Regenerates only the stateless payload inside the Solidity-shaped wrapper.
+// The wrapper context and ABI layout remain the Solidity export oracle; Rust
+// deterministically recreates the same key, signs the V2 profile-bound message,
+// and replaces the equal-sized signature body and message word in place.
+//
+// Runs for every profile that has a committed wrapper fixture: the 256s pair,
+// whose fixture the Solidity export oracle produced, and the 128s keccak pair,
+// whose fixture a Rust generator produced. The 128s-sha2 twins have no fixture,
+// which is why their ERC-7913 tests stay held back in CI.
+#[cfg(any(
+    shrincs_default_profile_256s,
+    shrincs_default_profile_256s_sha2,
+    shrincs_default_profile_128s_q18,
+    shrincs_default_profile_128s_q20
+))]
+#[test]
+#[ignore = "run explicitly after a stateless digest migration"]
+fn regenerate_profile_bound_stateless_account_vector() {
+    use flate2::write::GzEncoder;
+    use flate2::Compression;
+    use hashsigs_rs::profiles::selected::{SelectedProfile, NUM_CHAINS, NUM_LAYERS};
+    use hashsigs_rs::shrincs::ShrincsSigner;
+    use std::io::Write;
+
+    let mut vectors = load_vectors();
+    let encoded = vectors["testExportStatelessActionBundle"]["stateless_vector_abi"]
+        .as_str()
+        .expect("missing stateless action vector blob");
+    let mut abi = hex_to_bytes(encoded);
+    let old = AbiDecoder::new(&abi).decode_root_stateless_action_vector();
+    let (key, public_key) = ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(
+        stateless_export_seed(),
+        4,
+    )
+    .expect("recreate Solidity export key");
+    assert_eq!(
+        public_key,
+        old.public_key,
+        "fixture key must match deterministic keygen: {} is not the seed that built this fixture",
+        String::from_utf8_lossy(stateless_export_seed()),
+    );
+
+    let verifier = ShrincsVerifier::new();
+    let message =
+        verifier.stateless_action_message_hash(old.current_shrincs_public_key, &old.context);
+    let signature =
+        ShrincsSigner::sign_stateless_raw::<SelectedProfile, NUM_LAYERS>(&key, &message)
+            .expect("profile-bound stateless signature");
+    assert!(verifier.verify_stateless(
+        old.current_shrincs_public_key,
+        &public_key,
+        &old.context,
+        &signature
+    ));
+
+    fn word(data: &[u8], at: usize) -> usize {
+        data[at..at + 32].iter().fold(0usize, |n, b| {
+            n.checked_mul(256)
+                .and_then(|n| n.checked_add(*b as usize))
+                .expect("ABI offset")
+        })
+    }
+    let root = word(&abi, 0);
+    let signature_start = root + word(&abi, root + 288);
+    let message_start = root + word(&abi, root + 320);
+    let encoded_signature = signature.to_bytes();
+    let body_start = word(&encoded_signature, 0);
+    let body = &encoded_signature[body_start..];
+    assert_eq!(
+        body.len(),
+        message_start - signature_start,
+        "signature ABI size changed"
+    );
+    abi[signature_start..message_start].copy_from_slice(body);
+    assert_eq!(
+        word(&abi, message_start),
+        32,
+        "message must be bytes32-shaped"
+    );
+    abi[message_start + 32..message_start + 64].copy_from_slice(&message);
+
+    vectors["testExportStatelessActionBundle"]["stateless_vector_abi"] =
+        serde_json::Value::String(format!(
+            "0x{}",
+            abi.iter().map(|b| format!("{b:02x}")).collect::<String>()
+        ));
+    let out = serde_json::to_vec_pretty(&vectors).expect("serialize wrapper vectors");
+    let file = std::fs::File::create(account_vector_out_path()).expect("create wrapper vector");
+    let mut gzip = GzEncoder::new(file, Compression::default());
+    gzip.write_all(&out).expect("write wrapper vector");
+    gzip.write_all(b"\n").expect("terminate wrapper vector");
+    gzip.finish().expect("finish wrapper vector");
+}
+
+// The seed the fixture's key was built from. It is a property of the generator
+// that produced the fixture, not of the profile: the 256s fixtures come from the
+// Solidity export oracle, the 128s keccak ones from a Rust generator that lived
+// in tests/generate_shrincs_vectors.rs until the account subsystem was removed.
+// Sign with the wrong one and keygen yields a different key, which the assertion
+// above catches rather than writing a fixture nothing can verify.
+#[cfg(any(
+    shrincs_default_profile_256s,
+    shrincs_default_profile_256s_sha2,
+    shrincs_default_profile_128s_q18,
+    shrincs_default_profile_128s_q20
+))]
+fn stateless_export_seed() -> &'static [u8] {
+    #[cfg(any(shrincs_default_profile_256s, shrincs_default_profile_256s_sha2))]
+    {
+        b"export-stateless-current-key"
+    }
+    #[cfg(any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20))]
+    {
+        b"128s account vectors: stateless action current key"
+    }
+}
+
+#[cfg(any(
+    shrincs_default_profile_256s,
+    shrincs_default_profile_256s_sha2,
+    shrincs_default_profile_128s_q18,
+    shrincs_default_profile_128s_q20
+))]
+fn account_vector_out_path() -> &'static str {
+    #[cfg(shrincs_default_profile_256s)]
+    {
+        "tests/test_vectors/shrincs_account_wrapper_vectors.json.gz"
+    }
+    #[cfg(shrincs_default_profile_128s_q18)]
+    {
+        "tests/test_vectors/shrincs_account_wrapper_vectors_128s_q18_keccak.json.gz"
+    }
+    #[cfg(shrincs_default_profile_128s_q20)]
+    {
+        "tests/test_vectors/shrincs_account_wrapper_vectors_128s_q20_keccak.json.gz"
+    }
+    #[cfg(shrincs_default_profile_256s_sha2)]
+    {
+        "tests/test_vectors/shrincs_account_wrapper_vectors_256s_sha2.json.gz"
+    }
+    #[cfg(shrincs_default_profile_128s_q18_sha2)]
+    {
+        "tests/test_vectors/shrincs_account_wrapper_vectors_128s_q18_sha2.json.gz"
+    }
+    #[cfg(shrincs_default_profile_128s_q20_sha2)]
+    {
+        "tests/test_vectors/shrincs_account_wrapper_vectors_128s_q20_sha2.json.gz"
+    }
 }

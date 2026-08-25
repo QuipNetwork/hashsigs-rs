@@ -1,0 +1,26 @@
+[package]
+name = "hashsigs-py-p128s-q20"
+# Keep in lockstep with the root crate; bin/sync-versions.sh checks it.
+version = "0.2.1-rc5"
+edition = "2021"
+rust-version = "1.95"
+authors = ["Richard T. Carback III <rick.carback@gmail.com>"]
+description = "hashsigs Python extension for the 128s-q20 SHRINCS profile"
+license = "AGPL-3.0-or-later"
+repository = "https://gitlab.com/quip.network/hashsigs-rs"
+# Built into the one `hashsigs` wheel, never published on its own.
+publish = false
+
+[lib]
+# MUST equal the module name the macro registers and the stem of the installed
+# `.so`; CPython imports an extension by matching the file stem to the init
+# symbol.
+name = "_hashsigs_p128s_q20"
+crate-type = ["cdylib"]
+
+[dependencies]
+# Needed directly: the PyO3 attribute macros the shared surface uses expand
+# to `::pyo3` paths in THIS crate.
+pyo3.workspace = true
+hashsigs-py-common = { path = "../../common" }
+hashsigs-rs = { path = "../../..", default-features = false, features = ["std", "profile-128s-q20"] }

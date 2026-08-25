@@ -32,6 +32,7 @@
 //! verify path requires — covering it needs a generator/schema change (see the
 //! `review` bead).
 
+use crate::profiles::selected::{SelectedProfile, NUM_CHAINS, NUM_LAYERS};
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -63,24 +64,34 @@ fn vector_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(vector_filename())
 }
 
-#[cfg(shrincs_profile_256s)]
+#[cfg(shrincs_default_profile_256s)]
 fn vector_filename() -> &'static str {
     "tests/test_vectors/shrincs_sphincs_256s_keccak.json"
 }
 
-#[cfg(shrincs_profile_128s_q18)]
+#[cfg(shrincs_default_profile_128s_q18)]
 fn vector_filename() -> &'static str {
     "tests/test_vectors/shrincs_sphincs_128s_q18_keccak.json"
 }
 
-#[cfg(shrincs_profile_128s_q20)]
+#[cfg(shrincs_default_profile_128s_q20)]
 fn vector_filename() -> &'static str {
     "tests/test_vectors/shrincs_sphincs_128s_q20_keccak.json"
 }
 
-#[cfg(shrincs_profile_256s_sha2)]
+#[cfg(shrincs_default_profile_256s_sha2)]
 fn vector_filename() -> &'static str {
     "tests/test_vectors/shrincs_sphincs_256s_sha2.json"
+}
+
+#[cfg(shrincs_default_profile_128s_q18_sha2)]
+fn vector_filename() -> &'static str {
+    "tests/test_vectors/shrincs_sphincs_128s_q18_sha2.json"
+}
+
+#[cfg(shrincs_default_profile_128s_q20_sha2)]
+fn vector_filename() -> &'static str {
+    "tests/test_vectors/shrincs_sphincs_128s_q20_sha2.json"
 }
 
 fn load_vectors() -> Value {
@@ -100,8 +111,11 @@ fn fixture_or_fresh_full_key(
     max_stateful_signatures: u32,
 ) -> (super::Keys, PublicKey) {
     match TestKeyMode::from_env() {
-        TestKeyMode::Fresh => ShrincsSigner::keygen(seed_label.as_bytes(), max_stateful_signatures)
-            .unwrap_or_else(|| panic!("fresh keygen failed for seed label {seed_label:?}")),
+        TestKeyMode::Fresh => ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(
+            seed_label.as_bytes(),
+            max_stateful_signatures,
+        )
+        .unwrap_or_else(|| panic!("fresh keygen failed for seed label {seed_label:?}")),
         TestKeyMode::Fixture => {
             let path = fixture_path();
             if path.is_file() {
@@ -115,8 +129,11 @@ fn fixture_or_fresh_full_key(
                     return fixture_pair(entry);
                 }
             }
-            ShrincsSigner::keygen(seed_label.as_bytes(), max_stateful_signatures)
-                .unwrap_or_else(|| panic!("fresh keygen failed for seed label {seed_label:?}"))
+            ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(
+                seed_label.as_bytes(),
+                max_stateful_signatures,
+            )
+            .unwrap_or_else(|| panic!("fresh keygen failed for seed label {seed_label:?}"))
         }
     }
 }
@@ -254,7 +271,7 @@ fn verify_stateless_case(case: &Value) -> bool {
         )
         .expect("vector pk_seed/root are 32 bytes");
         assert!(
-            crate::sphincs_plus_c::verify(&pk, &message, &signature),
+            crate::sphincs_plus_c::verify::<SelectedProfile, NUM_CHAINS>(&pk, &message, &signature),
             "stateless vector must verify through independent sphincs_plus_c::verify"
         );
     }
@@ -294,7 +311,12 @@ fn stateless_golden_vector_accepts_valid_and_rejects_tampered() {
     }
 }
 
-#[cfg(any(feature = "profile-128s-q18", feature = "profile-128s-q20"))]
+#[cfg(any(
+    shrincs_default_profile_128s_q18,
+    shrincs_default_profile_128s_q20,
+    shrincs_default_profile_128s_q18_sha2,
+    shrincs_default_profile_128s_q20_sha2
+))]
 #[test]
 fn logs_committed_128_stateless_fors_counter() {
     use crate::shrincs::{FORS_C_MAX_GRIND_COUNTER, PROFILE_NAME};
@@ -316,7 +338,12 @@ fn logs_committed_128_stateless_fors_counter() {
 /// This proves the signer still *reproduces* the reference bytes, not only that
 /// the verifier accepts them. (Bead 0y8.)
 #[cfg_attr(
-    any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+    any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    ),
     ignore = "128s stateless keygen/signing is compute-infeasible in-process"
 )]
 #[test]
@@ -325,10 +352,15 @@ fn signer_reproduces_committed_stateless_vector_bytes() {
     let section = &vectors["stateless"];
 
     let (signing_key, public_key) =
-        ShrincsSigner::keygen(STATELESS_SEED, STATELESS_MAX_SIGNATURES).expect("stateless keygen");
+        ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(
+            STATELESS_SEED,
+            STATELESS_MAX_SIGNATURES,
+        )
+        .expect("stateless keygen");
     let message = hex_to_vec(&section["message"]);
     let signature =
-        ShrincsSigner::sign_stateless_raw(&signing_key, &message).expect("stateless signature");
+        ShrincsSigner::sign_stateless_raw::<SelectedProfile, NUM_LAYERS>(&signing_key, &message)
+            .expect("stateless signature");
 
     assert_eq!(
         public_key,
@@ -434,7 +466,12 @@ fn stateful_public_key_from_case(base: &PublicKey, case_public_key: &Value) -> P
 /// keygen: accept the valid case and reject wrongMessage / wrongPublicKey /
 /// corruptedSignature. (Bead p8a.)
 #[cfg_attr(
-    any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+    any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    ),
     ignore = "128s stateful golden conformance still needs a full key fixture/manual regeneration path"
 )]
 #[test]

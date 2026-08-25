@@ -76,7 +76,8 @@ pub(crate) mod abi;
 pub(crate) mod buf;
 pub mod error;
 pub(crate) mod hash;
-pub(crate) mod profiles;
+pub mod profile;
+pub mod profiles;
 pub mod shrincs;
 pub mod sphincs_plus_c;
 pub(crate) mod treehash;
@@ -85,6 +86,8 @@ pub mod verifier;
 // the `unsafe_code` exception is scoped to exactly this module.
 #[cfg(feature = "std")]
 #[cfg_attr(feature = "wasm-bindings", allow(unsafe_code))]
+#[doc(hidden)]
+pub mod bindings;
 pub mod wasm;
 pub mod wots_c;
 pub mod wotsplus;
@@ -97,6 +100,24 @@ pub(crate) mod test_support;
 // the parameter set. A truncated profile emits high-aligned, zero-padded node
 // values inside this slot (see HASH_TRUNC_LEN and `mask_hash`).
 pub const HASH_LEN: usize = 32;
+
+/// The build-selected profile's SHRINCS type.
+///
+/// This follows `profiles::selected::SelectedProfile`, the same profile the
+/// verifiers, the wasm bindings and the `crate::shrincs` facade constants
+/// already use, so the crate root cannot disagree with the rest of the crate
+/// about which parameter set this build carries. Name a profile module's own
+/// alias (for example `profiles::p256s::Shrincs`) to pin one explicitly.
+///
+/// This alias exists because `build.rs` still binds each build to exactly one
+/// profile for the surfaces that are not generic over a profile. If those
+/// surfaces ever take their own profile parameter, this alias is removable and
+/// callers name a profile module directly.
+pub type Shrincs = shrincs::ShrincsCore<
+    profiles::selected::SelectedProfile,
+    { profiles::selected::NUM_CHAINS },
+    { profiles::selected::NUM_LAYERS },
+>;
 
 pub use error::ErrorCode;
 pub use sphincs_plus_c::SphincsPlusCVerifier;

@@ -21,6 +21,7 @@
 //! is arbitrary bytes (or raw 32-byte hash via `to_message` / `verify_hash`).
 //! No SHRINCS public-key-bundle commitment and no action envelope.
 
+use crate::profile::Profile;
 use crate::HASH_LEN;
 
 /// Convert a 32-byte hash into the signed message bytes.
@@ -35,26 +36,35 @@ pub fn to_message(hash: &[u8; HASH_LEN]) -> [u8; HASH_LEN] {
 ///
 /// ```rust,no_run
 /// # fn main() -> Result<(), ()> {
+/// # use hashsigs_rs::profiles::selected::{SelectedProfile, NUM_CHAINS, NUM_LAYERS};
 /// use hashsigs_rs::sphincs_plus_c::{keygen, sign, verify};
 ///
-/// let key = keygen([1u8; 32], [2u8; 32], [3u8; 32]);
+/// let key = keygen::<SelectedProfile, NUM_LAYERS>([1u8; 32], [2u8; 32], [3u8; 32]);
 /// let message = b"hello";
-/// let sig = sign(&key, message).ok_or(())?;
-/// assert!(verify(&key.public_key, message, &sig));
+/// let sig = sign::<SelectedProfile, NUM_LAYERS>(&key, message).ok_or(())?;
+/// assert!(verify::<SelectedProfile, NUM_CHAINS>(&key.public_key, message, &sig));
 /// # Ok(())
 /// # }
 /// ```
-pub fn verify(pk: &key::PublicKey, message: &[u8], sig: &Signature) -> bool {
-    verify_raw(pk.pk_seed.as_bytes(), pk.root.as_bytes(), message, sig)
+pub fn verify<P: Profile, const NUM_CHAINS: usize>(
+    pk: &key::PublicKey,
+    message: &[u8],
+    sig: &Signature,
+) -> bool {
+    verify_raw::<P, NUM_CHAINS>(pk.pk_seed.as_bytes(), pk.root.as_bytes(), message, sig)
 }
 
 /// Verify a SPHINCS+C signature over a 32-byte hash.
-pub fn verify_hash(pk: &key::PublicKey, hash: &[u8; HASH_LEN], sig: &Signature) -> bool {
-    verify(pk, &to_message(hash), sig)
+pub fn verify_hash<P: Profile, const NUM_CHAINS: usize>(
+    pk: &key::PublicKey,
+    hash: &[u8; HASH_LEN],
+    sig: &Signature,
+) -> bool {
+    verify::<P, NUM_CHAINS>(pk, &to_message(hash), sig)
 }
 
 /// Core verify: FORS-C then hypertree (byte-identical to prior `verify_stateless_raw`).
-pub(crate) fn verify_raw(
+pub(crate) fn verify_raw<P: Profile, const NUM_CHAINS: usize>(
     pk_seed: &[u8; HASH_LEN],
     hypertree_root: &[u8; HASH_LEN],
     message: &[u8],
@@ -64,11 +74,16 @@ pub(crate) fn verify_raw(
         return false;
     }
     let Some((fors_root, seed_tree_index, seed_leaf_index)) =
-        fors_c::verify_fors_c_and_return_root(pk_seed, hypertree_root, message, &signature.fors)
+        fors_c::verify_fors_c_and_return_root::<P>(
+            pk_seed,
+            hypertree_root,
+            message,
+            &signature.fors,
+        )
     else {
         return false;
     };
-    hypertree::verify_hypertree(
+    hypertree::verify_hypertree::<P, NUM_CHAINS>(
         pk_seed,
         hypertree_root,
         fors_root,
@@ -133,17 +148,21 @@ pub use verifier::SphincsPlusCVerifier;
 ///
 /// ```rust,no_run
 /// # fn main() -> Result<(), ()> {
+/// # use hashsigs_rs::profiles::selected::{SelectedProfile, NUM_CHAINS, NUM_LAYERS};
 /// use hashsigs_rs::sphincs_plus_c::{keygen, sign};
 ///
-/// let key = keygen([1u8; 32], [2u8; 32], [3u8; 32]);
-/// let sig = sign(&key, b"hello").ok_or(())?;
+/// let key = keygen::<SelectedProfile, NUM_LAYERS>([1u8; 32], [2u8; 32], [3u8; 32]);
+/// let sig = sign::<SelectedProfile, NUM_LAYERS>(&key, b"hello").ok_or(())?;
 /// assert!(!sig.to_bytes().is_empty());
 /// # Ok(())
 /// # }
 /// ```
-pub fn sign(signing_key: &key::Key, message: &[u8]) -> Option<Signature> {
-    let signed_fors = fors_c::sign_fors_c(signing_key, message)?;
-    let hypertree_layers = hypertree::sign_hypertree(
+pub fn sign<P: Profile, const NUM_LAYERS: usize>(
+    signing_key: &key::Key,
+    message: &[u8],
+) -> Option<Signature> {
+    let signed_fors = fors_c::sign_fors_c::<P>(signing_key, message)?;
+    let hypertree_layers = hypertree::sign_hypertree::<P, NUM_LAYERS>(
         signing_key,
         signed_fors.root,
         signed_fors.tree_index,
@@ -160,8 +179,11 @@ pub fn sign(signing_key: &key::Key, message: &[u8]) -> Option<Signature> {
 /// [`SphincsPlusCVerifier`] takes are `signature.to_bytes()`.
 ///
 /// Returns `None` under the same grinding-exhaustion conditions as [`sign`].
-pub fn sign_hash(signing_key: &key::Key, hash: &[u8; HASH_LEN]) -> Option<Signature> {
-    sign(signing_key, &to_message(hash))
+pub fn sign_hash<P: Profile, const NUM_LAYERS: usize>(
+    signing_key: &key::Key,
+    hash: &[u8; HASH_LEN],
+) -> Option<Signature> {
+    sign::<P, NUM_LAYERS>(signing_key, &to_message(hash))
 }
 
 /// Derive the SPHINCS+C signing key and public key from raw seed material.
@@ -175,17 +197,18 @@ pub fn sign_hash(signing_key: &key::Key, hash: &[u8; HASH_LEN]) -> Option<Signat
 /// # Examples
 ///
 /// ```rust,no_run
+/// # use hashsigs_rs::profiles::selected::{SelectedProfile, NUM_CHAINS, NUM_LAYERS};
 /// use hashsigs_rs::sphincs_plus_c::keygen;
 ///
-/// let key = keygen([1u8; 32], [2u8; 32], [3u8; 32]);
+/// let key = keygen::<SelectedProfile, NUM_LAYERS>([1u8; 32], [2u8; 32], [3u8; 32]);
 /// assert_eq!(key.to_bytes().len(), 128);
 /// ```
-pub fn keygen(
+pub fn keygen<P: Profile, const NUM_LAYERS: usize>(
     sk_seed: [u8; HASH_LEN],
     prf_seed: [u8; HASH_LEN],
     pk_seed: [u8; HASH_LEN],
 ) -> key::Key {
-    let hypertree_root = hypertree::hypertree_public_root(&sk_seed, &pk_seed);
+    let hypertree_root = hypertree::hypertree_public_root::<P, NUM_LAYERS>(&sk_seed, &pk_seed);
     key::Key::new(
         key::PrivateKey::new(key::SkSeed::new(sk_seed), key::PrfSeed::new(prf_seed)),
         key::PublicKey {
@@ -198,39 +221,75 @@ pub fn keygen(
 /// Derive a SPHINCS+C key from a master seed. Domain tags are consensus-fixed
 /// serialized bytes — do NOT rename them. Shared with `ShrincsSigner::keygen`'s
 /// stateless half so the same master seed yields matching key material.
-pub(crate) fn keygen_from_master_seed(seed: &[u8]) -> key::Key {
-    let sk = crate::hash::derive32(b"shrincs-stateless-sk-seed", seed, &[]);
-    let prf = crate::hash::derive32(b"shrincs-stateless-prf-seed", seed, &[]);
-    let pk = crate::hash::derive32(b"shrincs-pk-seed", seed, &[]);
-    keygen(sk, prf, pk)
+pub(crate) fn keygen_from_master_seed<P: Profile, const NUM_LAYERS: usize>(
+    seed: &[u8],
+) -> key::Key {
+    let sk = crate::hash::derive32::<P::Suite>(b"shrincs-stateless-sk-seed", seed, &[]);
+    let prf = crate::hash::derive32::<P::Suite>(b"shrincs-stateless-prf-seed", seed, &[]);
+    let pk = crate::hash::derive32::<P::Suite>(b"shrincs-pk-seed", seed, &[]);
+    keygen::<P, NUM_LAYERS>(sk, prf, pk)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
+    #[cfg(not(any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    )))]
     use crate::hash::{derive32, hash_packed};
+    #[cfg(not(any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    )))]
+    use crate::profiles::selected::{SelectedProfile, NUM_CHAINS, NUM_LAYERS};
+
+    /// Scheme hash suite of the active profile: what every test fixture below
+    /// derives its seeds with.
+    #[cfg(not(any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    )))]
+    type Suite = <SelectedProfile as Profile>::Suite;
 
     /// Independent keygen at the SPHINCS+C layer (no SHRINCS hybrid fields).
-    #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
+    #[cfg(not(any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    )))]
     fn independent_keygen(seed: &[u8]) -> (Key, PublicKey) {
-        let key = keygen(
-            derive32(b"shrincs-stateless-sk-seed", seed, &[]),
-            derive32(b"shrincs-stateless-prf-seed", seed, &[]),
-            derive32(b"shrincs-pk-seed", seed, &[]),
+        let key = keygen::<SelectedProfile, NUM_LAYERS>(
+            derive32::<Suite>(b"shrincs-stateless-sk-seed", seed, &[]),
+            derive32::<Suite>(b"shrincs-stateless-prf-seed", seed, &[]),
+            derive32::<Suite>(b"shrincs-pk-seed", seed, &[]),
         );
         let public_key = key.public_key;
         (key, public_key)
     }
 
-    #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
+    #[cfg(not(any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    )))]
     #[test]
     fn sphincs_plus_c_sign_verify_round_trip() {
         let (sk, pk) = independent_keygen(b"sphincs-plus-c independent rt");
-        let message = hash_packed(&[b"sphincs-plus-c-rt-message"]);
-        let sig = sign(&sk, &message).expect("sign");
-        assert!(verify(&pk, &message, &sig));
-        assert!(verify_hash(&pk, &message, &sig));
+        let message = hash_packed::<Suite>(&[b"sphincs-plus-c-rt-message"]);
+        let sig = sign::<SelectedProfile, NUM_LAYERS>(&sk, &message).expect("sign");
+        assert!(verify::<SelectedProfile, NUM_CHAINS>(&pk, &message, &sig));
+        assert!(verify_hash::<SelectedProfile, NUM_CHAINS>(
+            &pk, &message, &sig
+        ));
         // verifier key shape: pk_seed || hypertree_root
         let mut key = [0u8; 64];
         key[..32].copy_from_slice(pk.pk_seed.as_bytes());
@@ -249,13 +308,18 @@ mod tests {
     // hash with the free function and verifying the resulting bytes through
     // the opaque `VerifierInterface` must round-trip. The stateless key is not
     // mutated (no `&mut`), which is the point of the free-function shape.
-    #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
+    #[cfg(not(any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    )))]
     #[test]
     fn sign_hash_round_trips_through_the_verifier_interface() {
         use crate::verifier::{VerifierInterface, VerifyOutcome};
         let (sk, pk) = independent_keygen(b"sphincs sign_hash round trip");
-        let hash = hash_packed(&[b"sphincs-plus-c sign_hash rt"]);
-        let signature = sign_hash(&sk, &hash).expect("sign_hash");
+        let hash = hash_packed::<Suite>(&[b"sphincs-plus-c sign_hash rt"]);
+        let signature = sign_hash::<SelectedProfile, NUM_LAYERS>(&sk, &hash).expect("sign_hash");
         let mut key = [0u8; 64];
         key[..32].copy_from_slice(pk.pk_seed.as_bytes());
         key[32..].copy_from_slice(pk.root.as_bytes());
@@ -282,22 +346,29 @@ mod tests {
     #[cfg(all(
         feature = "std",
         not(feature = "parallel"),
-        not(any(feature = "profile-128s-q18", feature = "profile-128s-q20"))
+        not(any(
+            shrincs_default_profile_128s_q18,
+            shrincs_default_profile_128s_q20,
+            shrincs_default_profile_128s_q18_sha2,
+            shrincs_default_profile_128s_q20_sha2
+        ))
     ))]
     #[test]
     fn stateless_verify_hash_count_matches_model_and_reports_cu_floor() {
         use crate::hash::backend::metrics;
-        use crate::profiles::{
-            FORS_TREE_HEIGHT, HYPERTREE_HEIGHT, NUM_FORS_TREES, NUM_HYPERTREE_LAYERS,
-            NUM_WOTS_CHAINS, WOTS_CHAIN_LEN,
-        };
+        const FORS_TREE_HEIGHT: u8 = SelectedProfile::FORS_TREE_HEIGHT;
+        const HYPERTREE_HEIGHT: u8 = SelectedProfile::HYPERTREE_HEIGHT;
+        const NUM_FORS_TREES: u8 = SelectedProfile::NUM_FORS_TREES;
+        const NUM_HYPERTREE_LAYERS: u8 = SelectedProfile::NUM_HYPERTREE_LAYERS;
+        const NUM_WOTS_CHAINS: u16 = SelectedProfile::NUM_WOTS_CHAINS;
+        const WOTS_CHAIN_LEN: u16 = SelectedProfile::WOTS_CHAIN_LEN;
 
         let (sk, pk) = independent_keygen(b"sphincs-plus-c cu estimator");
-        let message = hash_packed(&[b"sphincs-plus-c-cu-message"]);
-        let sig = sign(&sk, &message).expect("sign");
+        let message = hash_packed::<Suite>(&[b"sphincs-plus-c-cu-message"]);
+        let sig = sign::<SelectedProfile, NUM_LAYERS>(&sk, &message).expect("sign");
 
         metrics::reset();
-        assert!(verify(&pk, &message, &sig));
+        assert!(verify::<SelectedProfile, NUM_CHAINS>(&pk, &message, &sig));
         let (calls, bytes, slice_cost) = metrics::snapshot();
 
         let signed_trees = u64::from(NUM_FORS_TREES) - 1;
@@ -316,7 +387,7 @@ mod tests {
         // wots-c-pk hash + one node hash per subtree auth-path level.
         let subtree_height = u64::from(HYPERTREE_HEIGHT / NUM_HYPERTREE_LAYERS);
         let chain_steps = u64::from(NUM_WOTS_CHAINS) * u64::from(WOTS_CHAIN_LEN - 1)
-            - u64::from(crate::wots_c::TARGET_SUM);
+            - u64::from(SelectedProfile::WOTS_TARGET_SUM);
         let per_layer = 1 + chain_steps + 1 + subtree_height;
         let expected_calls = fors_calls + u64::from(NUM_HYPERTREE_LAYERS) * per_layer;
         assert_eq!(calls, expected_calls, "verify hash-count model drifted");
@@ -326,7 +397,7 @@ mod tests {
             "CU estimate profile={}: stateless verify = {calls} hash syscalls, \
              {bytes} bytes hashed, syscall floor ≈ {cu_floor} CU \
              (excludes SBF instruction execution and borsh deserialization)",
-            crate::profiles::PROFILE_NAME
+            SelectedProfile::PROFILE_NAME
         );
     }
 }

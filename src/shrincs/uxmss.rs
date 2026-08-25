@@ -26,6 +26,7 @@ use alloc::vec::Vec;
 
 use super::signature::Signature;
 use crate::hash::{base_w16_digit, hash_node, hash_packed, word32};
+use crate::profile::Profile;
 use crate::wots_c::{wots_chain_walk, ChainWalk, WOTS_C_MAX_GRIND_COUNTER};
 use crate::HASH_LEN;
 use core::fmt;
@@ -38,6 +39,21 @@ pub const STATEFUL_PUBLIC_KEY_BYTES: usize = 68;
 pub(crate) const INITIAL_STATEFUL_LEAF_INDEX: u32 = 1;
 pub(crate) const MAX_STATEFUL_SIGNATURES_LIMIT: u32 = 4096;
 
+/// Carrier for the chain-width agreement check on the functions that size a
+/// fixed array by `NUM_CHAINS`.
+///
+/// Associated-const form, not a bare `assert!` in a `const fn`: only an
+/// associated const is guaranteed to be evaluated at monomorphisation. Same
+/// pattern as `ShrincsCore::WIDTHS_AGREE`.
+struct ChainWidthAgrees<P: Profile, const NUM_CHAINS: usize>(core::marker::PhantomData<fn() -> P>);
+
+impl<P: Profile, const NUM_CHAINS: usize> ChainWidthAgrees<P, NUM_CHAINS> {
+    const CHECK: () = assert!(
+        P::NUM_WOTS_CHAINS as usize == NUM_CHAINS,
+        "NUM_CHAINS const generic parameter disagrees with the profile"
+    );
+}
+
 /// Leaf/chain coordinates for a stateful UXMSS WOTS-C chain walk.
 #[derive(Clone, Copy)]
 struct StatefulChainCtx {
@@ -46,14 +62,14 @@ struct StatefulChainCtx {
 }
 
 /// Stateful UXMSS WOTS-C chain walk (`b"uxmss-wots-chain"`).
-fn stateful_chain_no_mask(
+fn stateful_chain_no_mask<P: Profile>(
     pk_seed: &[u8; HASH_LEN],
     ctx: StatefulChainCtx,
     walk: ChainWalk,
 ) -> [u8; HASH_LEN] {
     use crate::hash::ADDRESS_TYPE_WOTS_HASH;
     use crate::hash::{address_word32, AddressWord32};
-    wots_chain_walk(
+    wots_chain_walk::<P>(
         b"uxmss-wots-chain",
         pk_seed,
         |step| {
@@ -83,7 +99,7 @@ pub struct PublicKey {
     pub max_signatures: u32,
 }
 
-pub(crate) fn verify_stateful_unsafe_raw(
+pub(crate) fn verify_stateful_unsafe_raw<P: Profile, const NUM_CHAINS: usize>(
     stateful_key: &PublicKey,
     message: &[u8],
     signature: &Signature,
@@ -92,11 +108,11 @@ pub(crate) fn verify_stateful_unsafe_raw(
     if leaf_index == 0 || leaf_index > stateful_key.max_signatures {
         return false;
     }
-    if signature.chains.len() != crate::wots_c::NUM_CHAINS {
+    if signature.chains.len() != P::NUM_WOTS_CHAINS as usize {
         return false;
     }
 
-    let Some(pk_hash) = compact_stateful_wots_public_key_from_signature(
+    let Some(pk_hash) = compact_stateful_wots_public_key_from_signature::<P, NUM_CHAINS>(
         stateful_key.pk_seed,
         leaf_index,
         message,
@@ -104,7 +120,7 @@ pub(crate) fn verify_stateful_unsafe_raw(
     ) else {
         return false;
     };
-    let Some(root) = root_from_unbalanced_path(
+    let Some(root) = root_from_unbalanced_path::<P>(
         stateful_key.pk_seed,
         leaf_index,
         pk_hash,
@@ -115,13 +131,13 @@ pub(crate) fn verify_stateful_unsafe_raw(
     stateful_key.root == root
 }
 
-pub(crate) fn stateful_parent_hash(
+pub(crate) fn stateful_parent_hash<P: Profile>(
     pk_seed: &[u8; HASH_LEN],
     left_leaf_index: u32,
     left: [u8; HASH_LEN],
     right: [u8; HASH_LEN],
 ) -> [u8; HASH_LEN] {
-    hash_node(&[
+    hash_node::<P>(&[
         b"uxmss-node".as_ref(),
         pk_seed.as_ref(),
         left_leaf_index.to_be_bytes().as_ref(),
@@ -130,21 +146,25 @@ pub(crate) fn stateful_parent_hash(
     ])
 }
 
-pub(crate) fn stateful_empty_tail(pk_seed: &[u8; HASH_LEN], leaf_index: u32) -> [u8; HASH_LEN] {
-    hash_packed(&[
+pub(crate) fn stateful_empty_tail<P: Profile>(
+    pk_seed: &[u8; HASH_LEN],
+    leaf_index: u32,
+) -> [u8; HASH_LEN] {
+    hash_packed::<P::Suite>(&[
         b"uxmss-empty-tail".as_ref(),
         pk_seed.as_ref(),
         leaf_index.to_be_bytes().as_ref(),
     ])
 }
 
-fn compact_stateful_wots_public_key_from_signature(
+fn compact_stateful_wots_public_key_from_signature<P: Profile, const NUM_CHAINS: usize>(
     pk_seed: [u8; HASH_LEN],
     leaf_index: u32,
     message: &[u8],
     signature: &Signature,
 ) -> Option<[u8; HASH_LEN]> {
-    let digest = hash_packed(&[
+    let () = ChainWidthAgrees::<P, NUM_CHAINS>::CHECK;
+    let digest = hash_packed::<P::Suite>(&[
         b"uxmss-wots-digits".as_ref(),
         pk_seed.as_ref(),
         leaf_index.to_be_bytes().as_ref(),
@@ -154,12 +174,12 @@ fn compact_stateful_wots_public_key_from_signature(
     ]);
 
     let mut digit_sum = 0u32;
-    let mut segments = crate::buf::node_buf::<{ crate::wots_c::NUM_CHAINS }>();
+    let mut segments = crate::buf::node_buf::<NUM_CHAINS>();
     for (chain_index, segment) in segments.iter_mut().enumerate() {
         let digit = base_w16_digit(&digest, chain_index);
         digit_sum = digit_sum.checked_add(digit)?;
         let chain_value = *signature.chains.get(chain_index)?;
-        *segment = stateful_chain_no_mask(
+        *segment = stateful_chain_no_mask::<P>(
             &pk_seed,
             StatefulChainCtx {
                 leaf_index,
@@ -168,29 +188,27 @@ fn compact_stateful_wots_public_key_from_signature(
             ChainWalk {
                 value: chain_value,
                 start: digit,
-                steps: crate::wots_c::BASE - 1 - digit,
+                steps: u32::from(P::WOTS_CHAIN_LEN) - 1 - digit,
             },
         );
     }
 
-    if digit_sum != crate::wots_c::TARGET_SUM {
+    if digit_sum != P::WOTS_TARGET_SUM {
         return None;
     }
     // Vectored preimage: tag ‖ pk_seed ‖ leaf_index ‖ segment_0 ‖ … —
-    // byte-identical to the packed form.
+    // byte-identical to the packed form. See `stateful_wots_pk_hash` for why
+    // the segments go in flattened.
     let leaf_be = leaf_index.to_be_bytes();
-    let mut parts: [&[u8]; { crate::wots_c::NUM_CHAINS } + 3] =
-        [&[]; { crate::wots_c::NUM_CHAINS } + 3];
-    parts[0] = b"uxmss-wots-pk";
-    parts[1] = pk_seed.as_ref();
-    parts[2] = leaf_be.as_ref();
-    for (part, segment) in parts[3..].iter_mut().zip(segments.iter()) {
-        *part = segment.as_ref();
-    }
-    Some(hash_node(&parts))
+    Some(hash_node::<P>(&[
+        b"uxmss-wots-pk".as_ref(),
+        pk_seed.as_ref(),
+        leaf_be.as_ref(),
+        segments.as_flattened(),
+    ]))
 }
 
-fn root_from_unbalanced_path(
+fn root_from_unbalanced_path<P: Profile>(
     pk_seed: [u8; HASH_LEN],
     leaf_index: u32,
     leaf: [u8; HASH_LEN],
@@ -199,9 +217,9 @@ fn root_from_unbalanced_path(
     if auth_path.len() != leaf_index as usize || auth_path.is_empty() {
         return None;
     }
-    let mut root = stateful_parent_hash(&pk_seed, leaf_index, leaf, *auth_path.first()?);
+    let mut root = stateful_parent_hash::<P>(&pk_seed, leaf_index, leaf, *auth_path.first()?);
     for offset in 0..auth_path.len() - 1 {
-        root = stateful_parent_hash(
+        root = stateful_parent_hash::<P>(
             &pk_seed,
             leaf_index - offset as u32 - 1,
             *auth_path.get(offset + 1)?,
@@ -573,7 +591,10 @@ fn word4(bytes: &[u8]) -> Option<[u8; 4]> {
     Some(out)
 }
 
-pub(crate) fn sign_stateful_raw(key: &mut Key, message: &[u8]) -> Option<Signature> {
+pub(crate) fn sign_stateful_raw<P: Profile, const NUM_CHAINS: usize>(
+    key: &mut Key,
+    message: &[u8],
+) -> Option<Signature> {
     // The verifier derives the stateful leaf index from auth_path.len(), so the
     // signer must advance one leaf at a time and must never reuse a prior leaf.
     let leaf_index = key.next_leaf_index();
@@ -588,12 +609,12 @@ pub(crate) fn sign_stateful_raw(key: &mut Key, message: &[u8]) -> Option<Signatu
     // seeds, leaf_index, and max_signatures), so we must not rebuild it here —
     // stateful_auth_path walks up to max_stateful_signatures nodes and doubled
     // the dominant signing cost.
-    let signature = sign_stateful_raw_at_leaf(key, leaf_index, message)?;
+    let signature = sign_stateful_raw_at_leaf::<P, NUM_CHAINS>(key, leaf_index, message)?;
     key.advance_next_leaf_index();
     Some(signature)
 }
 
-pub(crate) fn sign_stateful_raw_at_leaf(
+pub(crate) fn sign_stateful_raw_at_leaf<P: Profile, const NUM_CHAINS: usize>(
     key: &Key,
     leaf_index: u32,
     message: &[u8],
@@ -607,14 +628,14 @@ pub(crate) fn sign_stateful_raw_at_leaf(
     if leaf_index > key.public_key().max_signatures {
         return None;
     }
-    let mut signature = sign_stateful_wots_c(
+    let mut signature = sign_stateful_wots_c::<P>(
         key.secret().as_sk_seed().as_bytes(),
         key.secret().as_prf_seed().as_bytes(),
         key.public_key().pk_seed.as_bytes(),
         leaf_index,
         message,
     )?;
-    signature.auth_path = stateful_auth_path(
+    signature.auth_path = stateful_auth_path::<P, NUM_CHAINS>(
         key.secret().as_sk_seed().as_bytes(),
         key.public_key().pk_seed.as_bytes(),
         leaf_index,
@@ -623,7 +644,7 @@ pub(crate) fn sign_stateful_raw_at_leaf(
     Some(signature)
 }
 
-pub(crate) fn stateful_subtree_root(
+pub(crate) fn stateful_subtree_root<P: Profile, const NUM_CHAINS: usize>(
     sk_seed: &[u8; HASH_LEN],
     pk_seed: &[u8; HASH_LEN],
     leaf_index: u32,
@@ -632,15 +653,15 @@ pub(crate) fn stateful_subtree_root(
     // The stateful tree is unbalanced: leaf 1 is the leftmost live leaf, and
     // each parent combines that leaf with the subtree to its right. Build that
     // chain iteratively so large-but-valid budgets do not recurse once per leaf.
-    let mut right = stateful_empty_tail(pk_seed, max_signatures);
+    let mut right = stateful_empty_tail::<P>(pk_seed, max_signatures);
     for current_leaf in (leaf_index..=max_signatures).rev() {
-        let leaf = stateful_wots_pk_hash(sk_seed, pk_seed, current_leaf);
-        right = stateful_parent_hash(pk_seed, current_leaf, leaf, right);
+        let leaf = stateful_wots_pk_hash::<P, NUM_CHAINS>(sk_seed, pk_seed, current_leaf);
+        right = stateful_parent_hash::<P>(pk_seed, current_leaf, leaf, right);
     }
     right
 }
 
-fn sign_stateful_wots_c(
+fn sign_stateful_wots_c<P: Profile>(
     sk_seed: &[u8; HASH_LEN],
     prf_seed: &[u8; HASH_LEN],
     pk_seed: &[u8; HASH_LEN],
@@ -653,7 +674,7 @@ fn sign_stateful_wots_c(
     // The randomizer is one fixed 32-byte value for this leaf/message pair. The
     // counter changes the digest derived from that randomizer; the randomizer
     // itself does not change inside the grinding loop.
-    let randomizer = hash_packed(&[
+    let randomizer = hash_packed::<P::Suite>(&[
         b"uxmss-wots-randomizer",
         prf_seed,
         &leaf_index.to_be_bytes(),
@@ -662,9 +683,9 @@ fn sign_stateful_wots_c(
 
     let result = crate::wots_c::grind_digit_sum(
         WOTS_C_MAX_GRIND_COUNTER,
-        crate::wots_c::TARGET_SUM,
+        P::WOTS_TARGET_SUM,
         |counter| {
-            let digest = hash_packed(&[
+            let digest = hash_packed::<P::Suite>(&[
                 b"uxmss-wots-digits",
                 pk_seed,
                 &leaf_index.to_be_bytes(),
@@ -672,7 +693,7 @@ fn sign_stateful_wots_c(
                 &counter.to_be_bytes(),
                 message,
             ]);
-            let digits = (0..crate::wots_c::NUM_CHAINS)
+            let digits = (0..P::NUM_WOTS_CHAINS as usize)
                 .map(|index| base_w16_digit(&digest, index))
                 .collect::<Vec<_>>();
             let digit_sum = digits
@@ -686,13 +707,13 @@ fn sign_stateful_wots_c(
                 .iter()
                 .enumerate()
                 .map(|(chain_index, digit)| {
-                    let secret = Zeroizing::new(stateful_chain_secret(
+                    let secret = Zeroizing::new(stateful_chain_secret::<P>(
                         sk_seed,
                         pk_seed,
                         leaf_index,
                         chain_index as u32,
                     ));
-                    stateful_chain_no_mask(
+                    stateful_chain_no_mask::<P>(
                         pk_seed,
                         StatefulChainCtx {
                             leaf_index,
@@ -717,7 +738,7 @@ fn sign_stateful_wots_c(
     })
 }
 
-fn stateful_chain_secret(
+fn stateful_chain_secret<P: Profile>(
     sk_seed: &[u8; HASH_LEN],
     pk_seed: &[u8; HASH_LEN],
     leaf_index: u32,
@@ -726,7 +747,7 @@ fn stateful_chain_secret(
     // The private chain start is deterministic from the stateful secret seed,
     // public seed, leaf, and chain. Including the public seed keeps the same
     // secret seed from producing interchangeable chains under a different key.
-    hash_packed(&[
+    hash_packed::<P::Suite>(&[
         b"uxmss-wots-chain-secret",
         sk_seed,
         pk_seed,
@@ -735,23 +756,24 @@ fn stateful_chain_secret(
     ])
 }
 
-fn stateful_wots_pk_hash(
+fn stateful_wots_pk_hash<P: Profile, const NUM_CHAINS: usize>(
     sk_seed: &[u8; HASH_LEN],
     pk_seed: &[u8; HASH_LEN],
     leaf_index: u32,
 ) -> [u8; HASH_LEN] {
+    let () = ChainWidthAgrees::<P, NUM_CHAINS>::CHECK;
     // This is the public WOTS-C commitment for one stateful leaf. It is computed
     // by advancing every chain to its endpoint and hashing all endpoints together.
-    let mut endpoints = crate::buf::node_buf::<{ crate::wots_c::NUM_CHAINS }>();
+    let mut endpoints = crate::buf::node_buf::<NUM_CHAINS>();
     for (chain_index, endpoint) in endpoints.iter_mut().enumerate() {
         // The private chain start is zeroized on drop.
-        let secret = Zeroizing::new(stateful_chain_secret(
+        let secret = Zeroizing::new(stateful_chain_secret::<P>(
             sk_seed,
             pk_seed,
             leaf_index,
             chain_index as u32,
         ));
-        *endpoint = stateful_chain_no_mask(
+        *endpoint = stateful_chain_no_mask::<P>(
             pk_seed,
             StatefulChainCtx {
                 leaf_index,
@@ -760,25 +782,29 @@ fn stateful_wots_pk_hash(
             ChainWalk {
                 value: *secret,
                 start: 0,
-                steps: crate::wots_c::BASE - 1,
+                steps: u32::from(P::WOTS_CHAIN_LEN) - 1,
             },
         );
     }
     // Vectored preimage, byte-identical to the packed form used by the
     // signature-side reconstruction above.
+    //
+    // The endpoints go in as one flat slice rather than one slice per chain.
+    // `[[u8; HASH_LEN]; N]` is contiguous, so `as_flattened` is the same bytes
+    // in the same order, and both backends hash the plain concatenation of the
+    // parts. The array-of-slices form this replaces needed a `NUM_CHAINS + 3`
+    // array length, which is a generic const expression and not expressible on
+    // stable Rust.
     let leaf_be = leaf_index.to_be_bytes();
-    let mut parts: [&[u8]; { crate::wots_c::NUM_CHAINS } + 3] =
-        [&[]; { crate::wots_c::NUM_CHAINS } + 3];
-    parts[0] = b"uxmss-wots-pk";
-    parts[1] = pk_seed.as_ref();
-    parts[2] = leaf_be.as_ref();
-    for (part, endpoint) in parts[3..].iter_mut().zip(endpoints.iter()) {
-        *part = endpoint.as_ref();
-    }
-    hash_node(&parts)
+    hash_node::<P>(&[
+        b"uxmss-wots-pk".as_ref(),
+        pk_seed.as_ref(),
+        leaf_be.as_ref(),
+        endpoints.as_flattened(),
+    ])
 }
 
-fn stateful_auth_path(
+fn stateful_auth_path<P: Profile, const NUM_CHAINS: usize>(
     sk_seed: &[u8; HASH_LEN],
     pk_seed: &[u8; HASH_LEN],
     leaf_index: u32,
@@ -789,17 +815,21 @@ fn stateful_auth_path(
     // verifier's unbalanced path reconstruction.
     let mut path = Vec::with_capacity(leaf_index as usize);
     if leaf_index < max_signatures {
-        path.push(stateful_subtree_root(
+        path.push(stateful_subtree_root::<P, NUM_CHAINS>(
             sk_seed,
             pk_seed,
             leaf_index + 1,
             max_signatures,
         ));
     } else {
-        path.push(stateful_empty_tail(pk_seed, leaf_index));
+        path.push(stateful_empty_tail::<P>(pk_seed, leaf_index));
     }
     for previous_leaf in (1..leaf_index).rev() {
-        path.push(stateful_wots_pk_hash(sk_seed, pk_seed, previous_leaf));
+        path.push(stateful_wots_pk_hash::<P, NUM_CHAINS>(
+            sk_seed,
+            pk_seed,
+            previous_leaf,
+        ));
     }
     path
 }
@@ -859,14 +889,17 @@ mod key_tests {
 mod stateful_core_tests {
     use super::*;
     use crate::hash::derive32;
+    use crate::profiles::selected::{SelectedProfile, NUM_CHAINS};
+
+    type Suite = <SelectedProfile as Profile>::Suite;
 
     /// Build a small-tree stateful key directly, bypassing the stateless half
     /// entirely (uxmss has no dependency on sphincs_plus_c).
     fn test_key(seed_label: &[u8], max_signatures: u32) -> Key {
-        let sk_seed = derive32(b"test-uxmss-sk-seed", seed_label, &[]);
-        let prf_seed = derive32(b"test-uxmss-prf-seed", seed_label, &[]);
-        let pk_seed = derive32(b"test-uxmss-pk-seed", seed_label, &[]);
-        let root = stateful_subtree_root(
+        let sk_seed = derive32::<Suite>(b"test-uxmss-sk-seed", seed_label, &[]);
+        let prf_seed = derive32::<Suite>(b"test-uxmss-prf-seed", seed_label, &[]);
+        let pk_seed = derive32::<Suite>(b"test-uxmss-pk-seed", seed_label, &[]);
+        let root = stateful_subtree_root::<SelectedProfile, NUM_CHAINS>(
             &sk_seed,
             &pk_seed,
             INITIAL_STATEFUL_LEAF_INDEX,
@@ -894,10 +927,11 @@ mod stateful_core_tests {
         let pk = flat_public_key(&key);
         for leaf in [1u32, 4, max] {
             let message = b"uxmss core test message";
-            let sig = sign_stateful_raw_at_leaf(&key, leaf, message).expect("sign at leaf");
+            let sig = sign_stateful_raw_at_leaf::<SelectedProfile, NUM_CHAINS>(&key, leaf, message)
+                .expect("sign at leaf");
             assert_eq!(sig.auth_path.len(), leaf as usize, "leaf {leaf}");
             assert!(
-                verify_stateful_unsafe_raw(&pk, message, &sig),
+                verify_stateful_unsafe_raw::<SelectedProfile, NUM_CHAINS>(&pk, message, &sig),
                 "verify failed at leaf {leaf}",
             );
         }
@@ -909,11 +943,16 @@ mod stateful_core_tests {
         let key = test_key(b"tamper-auth", max);
         let pk = flat_public_key(&key);
         let message = b"tamper auth path";
-        let mut sig = sign_stateful_raw_at_leaf(&key, 4, message).expect("sign");
-        assert!(verify_stateful_unsafe_raw(&pk, message, &sig));
+        let mut sig = sign_stateful_raw_at_leaf::<SelectedProfile, NUM_CHAINS>(&key, 4, message)
+            .expect("sign");
+        assert!(verify_stateful_unsafe_raw::<SelectedProfile, NUM_CHAINS>(
+            &pk, message, &sig
+        ));
 
         sig.auth_path[0][0] ^= 0x01;
-        assert!(!verify_stateful_unsafe_raw(&pk, message, &sig));
+        assert!(!verify_stateful_unsafe_raw::<SelectedProfile, NUM_CHAINS>(
+            &pk, message, &sig
+        ));
     }
 
     #[test]
@@ -922,11 +961,16 @@ mod stateful_core_tests {
         let key = test_key(b"tamper-chain", max);
         let pk = flat_public_key(&key);
         let message = b"tamper chain value";
-        let mut sig = sign_stateful_raw_at_leaf(&key, 2, message).expect("sign");
-        assert!(verify_stateful_unsafe_raw(&pk, message, &sig));
+        let mut sig = sign_stateful_raw_at_leaf::<SelectedProfile, NUM_CHAINS>(&key, 2, message)
+            .expect("sign");
+        assert!(verify_stateful_unsafe_raw::<SelectedProfile, NUM_CHAINS>(
+            &pk, message, &sig
+        ));
 
         sig.chains[0][0] ^= 0x01;
-        assert!(!verify_stateful_unsafe_raw(&pk, message, &sig));
+        assert!(!verify_stateful_unsafe_raw::<SelectedProfile, NUM_CHAINS>(
+            &pk, message, &sig
+        ));
     }
 
     #[test]
@@ -935,17 +979,23 @@ mod stateful_core_tests {
         let key = test_key(b"short-path", max);
         let message = b"short auth path";
         let leaf_index = 4u32;
-        let sig = sign_stateful_raw_at_leaf(&key, leaf_index, message).expect("sign");
+        let sig =
+            sign_stateful_raw_at_leaf::<SelectedProfile, NUM_CHAINS>(&key, leaf_index, message)
+                .expect("sign");
         let pk_seed = *key.public_key().pk_seed.as_bytes();
-        let leaf_hash =
-            compact_stateful_wots_public_key_from_signature(pk_seed, leaf_index, message, &sig)
-                .expect("wots pk hash");
+        let leaf_hash = compact_stateful_wots_public_key_from_signature::<
+            SelectedProfile,
+            NUM_CHAINS,
+        >(pk_seed, leaf_index, message, &sig)
+        .expect("wots pk hash");
 
         // One sibling short of what `leaf_index` requires: the length guard
         // must reject rather than silently reconstruct a wrong root.
         let short_path = &sig.auth_path[..sig.auth_path.len() - 1];
         assert_eq!(
-            root_from_unbalanced_path(pk_seed, leaf_index, leaf_hash, short_path),
+            root_from_unbalanced_path::<SelectedProfile>(
+                pk_seed, leaf_index, leaf_hash, short_path
+            ),
             None
         );
     }
@@ -956,13 +1006,22 @@ mod stateful_core_tests {
         let key = test_key(b"wrong-siblings", max);
         let message = b"wrong sibling values";
         let leaf_index = 4u32;
-        let sig = sign_stateful_raw_at_leaf(&key, leaf_index, message).expect("sign");
+        let sig =
+            sign_stateful_raw_at_leaf::<SelectedProfile, NUM_CHAINS>(&key, leaf_index, message)
+                .expect("sign");
         let pk_seed = *key.public_key().pk_seed.as_bytes();
-        let leaf_hash =
-            compact_stateful_wots_public_key_from_signature(pk_seed, leaf_index, message, &sig)
-                .expect("wots pk hash");
-        let true_root = root_from_unbalanced_path(pk_seed, leaf_index, leaf_hash, &sig.auth_path)
-            .expect("true root reconstructs");
+        let leaf_hash = compact_stateful_wots_public_key_from_signature::<
+            SelectedProfile,
+            NUM_CHAINS,
+        >(pk_seed, leaf_index, message, &sig)
+        .expect("wots pk hash");
+        let true_root = root_from_unbalanced_path::<SelectedProfile>(
+            pk_seed,
+            leaf_index,
+            leaf_hash,
+            &sig.auth_path,
+        )
+        .expect("true root reconstructs");
         assert_eq!(true_root, key.public_key().root.as_bytes().to_owned());
 
         // Correct length, wrong values: reconstructs *a* root, but not the
@@ -970,8 +1029,13 @@ mod stateful_core_tests {
         // this into a rejection.
         let mut wrong_path = sig.auth_path.clone();
         wrong_path[0][0] ^= 0xff;
-        let wrong_root = root_from_unbalanced_path(pk_seed, leaf_index, leaf_hash, &wrong_path)
-            .expect("still reconstructs a root");
+        let wrong_root = root_from_unbalanced_path::<SelectedProfile>(
+            pk_seed,
+            leaf_index,
+            leaf_hash,
+            &wrong_path,
+        )
+        .expect("still reconstructs a root");
         assert_ne!(wrong_root, true_root);
     }
 }

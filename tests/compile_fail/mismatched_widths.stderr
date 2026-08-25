@@ -1,0 +1,30 @@
+error[E0080]: evaluation panicked: NUM_WOTS_CHAINS const generic parameter disagrees with the profile
+ --> src/shrincs/mod.rs
+  |
+  |     pub(crate) const WIDTHS_AGREE: () = assert_widths::<P, NUM_CHAINS, NUM_LAYERS>();
+  |                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ evaluation of `hashsigs_rs::shrincs::ShrincsCore::<hashsigs_rs::shrincs::Profile256s, 32, 8>::WIDTHS_AGREE` failed inside this call
+  |
+note: inside `assert_widths::<Profile256s, 32, 8>`
+ --> $RUST/core/src/panic.rs
+  |
+  = note: the failure occurred here
+  |
+ ::: src/profile.rs
+  |
+  | /     assert!(
+  | |         P::NUM_WOTS_CHAINS as usize == NUM_CHAINS,
+  | |         "NUM_WOTS_CHAINS const generic parameter disagrees with the profile"
+  | |     );
+  | |_____- in this macro invocation
+
+note: erroneous constant encountered
+ --> src/shrincs/mod.rs
+  |
+  |         let () = Self::WIDTHS_AGREE;
+  |                  ^^^^^^^^^^^^^^^^^^
+
+note: the above error was encountered while instantiating `fn ShrincsCore::<Profile256s, 32, 8>::new`
+ --> tests/compile_fail/mismatched_widths.rs:5:16
+  |
+5 |     let _bad = hashsigs_rs::shrincs::ShrincsCore::<Profile256s, 32, 8>::new();
+  |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

@@ -1,6 +1,6 @@
 [package]
 name = "hashsigs-rs"
-version = "0.2.1-rc4"
+version = "0.2.1-rc5"
 edition = "2021"
 rust-version = "1.95"
 authors = ["Richard T. Carback III <rick.rust.cargo.383d5@passmail.net>"]
@@ -43,15 +43,29 @@ crate-type = ["rlib"]
 [workspace]
 members = [
     "py",
+    "py/common",
+    "py/profiles/p256s",
+    "py/profiles/p256s_sha2",
+    "py/profiles/p128s_q18",
+    "py/profiles/p128s_q20",
+    "py/profiles/p128s_q18_sha2",
+    "py/profiles/p128s_q20_sha2",
     "solana",
     "solana/examples/shrincs-account"
 ]
 resolver = "2"
 
+# One pyo3 version for every crate that builds a Python extension. The PyO3
+# attribute macros expand to `::pyo3` paths, so each profile crate needs the
+# dependency directly even though the surface it stamps out comes from
+# hashsigs-py-common. Pinning it here is what stops seven manifests drifting.
+#
+# abi3-py39: one wheel per platform covers CPython 3.9+. extension-module
+# leaves libpython unlinked, as a wheel requires.
+[workspace.dependencies]
+pyo3 = { version = "0.29.2", features = ["abi3-py39", "extension-module"] }
+
 [features]
-# Keep the default-profile selector internal so downstream additive feature use
-# works as expected: `--features profile-128s-q18` should override the default
-# 256s selection instead of conflicting with it.
 default = ["std", "default-profile-256s"]
 # Host/runtime surface: serde std, env-based debug traces.
 std = ["alloc", "serde/std"]
@@ -60,21 +74,38 @@ alloc = []
 # Optional Solana program dependency + syscall hash routing (also auto-selected
 # on target_os = "solana" via cfg in hash_backend).
 solana = ["dep:solana-program"]
-# Compile-time SHRINCS parameter-profile selection. These mirror the Solidity
-# contracts/profiles/<profile>/SHRINCSParams.sol libraries selected by the
-# Foundry `shrincs-profile/` remapping: one parameter tuple is chosen at
-# build time, so counts stay compile-time constants (no runtime params
-# struct). `profile-256s-sha2` switches the internal scheme-hash suite to
-# SHA-256 while keeping EVM-domain hashes (profile identity, commitments,
-# canonical action hashes) on keccak to match Solidity. Consumers may either:
-# - rely on the default internal 256s selection
-# - enable one explicit public profile feature
-# Build selection logic lives in build.rs.
-default-profile-256s = []
+# SHRINCS parameter profiles. These are additive: enabling two features
+# compiles two instantiations that coexist in one build. Each mirrors the
+# Solidity contracts/profiles/<profile>/SHRINCSParams.sol library.
+#
+# Counts stay compile-time constants (no runtime params struct): each profile
+# is a type implementing `Profile`, and the algorithms are generic over it.
+# The `*-sha2` profiles (`profile-256s-sha2`, `profile-128s-q18-sha2`,
+# `profile-128s-q20-sha2`) use SHA-256 for the internal scheme hashes while
+# keeping EVM-domain hashes (profile identity, commitments, canonical action
+# hashes) on keccak to match Solidity. Each is the exact numeric twin of the
+# keccak profile it is named after.
+#
+# The non-generic facades (`ShrincsVerifier`, the wasm bindings, the
+# golden-vector tests) still bind to one profile, which build.rs picks.
+#
+# `default-profile-256s` marks 256s as on only because it is the default, so
+# that `--features profile-128s-q18` (which, features being additive, leaves
+# the default enabled) still BINDS to q18 instead of silently testing 256s.
+# Naming a profile explicitly overrides the default; naming several, or
+# `--all-features`, falls back to the fixed order profile-256s,
+# profile-256s-sha2, profile-128s-q18, profile-128s-q20, profile-128s-q18-sha2,
+# profile-128s-q20-sha2 so the choice stays deterministic. New profiles are
+# appended to that order, never inserted, so an existing multi-profile build
+# keeps binding to the profile it bound to before. Every enabled profile
+# compiles either way.
+default-profile-256s = ["profile-256s"]
 profile-256s = []
 profile-128s-q18 = []
 profile-128s-q20 = []
 profile-256s-sha2 = []
+profile-128s-q18-sha2 = []
+profile-128s-q20-sha2 = []
 # Heap-back the WOTS+ segment accumulator instead of using a stack array.
 # Solana BPF stack frames are 4 KB, well under SIGNATURE_SIZE, so on-chain
 # builds must opt in. Native and wasm builds keep the stack array.
@@ -117,6 +148,9 @@ wasm-bindgen-test = "0.3.50"
 # byte-identical output against hash_backend's default (non-`solana`-feature)
 # sha3/sha2 path. Dev-only — never ships in the published library artifact.
 solana-program = "4.0"
+# Compile-fail harness: proves assert_widths rejects a mismatched const
+# generic width at compile time (see tests/compile_fail.rs).
+trybuild = "1.0.120"
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 getrandom = { version = "0.3.3", features = ["wasm_js"] }

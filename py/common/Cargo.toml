@@ -1,0 +1,17 @@
+[package]
+name = "hashsigs-py-common"
+# Keep in lockstep with the root crate; bin/sync-versions.sh checks it.
+version = "0.2.1-rc5"
+edition = "2021"
+rust-version = "1.95"
+authors = ["Richard T. Carback III <rick.carback@gmail.com>"]
+description = "Shared PyO3 export layer for the hashsigs profile extensions"
+license = "AGPL-3.0-or-later"
+repository = "https://gitlab.com/quip.network/hashsigs-rs"
+# Internal build-time crate: it ships inside the wheel's extensions, never to
+# crates.io on its own.
+publish = false
+
+[dependencies]
+hashsigs-rs = { path = "../..", default-features = false, features = ["std"] }
+pyo3.workspace = true

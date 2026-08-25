@@ -22,23 +22,75 @@
 //! (canonical action hashes, public-key commitments, profile identity) on
 //! keccak under every suite; Rust mirrors that split.
 //!
-//! The suite is selected by the `shrincs_hash_suite_sha2` cfg that build.rs
-//! derives from the active profile, not by a Cargo feature directly.
+//! The suite is never selected on its own: it is `<P as Profile>::Suite`, an
+//! associated type of the profile, so a profile can never be paired with the
+//! wrong suite and two profiles with different suites coexist in one build.
 
 pub const HASH_SUITE_KECCAK_256: u32 = 1;
 pub const HASH_SUITE_SHA2_256: u32 = 2;
 
-#[cfg(not(shrincs_hash_suite_sha2))]
 mod keccak;
-#[cfg(shrincs_hash_suite_sha2)]
 mod sha2;
 
-#[cfg(not(shrincs_hash_suite_sha2))]
-pub use keccak::HASH_SUITE_ID;
-#[cfg(shrincs_hash_suite_sha2)]
-pub use sha2::HASH_SUITE_ID;
+/// A scheme hash suite. Selected per profile as `Profile::Suite`, not by a
+/// global cfg, so that profiles using different suites coexist in one build.
+pub trait HashSuite {
+    /// Wire identifier for this suite. An ABI value: never renumber it.
+    const HASH_SUITE_ID: u32;
 
-#[cfg(not(shrincs_hash_suite_sha2))]
-pub(crate) use keccak::scheme_hash_parts;
-#[cfg(shrincs_hash_suite_sha2)]
-pub(crate) use sha2::scheme_hash_parts;
+    /// Hash the concatenation of `parts` under this suite.
+    fn scheme_hash_parts(parts: &[&[u8]]) -> [u8; crate::HASH_LEN];
+}
+
+/// Keccak-256 scheme hashes, used by the three keccak profiles
+/// (`shrincs-256s-keccak`, `shrincs-128s-q18-keccak`, `shrincs-128s-q20-keccak`).
+///
+/// A profile selects its suite through `<P as Profile>::Suite`, so a build
+/// enabling only sha2 profiles compiles this one and constructs it nowhere.
+/// That is a legitimate configuration -- the wasm and Python packages build
+/// exactly one profile per artifact -- so the dead-code warning it produces is
+/// noise rather than a finding.
+#[allow(dead_code)]
+pub struct Keccak256Suite;
+
+impl HashSuite for Keccak256Suite {
+    const HASH_SUITE_ID: u32 = HASH_SUITE_KECCAK_256;
+
+    fn scheme_hash_parts(parts: &[&[u8]]) -> [u8; crate::HASH_LEN] {
+        keccak::scheme_hash_parts(parts)
+    }
+}
+
+/// SHA2-256 scheme hashes, used by `shrincs-256s-sha2`. Dead under any build
+/// that does not enable that feature, since it is the only profile whose
+/// `Profile::Suite` names this type.
+#[cfg_attr(not(feature = "profile-256s-sha2"), allow(dead_code))]
+pub struct Sha2256Suite;
+
+impl HashSuite for Sha2256Suite {
+    const HASH_SUITE_ID: u32 = HASH_SUITE_SHA2_256;
+
+    #[cfg_attr(not(feature = "profile-256s-sha2"), allow(dead_code))]
+    fn scheme_hash_parts(parts: &[&[u8]]) -> [u8; crate::HASH_LEN] {
+        sha2::scheme_hash_parts(parts)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn suites_have_distinct_ids() {
+        assert_eq!(Keccak256Suite::HASH_SUITE_ID, HASH_SUITE_KECCAK_256);
+        assert_eq!(Sha2256Suite::HASH_SUITE_ID, HASH_SUITE_SHA2_256);
+    }
+
+    #[test]
+    fn both_suites_compile_together_and_differ() {
+        let parts: &[&[u8]] = &[b"shrincs", b"suite"];
+        let k = Keccak256Suite::scheme_hash_parts(parts);
+        let s = Sha2256Suite::scheme_hash_parts(parts);
+        assert_ne!(k, s, "keccak and sha2 must not agree on the same input");
+    }
+}

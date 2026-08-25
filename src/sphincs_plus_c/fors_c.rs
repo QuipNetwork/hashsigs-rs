@@ -40,19 +40,61 @@ use crate::abi::{
     Field,
 };
 use crate::hash::{fors_address_word, hash_node, hash_packed, read_bits32, read_bits64};
-use crate::profiles::{
-    FORS_C_MAX_GRIND_COUNTER, FORS_TREE_HEIGHT, HYPERTREE_HEIGHT, NUM_FORS_TREES,
-    NUM_HYPERTREE_LAYERS,
-};
+use crate::profile::Profile;
 use crate::HASH_LEN;
+use core::marker::PhantomData;
 
 /// Signed FORS trees per signature: the final tree is omitted (FORS-C).
-const SIGNED_TREES: usize = NUM_FORS_TREES as usize - 1;
+pub(crate) const fn signed_trees<P: Profile>() -> usize {
+    P::NUM_FORS_TREES as usize - 1
+}
 
 /// FORS digest length: `NUM_FORS_TREES * FORS_TREE_HEIGHT` leaf-index bits
 /// plus `HYPERTREE_HEIGHT` coordinate bits, rounded up to whole bytes.
-const FORS_DIGEST_BYTES: usize =
-    (NUM_FORS_TREES as usize * FORS_TREE_HEIGHT as usize + HYPERTREE_HEIGHT as usize).div_ceil(8);
+const fn fors_digest_len<P: Profile>() -> usize {
+    (P::NUM_FORS_TREES as usize * P::FORS_TREE_HEIGHT as usize + P::HYPERTREE_HEIGHT as usize)
+        .div_ceil(8)
+}
+
+/// Capacity of the per-signed-tree buffers.
+///
+/// The FORS widths derive from `P::NUM_FORS_TREES` by subtraction, so they
+/// cannot be a bare const generic parameter the way `NUM_CHAINS` and
+/// `NUM_LAYERS` are, and stable Rust rejects `NUM_FORS_TREES - 1` as an array
+/// length. The buffers are therefore fixed at this capacity and sliced down to
+/// `signed_trees::<P>()`. They stay on the stack; nothing moves to the heap.
+/// `ForsWidthsFit` turns a profile that exceeds the capacity into a build
+/// failure, so a mis-tuned profile can never silently truncate.
+const MAX_SIGNED_TREES: usize = 32;
+
+/// Capacity of the FORS message digest buffer, sized the same way.
+/// The shipping profiles need 47 bytes (256s) and 21 bytes (128s).
+const FORS_DIGEST_CAPACITY: usize = 2 * HASH_LEN;
+
+/// Carrier for the per-profile FORS width assertions.
+///
+/// Associated-const form, not a bare `assert!` in a `const fn`: only an
+/// associated const is guaranteed to be evaluated at monomorphisation, so
+/// only this form turns an over-wide profile into a build failure instead of
+/// a runtime panic. Same pattern as `ShrincsCore::WIDTHS_AGREE`.
+struct ForsWidthsFit<P: Profile>(PhantomData<fn() -> P>);
+
+impl<P: Profile> ForsWidthsFit<P> {
+    const CHECK: () = {
+        assert!(
+            P::NUM_FORS_TREES >= 2,
+            "NUM_FORS_TREES must be at least 2: FORS-C omits the final tree"
+        );
+        assert!(
+            signed_trees::<P>() <= MAX_SIGNED_TREES,
+            "NUM_FORS_TREES - 1 exceeds MAX_SIGNED_TREES; raise the capacity"
+        );
+        assert!(
+            fors_digest_len::<P>() <= FORS_DIGEST_CAPACITY,
+            "FORS digest exceeds FORS_DIGEST_CAPACITY; raise the capacity"
+        );
+    };
+}
 
 /// Revealed FORS secret leaf and authentication path for one signed FORS
 /// tree.
@@ -90,13 +132,13 @@ impl Entry {
     /// inside a larger encoded envelope, so exhaustion is the calling
     /// top-level decoder's responsibility (see `from_bytes` for the
     /// standalone entrypoint that does check).
-    pub(crate) fn decode(reader: &AbiReader, base: usize) -> Option<Self> {
+    pub(crate) fn decode<P: Profile>(reader: &AbiReader, base: usize) -> Option<Self> {
         Some(Self {
             secret_leaf: reader.decode_bytes32_field(base, base)?,
             auth_path: collect_hash_words(reader.decode_array_bytes(
                 base,
                 base.checked_add(32)?,
-                FORS_TREE_HEIGHT as usize,
+                P::FORS_TREE_HEIGHT as usize,
             )?)?,
         })
     }
@@ -104,23 +146,15 @@ impl Entry {
     /// Decode a standalone byte blob produced by `to_bytes`. Byte-identical
     /// to the historical `envelope::decode_fors_entry`, built as a top-level
     /// entrypoint: a fresh `AbiReader` at base 0, rejecting trailing bytes.
-    pub fn from_bytes(data: &[u8]) -> Option<Self> {
+    pub fn from_bytes<P: Profile>(data: &[u8]) -> Option<Self> {
         let reader = AbiReader::new(data);
-        let decoded = Self::decode(&reader, 0)?;
+        let decoded = Self::decode::<P>(&reader, 0)?;
         reader.finish()?;
         // Reject non-canonical encodings (see `AbiReader::finish` docs).
         if decoded.to_bytes() != data {
             return None;
         }
         Some(decoded)
-    }
-}
-
-impl TryFrom<&[u8]> for Entry {
-    type Error = ();
-
-    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        Self::from_bytes(value).ok_or(())
     }
 }
 
@@ -160,15 +194,15 @@ impl Signature {
     /// inside a larger encoded envelope, so exhaustion is the calling
     /// top-level decoder's responsibility (see `from_bytes` for the
     /// standalone entrypoint that does check).
-    pub(crate) fn decode(reader: &AbiReader, base: usize) -> Option<Self> {
+    pub(crate) fn decode<P: Profile>(reader: &AbiReader, base: usize) -> Option<Self> {
         Some(Self {
             randomizer: reader.decode_bytes32_field(base, base)?,
             counter: reader.read_u32(base.checked_add(32)?)?,
             entries: reader.decode_dynamic_array(
                 base,
                 base.checked_add(64)?,
-                NUM_FORS_TREES as usize,
-                Entry::decode,
+                P::NUM_FORS_TREES as usize,
+                Entry::decode::<P>,
             )?,
         })
     }
@@ -177,9 +211,9 @@ impl Signature {
     /// to the historical `envelope::decode_fors_signature`, built as a
     /// top-level entrypoint: a fresh `AbiReader` at base 0, rejecting
     /// trailing bytes.
-    pub fn from_bytes(data: &[u8]) -> Option<Self> {
+    pub fn from_bytes<P: Profile>(data: &[u8]) -> Option<Self> {
         let reader = AbiReader::new(data);
-        let decoded = Self::decode(&reader, 0)?;
+        let decoded = Self::decode::<P>(&reader, 0)?;
         reader.finish()?;
         // Reject non-canonical encodings (see `AbiReader::finish` docs).
         if decoded.to_bytes() != data {
@@ -189,59 +223,52 @@ impl Signature {
     }
 }
 
-impl TryFrom<&[u8]> for Signature {
-    type Error = ();
-
-    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        Self::from_bytes(value).ok_or(())
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ForsDigest {
     tree_index: u64,
     leaf_index: u32,
-    digest: [u8; FORS_DIGEST_BYTES],
+    digest: [u8; FORS_DIGEST_CAPACITY],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SigningForsDigest {
     pub tree_index: u64,
     pub leaf_index: u32,
-    pub signed_tree_indices: [u32; SIGNED_TREES],
+    pub signed_tree_indices: [u32; MAX_SIGNED_TREES],
     pub omitted_final_tree_is_zero: bool,
 }
 
-pub(crate) fn verify_fors_c_and_return_root(
+pub(crate) fn verify_fors_c_and_return_root<P: Profile>(
     pk_seed: &[u8; HASH_LEN],
     hypertree_root: &[u8; HASH_LEN],
     message: &[u8],
     signature: &Signature,
 ) -> Option<([u8; HASH_LEN], u64, u32)> {
-    let signed_trees = NUM_FORS_TREES as usize - 1;
+    let () = ForsWidthsFit::<P>::CHECK;
+    let signed_trees = signed_trees::<P>();
     if signature.entries.len() != signed_trees {
         return None;
     }
 
-    let digest = fors_digest(
+    let digest = fors_digest::<P>(
         pk_seed,
         hypertree_root,
         message,
         &signature.randomizer,
         signature.counter,
     )?;
-    let fors_tree_height = FORS_TREE_HEIGHT as usize;
+    let fors_tree_height = P::FORS_TREE_HEIGHT as usize;
     if read_bits32(
         &digest.digest,
         signed_trees * fors_tree_height,
-        FORS_TREE_HEIGHT as u32,
+        P::FORS_TREE_HEIGHT as u32,
     )? != 0
     {
         return None;
     }
 
-    let mut roots = [[0u8; HASH_LEN]; SIGNED_TREES];
-    for (fors_tree_index, root_slot) in roots.iter_mut().enumerate() {
+    let mut roots = crate::buf::node_buf::<MAX_SIGNED_TREES>();
+    for (fors_tree_index, root_slot) in roots[..signed_trees].iter_mut().enumerate() {
         let entry = signature.entries.get(fors_tree_index)?;
         if entry.auth_path.len() != fors_tree_height {
             return None;
@@ -249,9 +276,9 @@ pub(crate) fn verify_fors_c_and_return_root(
         let entry_leaf_index = read_bits32(
             &digest.digest,
             fors_tree_index * fors_tree_height,
-            FORS_TREE_HEIGHT as u32,
+            P::FORS_TREE_HEIGHT as u32,
         )?;
-        *root_slot = fors_entry_root32(
+        *root_slot = fors_entry_root32::<P>(
             fors_tree_height as u32,
             pk_seed,
             ForsLeafCoords {
@@ -265,7 +292,7 @@ pub(crate) fn verify_fors_c_and_return_root(
     }
 
     Some((
-        fors_public_key_hash(pk_seed, &roots),
+        fors_public_key_hash::<P>(pk_seed, &roots[..signed_trees]),
         digest.tree_index,
         digest.leaf_index,
     ))
@@ -273,39 +300,42 @@ pub(crate) fn verify_fors_c_and_return_root(
 
 /// Aggregate FORS public key hash: `"fors-pk" ‖ pk_seed ‖ root_0 ‖ …` fed to
 /// the hash vectored, byte-identical to the packed form.
-fn fors_public_key_hash(pk_seed: &[u8], roots: &[[u8; HASH_LEN]; SIGNED_TREES]) -> [u8; HASH_LEN] {
-    let mut parts: [&[u8]; SIGNED_TREES + 2] = [&[]; SIGNED_TREES + 2];
-    parts[0] = b"fors-pk";
-    parts[1] = pk_seed;
-    for (part, root) in parts[2..].iter_mut().zip(roots) {
-        *part = root.as_ref();
-    }
-    hash_node(&parts)
+///
+/// The roots go in as one flat slice rather than one slice per tree.
+/// `[[u8; HASH_LEN]]` is contiguous, so `as_flattened` is the same bytes in
+/// the same order, and both backends hash the plain concatenation of the
+/// parts. The array-of-slices form this replaces needed a `SIGNED_TREES + 2`
+/// array length, which is a generic const expression and not expressible on
+/// stable Rust once the tree count comes from `P`.
+fn fors_public_key_hash<P: Profile>(pk_seed: &[u8], roots: &[[u8; HASH_LEN]]) -> [u8; HASH_LEN] {
+    hash_node::<P>(&[b"fors-pk", pk_seed, roots.as_flattened()])
 }
 
-pub(crate) fn signer_fors_digest(
+pub(crate) fn signer_fors_digest<P: Profile>(
     pk_seed: &[u8; HASH_LEN],
     hypertree_root: &[u8; HASH_LEN],
     message: &[u8],
     randomizer: &[u8; HASH_LEN],
     counter: u32,
 ) -> Option<SigningForsDigest> {
-    let index_bits = u32::from(NUM_FORS_TREES) * u32::from(FORS_TREE_HEIGHT);
-    let subtree_height = u32::from(HYPERTREE_HEIGHT / NUM_HYPERTREE_LAYERS);
-    let tree_bits = u32::from(HYPERTREE_HEIGHT) - subtree_height;
-    let digest = fors_digest_bytes(pk_seed, hypertree_root, randomizer, counter, message);
-    let mut signed_tree_indices = [0u32; SIGNED_TREES];
-    for (tree, index_slot) in signed_tree_indices.iter_mut().enumerate() {
+    let () = ForsWidthsFit::<P>::CHECK;
+    let signed = signed_trees::<P>();
+    let index_bits = u32::from(P::NUM_FORS_TREES) * u32::from(P::FORS_TREE_HEIGHT);
+    let subtree_height = u32::from(P::HYPERTREE_HEIGHT / P::NUM_HYPERTREE_LAYERS);
+    let tree_bits = u32::from(P::HYPERTREE_HEIGHT) - subtree_height;
+    let digest = fors_digest_bytes::<P>(pk_seed, hypertree_root, randomizer, counter, message);
+    let mut signed_tree_indices = [0u32; MAX_SIGNED_TREES];
+    for (tree, index_slot) in signed_tree_indices[..signed].iter_mut().enumerate() {
         *index_slot = read_bits32(
             &digest,
-            tree * FORS_TREE_HEIGHT as usize,
-            FORS_TREE_HEIGHT as u32,
+            tree * P::FORS_TREE_HEIGHT as usize,
+            P::FORS_TREE_HEIGHT as u32,
         )?;
     }
     let omitted_final_tree_is_zero = read_bits32(
         &digest,
-        SIGNED_TREES * FORS_TREE_HEIGHT as usize,
-        FORS_TREE_HEIGHT as u32,
+        signed * P::FORS_TREE_HEIGHT as usize,
+        P::FORS_TREE_HEIGHT as u32,
     )? == 0;
     let cursor = index_bits as usize;
     Some(SigningForsDigest {
@@ -325,14 +355,14 @@ pub(crate) struct ForsLeafCoords {
     pub leaf: u32,
 }
 
-pub(crate) fn fors_leaf_secret(
+pub(crate) fn fors_leaf_secret<P: Profile>(
     pk_seed: &[u8; HASH_LEN],
     sk_seed: &[u8; HASH_LEN],
     coords: ForsLeafCoords,
 ) -> [u8; HASH_LEN] {
-    let tree_leaf = (u64::from(coords.fors_tree) << FORS_TREE_HEIGHT) + u64::from(coords.leaf);
+    let tree_leaf = (u64::from(coords.fors_tree) << P::FORS_TREE_HEIGHT) + u64::from(coords.leaf);
     let address_word = fors_address_word(coords.tree_index, coords.leaf_index, 0, tree_leaf);
-    hash_packed(&[
+    hash_packed::<P::Suite>(&[
         b"fors-sk".as_ref(),
         sk_seed.as_ref(),
         pk_seed.as_ref(),
@@ -340,23 +370,23 @@ pub(crate) fn fors_leaf_secret(
     ])
 }
 
-pub(crate) fn fors_leaf_hash(
+pub(crate) fn fors_leaf_hash<P: Profile>(
     pk_seed: &[u8; HASH_LEN],
     sk_seed: &[u8; HASH_LEN],
     coords: ForsLeafCoords,
 ) -> [u8; HASH_LEN] {
-    let secret = Zeroizing::new(fors_leaf_secret(pk_seed, sk_seed, coords));
-    fors_leaf_hash_from_secret(pk_seed, coords, &secret)
+    let secret = Zeroizing::new(fors_leaf_secret::<P>(pk_seed, sk_seed, coords));
+    fors_leaf_hash_from_secret::<P>(pk_seed, coords, &secret)
 }
 
-fn fors_leaf_hash_from_secret(
+fn fors_leaf_hash_from_secret<P: Profile>(
     pk_seed: &[u8; HASH_LEN],
     coords: ForsLeafCoords,
     secret: &[u8; HASH_LEN],
 ) -> [u8; HASH_LEN] {
-    let tree_leaf = (u64::from(coords.fors_tree) << FORS_TREE_HEIGHT) + u64::from(coords.leaf);
+    let tree_leaf = (u64::from(coords.fors_tree) << P::FORS_TREE_HEIGHT) + u64::from(coords.leaf);
     let address_word = fors_address_word(coords.tree_index, coords.leaf_index, 0, tree_leaf);
-    hash_node(&[
+    hash_node::<P>(&[
         b"fors-leaf".as_ref(),
         pk_seed.as_ref(),
         address_word.as_ref(),
@@ -364,24 +394,24 @@ fn fors_leaf_hash_from_secret(
     ])
 }
 
-pub(crate) fn fors_tree_root_and_auth_path(
+pub(crate) fn fors_tree_root_and_auth_path<P: Profile>(
     pk_seed: &[u8; HASH_LEN],
     sk_seed: &[u8; HASH_LEN],
     coords: ForsLeafCoords,
 ) -> ([u8; HASH_LEN], [u8; HASH_LEN], Vec<[u8; HASH_LEN]>) {
-    let height = u32::from(FORS_TREE_HEIGHT);
+    let height = u32::from(P::FORS_TREE_HEIGHT);
     // Compute the selected leaf secret once and reuse it for both the revealed
     // signature field and the leaf-hash step (avoids a second SK derivation).
-    let selected_secret_leaf = fors_leaf_secret(pk_seed, sk_seed, coords);
+    let selected_secret_leaf = fors_leaf_secret::<P>(pk_seed, sk_seed, coords);
 
     let (root, auth_path) = crate::treehash::treehash_root_and_auth_path(
         height,
         coords.leaf,
         |index| {
             if index == coords.leaf {
-                fors_leaf_hash_from_secret(pk_seed, coords, &selected_secret_leaf)
+                fors_leaf_hash_from_secret::<P>(pk_seed, coords, &selected_secret_leaf)
             } else {
-                fors_leaf_hash(
+                fors_leaf_hash::<P>(
                     pk_seed,
                     sk_seed,
                     ForsLeafCoords {
@@ -400,7 +430,7 @@ pub(crate) fn fors_tree_root_and_auth_path(
                 node_height,
                 parent_low_index,
             );
-            hash_node(&[
+            hash_node::<P>(&[
                 b"fors-node".as_ref(),
                 pk_seed.as_ref(),
                 address_word.as_ref(),
@@ -413,7 +443,7 @@ pub(crate) fn fors_tree_root_and_auth_path(
     (root, selected_secret_leaf, auth_path)
 }
 
-fn fors_entry_root32(
+fn fors_entry_root32<P: Profile>(
     height: u32,
     pk_seed: &[u8],
     coords: ForsLeafCoords,
@@ -421,7 +451,7 @@ fn fors_entry_root32(
 ) -> Option<[u8; HASH_LEN]> {
     let shifted_fors_tree = u64::from(coords.fors_tree) << height;
     let leaf_low_index = shifted_fors_tree + u64::from(coords.leaf);
-    let leaf = hash_fors_leaf32(
+    let leaf = hash_fors_leaf32::<P>(
         pk_seed,
         fors_address_word(coords.tree_index, coords.leaf_index, 0, leaf_low_index),
         &entry.secret_leaf,
@@ -440,12 +470,12 @@ fn fors_entry_root32(
                 node_height,
                 parent_low_index,
             );
-            hash_node(&[b"fors-node", pk_seed, &address_word, left, right])
+            hash_node::<P>(&[b"fors-node", pk_seed, &address_word, left, right])
         },
     )
 }
 
-fn hash_fors_leaf32(
+fn hash_fors_leaf32<P: Profile>(
     pk_seed: &[u8],
     address_word: [u8; HASH_LEN],
     sk: &[u8],
@@ -453,20 +483,20 @@ fn hash_fors_leaf32(
     if pk_seed.len() != HASH_LEN || sk.len() != HASH_LEN {
         return None;
     }
-    Some(hash_node(&[b"fors-leaf", pk_seed, &address_word, sk]))
+    Some(hash_node::<P>(&[b"fors-leaf", pk_seed, &address_word, sk]))
 }
 
-fn fors_digest(
+fn fors_digest<P: Profile>(
     pk_seed: &[u8; HASH_LEN],
     hypertree_root: &[u8; HASH_LEN],
     message: &[u8],
     randomizer: &[u8],
     counter: u32,
 ) -> Option<ForsDigest> {
-    let index_bits = u32::from(NUM_FORS_TREES) * u32::from(FORS_TREE_HEIGHT);
-    let subtree_height = u32::from(HYPERTREE_HEIGHT / NUM_HYPERTREE_LAYERS);
-    let tree_bits = u32::from(HYPERTREE_HEIGHT) - subtree_height;
-    let digest = fors_digest_bytes(pk_seed, hypertree_root, randomizer, counter, message);
+    let index_bits = u32::from(P::NUM_FORS_TREES) * u32::from(P::FORS_TREE_HEIGHT);
+    let subtree_height = u32::from(P::HYPERTREE_HEIGHT / P::NUM_HYPERTREE_LAYERS);
+    let tree_bits = u32::from(P::HYPERTREE_HEIGHT) - subtree_height;
+    let digest = fors_digest_bytes::<P>(pk_seed, hypertree_root, randomizer, counter, message);
 
     let cursor = index_bits as usize;
     Some(ForsDigest {
@@ -477,22 +507,27 @@ fn fors_digest(
 }
 
 /// FORS message digest, MGF1-style: block `i` is
-/// `H("fors-digest" ‖ pk_seed ‖ root ‖ randomizer ‖ counter ‖ message [‖ i])`,
+/// `H("fors-digest" ‖ PROFILE_ID ‖ pk_seed ‖ root ‖ randomizer ‖ counter
+/// ‖ message [‖ i])`,
 /// with the block counter suffix only in the multi-block (>32 byte) regime.
 /// The preimage parts are fed to the hash vectored, byte-identical to the
 /// previously packed `base` buffer.
-fn fors_digest_bytes(
+fn fors_digest_bytes<P: Profile>(
     pk_seed: &[u8],
     hypertree_root: &[u8],
     randomizer: &[u8],
     counter: u32,
     message: &[u8],
-) -> [u8; FORS_DIGEST_BYTES] {
+) -> [u8; FORS_DIGEST_CAPACITY] {
+    let digest_len = fors_digest_len::<P>();
     let counter_be = counter.to_be_bytes();
-    let mut out = [0u8; FORS_DIGEST_BYTES];
-    if FORS_DIGEST_BYTES <= HASH_LEN {
-        let word = hash_packed(&[
+    // Fixed capacity, filled only to `digest_len`. The tail stays zero and is
+    // never read: every `read_bits*` offset lies inside the real digest.
+    let mut out = [0u8; FORS_DIGEST_CAPACITY];
+    if digest_len <= HASH_LEN {
+        let word = hash_packed::<P::Suite>(&[
             b"fors-digest",
+            &P::PROFILE_ID,
             pk_seed,
             hypertree_root,
             randomizer,
@@ -501,16 +536,17 @@ fn fors_digest_bytes(
         ]);
         // `min` keeps the wide-digest profiles (which never reach this
         // compile-time-dead branch) borrow-checkable and lint-clean.
-        let take = FORS_DIGEST_BYTES.min(HASH_LEN);
+        let take = digest_len.min(HASH_LEN);
         out[..take].copy_from_slice(&word[..take]);
         return out;
     }
 
     let mut filled = 0usize;
     let mut block_counter = 0u32;
-    while filled < FORS_DIGEST_BYTES {
-        let digest_word = hash_packed(&[
+    while filled < digest_len {
+        let digest_word = hash_packed::<P::Suite>(&[
             b"fors-digest",
+            &P::PROFILE_ID,
             pk_seed,
             hypertree_root,
             randomizer,
@@ -518,7 +554,7 @@ fn fors_digest_bytes(
             message,
             &block_counter.to_be_bytes(),
         ]);
-        let take = (FORS_DIGEST_BYTES - filled).min(HASH_LEN);
+        let take = (digest_len - filled).min(HASH_LEN);
         out[filled..filled + take].copy_from_slice(&digest_word[..take]);
         filled += take;
         block_counter = block_counter.wrapping_add(1);
@@ -529,6 +565,7 @@ fn fors_digest_bytes(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::profiles::selected::{SelectedProfile, NUM_LAYERS};
     use alloc::vec;
 
     fn sample_entry() -> Entry {
@@ -544,7 +581,7 @@ mod tests {
         let encoded = sample_entry().to_bytes();
         let gapped = crate::test_support::insert_abi_head_gap(&encoded, 2, &[0, 1]);
         assert!(
-            Entry::from_bytes(&gapped).is_none(),
+            Entry::from_bytes::<SelectedProfile>(&gapped).is_none(),
             "an encoding with unread interior bytes must be rejected"
         );
     }
@@ -561,7 +598,7 @@ mod tests {
         let encoded = signature.to_bytes();
         let gapped = crate::test_support::insert_abi_head_gap(&encoded, 3, &[0, 2]);
         assert!(
-            Signature::from_bytes(&gapped).is_none(),
+            Signature::from_bytes::<SelectedProfile>(&gapped).is_none(),
             "an encoding with unread interior bytes must be rejected"
         );
     }
@@ -581,9 +618,9 @@ mod tests {
             fors_tree,
             leaf,
         };
-        let secret = fors_leaf_secret(&pk_seed, &sk_seed, coords);
-        let reused = fors_leaf_hash_from_secret(&pk_seed, coords, &secret);
-        let direct = fors_leaf_hash(&pk_seed, &sk_seed, coords);
+        let secret = fors_leaf_secret::<SelectedProfile>(&pk_seed, &sk_seed, coords);
+        let reused = fors_leaf_hash_from_secret::<SelectedProfile>(&pk_seed, coords, &secret);
+        let direct = fors_leaf_hash::<SelectedProfile>(&pk_seed, &sk_seed, coords);
 
         assert_eq!(reused, direct);
     }
@@ -595,28 +632,38 @@ mod tests {
     /// (`shrincs::vector_conformance`'s `tamperedFors` case).
     #[test]
     fn verify_rejects_tampered_secret_auth_path_and_counter() {
-        let key = crate::sphincs_plus_c::keygen(
+        let key = crate::sphincs_plus_c::keygen::<SelectedProfile, NUM_LAYERS>(
             [0x33u8; HASH_LEN],
             [0x44u8; HASH_LEN],
             [0x55u8; HASH_LEN],
         );
         let message = b"fors-c negative test message";
-        let signed = sign_fors_c(&key, message).expect("sign_fors_c should succeed");
+        let signed =
+            sign_fors_c::<SelectedProfile>(&key, message).expect("sign_fors_c should succeed");
 
         let pk_seed = key.public_key.pk_seed.as_bytes();
         let hypertree_root = key.public_key.root.as_bytes();
 
         // Sanity: the honest signature verifies and reconstructs the signed root.
-        let (root, tree_index, leaf_index) =
-            verify_fors_c_and_return_root(pk_seed, hypertree_root, message, &signed.signature)
-                .expect("honest signature verifies");
+        let (root, tree_index, leaf_index) = verify_fors_c_and_return_root::<SelectedProfile>(
+            pk_seed,
+            hypertree_root,
+            message,
+            &signed.signature,
+        )
+        .expect("honest signature verifies");
         assert_eq!(root, signed.root);
         assert_eq!(tree_index, signed.tree_index);
         assert_eq!(leaf_index, signed.leaf_index);
 
         let recomputed_root = |signature: &Signature| {
-            verify_fors_c_and_return_root(pk_seed, hypertree_root, message, signature)
-                .map(|(root, ..)| root)
+            verify_fors_c_and_return_root::<SelectedProfile>(
+                pk_seed,
+                hypertree_root,
+                message,
+                signature,
+            )
+            .map(|(root, ..)| root)
         };
 
         let mut tampered_secret = signed.signature.clone();
@@ -655,13 +702,15 @@ pub(crate) struct SignedForsC {
     pub leaf_index: u32,
 }
 
-pub(crate) fn sign_fors_c(signing_key: &Key, message: &[u8]) -> Option<SignedForsC> {
+pub(crate) fn sign_fors_c<P: Profile>(signing_key: &Key, message: &[u8]) -> Option<SignedForsC> {
+    let () = ForsWidthsFit::<P>::CHECK;
+    let signed = signed_trees::<P>();
     if stateless_trace_enabled() {
         stateless_trace(&format!(
             "stateless trace: FORS start message_len={} signed_trees={} max_counter={}",
             message.len(),
-            SIGNED_TREES,
-            FORS_C_MAX_GRIND_COUNTER
+            signed,
+            P::FORS_C_MAX_GRIND_COUNTER
         ));
     }
     // FORS-C signs k - 1 trees. The final tree is omitted only when the digest
@@ -671,16 +720,19 @@ pub(crate) fn sign_fors_c(signing_key: &Key, message: &[u8]) -> Option<SignedFor
     // This is the FORS-C local message randomizer. It is deterministic for the
     // same stateless PRF seed and message, matching the SPHINCS-style separation
     // between SK.seed-derived signing secrets and SK.prf-derived randomness.
-    let randomizer = hash_packed(&[
+    let randomizer = hash_packed::<P::Suite>(&[
         b"fors-randomizer",
         signing_key.secret().as_prf_seed().as_bytes(),
         message,
     ]);
     stateless_trace("stateless trace: FORS randomizer ready");
 
-    if let Some((counter, digest)) =
-        winning_fors_counter_and_digest(signing_key, message, &randomizer, FORS_C_MAX_GRIND_COUNTER)
-    {
+    if let Some((counter, digest)) = winning_fors_counter_and_digest::<P>(
+        signing_key,
+        message,
+        &randomizer,
+        P::FORS_C_MAX_GRIND_COUNTER,
+    ) {
         if stateless_trace_enabled() {
             stateless_trace(&format!(
                 "stateless trace: FORS winner counter={} tree_index={} leaf_index={}",
@@ -688,20 +740,20 @@ pub(crate) fn sign_fors_c(signing_key: &Key, message: &[u8]) -> Option<SignedFor
             ));
         }
 
-        let mut roots = [[0u8; HASH_LEN]; SIGNED_TREES];
-        let mut entries = Vec::with_capacity(SIGNED_TREES);
-        for (fors_tree, root_slot) in roots.iter_mut().enumerate() {
-            if stateless_trace_enabled() && (fors_tree == 0 || fors_tree + 1 == SIGNED_TREES) {
+        let mut roots = crate::buf::node_buf::<MAX_SIGNED_TREES>();
+        let mut entries = Vec::with_capacity(signed);
+        for (fors_tree, root_slot) in roots[..signed].iter_mut().enumerate() {
+            if stateless_trace_enabled() && (fors_tree == 0 || fors_tree + 1 == signed) {
                 hashsigs_println!(
                     "stateless trace: FORS materializing tree {}/{}",
                     fors_tree + 1,
-                    SIGNED_TREES
+                    signed
                 );
             }
             // For each selected tree, reveal exactly the chosen secret leaf and
             // provide the siblings needed to recompute that tree's root.
             let leaf = digest.signed_tree_indices[fors_tree];
-            let (root, secret_leaf, auth_path) = fors_tree_root_and_auth_path(
+            let (root, secret_leaf, auth_path) = fors_tree_root_and_auth_path::<P>(
                 signing_key.public_key.pk_seed.as_bytes(),
                 signing_key.secret().as_sk_seed().as_bytes(),
                 ForsLeafCoords {
@@ -722,7 +774,10 @@ pub(crate) fn sign_fors_c(signing_key: &Key, message: &[u8]) -> Option<SignedFor
         // The public seed is included so roots from a different FORS key cannot
         // be transplanted into this key.
         return Some(SignedForsC {
-            root: fors_public_key_hash(signing_key.public_key.pk_seed.as_bytes(), &roots),
+            root: fors_public_key_hash::<P>(
+                signing_key.public_key.pk_seed.as_bytes(),
+                &roots[..signed],
+            ),
             signature: Signature {
                 randomizer,
                 counter,
@@ -740,7 +795,7 @@ pub(crate) fn sign_fors_c(signing_key: &Key, message: &[u8]) -> Option<SignedFor
 /// Sequential fallback (default / `parallel` feature off). Kept byte-identical
 /// to the parallel version below: both return the lowest winning counter.
 #[cfg(not(feature = "parallel"))]
-fn winning_fors_counter_and_digest(
+fn winning_fors_counter_and_digest<P: Profile>(
     signing_key: &Key,
     message: &[u8],
     randomizer: &[u8; HASH_LEN],
@@ -757,7 +812,7 @@ fn winning_fors_counter_and_digest(
         if trace_enabled && counter > 0 && counter % trace_every == 0 {
             hashsigs_println!("stateless trace: FORS counter search tried={counter}/{limit}");
         }
-        let digest = signer_fors_digest(
+        let digest = signer_fors_digest::<P>(
             signing_key.public_key.pk_seed.as_bytes(),
             signing_key.public_key.root.as_bytes(),
             message,
@@ -783,7 +838,7 @@ fn winning_fors_counter_and_digest(
 /// Uses `find_map_first` so the winner is always the lowest matching counter,
 /// matching the sequential search and keeping signature bytes identical.
 #[cfg(feature = "parallel")]
-fn winning_fors_counter_and_digest(
+fn winning_fors_counter_and_digest<P: Profile>(
     signing_key: &Key,
     message: &[u8],
     randomizer: &[u8; HASH_LEN],
@@ -794,7 +849,7 @@ fn winning_fors_counter_and_digest(
         hashsigs_println!("stateless trace: FORS counter search start (parallel) limit={limit}");
     }
     let winner = crate::wots_c::lowest_winning_counter(limit, |counter| {
-        let digest = signer_fors_digest(
+        let digest = signer_fors_digest::<P>(
             signing_key.public_key.pk_seed.as_bytes(),
             signing_key.public_key.root.as_bytes(),
             message,
@@ -816,21 +871,31 @@ fn winning_fors_counter_and_digest(
     winner
 }
 
-#[cfg(all(test, any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
+#[cfg(all(
+    test,
+    any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    )
+))]
 mod measurement_tests {
     use super::super::key::{Key, PkSeed, PrfSeed, PrivateKey, PublicKey, Root, SkSeed};
     use super::{signer_fors_digest, SigningForsDigest};
     use crate::hash::hash_packed;
-    use crate::profiles::FORS_C_MAX_GRIND_COUNTER;
+    use crate::profile::Profile;
+    use crate::profiles::selected::SelectedProfile;
+    const FORS_C_MAX_GRIND_COUNTER: u32 = SelectedProfile::FORS_C_MAX_GRIND_COUNTER;
     use crate::HASH_LEN;
 
     fn measurement_key(seed: &[u8], _max: u32) -> Key {
         hashsigs_println!(
             "measurement setup: deriving stateless key profile={}",
-            crate::profiles::PROFILE_NAME
+            SelectedProfile::PROFILE_NAME
         );
         fn d(domain: &[u8], seed: &[u8]) -> [u8; HASH_LEN] {
-            hash_packed(&[domain, seed, &[]])
+            hash_packed::<<SelectedProfile as crate::profile::Profile>::Suite>(&[domain, seed, &[]])
         }
         let key = Key::new(
             PrivateKey::new(
@@ -880,11 +945,11 @@ mod measurement_tests {
             if counter > 0 && counter % progress.counter_progress_every == 0 {
                 hashsigs_println!(
                     "counter progress profile={} sample={}/? tried={counter}/{limit}",
-                    crate::profiles::PROFILE_NAME,
+                    SelectedProfile::PROFILE_NAME,
                     progress.sample_index + 1
                 );
             }
-            let Some(digest) = signer_fors_digest(
+            let Some(digest) = signer_fors_digest::<SelectedProfile>(
                 signing_key.public_key.pk_seed.as_bytes(),
                 signing_key.public_key.root.as_bytes(),
                 message,
@@ -909,7 +974,7 @@ mod measurement_tests {
         let counter_progress_every = measurement_counter_progress_interval(limit);
         hashsigs_println!(
             "starting FORS measurement profile={} samples={samples} limit={limit} progress_every={progress_every} counter_progress_every={counter_progress_every}",
-            crate::profiles::PROFILE_NAME,
+            SelectedProfile::PROFILE_NAME,
         );
         let signing_key = measurement_key(b"fors success-rate measurement key", 4);
 
@@ -920,11 +985,11 @@ mod measurement_tests {
 
         for i in 0..samples {
             let counter_bytes = i.to_be_bytes();
-            let message = hash_packed(&[
+            let message = hash_packed::<<SelectedProfile as crate::profile::Profile>::Suite>(&[
                 b"fors-success-rate-measurement".as_ref(),
                 counter_bytes.as_ref(),
             ]);
-            let randomizer = hash_packed(&[
+            let randomizer = hash_packed::<<SelectedProfile as crate::profile::Profile>::Suite>(&[
                 b"fors-randomizer".as_ref(),
                 signing_key.secret().as_prf_seed().as_bytes().as_ref(),
                 message.as_ref(),
@@ -951,7 +1016,7 @@ mod measurement_tests {
             if completed % progress_every == 0 || completed == samples {
                 hashsigs_println!(
                     "progress profile={} completed={completed}/{samples} successes={successes} failures={failures}",
-                    crate::profiles::PROFILE_NAME
+                    SelectedProfile::PROFILE_NAME
                 );
             }
         }
@@ -974,7 +1039,7 @@ mod measurement_tests {
 
         hashsigs_println!(
             "profile={} samples={samples} limit={limit} successes={successes} failures={failures} success_pct={success_pct:.2} failure_pct={failure_pct:.2} avg_success_counter={avg_success_counter:.2} max_success_counter={max_success_counter}",
-            crate::profiles::PROFILE_NAME
+            SelectedProfile::PROFILE_NAME
         );
     }
 }

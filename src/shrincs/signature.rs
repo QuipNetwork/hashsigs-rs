@@ -35,6 +35,7 @@ use alloc::vec::Vec;
 
 use super::key::PublicKey;
 use crate::abi::{encode_bytes32_array, encode_tuple, word_from_u32, AbiReader, Field};
+use crate::profile::Profile;
 use crate::sphincs_plus_c::Signature as StatelessSignature;
 use crate::HASH_LEN;
 
@@ -82,14 +83,14 @@ impl Signature {
     /// this type's own `from_bytes`), so exhaustion is the calling top-level
     /// decoder's responsibility. Byte-identical to the historical
     /// `envelope::decode_stateful_signature`.
-    pub(crate) fn decode(reader: &AbiReader, base: usize) -> Option<Self> {
+    pub(crate) fn decode<P: Profile>(reader: &AbiReader, base: usize) -> Option<Self> {
         Some(Self {
             randomizer: reader.read_bytes32(base)?,
             counter: reader.read_u32(base.checked_add(32)?)?,
             chains: reader.decode_array_bytes32(
                 base,
                 base.checked_add(64)?,
-                crate::wots_c::NUM_CHAINS,
+                P::NUM_WOTS_CHAINS as usize,
             )?,
             auth_path: reader.decode_array_bytes32(
                 base,
@@ -100,24 +101,16 @@ impl Signature {
     }
 
     /// Decode a standalone byte blob produced by `to_bytes`.
-    pub fn from_bytes(data: &[u8]) -> Option<Self> {
+    pub fn from_bytes<P: Profile>(data: &[u8]) -> Option<Self> {
         let reader = AbiReader::new(data);
         let signature_start = reader.decode_offset(0, 0)?;
-        let decoded = Self::decode(&reader, signature_start)?;
+        let decoded = Self::decode::<P>(&reader, signature_start)?;
         reader.finish()?;
         // Reject non-canonical encodings (see `AbiReader::finish` docs).
         if decoded.to_bytes() != data {
             return None;
         }
         Some(decoded)
-    }
-}
-
-impl TryFrom<&[u8]> for Signature {
-    type Error = ();
-
-    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        Self::from_bytes(value).ok_or(())
     }
 }
 
@@ -137,13 +130,13 @@ pub fn encode_stateful_envelope(public_key: &PublicKey, signature: &Signature) -
 /// Strict decoder for the layout `encode_stateful_envelope` produces. See
 /// `crate::shrincs`'s module-level strictness note for how this differs from
 /// the Solidity `statefulEnvelope` calldata re-tag.
-pub fn decode_stateful_envelope(data: &[u8]) -> Option<(PublicKey, Signature)> {
+pub fn decode_stateful_envelope<P: Profile>(data: &[u8]) -> Option<(PublicKey, Signature)> {
     let reader = AbiReader::new(data);
     let public_key_start = reader.decode_offset(0, 0)?;
     let signature_start = reader.decode_offset(0, 32)?;
     let decoded = (
         PublicKey::decode(&reader, public_key_start)?,
-        Signature::decode(&reader, signature_start)?,
+        Signature::decode::<P>(&reader, signature_start)?,
     );
     reader.finish()?;
     // Reject non-canonical encodings (see `AbiReader::finish` docs).
@@ -166,13 +159,15 @@ pub fn encode_stateless_envelope(
 }
 
 /// Strict decoder for the layout `encode_stateless_envelope` produces.
-pub fn decode_stateless_envelope(data: &[u8]) -> Option<(PublicKey, StatelessSignature)> {
+pub fn decode_stateless_envelope<P: Profile>(
+    data: &[u8],
+) -> Option<(PublicKey, StatelessSignature)> {
     let reader = AbiReader::new(data);
     let public_key_start = reader.decode_offset(0, 0)?;
     let signature_start = reader.decode_offset(0, 32)?;
     let decoded = (
         PublicKey::decode(&reader, public_key_start)?,
-        StatelessSignature::decode(&reader, signature_start)?,
+        StatelessSignature::decode::<P>(&reader, signature_start)?,
     );
     reader.finish()?;
     // Reject non-canonical encodings (see `AbiReader::finish` docs).
@@ -185,7 +180,7 @@ pub fn decode_stateless_envelope(data: &[u8]) -> Option<(PublicKey, StatelessSig
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::profiles::NUM_HYPERTREE_LAYERS;
+    use crate::profiles::selected::SelectedProfile;
     use crate::sphincs_plus_c::{ForsEntry as Entry, ForsSignature, LayerSignature};
     use crate::wots_c::Signature as WotsCSignature;
     use alloc::vec;
@@ -231,7 +226,7 @@ mod tests {
             // One layer per profile layer: 8 at 256s, 1 at 128s. A fixed count
             // would exceed the decoder's `<= NUM_HYPERTREE_LAYERS` cap on the
             // single-layer 128s profiles.
-            hypertree: (0..NUM_HYPERTREE_LAYERS)
+            hypertree: (0..SelectedProfile::NUM_HYPERTREE_LAYERS)
                 .map(|layer| LayerSignature {
                     wots_c_pk_hash: [0xB1 ^ layer; HASH_LEN],
                     wots_c_signature: WotsCSignature {
@@ -251,7 +246,8 @@ mod tests {
     fn to_bytes_from_bytes_round_trips() {
         let signature = sample_stateful_signature();
         let encoded = signature.to_bytes();
-        let decoded = Signature::from_bytes(&encoded).expect("valid encoding must decode");
+        let decoded =
+            Signature::from_bytes::<SelectedProfile>(&encoded).expect("valid encoding must decode");
         assert_eq!(decoded, signature);
         assert_eq!(decoded.to_bytes(), encoded);
     }
@@ -261,7 +257,7 @@ mod tests {
         let mut encoded = sample_stateful_signature().to_bytes();
         encoded.extend_from_slice(&[0xAA, 0xBB]);
         assert!(
-            Signature::from_bytes(&encoded).is_none(),
+            Signature::from_bytes::<SelectedProfile>(&encoded).is_none(),
             "trailing junk on the signature envelope must be rejected"
         );
     }
@@ -271,7 +267,7 @@ mod tests {
         let encoded = sample_stateful_signature().to_bytes();
         let gapped = crate::test_support::insert_abi_head_gap(&encoded, 1, &[0]);
         assert!(
-            Signature::from_bytes(&gapped).is_none(),
+            Signature::from_bytes::<SelectedProfile>(&gapped).is_none(),
             "an envelope with unread interior bytes must be rejected"
         );
     }
@@ -281,7 +277,7 @@ mod tests {
         let encoded = encode_stateful_envelope(&sample_public_key(), &sample_stateful_signature());
         let gapped = crate::test_support::insert_abi_head_gap(&encoded, 2, &[0, 1]);
         assert!(
-            decode_stateful_envelope(&gapped).is_none(),
+            decode_stateful_envelope::<SelectedProfile>(&gapped).is_none(),
             "a stateful envelope with unread interior bytes must be rejected"
         );
     }
@@ -308,7 +304,7 @@ mod tests {
             "the reordered layout must differ from the canonical bytes"
         );
         assert!(
-            decode_stateful_envelope(&swapped).is_none(),
+            decode_stateful_envelope::<SelectedProfile>(&swapped).is_none(),
             "a stateful envelope with reordered tails must be rejected"
         );
     }
@@ -319,19 +315,20 @@ mod tests {
             encode_stateless_envelope(&sample_public_key(), &sample_stateless_signature());
         let gapped = crate::test_support::insert_abi_head_gap(&encoded, 2, &[0, 1]);
         assert!(
-            decode_stateless_envelope(&gapped).is_none(),
+            decode_stateless_envelope::<SelectedProfile>(&gapped).is_none(),
             "a stateless envelope with unread interior bytes must be rejected"
         );
     }
 
     #[test]
-    fn try_from_delegates_to_from_bytes() {
+    fn from_bytes_accepts_a_round_trip_and_rejects_truncation() {
         let signature = sample_stateful_signature();
         let encoded = signature.to_bytes();
-        let decoded = Signature::try_from(encoded.as_slice()).expect("valid encoding must decode");
+        let decoded = Signature::from_bytes::<SelectedProfile>(encoded.as_slice())
+            .expect("valid encoding must decode");
         assert_eq!(decoded, signature);
         let truncated = &encoded[..encoded.len() - 1];
-        assert!(Signature::try_from(truncated).is_err());
+        assert!(Signature::from_bytes::<SelectedProfile>(truncated).is_none());
     }
 
     // --- (a) round-trip tests -------------------------------------------
@@ -341,8 +338,8 @@ mod tests {
         let public_key = sample_public_key();
         let signature = sample_stateful_signature();
         let encoded = encode_stateful_envelope(&public_key, &signature);
-        let (decoded_key, decoded_sig) =
-            decode_stateful_envelope(&encoded).expect("valid envelope must decode");
+        let (decoded_key, decoded_sig) = decode_stateful_envelope::<SelectedProfile>(&encoded)
+            .expect("valid envelope must decode");
         assert_eq!(decoded_key, public_key);
         assert_eq!(decoded_sig, signature);
         // Canonical framing must re-encode byte-identical.
@@ -357,8 +354,8 @@ mod tests {
         let public_key = sample_public_key();
         let signature = sample_stateless_signature();
         let encoded = encode_stateless_envelope(&public_key, &signature);
-        let (decoded_key, decoded_sig) =
-            decode_stateless_envelope(&encoded).expect("valid envelope must decode");
+        let (decoded_key, decoded_sig) = decode_stateless_envelope::<SelectedProfile>(&encoded)
+            .expect("valid envelope must decode");
         assert_eq!(decoded_key, public_key);
         assert_eq!(decoded_sig, signature);
         assert_eq!(
@@ -372,7 +369,7 @@ mod tests {
         let mut public_key = sample_public_key();
         // Build a self-consistent commitment via the `Commitment::of` helper
         // instead of hand-rolling the keccak call.
-        let commitment = *crate::shrincs::key::Commitment::of(
+        let commitment = *crate::shrincs::key::Commitment::of::<SelectedProfile>(
             &public_key.stateful_public_key,
             &public_key.pk_seed.clone().try_into().unwrap(),
             &public_key.hypertree_root.clone().try_into().unwrap(),
@@ -383,7 +380,7 @@ mod tests {
         let envelope = encode_stateless_envelope(&public_key, &signature);
 
         let (delegate_key, delegate_signature) =
-            crate::shrincs::prepare_stateless_delegation(commitment, &envelope)
+            crate::shrincs::prepare_stateless_delegation::<SelectedProfile>(commitment, &envelope)
                 .expect("matching commitment must delegate");
         let mut expected_key = [0u8; 64];
         expected_key[..32].copy_from_slice(&public_key.pk_seed);
@@ -395,7 +392,11 @@ mod tests {
         let mut wrong_commitment = commitment;
         wrong_commitment[0] ^= 0x01;
         assert!(
-            crate::shrincs::prepare_stateless_delegation(wrong_commitment, &envelope).is_none()
+            crate::shrincs::prepare_stateless_delegation::<SelectedProfile>(
+                wrong_commitment,
+                &envelope
+            )
+            .is_none()
         );
     }
 
@@ -406,7 +407,7 @@ mod tests {
         let encoded = encode_stateful_envelope(&sample_public_key(), &sample_stateful_signature());
         for cut in [0usize, 1, 32, 63, encoded.len() - 1] {
             assert!(
-                decode_stateful_envelope(&encoded[..cut]).is_none(),
+                decode_stateful_envelope::<SelectedProfile>(&encoded[..cut]).is_none(),
                 "truncation at {cut} must be rejected"
             );
         }
@@ -421,7 +422,7 @@ mod tests {
         for byte in &mut encoded[24..32] {
             *byte = 0xFF;
         }
-        assert!(decode_stateful_envelope(&encoded).is_none());
+        assert!(decode_stateful_envelope::<SelectedProfile>(&encoded).is_none());
     }
 
     #[test]
@@ -430,7 +431,7 @@ mod tests {
             encode_stateful_envelope(&sample_public_key(), &sample_stateful_signature());
         // Dirty high bits above the 8 bytes read_usize actually consumes.
         encoded[0] = 0x01;
-        assert!(decode_stateful_envelope(&encoded).is_none());
+        assert!(decode_stateful_envelope::<SelectedProfile>(&encoded).is_none());
     }
 
     #[test]
@@ -447,7 +448,7 @@ mod tests {
         .unwrap();
         // counter word sits at signature_start + 32; dirty one high byte.
         encoded[signature_start + 32] = 0x01;
-        assert!(decode_stateful_envelope(&encoded).is_none());
+        assert!(decode_stateful_envelope::<SelectedProfile>(&encoded).is_none());
     }
 
     #[test]
@@ -467,7 +468,7 @@ mod tests {
         let pad_byte_pos = field_data_start + 68 + 27; // last of the 28 pad bytes
         assert!(pad_byte_pos < last);
         encoded[pad_byte_pos] = 0x01;
-        assert!(decode_stateful_envelope(&encoded).is_none());
+        assert!(decode_stateful_envelope::<SelectedProfile>(&encoded).is_none());
     }
 
     /// Read a clean ABI length/offset word at `pos` (big-endian u64 in the
@@ -490,7 +491,7 @@ mod tests {
             encode_stateful_envelope(&sample_public_key(), &sample_stateful_signature());
         encoded.push(0x00);
         assert!(
-            decode_stateful_envelope(&encoded).is_none(),
+            decode_stateful_envelope::<SelectedProfile>(&encoded).is_none(),
             "single trailing byte must be rejected"
         );
     }
@@ -509,9 +510,13 @@ mod tests {
         let signature_start = read_abi_usize(&encoded, 32);
         // Signature body head: randomizer@0, counter@32, chains_off@64, auth_off@96.
         let chains_start = signature_start + read_abi_usize(&encoded, signature_start + 64);
-        write_abi_usize(&mut encoded, chains_start, crate::wots_c::NUM_CHAINS + 1);
+        write_abi_usize(
+            &mut encoded,
+            chains_start,
+            SelectedProfile::NUM_WOTS_CHAINS as usize + 1,
+        );
         assert!(
-            decode_stateful_envelope(&encoded).is_none(),
+            decode_stateful_envelope::<SelectedProfile>(&encoded).is_none(),
             "WOTS-C chain count + 1 must be rejected"
         );
     }
