@@ -203,7 +203,8 @@ impl WasmSphincsPlusCKeys {
 #[wasm_bindgen(js_name = sphincsPlusCKeygen)]
 pub fn sphincs_plus_c_keygen(seed: &[u8]) -> Result<WasmSphincsPlusCKeys, JsValue> {
     let mut seed = bytes_fixed::<32>(seed).map_err(js_error)?;
-    let signing_key = crate::sphincs_plus_c::keygen_from_master_seed(&seed);
+    let signing_key =
+        crate::sphincs_plus_c::keygen_from_master_seed::<SelectedProfile, NUM_LAYERS>(&seed);
     seed.zeroize();
     Ok(WasmSphincsPlusCKeys { signing_key })
 }
