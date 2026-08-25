@@ -34,9 +34,6 @@ mod sha2;
 
 /// A scheme hash suite. Selected per profile as `Profile::Suite`, not by a
 /// global cfg, so that profiles using different suites coexist in one build.
-// Not yet consumed outside tests: `src/hash/ops.rs` starts reading this
-// through `Profile::Suite` in Task 3.
-#[allow(dead_code)]
 pub trait HashSuite {
     /// Wire identifier for this suite. An ABI value: never renumber it.
     const HASH_SUITE_ID: u32;
@@ -47,7 +44,6 @@ pub trait HashSuite {
 
 /// Keccak-256 scheme hashes. The default under every profile except
 /// `shrincs-256s-sha2`.
-#[allow(dead_code)]
 pub struct Keccak256Suite;
 
 impl HashSuite for Keccak256Suite {
@@ -58,13 +54,16 @@ impl HashSuite for Keccak256Suite {
     }
 }
 
-/// SHA2-256 scheme hashes, used by `shrincs-256s-sha2`.
-#[allow(dead_code)]
+/// SHA2-256 scheme hashes, used by `shrincs-256s-sha2`. Dead under any build
+/// that does not enable that feature, since it is the only profile whose
+/// `Profile::Suite` names this type.
+#[cfg_attr(not(feature = "profile-256s-sha2"), allow(dead_code))]
 pub struct Sha2256Suite;
 
 impl HashSuite for Sha2256Suite {
     const HASH_SUITE_ID: u32 = HASH_SUITE_SHA2_256;
 
+    #[cfg_attr(not(feature = "profile-256s-sha2"), allow(dead_code))]
     fn scheme_hash_parts(parts: &[&[u8]]) -> [u8; crate::HASH_LEN] {
         sha2::scheme_hash_parts(parts)
     }

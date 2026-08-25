@@ -17,13 +17,7 @@
 
 //! SHA-256 scheme-hash suite (HASH_SUITE_ID = 2).
 
-use super::HASH_SUITE_SHA2_256;
 use crate::HASH_LEN;
-
-// Superseded by `Sha2256Suite::HASH_SUITE_ID`; kept as the module-local name
-// the suite impl reads. Task 7 removes it.
-#[allow(dead_code)]
-pub const HASH_SUITE_ID: u32 = HASH_SUITE_SHA2_256;
 
 pub fn scheme_hash_parts(parts: &[&[u8]]) -> [u8; HASH_LEN] {
     crate::hash::backend::sha256v(parts)

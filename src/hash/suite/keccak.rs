@@ -17,13 +17,7 @@
 
 //! Keccak-256 scheme-hash suite (HASH_SUITE_ID = 1).
 
-use super::HASH_SUITE_KECCAK_256;
 use crate::HASH_LEN;
-
-// Superseded by `Keccak256Suite::HASH_SUITE_ID`; kept as the module-local name
-// the suite impl reads. Task 7 removes it.
-#[allow(dead_code)]
-pub const HASH_SUITE_ID: u32 = HASH_SUITE_KECCAK_256;
 
 pub fn scheme_hash_parts(parts: &[&[u8]]) -> [u8; HASH_LEN] {
     crate::hash::backend::keccak256v(parts)
