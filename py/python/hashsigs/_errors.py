@@ -7,9 +7,11 @@ Defined in Python rather than in Rust on purpose. The wheel ships one compiled
 extension per profile, and six extensions each declaring their own exception
 class would give six unrelated classes: ``except HashSigsError`` caught from
 one profile would not catch an error raised by another. Every extension imports
-this class at module init instead, so there is exactly one of it per
-interpreter no matter how many profiles a caller touches.
+this class on the first error it raises instead, so there is exactly one of it
+per interpreter no matter how many profiles a caller touches.
 """
+
+from ._hashsigs import ERROR_CODES as _ERROR_CODES
 
 __all__ = ["HashSigsError", "ERROR_CODES"]
 
@@ -34,15 +36,6 @@ class HashSigsError(Exception):
 
 #: Every code an extension can attach to :class:`HashSigsError`.
 #:
-#: Kept in step with ``ErrorCode`` in the Rust crate by
-#: ``test_errors.py::test_error_codes_match_the_rust_enum``, which reads the
-#: variants out of the source rather than trusting this copy.
-ERROR_CODES = (
-    "ERR_BAD_LENGTH",
-    "ERR_STATEFUL_LEAVES_EXHAUSTED",
-    "ERR_SIGNING_FAILED",
-    "ERR_KEYGEN_FAILED",
-    "ERR_INVALID_INPUT",
-    "ERR_IMPORT_INVALID",
-    "ERR_ENVELOPE_MALFORMED",
-)
+#: Read out of the Rust ``ErrorCode`` enum by the root extension rather than
+#: restated here, so a code added in Rust cannot go missing from this tuple.
+ERROR_CODES: tuple[str, ...] = tuple(_ERROR_CODES)

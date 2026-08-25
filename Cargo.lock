@@ -2342,6 +2342,8 @@ dependencies = [
 name = "hashsigs-py"
 version = "0.2.1-rc4"
 dependencies = [
+ "hashsigs-py-common",
+ "hashsigs-rs",
  "pyo3",
 ]
 

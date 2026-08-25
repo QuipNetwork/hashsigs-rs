@@ -400,9 +400,9 @@ All three ecosystems work this way today.
 `src/bindings.rs` holds the whole surface generic over `P: Profile`, and each
 language stamps it out as concrete exports for one profile: `src/wasm/export.rs`
 for WebAssembly, `py/common/src/lib.rs` for Python. Neither `#[wasm_bindgen]`
-nor `#[pyfunction]` can annotate a generic function. So an export boundary must
-be monomorphized somewhere, and a macro does that without a second copy of the
-logic.
+nor `#[pyfunction]` can annotate a generic function, which forces an export
+boundary to be monomorphized somewhere. A macro does that without a second copy
+of the logic.
 
 npm ships one wasm binary per profile, each behind its own subpath export, built
 by a `bin/build-wasm.sh` loop. One binary per profile keeps the browser payload
@@ -411,8 +411,12 @@ bundler can remove unused profiles from a base64 string literal. A shipped
 binary measures 133-147 KB, or 178-196 KB once encoded.
 
 PyPI ships one compiled extension per profile inside the single wheel, built by
-a `bin/build-python.sh` loop over the crates in `py/profiles/`. One Cargo
-package builds at most one cdylib, so each profile needs its own crate.
+`py/hashsigs_build.py`, a PEP 517 backend that stages the extensions before
+handing off to maturin. One Cargo package builds at most one cdylib, so each
+profile needs its own crate, and the backend is what builds them all. Build
+through it, with `python -m build` or `pip install .`: a bare `maturin build`
+skips the backend and produces a wheel with no extensions. The backend also
+runs from an unpacked sdist, so a source install rebuilds every extension.
 Importing a profile maps only that profile's code. Each extension links its own
 copy of the crate, at about 715 KB, so the six add roughly 4.3 MB against 715 KB
 for a single-profile build, and the released wheel is about 2.0 MB compressed. A

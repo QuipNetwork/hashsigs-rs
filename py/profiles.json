@@ -1,0 +1,54 @@
+{
+  "_comment": "Canonical profile table for the Python distribution. Mirrors bin/packages.sh, which bin/tests/test-packages.sh checks this against. It is a committed JSON file rather than generated from the shell script because the PEP 517 build backend reads it from an unpacked sdist, where bin/ is absent and bash may be too.",
+  "default": "256s-keccak",
+  "profiles": [
+    {
+      "key": "256s-keccak",
+      "name": "shrincs-256s-keccak",
+      "module": "p256s",
+      "ext": "_hashsigs_p256s",
+      "crate": "hashsigs-py-p256s",
+      "feature": "profile-256s"
+    },
+    {
+      "key": "256s-sha2",
+      "name": "shrincs-256s-sha2",
+      "module": "p256s_sha2",
+      "ext": "_hashsigs_p256s_sha2",
+      "crate": "hashsigs-py-p256s-sha2",
+      "feature": "profile-256s-sha2"
+    },
+    {
+      "key": "128s-q18",
+      "name": "shrincs-128s-q18-keccak",
+      "module": "p128s_q18",
+      "ext": "_hashsigs_p128s_q18",
+      "crate": "hashsigs-py-p128s-q18",
+      "feature": "profile-128s-q18"
+    },
+    {
+      "key": "128s-q20",
+      "name": "shrincs-128s-q20-keccak",
+      "module": "p128s_q20",
+      "ext": "_hashsigs_p128s_q20",
+      "crate": "hashsigs-py-p128s-q20",
+      "feature": "profile-128s-q20"
+    },
+    {
+      "key": "128s-q18-sha2",
+      "name": "shrincs-128s-q18-sha2",
+      "module": "p128s_q18_sha2",
+      "ext": "_hashsigs_p128s_q18_sha2",
+      "crate": "hashsigs-py-p128s-q18-sha2",
+      "feature": "profile-128s-q18-sha2"
+    },
+    {
+      "key": "128s-q20-sha2",
+      "name": "shrincs-128s-q20-sha2",
+      "module": "p128s_q20_sha2",
+      "ext": "_hashsigs_p128s_q20_sha2",
+      "crate": "hashsigs-py-p128s-q20-sha2",
+      "feature": "profile-128s-q20-sha2"
+    }
+  ]
+}

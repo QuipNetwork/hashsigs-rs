@@ -20,3 +20,14 @@ crate-type = ["cdylib"]
 
 [dependencies]
 pyo3.workspace = true
+# The default profile, for the canonical error-code list this module exposes.
+# It also makes maturin vendor hashsigs-rs into the sdist, which the profile
+# crates need: they are not in this package's dependency closure, so nothing
+# else would pull the core in.
+hashsigs-rs = { path = "..", default-features = false, features = [
+  "std",
+  "profile-256s",
+] }
+# Vendored into the sdist for the same reason. py/profiles/* depend on it, and
+# they are built directly rather than as dependencies of this package.
+hashsigs-py-common = { path = "common" }

@@ -170,12 +170,26 @@ commitment mismatch is simply `False`.
 ## Building from source
 
 ```bash
-bash bin/build-python.sh                  # one extension per profile
-maturin build --release -m py/Cargo.toml  # assemble the wheel
+pip install build
+python -m build          # wheel + sdist
+pip install dist/*.whl
 ```
 
-Pass `--release`. maturin defaults to a debug build, which produces a far
-larger and far slower extension.
+Or straight from a checkout:
+
+```bash
+pip install .
+```
+
+Both go through `py/hashsigs_build.py`, a PEP 517 backend that compiles one
+extension per profile and stages them into the package before handing off to
+maturin. Use it rather than calling `maturin` directly: maturin builds one
+Cargo package, and a bare `maturin build` produces a wheel whose
+`hashsigs._ext` is empty.
+
+Installing from source works the same way. `pip install hashsigs --no-binary
+hashsigs` runs that backend from the unpacked sdist and rebuilds every
+extension, so it needs a Rust toolchain.
 
 The wheel carries one compiled extension per profile under `hashsigs._ext`, so
 importing a profile maps only that profile's code. Each extension links its own

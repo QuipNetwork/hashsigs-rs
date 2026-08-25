@@ -32,7 +32,7 @@
 //! Six extension modules each defining their own `HashSigsError` would give
 //! six unrelated classes, so `except HashSigsError` caught from one profile
 //! would not catch an error raised by another. Instead every module imports
-//! the single class from `hashsigs._errors` at init and raises that. One
+//! the single class from `hashsigs._errors` on first use and raises that. One
 //! wheel, one exception class, regardless of which profiles a caller touches.
 
 use pyo3::exceptions::PyRuntimeError;

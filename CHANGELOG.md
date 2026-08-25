@@ -71,12 +71,22 @@ This file records changes to this project, in the
   enabled, a fixed priority order decides which one that is. Name a profile
   module's own alias to pin one explicitly.
 
-- The PyPI release publishes a wheel and skips the source distribution. The
-  wheel's per-profile extensions are staged into the package tree by
-  `bin/build-python.sh` before maturin runs, and maturin knows nothing about
-  that script, so an sdist would rebuild with the version module alone and
-  install a package that fails at import. Publishing no sdist is better than
-  publishing one that installs broken.
+- The PyPI distribution builds through `py/hashsigs_build.py`, a PEP 517
+  backend that compiles one extension per profile and stages them into the
+  package before delegating to maturin. `python -m build` and `pip install .`
+  go through it; a bare `maturin build` does not, and produces a wheel whose
+  `hashsigs._ext` is empty. The source distribution works: `pip install
+  hashsigs --no-binary hashsigs` runs the same backend from the unpacked sdist
+  and rebuilds every extension.
+- `pyproject.toml` moved from `py/` to the repository root. maturin resolves
+  `include` paths against the directory holding it, and that directory becomes
+  the sdist root, while path dependencies are vendored at their
+  workspace-relative locations. Rooting the file here makes those agree: the
+  profile crates sit at `py/profiles/` in the sdist, the same place they
+  occupy in the repository, so their path dependencies back to the core
+  resolve.
+- `hashsigs.ERROR_CODES` comes from the Rust `ErrorCode` enum through the root
+  extension, rather than a tuple restated in Python.
 - The profile-generic binding core moved from `src/wasm/core.rs` to
   `src/bindings.rs` and is now `#[doc(hidden)] pub`. Both the WebAssembly
   surface and the Python extension crates build on it, and the Python crates

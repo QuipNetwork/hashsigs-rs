@@ -200,12 +200,19 @@ py-tests:
   before_script:
     - apt-get update -qq && apt-get install -y -qq python3-venv > /dev/null
     - python3 -m venv /tmp/py-venv
-    - /tmp/py-venv/bin/pip install --quiet maturin==1.14.1 pytest
+    - /tmp/py-venv/bin/pip install --quiet build pytest
   script:
-    - bash bin/build-python.sh
-    # --release: maturin defaults to a debug build, which would ship an
-    # unoptimized extension and test signing at a fraction of real speed.
-    - /tmp/py-venv/bin/maturin build --release -m py/Cargo.toml --out /tmp/wheels
-    - /tmp/py-venv/bin/pip install --quiet --force-reinstall /tmp/wheels/*.whl
+    # `build` with no flags builds the sdist and then builds the wheel FROM
+    # that sdist, so this one command covers the source-install path that
+    # `pip install --no-binary` takes. Both go through py/hashsigs_build.py,
+    # the PEP 517 backend that compiles one extension per profile before
+    # handing off to maturin; a bare `maturin build` skips it and produces a
+    # wheel with no extensions.
+    - /tmp/py-venv/bin/python -m build --outdir /tmp/dist .
+    # The wheel came from the sdist, so a source file missing from the sdist
+    # shows up as a missing extension here.
+    - /tmp/py-venv/bin/python -c "import zipfile,glob; z=zipfile.ZipFile(glob.glob('/tmp/dist/*.whl')[0]); n=[x for x in z.namelist() if x.endswith('.so')]; assert len(n) == 7, f'wheel built from the sdist has {len(n)} extensions, expected 7: {n}'; print('sdist rebuild carries every extension')"
+    - /tmp/py-venv/bin/pip install --quiet --force-reinstall /tmp/dist/*.whl
     # Run from py/ so the installed package is imported, never py/python/.
     - cd py && /tmp/py-venv/bin/python -m pytest tests/ -q
+

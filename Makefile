@@ -70,10 +70,12 @@ check-npm-dists:
 # Build every profile extension, assemble the wheel, and run the Python suite
 # against the INSTALLED wheel rather than the source tree. --release because
 # maturin defaults to a debug build, which would ship an unoptimized extension.
+# `build` with no flags builds the sdist, then builds the wheel FROM that
+# sdist, so this covers the source-install path as well as the wheel.
 check-python-dists:
-	bash bin/build-python.sh
-	maturin build --release -m py/Cargo.toml --out target/wheels
-	python3 -m pip install --quiet --force-reinstall target/wheels/*.whl
+	python3 -m build --outdir target/dist .
+	python3 -c "import zipfile,glob; z=zipfile.ZipFile(glob.glob('target/dist/*.whl')[0]); n=[x for x in z.namelist() if x.endswith('.so')]; assert len(n)==7, f'wheel built from the sdist has {len(n)} extensions, expected 7'"
+	python3 -m pip install --quiet --force-reinstall target/dist/*.whl
 	cd py && python3 -m pytest tests/ -q
 
 # The full gate. A later plan adds check-c-artifacts.
@@ -85,7 +87,7 @@ help:
 	@echo "  check-packages         every profile has a package in every ecosystem"
 	@echo "  check-crate-publish    cargo package the crate, no upload path"
 	@echo "  check-npm-dists        pack the npm tarball and import it outside the repo"
-	@echo "  check-python-dists     build every profile extension, wheel it, run pytest"
+	@echo "  check-python-dists     build the sdist and the wheel from it, run pytest"
 
 # Only build output. `ts/dist` is the compiled TypeScript, and a packed
 # tarball left in ts/ is what the CI publish job would otherwise pick up.

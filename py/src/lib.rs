@@ -15,17 +15,29 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! The `hashsigs` package's root extension: version metadata only.
+//! The `hashsigs` package's root extension: package-wide metadata.
 //!
 //! The signing surface lives in one extension per profile, under
 //! `hashsigs._ext`, built from the crates in `py/profiles/`. This module is
-//! what maturin compiles for the wheel, and it carries the version so
+//! what maturin compiles for the wheel. It carries the version, so
 //! `hashsigs.__version__` comes from the same Cargo manifest maturin derives
-//! the wheel version from, rather than a second copy in Python.
+//! the wheel version from rather than a second copy in Python, and the error
+//! codes, so the Python layer does not restate an enum that lives in Rust.
+use hashsigs_rs::ErrorCode;
 use pyo3::prelude::*;
 
 #[pymodule]
 fn _hashsigs(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add("__version__", env!("CARGO_PKG_VERSION"))?;
+    // Every code `HashSigsError.code` can carry, taken from the Rust enum that
+    // produces them. A hand-copied list in Python would drift silently: a code
+    // added in Rust and missing here would still reach callers.
+    module.add(
+        "ERROR_CODES",
+        ErrorCode::ALL
+            .iter()
+            .map(|c| c.as_str())
+            .collect::<Vec<_>>(),
+    )?;
     Ok(())
 }

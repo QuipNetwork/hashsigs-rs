@@ -97,4 +97,46 @@ for profile in "${PROFILES[@]}"; do
     fail "profile ${profile} maps to ${module}, but ${module_file} does not exist"
 done
 
+# py/profiles.json restates this file's table for the Python distribution,
+# because the PEP 517 backend reads it from an unpacked sdist where bin/ does
+# not exist. Two tables of the same truth need a guard, or a profile added here
+# quietly fails to ship in the wheel.
+PY_TABLE="${SCRIPT_DIR}/../py/profiles.json"
+[[ -f "${PY_TABLE}" ]] || fail "${PY_TABLE} is missing; the Python build reads its profile list from it"
+
+# Each profile's fields, computed here so the checker never has to re-enter
+# bash to read this file back.
+expected_rows=()
+for profile in "${PROFILES[@]}"; do
+  expected_rows+=("${profile}|$(PROFILE_SHRINCS_NAME "${profile}")|$(PROFILE_PYTHON_MODULE "${profile}")|$(PROFILE_FEATURE "${profile}")")
+done
+
+python3 - "${PY_TABLE}" "${DEFAULT_PROFILE}" "${expected_rows[@]}" <<'PYEOF' || fail "py/profiles.json disagrees with bin/packages.sh"
+import json
+import sys
+
+table_path, default, *rows = sys.argv[1:]
+table = json.load(open(table_path))
+
+if table["default"] != default:
+    sys.exit(f'default is {table["default"]!r}, packages.sh says {default!r}')
+
+if len(table["profiles"]) != len(rows):
+    sys.exit(f'lists {len(table["profiles"])} profiles, packages.sh lists {len(rows)}')
+
+for entry, row in zip(table["profiles"], rows):
+    key, name, module, feature = row.split("|")
+    want = {
+        "key": key,
+        "name": name,
+        "module": module,
+        "feature": feature,
+        "ext": f"_hashsigs_{module}",
+        "crate": "hashsigs-py-" + module.replace("_", "-"),
+    }
+    for field, value in want.items():
+        if entry.get(field) != value:
+            sys.exit(f'{key}: {field}={entry.get(field)!r}, expected {value!r}')
+PYEOF
+
 echo "packages.sh invariants OK"
