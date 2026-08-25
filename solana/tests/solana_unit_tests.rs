@@ -566,8 +566,8 @@ pub mod sphincs_plus_c_solana_test {
 
         let (signing_key, key) = test_keypair(b"sphincs-plus-c solana happy path");
         let hash = derive32(b"sphincs-plus-c-solana-message", b"happy path");
-        let signature = sphincs_plus_c_sign::<SelectedProfile, NUM_LAYERS>(&signing_key, &hash)
-            .expect("sign");
+        let signature =
+            sphincs_plus_c_sign::<SelectedProfile, NUM_LAYERS>(&signing_key, &hash).expect("sign");
 
         let instruction = WOTSPlusInstruction::SphincsPlusCVerify {
             key,
@@ -602,8 +602,8 @@ pub mod sphincs_plus_c_solana_test {
 
         let (signing_key, key) = test_keypair(b"sphincs-plus-c solana tampered");
         let hash = derive32(b"sphincs-plus-c-solana-message", b"tampered");
-        let signature = sphincs_plus_c_sign::<SelectedProfile, NUM_LAYERS>(&signing_key, &hash)
-            .expect("sign");
+        let signature =
+            sphincs_plus_c_sign::<SelectedProfile, NUM_LAYERS>(&signing_key, &hash).expect("sign");
 
         let mut tampered_hash = hash;
         tampered_hash[0] ^= 0xff;
@@ -638,10 +638,11 @@ pub mod sphincs_plus_c_solana_test {
         let (program_test, program_id) = setup_test().await;
         let mut context = program_test.start_with_context().await;
 
-        let (signing_key, public_key) = ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(
-            b"shrincs solana hybrid stateless",
-            4096,
-        )
+        let (signing_key, public_key) = ShrincsSigner::keygen::<
+            SelectedProfile,
+            NUM_CHAINS,
+            NUM_LAYERS,
+        >(b"shrincs solana hybrid stateless", 4096)
         .expect("keygen");
         let commitment: [u8; 32] = public_key
             .public_key_commitment
@@ -701,10 +702,11 @@ pub mod sphincs_plus_c_solana_test {
         let (program_test, program_id) = setup_test().await;
         let mut context = program_test.start_with_context().await;
 
-        let (mut signing_key, public_key) = ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(
-            b"shrincs solana hybrid stateful",
-            4,
-        )
+        let (mut signing_key, public_key) = ShrincsSigner::keygen::<
+            SelectedProfile,
+            NUM_CHAINS,
+            NUM_LAYERS,
+        >(b"shrincs solana hybrid stateful", 4)
         .expect("keygen");
         let commitment: [u8; 32] = public_key
             .public_key_commitment
