@@ -73,7 +73,11 @@ impl<P: Profile, const NUM_CHAINS: usize, const NUM_LAYERS: usize>
     /// from a runtime path the assertion is an ordinary runtime panic. Only
     /// an associated const is guaranteed to be evaluated at monomorphisation.
     /// Do not inline this back into a direct call.
-    const WIDTHS_AGREE: () = assert_widths::<P, NUM_CHAINS, NUM_LAYERS>();
+    ///
+    /// `pub(crate)` so each profile module can force it against its own alias
+    /// with `const _: () = Shrincs::WIDTHS_AGREE;`. That makes the alias itself
+    /// the operand, which a guard spelling the widths out again does not do.
+    pub(crate) const WIDTHS_AGREE: () = assert_widths::<P, NUM_CHAINS, NUM_LAYERS>();
 
     /// Create an instance. Fails to compile when the const generic widths
     /// disagree with the profile's own constants.
