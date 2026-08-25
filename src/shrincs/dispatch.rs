@@ -28,8 +28,9 @@ use super::key::PublicKey;
 use super::signature::Signature;
 use super::uxmss::STATEFUL_PUBLIC_KEY_BYTES;
 use crate::hash::keccak_packed;
-use crate::hash::suite::HASH_SUITE_ID;
+use crate::hash::suite::HashSuite;
 use crate::hash::word32;
+use crate::profile::Profile;
 use crate::shrincs::uxmss;
 use crate::sphincs_plus_c;
 use crate::sphincs_plus_c::Signature as StatelessSignature;
@@ -41,15 +42,19 @@ use alloc::vec::Vec;
 /// action type, and payload hash. Shared body for
 /// `stateful_action_message_hash` and `stateless_action_message_hash`, which
 /// differ only in `op_tag`.
-fn action_message_hash(
+fn action_message_hash<P: Profile>(
     op_tag: &[u8],
     expected_public_key_commitment: [u8; HASH_LEN],
     context: &ActionContext,
 ) -> [u8; HASH_LEN] {
+    // ABI-bearing: the suite id must come from the profile being verified,
+    // never from a build-wide cfg, or two profiles in one build would fold
+    // the same id into different preimages.
+    let suite_id = <P::Suite as HashSuite>::HASH_SUITE_ID;
     let op = keccak_packed(&[op_tag]);
     keccak_packed(&[
         &op,
-        &HASH_SUITE_ID.to_be_bytes(),
+        &suite_id.to_be_bytes(),
         &expected_public_key_commitment,
         &context.domain_separator,
         &context.nonce,
@@ -61,11 +66,11 @@ fn action_message_hash(
 
 /// Canonical message hash for a stateful action verify. See
 /// `action_message_hash`.
-pub(crate) fn stateful_action_message_hash(
+pub(crate) fn stateful_action_message_hash<P: Profile>(
     expected_public_key_commitment: [u8; HASH_LEN],
     context: &ActionContext,
 ) -> [u8; HASH_LEN] {
-    action_message_hash(
+    action_message_hash::<P>(
         b"shrincs-verify-stateful",
         expected_public_key_commitment,
         context,
@@ -74,18 +79,18 @@ pub(crate) fn stateful_action_message_hash(
 
 /// Canonical message hash for a stateless action verify. See
 /// `action_message_hash`.
-pub(crate) fn stateless_action_message_hash(
+pub(crate) fn stateless_action_message_hash<P: Profile>(
     expected_public_key_commitment: [u8; HASH_LEN],
     context: &ActionContext,
 ) -> [u8; HASH_LEN] {
-    action_message_hash(
+    action_message_hash::<P>(
         b"shrincs-verify-stateless",
         expected_public_key_commitment,
         context,
     )
 }
 
-fn verify_stateless_crypto(
+fn verify_stateless_crypto<P: Profile, const NUM_CHAINS: usize>(
     public_key: &PublicKey,
     message: &[u8],
     signature: &StatelessSignature,
@@ -100,7 +105,7 @@ fn verify_stateless_crypto(
         pk_seed: sphincs_plus_c::PkSeed::new(pk_seed),
         root: sphincs_plus_c::Root::new(hypertree_root),
     };
-    sphincs_plus_c::verify(&pk, message, signature)
+    sphincs_plus_c::verify::<P, NUM_CHAINS>(&pk, message, signature)
 }
 
 pub(crate) fn valid_action_context(context: &ActionContext) -> bool {
@@ -109,28 +114,28 @@ pub(crate) fn valid_action_context(context: &ActionContext) -> bool {
         && context.payload_hash != [0u8; HASH_LEN]
 }
 
-fn recompute_public_key_commitment(public_key: &PublicKey) -> Option<[u8; HASH_LEN]> {
-    Some(*public_key.commitment()?.as_bytes())
+fn recompute_public_key_commitment<P: Profile>(public_key: &PublicKey) -> Option<[u8; HASH_LEN]> {
+    Some(*public_key.commitment::<P>()?.as_bytes())
 }
 
-pub(crate) fn matches_expected_public_key_commitment(
+pub(crate) fn matches_expected_public_key_commitment<P: Profile>(
     public_key: &PublicKey,
     expected_public_key_commitment: [u8; HASH_LEN],
 ) -> bool {
     expected_public_key_commitment != [0u8; HASH_LEN]
         && word32(&public_key.public_key_commitment) == Some(expected_public_key_commitment)
-        && recompute_public_key_commitment(public_key) == Some(expected_public_key_commitment)
+        && recompute_public_key_commitment::<P>(public_key) == Some(expected_public_key_commitment)
 }
 
-pub(crate) fn valid_public_key(public_key: &PublicKey) -> bool {
+pub(crate) fn valid_public_key<P: Profile>(public_key: &PublicKey) -> bool {
     public_key.stateful_public_key.len() == STATEFUL_PUBLIC_KEY_BYTES
         && public_key.public_key_commitment.len() == HASH_LEN
         && public_key.pk_seed.len() == HASH_LEN
         && public_key.hypertree_root.len() == HASH_LEN
-        && recompute_public_key_commitment(public_key) == word32(&public_key.public_key_commitment)
+        && recompute_public_key_commitment::<P>(public_key) == word32(&public_key.public_key_commitment)
 }
 
-pub(crate) fn verify_stateful(
+pub(crate) fn verify_stateful<P: Profile, const NUM_CHAINS: usize>(
     expected_public_key_commitment: [u8; HASH_LEN],
     public_key: &PublicKey,
     context: &ActionContext,
@@ -139,8 +144,8 @@ pub(crate) fn verify_stateful(
     if !valid_action_context(context) {
         return false;
     }
-    let message = stateful_action_message_hash(expected_public_key_commitment, context);
-    verify_stateful_unsafe_raw(
+    let message = stateful_action_message_hash::<P>(expected_public_key_commitment, context);
+    verify_stateful_unsafe_raw::<P, NUM_CHAINS>(
         expected_public_key_commitment,
         public_key,
         &message,
@@ -148,7 +153,7 @@ pub(crate) fn verify_stateful(
     )
 }
 
-pub(crate) fn verify_stateless(
+pub(crate) fn verify_stateless<P: Profile, const NUM_CHAINS: usize>(
     expected_public_key_commitment: [u8; HASH_LEN],
     public_key: &PublicKey,
     context: &ActionContext,
@@ -157,48 +162,48 @@ pub(crate) fn verify_stateless(
     if !valid_action_context(context) {
         return false;
     }
-    if !matches_expected_public_key_commitment(public_key, expected_public_key_commitment) {
+    if !matches_expected_public_key_commitment::<P>(public_key, expected_public_key_commitment) {
         return false;
     }
-    if !valid_public_key(public_key) {
+    if !valid_public_key::<P>(public_key) {
         return false;
     }
-    let message = stateless_action_message_hash(expected_public_key_commitment, context);
-    verify_stateless_crypto(public_key, &message, signature)
+    let message = stateless_action_message_hash::<P>(expected_public_key_commitment, context);
+    verify_stateless_crypto::<P, NUM_CHAINS>(public_key, &message, signature)
 }
 
-pub(crate) fn verify_stateful_unsafe_raw(
+pub(crate) fn verify_stateful_unsafe_raw<P: Profile, const NUM_CHAINS: usize>(
     expected_public_key_commitment: [u8; HASH_LEN],
     public_key: &PublicKey,
     message: &[u8],
     signature: &Signature,
 ) -> bool {
-    if !matches_expected_public_key_commitment(public_key, expected_public_key_commitment) {
+    if !matches_expected_public_key_commitment::<P>(public_key, expected_public_key_commitment) {
         return false;
     }
-    if !valid_public_key(public_key) {
+    if !valid_public_key::<P>(public_key) {
         return false;
     }
     let Some(stateful_key) = decode_stateful_public_key(&public_key.stateful_public_key) else {
         return false;
     };
-    uxmss::verify_stateful_unsafe_raw(&stateful_key, message, signature)
+    uxmss::verify_stateful_unsafe_raw::<P, NUM_CHAINS>(&stateful_key, message, signature)
 }
 
 #[cfg(test)]
-pub(crate) fn verify_stateless_unsafe_raw(
+pub(crate) fn verify_stateless_unsafe_raw<P: Profile, const NUM_CHAINS: usize>(
     expected_public_key_commitment: [u8; HASH_LEN],
     public_key: &PublicKey,
     message: &[u8],
     signature: &StatelessSignature,
 ) -> bool {
-    if !matches_expected_public_key_commitment(public_key, expected_public_key_commitment) {
+    if !matches_expected_public_key_commitment::<P>(public_key, expected_public_key_commitment) {
         return false;
     }
-    if !valid_public_key(public_key) {
+    if !valid_public_key::<P>(public_key) {
         return false;
     }
-    verify_stateless_crypto(public_key, message, signature)
+    verify_stateless_crypto::<P, NUM_CHAINS>(public_key, message, signature)
 }
 
 /// Mirrors `SHRINCS.prepareStatelessDelegation`: decode a stateless envelope,
@@ -207,15 +212,15 @@ pub(crate) fn verify_stateless_unsafe_raw(
 /// 64-byte `pkSeed || hypertreeRoot` `SPHINCSPlusCVerifier` key layout) and
 /// delegate signature envelope. Returns `None` on any commitment mismatch,
 /// shape failure, or malformed envelope — this function never panics.
-pub fn prepare_stateless_delegation(
+pub fn prepare_stateless_delegation<P: Profile>(
     expected_public_key_commitment: [u8; HASH_LEN],
     envelope: &[u8],
 ) -> Option<([u8; 64], Vec<u8>)> {
-    let (public_key, signature) = super::signature::decode_stateless_envelope(envelope)?;
-    if !matches_expected_public_key_commitment(&public_key, expected_public_key_commitment) {
+    let (public_key, signature) = super::signature::decode_stateless_envelope::<P>(envelope)?;
+    if !matches_expected_public_key_commitment::<P>(&public_key, expected_public_key_commitment) {
         return None;
     }
-    if !valid_public_key(&public_key) {
+    if !valid_public_key::<P>(&public_key) {
         return None;
     }
     // valid_public_key has proven both fields are exactly 32 bytes.
@@ -230,11 +235,12 @@ pub fn prepare_stateless_delegation(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::profile_active::{ActiveProfile, NUM_CHAINS, NUM_LAYERS};
     use crate::shrincs::signature::encode_stateless_envelope;
     use crate::shrincs::signer::ShrincsSigner;
 
     fn keypair(seed: &[u8]) -> (crate::shrincs::Keys, PublicKey) {
-        ShrincsSigner::keygen(seed, 4).expect("keygen must succeed for a valid seed/budget")
+        ShrincsSigner::keygen::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(seed, 4).expect("keygen must succeed for a valid seed/budget")
     }
 
     fn sample_context() -> ActionContext {
@@ -279,14 +285,16 @@ mod tests {
         let (signing_key, public_key) =
             keypair(b"dispatch prepare_stateless_delegation wrong commitment");
         let hash = [0x77u8; HASH_LEN];
-        let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &hash).expect("sign");
+        let signature =
+            ShrincsSigner::sign_stateless_raw::<ActiveProfile, NUM_LAYERS>(&signing_key, &hash)
+                .expect("sign");
         let envelope = encode_stateless_envelope(&public_key, &signature);
 
         let mut wrong_commitment = [0u8; HASH_LEN];
         wrong_commitment.copy_from_slice(&public_key.public_key_commitment);
         wrong_commitment[0] ^= 0x01;
 
-        assert!(prepare_stateless_delegation(wrong_commitment, &envelope).is_none());
+        assert!(prepare_stateless_delegation::<ActiveProfile>(wrong_commitment, &envelope).is_none());
     }
 
     #[test]
@@ -298,7 +306,7 @@ mod tests {
             .try_into()
             .expect("commitment is 32 bytes");
 
-        assert!(prepare_stateless_delegation(commitment, &[]).is_none());
-        assert!(prepare_stateless_delegation(commitment, &[0xffu8; 3]).is_none());
+        assert!(prepare_stateless_delegation::<ActiveProfile>(commitment, &[]).is_none());
+        assert!(prepare_stateless_delegation::<ActiveProfile>(commitment, &[0xffu8; 3]).is_none());
     }
 }

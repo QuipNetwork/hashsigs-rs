@@ -27,8 +27,8 @@ use alloc::vec::Vec;
 use super::action_context::ActionContext;
 use super::key::{encode_stateful_public_key, Commitment, PublicKey};
 use super::signature::Signature;
-use crate::hash::suite::Keccak256Suite;
 use crate::hash::{derive32, word32};
+use crate::profile::Profile;
 use crate::shrincs::uxmss;
 use crate::sphincs_plus_c::Signature as StatelessSignature;
 use crate::sphincs_plus_c::{self};
@@ -45,12 +45,12 @@ pub type ShrincsSignerResult<T> = Option<T>;
 /// Assemble the SHRINCS public-key bundle from an encoded stateful sub-key, a
 /// stateless `pk_seed`, and a hypertree root, recomputing the commitment.
 /// (Folded in from the former `signer_utils` module.)
-pub(crate) fn public_key_from_components(
+pub(crate) fn public_key_from_components<P: Profile>(
     stateful_public_key: Vec<u8>,
     pk_seed: [u8; HASH_LEN],
     hypertree_root: [u8; HASH_LEN],
 ) -> PublicKey {
-    let commitment = Commitment::of(&stateful_public_key, &pk_seed, &hypertree_root);
+    let commitment = Commitment::of::<P>(&stateful_public_key, &pk_seed, &hypertree_root);
     PublicKey {
         stateful_public_key,
         public_key_commitment: commitment.as_bytes().to_vec(),
@@ -62,8 +62,8 @@ pub(crate) fn public_key_from_components(
 /// Derive the public-key bundle implied by a signing key's two public halves.
 /// The stateful/stateless seeds and roots fully determine it, so a caller
 /// holding only a [`Keys`] can recover the `PublicKey` a verifier needs.
-fn public_key_of(keys: &Keys) -> PublicKey {
-    public_key_from_components(
+fn public_key_of<P: Profile>(keys: &Keys) -> PublicKey {
+    public_key_from_components::<P>(
         encode_stateful_public_key(
             *keys.stateful().public_key().pk_seed.as_bytes(),
             *keys.stateful().public_key().root.as_bytes(),
@@ -81,9 +81,12 @@ fn public_key_of(keys: &Keys) -> PublicKey {
 /// not in any signer object — that is why `keys` is `&mut` and no signer
 /// struct exists. Returns `None` once the leaf budget is exhausted. The signed
 /// message is the raw 32-byte hash, matching the verifier's stateful path.
-pub fn sign(keys: &mut Keys, hash: &[u8; HASH_LEN]) -> Option<Vec<u8>> {
-    let public_key = public_key_of(keys);
-    let signature = ShrincsSigner::sign_stateful_raw(keys, hash)?;
+pub fn sign<P: Profile, const NUM_CHAINS: usize>(
+    keys: &mut Keys,
+    hash: &[u8; HASH_LEN],
+) -> Option<Vec<u8>> {
+    let public_key = public_key_of::<P>(keys);
+    let signature = ShrincsSigner::sign_stateful_raw::<P, NUM_CHAINS>(keys, hash)?;
     Some(super::signature::encode_stateful_envelope(
         &public_key,
         &signature,
@@ -129,7 +132,7 @@ impl ShrincsSigner {
     ///
     /// Returns `None` if `max_stateful_signatures` is 0 or exceeds the
     /// stateful budget limit (4096).
-    pub fn keygen(
+    pub fn keygen<P: Profile, const NUM_CHAINS: usize, const NUM_LAYERS: usize>(
         seed_material: &[u8],
         max_stateful_signatures: u32,
     ) -> ShrincsSignerResult<(Keys, PublicKey)> {
@@ -143,9 +146,9 @@ impl ShrincsSigner {
         // Stateless half derived through the SPHINCS+C boundary helper — the
         // same code path the wasm pure-SPHINCS keygen uses, so the shared
         // master-seed material is structurally identical between the two.
-        let stateless = sphincs_plus_c::keygen_from_master_seed(seed_material);
+        let stateless = sphincs_plus_c::keygen_from_master_seed::<P, NUM_LAYERS>(seed_material);
 
-        Some(Self::build_keys(
+        Some(Self::build_keys::<P, NUM_CHAINS>(
             seed_material,
             max_stateful_signatures,
             stateless,
@@ -158,15 +161,15 @@ impl ShrincsSigner {
     /// Shared by [`Self::keygen`] (real stateless keygen) and the
     /// `stateful_only_key` test helper (placeholder stateless key), so the
     /// stateful derivation and assembly logic exist in exactly one place.
-    pub(crate) fn build_keys(
+    pub(crate) fn build_keys<P: Profile, const NUM_CHAINS: usize>(
         seed: &[u8],
         max: u32,
         stateless: sphincs_plus_c::Key,
     ) -> (Keys, PublicKey) {
-        let stateful_sk_seed = derive32::<Keccak256Suite>(b"shrincs-stateful-sk-seed", seed, &[]);
-        let stateful_prf_seed = derive32::<Keccak256Suite>(b"shrincs-stateful-prf-seed", seed, &[]);
-        let stateful_pk_seed = derive32::<Keccak256Suite>(b"shrincs-stateful-pk-seed", seed, &[]);
-        let stateful_root = uxmss::stateful_subtree_root(
+        let stateful_sk_seed = derive32::<P::Suite>(b"shrincs-stateful-sk-seed", seed, &[]);
+        let stateful_prf_seed = derive32::<P::Suite>(b"shrincs-stateful-prf-seed", seed, &[]);
+        let stateful_pk_seed = derive32::<P::Suite>(b"shrincs-stateful-pk-seed", seed, &[]);
+        let stateful_root = uxmss::stateful_subtree_root::<P, NUM_CHAINS>(
             &stateful_sk_seed,
             &stateful_pk_seed,
             INITIAL_STATEFUL_LEAF_INDEX,
@@ -187,8 +190,8 @@ impl ShrincsSigner {
         );
         let hypertree_root = *stateless.public_key.root.as_bytes();
         let stateless_pk_seed = *stateless.public_key.pk_seed.as_bytes();
-        let signing_key = Keys::new(stateless, stateful);
-        let public_key = public_key_from_components(
+        let signing_key = Keys::new::<P>(stateless, stateful);
+        let public_key = public_key_from_components::<P>(
             encode_stateful_public_key(stateful_pk_seed, stateful_root, max),
             stateless_pk_seed,
             hypertree_root,
@@ -209,9 +212,11 @@ impl ShrincsSigner {
     /// Delegates the root-recompute/reject validation to [`Keys::import`] (the
     /// same 264-byte flat layout), then derives the `PublicKey` from the
     /// validated fields.
-    pub fn import_signing_key(candidate: Keys) -> ShrincsSignerResult<(Keys, PublicKey)> {
-        let validated = Keys::import(&candidate.to_bytes())?;
-        let public_key = public_key_from_components(
+    pub fn import_signing_key<P: Profile, const NUM_CHAINS: usize, const NUM_LAYERS: usize>(
+        candidate: Keys,
+    ) -> ShrincsSignerResult<(Keys, PublicKey)> {
+        let validated = Keys::import::<P, NUM_CHAINS, NUM_LAYERS>(&candidate.to_bytes())?;
+        let public_key = public_key_from_components::<P>(
             encode_stateful_public_key(
                 *validated.stateful().public_key().pk_seed.as_bytes(),
                 *validated.stateful().public_key().root.as_bytes(),
@@ -228,25 +233,25 @@ impl ShrincsSigner {
     /// Returns `None` if the public key's commitment field is not exactly
     /// 32 bytes, if the stateful leaves are exhausted, or if WOTS-C
     /// grinding fails.
-    pub fn sign_stateful_action(
+    pub fn sign_stateful_action<P: Profile, const NUM_CHAINS: usize>(
         signing_key: &mut Keys,
         public_key: &PublicKey,
         context: &ActionContext,
     ) -> ShrincsSignerResult<Signature> {
         let expected = word32(&public_key.public_key_commitment)?;
-        let message = stateful_action_message_hash(expected, context);
-        uxmss::sign_stateful_raw(signing_key.stateful_mut(), &message)
+        let message = stateful_action_message_hash::<P>(expected, context);
+        uxmss::sign_stateful_raw::<P, NUM_CHAINS>(signing_key.stateful_mut(), &message)
     }
 
     /// Sign raw bytes with the next unused stateful leaf.
     ///
     /// Returns `None` if the stateful leaves are exhausted or if WOTS-C
     /// grinding fails.
-    pub fn sign_stateful_raw(
+    pub fn sign_stateful_raw<P: Profile, const NUM_CHAINS: usize>(
         signing_key: &mut Keys,
         message: &[u8],
     ) -> ShrincsSignerResult<Signature> {
-        uxmss::sign_stateful_raw(signing_key.stateful_mut(), message)
+        uxmss::sign_stateful_raw::<P, NUM_CHAINS>(signing_key.stateful_mut(), message)
     }
 
     /// Sign raw bytes with a caller-supplied stateful leaf; does NOT advance the
@@ -254,12 +259,16 @@ impl ShrincsSigner {
     /// binding (see the wasm-noble delivery report) in favor of the
     /// noble-style `shrincsSign`/`shrincsSignStateless` free functions.
     #[cfg(test)]
-    pub(crate) fn sign_stateful_raw_at_leaf(
+    pub(crate) fn sign_stateful_raw_at_leaf<P: Profile, const NUM_CHAINS: usize>(
         signing_key: &Keys,
         leaf_index: u32,
         message: &[u8],
     ) -> ShrincsSignerResult<Signature> {
-        uxmss::sign_stateful_raw_at_leaf(signing_key.stateful(), leaf_index, message)
+        uxmss::sign_stateful_raw_at_leaf::<P, NUM_CHAINS>(
+            signing_key.stateful(),
+            leaf_index,
+            message,
+        )
     }
 
     /// Sign raw bytes with FORS-C plus the hypertree.
@@ -267,7 +276,7 @@ impl ShrincsSigner {
     /// The signature verifies under the long-lived public key returned by
     /// `keygen`; the message-specific FORS root is carried only inside the
     /// signature/hypertree flow.
-    pub fn sign_stateless_raw(
+    pub fn sign_stateless_raw<P: Profile, const NUM_LAYERS: usize>(
         signing_key: &Keys,
         message: &[u8],
     ) -> ShrincsSignerResult<StatelessSignature> {
@@ -277,7 +286,7 @@ impl ShrincsSigner {
                 message.len()
             );
         }
-        let sig = sphincs_plus_c::sign(signing_key.stateless(), message)?;
+        let sig = sphincs_plus_c::sign::<P, NUM_LAYERS>(signing_key.stateless(), message)?;
         if stateless_trace_enabled() {
             hashsigs_println!("stateless trace: signer done");
         }
@@ -443,8 +452,8 @@ mod tests {
                 root: sphincs_plus_c::Root::new(hypertree_root),
             },
         );
-        let signing_key = Keys::new(stateless, stateful);
-        let public_key = public_key_from_components(
+        let signing_key = Keys::new::<P>(stateless, stateful);
+        let public_key = public_key_from_components::<P>(
             encode_stateful_public_key(stateful_pk_seed, stateful_root, max),
             pk_seed,
             hypertree_root,

@@ -29,9 +29,8 @@
 use alloc::vec::Vec;
 
 use crate::abi::{encode_bytes, encode_tuple, AbiReader, Field};
-use crate::hash::suite::Keccak256Suite;
 use crate::hash::{derive32, keccak_packed, word32};
-use crate::profiles::PROFILE_NAME;
+use crate::profile::Profile;
 use crate::shrincs::uxmss::{
     self, stateful_subtree_root, PublicKey as StatefulPublicKey, INITIAL_STATEFUL_LEAF_INDEX,
     MAX_STATEFUL_SIGNATURES_LIMIT, STATEFUL_PUBLIC_KEY_BYTES,
@@ -62,14 +61,14 @@ impl Commitment {
     /// `keccak256("shrincs-public-key/" || profile || stateful_public_key ||
     /// pk_seed || hypertree_root)`. Mirrors
     /// `SHRINCS.publicKeyCommitmentFromParts`.
-    pub fn of(
+    pub fn of<P: Profile>(
         stateful_public_key: &[u8],
         pk_seed: &[u8; HASH_LEN],
         hypertree_root: &[u8; HASH_LEN],
     ) -> Self {
         Self(keccak_packed(&[
             b"shrincs-public-key/",
-            PROFILE_NAME.as_bytes(),
+            P::PROFILE_NAME.as_bytes(),
             stateful_public_key,
             pk_seed,
             hypertree_root,
@@ -112,8 +111,8 @@ pub struct Keys {
 
 impl Keys {
     /// Assemble from the two scheme keys and recompute the commitment.
-    pub fn new(stateless: sphincs_plus_c::Key, stateful: uxmss::Key) -> Self {
-        let public_key_commitment = Self::compute_commitment(&stateful, &stateless);
+    pub fn new<P: Profile>(stateless: sphincs_plus_c::Key, stateful: uxmss::Key) -> Self {
+        let public_key_commitment = Self::compute_commitment::<P>(&stateful, &stateless);
         Self {
             stateless,
             stateful,
@@ -143,12 +142,12 @@ impl Keys {
 
     /// Recompute the commitment from the two public keys. Deterministic; the
     /// authoritative definition of a SHRINCS identity.
-    pub fn compute_commitment(
+    pub fn compute_commitment<P: Profile>(
         stateful: &uxmss::Key,
         stateless: &sphincs_plus_c::Key,
     ) -> Commitment {
         let stateful_public_key = stateful.public_key().to_bytes();
-        Commitment::of(
+        Commitment::of::<P>(
             &stateful_public_key,
             stateless.public_key.pk_seed.as_bytes(),
             stateless.public_key.root.as_bytes(),
@@ -171,13 +170,13 @@ impl Keys {
     /// the seeds, so a caller reloading persisted bytes trusts that those
     /// bytes came from a prior `to_bytes`. Root re-derivation belongs to the
     /// signer's validating import.
-    pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
+    pub fn from_bytes<P: Profile>(bytes: &[u8]) -> Option<Self> {
         if bytes.len() != KEYS_BYTES {
             return None;
         }
         let stateful = uxmss::Key::from_bytes(bytes.get(..136)?)?;
         let stateless = sphincs_plus_c::Key::from_bytes(bytes.get(136..)?)?;
-        Some(Self::new(stateless, stateful))
+        Some(Self::new::<P>(stateless, stateful))
     }
 
     /// Parse and validate a persisted 264-byte secret.
@@ -188,8 +187,10 @@ impl Keys {
     /// counter may sit at the exhausted position (`next == max + 1`), which
     /// stateful signing legitimately produces. On success the commitment is
     /// recomputed, never trusted from the input.
-    pub fn import(bytes: &[u8]) -> Option<Self> {
-        let keys = Self::from_bytes(bytes)?;
+    pub fn import<P: Profile, const NUM_CHAINS: usize, const NUM_LAYERS: usize>(
+        bytes: &[u8],
+    ) -> Option<Self> {
+        let keys = Self::from_bytes::<P>(bytes)?;
         let max = keys.stateful.public_key().max_signatures;
         if max == 0 || max > MAX_STATEFUL_SIGNATURES_LIMIT {
             return None;
@@ -200,13 +201,13 @@ impl Keys {
         }
         // The stateful root always covers the whole tree from leaf 1,
         // independent of `next`.
-        let stateful_root = stateful_subtree_root(
+        let stateful_root = stateful_subtree_root::<P, NUM_CHAINS>(
             keys.stateful.secret().as_sk_seed().as_bytes(),
             keys.stateful.public_key().pk_seed.as_bytes(),
             INITIAL_STATEFUL_LEAF_INDEX,
             max,
         );
-        let hypertree_root = *sphincs_plus_c::keygen(
+        let hypertree_root = *sphincs_plus_c::keygen::<P, NUM_LAYERS>(
             *keys.stateless.secret().as_sk_seed().as_bytes(),
             *keys.stateless.secret().as_prf_seed().as_bytes(),
             *keys.stateless.public_key.pk_seed.as_bytes(),
@@ -230,12 +231,13 @@ impl Keys {
     /// stateful half. `new_seed` is arbitrary-length seed material hashed by
     /// `derive32`; this library has no RNG, so the caller must supply
     /// fresh entropy.
-    pub fn reset(&mut self, new_seed: &[u8]) {
+    pub fn reset<P: Profile, const NUM_CHAINS: usize>(&mut self, new_seed: &[u8]) {
         let max = self.stateful.public_key().max_signatures;
-        let sk = derive32::<Keccak256Suite>(b"shrincs-stateful-sk-seed", new_seed, &[]);
-        let prf = derive32::<Keccak256Suite>(b"shrincs-stateful-prf-seed", new_seed, &[]);
-        let pk = derive32::<Keccak256Suite>(b"shrincs-stateful-pk-seed", new_seed, &[]);
-        let root = stateful_subtree_root(&sk, &pk, INITIAL_STATEFUL_LEAF_INDEX, max);
+        let sk = derive32::<P::Suite>(b"shrincs-stateful-sk-seed", new_seed, &[]);
+        let prf = derive32::<P::Suite>(b"shrincs-stateful-prf-seed", new_seed, &[]);
+        let pk = derive32::<P::Suite>(b"shrincs-stateful-pk-seed", new_seed, &[]);
+        let root =
+            stateful_subtree_root::<P, NUM_CHAINS>(&sk, &pk, INITIAL_STATEFUL_LEAF_INDEX, max);
         self.stateful = uxmss::Key::new(
             uxmss::PrivateKey::new(uxmss::SkSeed::new(sk), uxmss::PrfSeed::new(prf)),
             uxmss::StructuredPublicKey {
@@ -245,13 +247,13 @@ impl Keys {
             },
             INITIAL_STATEFUL_LEAF_INDEX,
         );
-        self.public_key_commitment = Self::compute_commitment(&self.stateful, &self.stateless);
+        self.public_key_commitment = Self::compute_commitment::<P>(&self.stateful, &self.stateless);
     }
 
     /// Recompute the commitment from this key's current public halves.
     /// Convenience wrapper around [`Keys::compute_commitment`].
-    pub fn recompute_commitment(&self) -> Commitment {
-        Self::compute_commitment(&self.stateful, &self.stateless)
+    pub fn recompute_commitment<P: Profile>(&self) -> Commitment {
+        Self::compute_commitment::<P>(&self.stateful, &self.stateless)
     }
 
     /// Decode a stateful envelope and recompute the commitment its carried
@@ -260,9 +262,10 @@ impl Keys {
     /// the envelope bytes, so the recovered value is only a claim, to be
     /// checked by the caller against a stored commitment. Returns `None` on
     /// a malformed envelope or wrong-length fields.
-    pub fn recover_commitment(stateful_envelope: &[u8]) -> Option<Commitment> {
-        let (pk, _sig) = crate::shrincs::signature::decode_stateful_envelope(stateful_envelope)?;
-        pk.commitment()
+    pub fn recover_commitment<P: Profile>(stateful_envelope: &[u8]) -> Option<Commitment> {
+        let (pk, _sig) =
+            crate::shrincs::signature::decode_stateful_envelope::<P>(stateful_envelope)?;
+        pk.commitment::<P>()
     }
 }
 
@@ -270,7 +273,7 @@ impl TryFrom<&[u8]> for Keys {
     type Error = ();
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        Self::from_bytes(value).ok_or(())
+        Self::from_bytes::<crate::profile_active::ActiveProfile>(value).ok_or(())
     }
 }
 
@@ -350,8 +353,8 @@ impl PublicKey {
     /// `public_key_commitment` field is only a claim (an attacker controls
     /// decoded bytes); this recomputation is authoritative. `None` if any
     /// part is not exactly 32 bytes.
-    pub fn commitment(&self) -> Option<Commitment> {
-        Some(Commitment::of(
+    pub fn commitment<P: Profile>(&self) -> Option<Commitment> {
+        Some(Commitment::of::<P>(
             &self.stateful_public_key,
             &word32(&self.pk_seed)?,
             &word32(&self.hypertree_root)?,

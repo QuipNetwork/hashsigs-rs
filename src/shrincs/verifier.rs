@@ -50,12 +50,27 @@ use super::key::Commitment;
 use super::signature::{decode_stateful_envelope, decode_stateless_envelope};
 #[cfg(test)]
 use super::signature::{encode_stateful_envelope, encode_stateless_envelope};
-pub use crate::profiles::{
-    FORS_TREE_HEIGHT, HASH_TRUNC_LEN, HYPERTREE_HEIGHT, NUM_FORS_TREES, NUM_HYPERTREE_LAYERS,
-    NUM_WOTS_CHAINS, PROFILE_NAME, STATELESS_SIGNATURE_LIMIT, WOTS_CHAIN_LEN,
-};
+use crate::profile::Profile;
+use crate::profile_active::{ActiveProfile, NUM_CHAINS};
+
+// The parameter tuple of the profile this facade is bound to. Historically a
+// `pub use crate::profiles::*`; now read off `ActiveProfile`. Task 5 repoints
+// these at the default profile alias.
+pub const FORS_TREE_HEIGHT: u8 = ActiveProfile::FORS_TREE_HEIGHT;
+pub const HASH_TRUNC_LEN: usize = ActiveProfile::HASH_TRUNC_LEN;
+pub const HYPERTREE_HEIGHT: u8 = ActiveProfile::HYPERTREE_HEIGHT;
+pub const NUM_FORS_TREES: u8 = ActiveProfile::NUM_FORS_TREES;
+pub const NUM_HYPERTREE_LAYERS: u8 = ActiveProfile::NUM_HYPERTREE_LAYERS;
+pub const NUM_WOTS_CHAINS: u16 = ActiveProfile::NUM_WOTS_CHAINS;
+pub const PROFILE_NAME: &str = ActiveProfile::PROFILE_NAME;
+pub const STATELESS_SIGNATURE_LIMIT: u64 = ActiveProfile::STATELESS_SIGNATURE_LIMIT;
+pub const WOTS_CHAIN_LEN: u16 = ActiveProfile::WOTS_CHAIN_LEN;
 
 /// Stateless hybrid SHRINCS verifier facade.
+///
+/// Bound to `ActiveProfile`: this facade names one profile, unlike the
+/// algorithms it calls, which are generic over `P: Profile`. Task 5 repoints
+/// it at the default profile alias (or gives it its own profile parameter).
 ///
 /// # Examples
 ///
@@ -102,7 +117,7 @@ impl ShrincsVerifier {
         context: &ActionContext,
         signature: &StatefulSignature,
     ) -> bool {
-        core_shrincs::verify_stateful(
+        core_shrincs::verify_stateful::<ActiveProfile, NUM_CHAINS>(
             expected_public_key_commitment,
             public_key,
             context,
@@ -120,7 +135,7 @@ impl ShrincsVerifier {
         context: &ActionContext,
         signature: &StatelessSignature,
     ) -> bool {
-        core_shrincs::verify_stateless(
+        core_shrincs::verify_stateless::<ActiveProfile, NUM_CHAINS>(
             expected_public_key_commitment,
             public_key,
             context,
@@ -136,7 +151,7 @@ impl ShrincsVerifier {
         message: &[u8],
         signature: &StatefulSignature,
     ) -> bool {
-        core_shrincs::verify_stateful_unsafe_raw(
+        core_shrincs::verify_stateful_unsafe_raw::<ActiveProfile, NUM_CHAINS>(
             expected_public_key_commitment,
             public_key,
             message,
@@ -152,7 +167,7 @@ impl ShrincsVerifier {
         message: &[u8],
         signature: &StatelessSignature,
     ) -> bool {
-        core_shrincs::verify_stateless_unsafe_raw(
+        core_shrincs::verify_stateless_unsafe_raw::<ActiveProfile, NUM_CHAINS>(
             expected_public_key_commitment,
             public_key,
             message,
@@ -168,7 +183,7 @@ impl ShrincsVerifier {
         expected_public_key_commitment: [u8; HASH_LEN],
         context: &ActionContext,
     ) -> [u8; HASH_LEN] {
-        stateful_action_message_hash(expected_public_key_commitment, context)
+        stateful_action_message_hash::<ActiveProfile>(expected_public_key_commitment, context)
     }
 
     /// The 32-byte message a stateless signature must sign: the same
@@ -178,7 +193,7 @@ impl ShrincsVerifier {
         expected_public_key_commitment: [u8; HASH_LEN],
         context: &ActionContext,
     ) -> [u8; HASH_LEN] {
-        stateless_action_message_hash(expected_public_key_commitment, context)
+        stateless_action_message_hash::<ActiveProfile>(expected_public_key_commitment, context)
     }
 
     /// Commitment binding an encoded stateful public key with a stateless
@@ -191,7 +206,7 @@ impl ShrincsVerifier {
         pk_seed: [u8; HASH_LEN],
         hypertree_root: [u8; HASH_LEN],
     ) -> [u8; HASH_LEN] {
-        *Commitment::of(stateful_public_key, &pk_seed, &hypertree_root).as_bytes()
+        *Commitment::of::<ActiveProfile>(stateful_public_key, &pk_seed, &hypertree_root).as_bytes()
     }
 }
 
@@ -239,11 +254,11 @@ impl ShrincsVerifierExt for ShrincsVerifier {
         // once more here, purely to split "framing that can't be read at
         // all" (Malformed) from "well-formed but rejected" (Invalid),
         // without duplicating its commitment/shape-check logic.
-        if decode_stateless_envelope(stateless_envelope).is_none() {
+        if decode_stateless_envelope::<ActiveProfile>(stateless_envelope).is_none() {
             return VerifyOutcome::Malformed;
         }
         let Some((delegate_key, delegate_signature_envelope)) =
-            super::prepare_stateless_delegation(commitment, stateless_envelope)
+            super::prepare_stateless_delegation::<ActiveProfile>(commitment, stateless_envelope)
         else {
             return VerifyOutcome::Invalid;
         };
@@ -254,7 +269,9 @@ impl ShrincsVerifierExt for ShrincsVerifier {
         // expects (an encode-then-decode round trip the Solidity adapter
         // never pays).
         let Some(delegate_signature) =
-            crate::sphincs_plus_c::Signature::from_bytes(&delegate_signature_envelope)
+            crate::sphincs_plus_c::Signature::from_bytes::<ActiveProfile>(
+                &delegate_signature_envelope,
+            )
         else {
             // `prepare_stateless_delegation` only ever emits a canonically
             // re-encoded envelope for a delegation it accepted, so this
@@ -284,12 +301,19 @@ impl crate::verifier::VerifierInterface for ShrincsVerifier {
         let Some(commitment) = Commitment::from_bytes(key).map(|c| *c.as_bytes()) else {
             return VerifyOutcome::Invalid;
         };
-        let Some((public_key, signature)) = decode_stateful_envelope(signature_envelope) else {
+        let Some((public_key, signature)) =
+            decode_stateful_envelope::<ActiveProfile>(signature_envelope)
+        else {
             return VerifyOutcome::Malformed;
         };
         // `SHRINCS.verify` packs the bytes32 hash into the signed message as
         // its raw 32 bytes (`SPHINCSPlusC.toMessage`); `hash` IS the message.
-        if super::verify_stateful_unsafe_raw(commitment, &public_key, hash, &signature) {
+        if super::verify_stateful_unsafe_raw::<ActiveProfile, NUM_CHAINS>(
+            commitment,
+            &public_key,
+            hash,
+            &signature,
+        ) {
             VerifyOutcome::Valid
         } else {
             VerifyOutcome::Invalid
