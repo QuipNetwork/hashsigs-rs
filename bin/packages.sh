@@ -33,7 +33,15 @@ DEFAULT_PROFILE="256s-keccak"
 # The opt-in profiles, each published as a sibling package.
 SIBLING_PROFILES=(128s-q18 128s-q20 256s-sha2)
 
-# Map a profile name to the cargo feature that compiles it.
+# Map a profile name to the cargo feature that compiles AND selects it.
+#
+# `cargo build --features "$(PROFILE_FEATURE 128s-q18)"` is enough: default
+# features may stay on. Cargo features are additive, so the default profile
+# remains enabled, but it is enabled through the `default-profile-256s` marker,
+# and build.rs lets any single explicitly named profile override that marker.
+# Adding --no-default-features is therefore unnecessary here, and would also
+# drop `std`. Verify with:
+#   cargo check --features <feature> -v | grep -o -- '--cfg shrincs_default_profile_[a-z0-9_]*'
 PROFILE_FEATURE() {
   case "$1" in
   256s-keccak) echo "profile-256s" ;;

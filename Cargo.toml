@@ -49,7 +49,7 @@ members = [
 resolver = "2"
 
 [features]
-default = ["std", "profile-256s"]
+default = ["std", "default-profile-256s"]
 # Host/runtime surface: serde std, env-based debug traces.
 std = ["alloc", "serde/std"]
 # Heap types (Vec/Box/String) used by signature wire types and pack helpers.
@@ -68,9 +68,16 @@ solana = ["dep:solana-program"]
 # keccak to match Solidity.
 #
 # The non-generic facades (`ShrincsVerifier`, the wasm bindings, the
-# golden-vector tests) still bind to one profile. build.rs picks it: the single
-# enabled profile, or, when several are on, the first of profile-256s,
-# profile-256s-sha2, profile-128s-q18, profile-128s-q20.
+# golden-vector tests) still bind to one profile, which build.rs picks.
+#
+# `default-profile-256s` marks 256s as on only because it is the default, so
+# that `--features profile-128s-q18` (which, features being additive, leaves
+# the default enabled) still BINDS to q18 instead of silently testing 256s.
+# Naming a profile explicitly overrides the default; naming several, or
+# `--all-features`, falls back to the fixed order profile-256s,
+# profile-256s-sha2, profile-128s-q18, profile-128s-q20 so the choice stays
+# deterministic. Every enabled profile compiles either way.
+default-profile-256s = ["profile-256s"]
 profile-256s = []
 profile-128s-q18 = []
 profile-128s-q20 = []

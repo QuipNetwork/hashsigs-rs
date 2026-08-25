@@ -56,9 +56,31 @@ fn feature_enabled(name: &str) -> bool {
 /// to it. Every enabled profile compiles regardless; this only picks which one
 /// those non-generic surfaces use.
 ///
-/// Exactly one profile feature selects itself. Two or more take the first in
-/// `PROFILES` order, which keeps `--all-features` deterministic.
+/// Cargo features are additive, so `--features profile-128s-q18` leaves the
+/// default `profile-256s` enabled too. Picking by priority alone would then bind
+/// to 256s and silently test the wrong profile's constants and golden vectors.
+/// `default-profile-256s` exists to tell the two cases apart: it is set only
+/// when 256s is on because it is the default, never when the user asked for it.
+///
+/// So: if 256s is merely the default and exactly one other profile is enabled,
+/// that profile wins. Otherwise take the first enabled in `PROFILES` order,
+/// which covers a lone profile, an explicitly named 256s, and `--all-features`
+/// (deterministically 256s). No profile at all is a build error.
 fn default_profile() -> &'static ProfileIdentity {
+    let is_default_fallback = feature_enabled("CARGO_FEATURE_DEFAULT_PROFILE_256S");
+
+    let mut explicit = PROFILES
+        .iter()
+        .filter(|profile| profile.module != "p256s" && feature_enabled(profile.feature_env));
+
+    // `next()` twice rather than counting: the override applies only when there
+    // is exactly one other profile, so several fall through to priority order.
+    if is_default_fallback {
+        if let (Some(only), None) = (explicit.next(), explicit.next()) {
+            return only;
+        }
+    }
+
     PROFILES
         .iter()
         .find(|profile| feature_enabled(profile.feature_env))
@@ -83,6 +105,7 @@ fn profile_id_literal(profile_name: &str) -> String {
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-env-changed=CARGO_FEATURE_DEFAULT_PROFILE_256S");
     for profile in &PROFILES {
         println!("cargo:rerun-if-env-changed={}", profile.feature_env);
         println!("cargo:rustc-check-cfg=cfg({})", profile.default_cfg);
