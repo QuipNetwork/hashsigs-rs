@@ -8,9 +8,18 @@ This file records changes to this project, in the
 ### Added
 
 - `profileName()` on the wasm surface, returning the SHRINCS profile the loaded
-  binary carries. The npm package is moving to one binary per profile, and every
-  binary exports the same function names, so this is how a caller confirms it
-  loaded the profile it imported.
+  binary carries. Every profile binary exports the same function names, so this
+  is how a caller confirms it loaded the profile it imported.
+- `@quip.network/hashsigs-wasm` ships every profile, each on its own subpath
+  export: `@quip.network/hashsigs-wasm/128s-q18` and the five siblings. The
+  package root stays the default profile, so a bare import is unchanged. Each
+  subpath carries its own wasm binary, built by a `bin/build-wasm.sh` loop, so
+  a browser consumer downloads one profile rather than six -- the browser build
+  inlines the wasm as base64, where no bundler can drop the profiles nobody
+  imported. A shipped binary is 133-147 KB, or 178-196 KB base64.
+  `ts/src/api.ts` holds the profile-independent surface, and the per-profile
+  loaders and entry points are generated from the profile list by
+  `ts/scripts/gen-profile-entries.mjs`.
 - Two SHRINCS profiles, `shrincs-128s-q18-sha2` and `shrincs-128s-q20-sha2`,
   behind the `profile-128s-q18-sha2` and `profile-128s-q20-sha2` features.
   Each is the exact numeric twin of the keccak profile of the same name and
@@ -27,10 +36,8 @@ This file records changes to this project, in the
   distribution, and `@quip.network/hashsigs-wasm` each carry every profile,
   and each profile is imported on its own path. `bin/packages.sh` no longer
   declares `SIBLING_PROFILES`, `PYPI_SIBLINGS`, or `NPM_SIBLINGS`; it declares
-  `PROFILES` instead. The Rust import paths work today. The npm subpaths still
-  need the TypeScript package layout: the wasm surface is now generic over the
-  profile, but the package still builds and ships one binary. The PyPI subpaths
-  need a Python API, which does not exist yet.
+  `PROFILES` instead. The Rust and npm import paths work today. The PyPI
+  subpaths need a Python API, which does not exist yet.
 - The six `profile-*` Cargo features (`profile-256s`, `profile-256s-sha2`,
   `profile-128s-q18`, `profile-128s-q20`, `profile-128s-q18-sha2`,
   `profile-128s-q20-sha2`) are additive. Enabling more than

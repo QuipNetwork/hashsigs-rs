@@ -395,28 +395,39 @@ a second dependency:
 `bin/tests/test-packages.sh` fails if a listed profile has no cargo feature to
 compile it or no module to import it by.
 
-The Rust side works this way today. The Python and npm profile subpaths are
-not built yet, and each needs a different thing.
+The Rust and npm sides work this way today, while the PyPI subpaths do not
+exist yet.
 
-For npm, the plan is one wasm binary per profile, each reached through its own
-subpath export. `src/wasm/core.rs` holds the whole surface generic over
-`P: Profile`, and `src/wasm/export.rs` stamps it out as concrete
-`#[wasm_bindgen]` items for one profile, because `#[wasm_bindgen]` cannot
-annotate a generic function. One binary per profile keeps the browser payload
-at one profile's worth: the browser build inlines the wasm as base64, where no
-bundler can remove the profiles a caller did not import. A measured profile
-build is about 385 KB of wasm, so a single six-profile binary would cost every
-consumer roughly 2 MB of base64. `profileName()` reports which profile a loaded
-binary carries, because all six export identical names. What remains is the
-TypeScript package layout: the build loop, the six subpath exports, and the
-per-profile loaders.
+npm ships one wasm binary per profile, each behind its own subpath export.
+`src/wasm/core.rs` holds the whole surface generic over `P: Profile`, and
+`src/wasm/export.rs` stamps it out as concrete `#[wasm_bindgen]` items for one
+profile, because `#[wasm_bindgen]` cannot annotate a generic function.
+`bin/build-wasm.sh` runs that build once per profile. One binary per profile
+keeps the browser payload at one profile's worth. The browser build inlines the
+wasm as base64, and no bundler can remove the profiles a caller did not import
+out of a base64 string literal. A shipped binary measures 133-147 KB, or
+178-196 KB once encoded.
 
-For PyPI, there is no API to package yet. `py/src/lib.rs` registers only
+Every binary exports identical names, so a caller cannot tell them apart by
+shape. Two things guard against a subpath serving the wrong profile. Each
+binary reports its own profile through `profileName()`, and each generated
+entry point declares the name it expects; `ts/test/profiles.test.mjs` asserts
+the two agree, that no two profiles report the same name, and that a 256s
+keccak signature does not verify under the 256s sha2 twin. `ts/scripts/`
+carries the generators and an exports-map check, all driven from the profile
+list `bin/build-wasm.sh` writes out of `bin/packages.sh`.
+
+The npm suite drives the full crypto surface on the 256s profiles only.
+Through wasm, 128s keygen costs about 53 seconds and signing about 52 more, so
+the 128s subpaths are identity checked there and their crypto is covered by
+`cargo test` under each `profile-*` feature.
+
+PyPI has no API to package yet, because `py/src/lib.rs` registers only
 `__version__`. The profile layout has to be designed as part of writing that
-surface, and it follows the npm shape: one compiled extension per profile
-inside the single wheel. PyO3 constrains it the same way wasm-bindgen does,
-because `#[pyfunction]` cannot be generic either, so the same generic-core plus
-macro-emitter split applies.
+surface. It follows the npm shape, with one compiled extension per profile
+inside the single wheel. PyO3 constrains the design the same way wasm-bindgen
+does, since `#[pyfunction]` cannot be generic either, so the same generic-core
+plus macro-emitter split applies.
 
 `build.rs` generates profile identity for every profile regardless of which
 features are on, and emits a cfg for each enabled one. Rust-side surfaces

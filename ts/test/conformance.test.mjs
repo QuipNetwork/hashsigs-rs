@@ -3,12 +3,13 @@
 // test of the packaging layer itself (loaders, exports map, ESM/CJS scoping,
 // base64-inline path), so it must run after `npm run build` and gate publish.
 //
-// Profile scope: `npm run build` (via `bin/build-wasm.sh`) always builds the
-// default 256s-keccak profile, so this suite only exercises that one profile
-// through the WASM boundary. The 256s-sha2 hash-suite switch and the 128s
-// params are covered on the native Rust side (`cargo test` under each
-// `profile-*` feature) but not through wasm-bindgen; see build-wasm.sh's
-// header comment for how to manually build/test another profile.
+// Profile scope: this file drives the DEFAULT profile (256s-keccak) through
+// the full crypto surface. `profiles.test.mjs` covers the other five: it
+// checks every subpath resolves and reports its own profile, and runs the
+// cross-profile rejection on the 256s pair. The 128s profiles are identity
+// checked only, because 128s keygen through wasm costs about 53 seconds and
+// signing about 52 more -- their crypto is covered natively by `cargo test`
+// under each `profile-*` feature.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -16,13 +17,11 @@ import {
   loadShrincsWasm as loadNode,
   loadHashSigs as loadHashSigsNode,
   shrincsKeysToSecretBytes,
+  makeHashSigs,
 } from "../dist/index.js";
-import { loadShrincsWasm as loadWeb } from "../dist/loader.browser.js";
+import { loadShrincsWasm as loadWeb } from "../dist/profiles/256s-keccak/loader.browser.js";
 import * as entryNode from "../dist/index.js";
-import * as entryWeb from "../dist/loader.browser.js";
-// loadHashSigs is assembled in index.ts itself (not re-exported per-loader),
-// so the web-loader variant is built by hand below with the same decompose/
-// recompose wiring: `loadHashSigsFor(loadWeb)`.
+import * as entryWeb from "../dist/profiles/256s-keccak/loader.browser.js";
 
 const SEED = new Uint8Array(32).fill(0xab);
 import { createHash } from "node:crypto";
@@ -32,103 +31,14 @@ import { createHash } from "node:crypto";
 const hash32 = (label) => new Uint8Array(createHash("sha256").update(label).digest());
 const MSG = hash32("hashsigs-noble-conformance-message");
 
-// ── decompose/recompose helpers, mirroring ts/src/index.ts ─────────────────
-// (duplicated here because `loadHashSigsFor` has to reassemble the noble
-// surface by hand for the web loader; see the comment above).
-
-function concatBytes(...parts) {
-  const total = parts.reduce((sum, part) => sum + part.length, 0);
-  const out = new Uint8Array(total);
-  let offset = 0;
-  for (const part of parts) {
-    out.set(part, offset);
-    offset += part.length;
-  }
-  return out;
-}
-
-function u32BEBytes(value) {
-  const out = new Uint8Array(4);
-  new DataView(out.buffer).setUint32(0, value, false);
-  return out;
-}
-
-function readU32BE(bytes, offset) {
-  return new DataView(bytes.buffer, bytes.byteOffset + offset, 4).getUint32(0, false);
-}
-
-function sphincsPlusCKeysToSecretBytes(keys) {
-  return concatBytes(keys.secret.skSeed, keys.secret.prfSeed, keys.publicKey.pkSeed, keys.publicKey.root);
-}
-
-function sphincsPlusCKeysFromSecretBytes(secret) {
-  return {
-    secret: { skSeed: secret.slice(0, 32), prfSeed: secret.slice(32, 64) },
-    publicKey: { pkSeed: secret.slice(64, 96), root: secret.slice(96, 128) },
-  };
-}
-
-function sphincsPlusCPublicKeyToBytes(publicKey) {
-  return concatBytes(publicKey.pkSeed, publicKey.root);
-}
-
-const STATEFUL_SECRET_LEN = 136;
-
-function shrincsKeysFromSecretBytes(secret, publicKeyCommitment) {
-  const maxSignatures = readU32BE(secret, 128);
-  const nextLeafIndex = readU32BE(secret, 132);
-  return {
-    stateless: sphincsPlusCKeysFromSecretBytes(secret.slice(STATEFUL_SECRET_LEN)),
-    stateful: {
-      secret: { skSeed: secret.slice(0, 32), prfSeed: secret.slice(32, 64) },
-      publicKey: { pkSeed: secret.slice(64, 96), root: secret.slice(96, 128), maxSignatures },
-      nextLeafIndex,
-      remaining: maxSignatures - (nextLeafIndex - 1),
-    },
-    publicKeyCommitment,
-  };
-}
-
+// The web loader yields the same module shape as the node loader, so both get
+// the same noble-style surface from the package's own `makeHashSigs`. This
+// used to be a hand-copied reimplementation of every ser/de helper; binding
+// the real one instead means a bug in that wiring fails this suite rather than
+// being faithfully reproduced by a second copy of it.
 async function loadHashSigsFor(load) {
   const wasm = await load();
-  const sphincsPlusC = {
-    keygen: (seed) => sphincsPlusCKeysFromSecretBytes(wasm.sphincsPlusCKeygen(seed).secretKey),
-    sign: (message, keys) => wasm.sphincsPlusCSign(message, sphincsPlusCKeysToSecretBytes(keys)),
-    verify: (signature, message, publicKey) =>
-      wasm.sphincsPlusCVerify(signature, message, sphincsPlusCPublicKeyToBytes(publicKey)),
-  };
-  const shrincs = {
-    keygen: (seed, maxSignatures = 1024) => {
-      const keys = wasm.shrincsKeygen(seed, maxSignatures);
-      return shrincsKeysFromSecretBytes(keys.secretKey, keys.publicKeyCommitment);
-    },
-    sign: (message, keys) => {
-      const secret = shrincsKeysToSecretBytes(keys);
-      const signature = wasm.shrincsSign(message, secret);
-      keys.stateful.nextLeafIndex = readU32BE(secret, 132);
-      keys.stateful.remaining = keys.stateful.publicKey.maxSignatures - (keys.stateful.nextLeafIndex - 1);
-      return signature;
-    },
-    signStateless: (message, keys) => wasm.shrincsSignStateless(message, shrincsKeysToSecretBytes(keys)),
-    verify: (signature, message, publicKeyCommitment) => wasm.shrincsVerify(signature, message, publicKeyCommitment),
-    verifyStateless: (signature, message, statelessPublicKey) =>
-      wasm.shrincsVerifyStateless(signature, message, sphincsPlusCPublicKeyToBytes(statelessPublicKey)),
-    reset: (keys, newSeed) => {
-      const secret = shrincsKeysToSecretBytes(keys);
-      wasm.shrincsReset(secret, newSeed);
-      const publicKeyCommitment = wasm.shrincsComputePublicKeyCommitment(secret);
-      const updated = shrincsKeysFromSecretBytes(secret, publicKeyCommitment);
-      keys.stateful = updated.stateful;
-      keys.publicKeyCommitment = updated.publicKeyCommitment;
-    },
-    computePublicKeyCommitment: (keys) => wasm.shrincsComputePublicKeyCommitment(shrincsKeysToSecretBytes(keys)),
-    recoverPublicKeyCommitment: (signature) => wasm.shrincsRecoverPublicKeyCommitment(signature),
-  };
-  const shrincsImportSigningKey = (secretKey) => {
-    const keys = wasm.shrincsImportSigningKey(secretKey);
-    return shrincsKeysFromSecretBytes(keys.secretKey, keys.publicKeyCommitment);
-  };
-  return { wasm, sphincsPlusC, shrincs, shrincsImportSigningKey };
+  return { wasm, ...makeHashSigs(wasm) };
 }
 
 const loaders = [
@@ -136,7 +46,7 @@ const loaders = [
   ["web", loadWeb],
 ];
 
-test("entry: runtime surface is exactly { loadHashSigs, loadShrincsWasm, shrincsKeysToSecretBytes } in node, { loadShrincsWasm } in web", () => {
+test("entry: node exposes the value surface, web exposes only the loader", () => {
   // WasmShrincsKeys / WasmSphincsPlusCKeys are exported TYPE-ONLY from
   // src/index.ts, and that is load-bearing: the `browser`
   // exports condition maps the package entry to loader.browser.js, so a
@@ -145,7 +55,7 @@ test("entry: runtime surface is exactly { loadHashSigs, loadShrincsWasm, shrincs
   // manipulation (no wasm dependency), so it is safe as a value export.
   assert.deepEqual(
     Object.keys(entryNode).sort(),
-    ["loadHashSigs", "loadShrincsWasm", "shrincsKeysToSecretBytes"],
+    ["PROFILE", "PROFILE_NAME", "loadHashSigs", "loadShrincsWasm", "makeHashSigs", "shrincsKeysToSecretBytes"],
   );
   assert.deepEqual(Object.keys(entryWeb).sort(), ["loadShrincsWasm"]);
 });
@@ -167,6 +77,7 @@ for (const [name, load] of loaders) {
       "shrincsComputePublicKeyCommitment",
       "shrincsRecoverPublicKeyCommitment",
       "version",
+      "profileName",
     ]) {
       assert.equal(typeof w[fn], "function", `missing ${fn}`);
     }

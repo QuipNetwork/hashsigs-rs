@@ -79,6 +79,32 @@ PROFILE_FEATURE() {
   esac
 }
 
+# Map a profile to the SHRINCS profile name its binaries report, the value
+# `<P as Profile>::PROFILE_NAME` carries and `PROFILE_ID = keccak256(name)`
+# hashes. The relation to the key above is irregular -- the 128s keccak
+# profiles spell `-keccak` in their name but not in their key, while the 256s
+# ones spell it in both -- so it is a table, not a rule.
+#
+# This restates a constant that lives in `src/profiles/p*.rs`, so it can drift.
+# It is checked rather than trusted: the npm conformance suite loads each
+# published binary and asserts `profileName()` equals the value below, which
+# fails the build both when this table is wrong and when a profile's wasm is
+# built into another profile's subpath.
+PROFILE_SHRINCS_NAME() {
+  case "$1" in
+  256s-keccak) echo "shrincs-256s-keccak" ;;
+  256s-sha2) echo "shrincs-256s-sha2" ;;
+  128s-q18) echo "shrincs-128s-q18-keccak" ;;
+  128s-q20) echo "shrincs-128s-q20-keccak" ;;
+  128s-q18-sha2) echo "shrincs-128s-q18-sha2" ;;
+  128s-q20-sha2) echo "shrincs-128s-q20-sha2" ;;
+  *)
+    echo "unknown profile: $1" >&2
+    return 1
+    ;;
+  esac
+}
+
 # The import path each ecosystem exposes for a profile. Used by the packaging
 # checks so a profile cannot ship without a way to reach it.
 PROFILE_RUST_MODULE() {

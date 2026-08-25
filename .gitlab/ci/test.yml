@@ -159,6 +159,13 @@ semver:
 # ESM/CJS scoping, base64-inline path — the layer cargo tests never touch.
 # npm run build already runs build-wasm.sh + npm test once; do not invoke them
 # again here.
+#
+# This builds one wasm binary per published profile (six), each preceded by a
+# `cargo clean -p hashsigs-rs` because the cdylib output path is shared, so the
+# wasm compile step costs roughly six times a single-profile build. The test
+# suite itself stays cheap: it drives the full crypto surface only on the 256s
+# profiles and identity-checks the rest, because 128s keygen through wasm
+# takes about 53 seconds.
 ts-conformance:
   stage: test
   image: rust:1.95.0

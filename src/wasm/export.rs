@@ -30,7 +30,8 @@
 //! a browser consumer downloads only the profile it imports. Prefixing the
 //! names to fit several profiles into one binary would force every consumer to
 //! download all six, and the browser build inlines the wasm as base64, where
-//! no bundler can tree-shake the unused ones out.
+//! no bundler can tree-shake the unused ones out. A shipped profile binary is
+//! 133-147 KB, or 178-196 KB base64.
 //!
 //! The doc comments below are load-bearing: `wasm-bindgen` copies them into the
 //! generated `.d.ts`, so they are the published TypeScript documentation.

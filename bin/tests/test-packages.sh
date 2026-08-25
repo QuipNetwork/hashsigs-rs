@@ -53,11 +53,27 @@ printf '%s\n' "${PROFILES[@]}" | grep -qx "${DEFAULT_PROFILE}" ||
 # Every shipped profile needs both halves: a cargo feature that compiles it,
 # and a module a caller can import it by. A profile missing either one is
 # listed as shipped and is not reachable.
+seen_names=()
 for profile in "${PROFILES[@]}"; do
   feature="$(PROFILE_FEATURE "${profile}")"
   [[ -n "${feature}" ]] || fail "no cargo feature mapped for profile ${profile}"
   grep -q "^${feature} = " "${SCRIPT_DIR}/../Cargo.toml" ||
     fail "cargo feature ${feature} (profile ${profile}) is not declared in Cargo.toml"
+
+  # The SHRINCS profile name a binary built for this profile reports. Only
+  # shape is checked here -- that a name exists, is unique, and is prefixed
+  # `shrincs-`. Whether it is the RIGHT name is checked where the answer
+  # actually lives: the npm conformance suite loads each built binary and
+  # compares `profileName()` against this table.
+  shrincs_name="$(PROFILE_SHRINCS_NAME "${profile}")"
+  [[ -n "${shrincs_name}" ]] ||
+    fail "no SHRINCS profile name mapped for profile ${profile}"
+  [[ "${shrincs_name}" == shrincs-* ]] ||
+    fail "profile ${profile} maps to SHRINCS name ${shrincs_name}, which is not prefixed 'shrincs-'"
+  if printf '%s\n' "${seen_names[@]:-}" | grep -qx "${shrincs_name}"; then
+    fail "SHRINCS name ${shrincs_name} is mapped by more than one profile"
+  fi
+  seen_names+=("${shrincs_name}")
 
   module="$(PROFILE_RUST_MODULE "${profile}")"
   [[ -n "${module}" ]] || fail "no rust module mapped for profile ${profile}"
