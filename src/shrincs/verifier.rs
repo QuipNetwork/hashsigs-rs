@@ -212,11 +212,11 @@ impl ShrincsVerifier {
 }
 
 impl ShrincsVerifier {
-    /// `keccak256("quip.shrincs-verifier.v1")`. Mirrors
+    /// `keccak256("quip.shrincs-verifier.v2")`. Mirrors
     /// `SHRINCSVerifier.VERSION_TAG`: names this verifier's key/envelope
     /// format family, not the compiled parameter profile.
     pub fn version_tag() -> [u8; HASH_LEN] {
-        keccak_packed(&[b"quip.shrincs-verifier.v1"])
+        keccak_packed(&[b"quip.shrincs-verifier.v2"])
     }
 }
 
@@ -342,13 +342,13 @@ mod interface_tests {
 
     #[test]
     fn version_tag_matches_pinned_solidity_constant() {
-        // keccak256("quip.shrincs-verifier.v1"), computed independently and
+        // keccak256("quip.shrincs-verifier.v2"), computed independently and
         // pinned here so drift in either the literal string or the hash
         // routine fails loud instead of silently matching itself.
         const EXPECTED: [u8; HASH_LEN] = [
-            0x06, 0x4b, 0x5b, 0x1b, 0x1f, 0x5d, 0x6d, 0xc3, 0xd3, 0x8c, 0x8e, 0xd9, 0xf3, 0x8f,
-            0xd2, 0x4f, 0x68, 0x62, 0x83, 0x29, 0xf9, 0x32, 0x9a, 0x54, 0xb8, 0xe8, 0xc5, 0x3e,
-            0x3b, 0x06, 0xda, 0x58,
+            0x87, 0x51, 0x90, 0x3f, 0x36, 0x56, 0xac, 0x40, 0xf4, 0x40, 0x82, 0x33, 0xd0, 0xdb,
+            0xc2, 0x4c, 0xeb, 0xc4, 0xdf, 0xa0, 0xca, 0xea, 0x6e, 0xfd, 0x09, 0xb7, 0x80, 0x81,
+            0x61, 0x1a, 0xa0, 0x42,
         ];
         assert_eq!(ShrincsVerifier::version_tag(), EXPECTED);
     }
