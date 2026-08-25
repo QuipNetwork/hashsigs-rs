@@ -198,9 +198,7 @@ py-tests:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   before_script:
-    - apt-get update -qq && apt-get install -y -qq python3-venv > /dev/null
-    - python3 -m venv /tmp/py-venv
-    - /tmp/py-venv/bin/pip install --quiet build pytest
+    - !reference [.install-python-build, before_script]
   script:
     # `build` with no flags builds the sdist and then builds the wheel FROM
     # that sdist, so this one command covers the source-install path that

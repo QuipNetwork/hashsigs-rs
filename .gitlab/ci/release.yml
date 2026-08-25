@@ -295,10 +295,14 @@ release:validate:
     # check-npm-dists packs the npm tarball, and prepack rebuilds the wasm.
     # Without this, bin/build-wasm.sh exits 1 with "wasm-bindgen CLI not found".
     - !reference [.install-wasm-bindgen, before_script]
+    # check-python-dists runs `python3 -m build`, which the rust image has no
+    # module for.
+    - !reference [.install-python-build, before_script]
   script:
     # The wasm-bindgen template installs into ${CARGO_HOME}/bin, which is not
-    # on PATH in a fresh script step.
-    - export PATH="${CARGO_HOME}/bin:${PATH}"
+    # on PATH in a fresh script step. The python venv is prepended for the same
+    # reason: the Makefile calls a bare `python3`, so the venv has to win.
+    - export PATH="/tmp/py-venv/bin:${CARGO_HOME}/bin:${PATH}"
     # Assert the tag against the manifests FIRST, before anything is built.
     # Without this the only thing enforcing tag-versus-crate agreement is the
     # sync check buried inside `npm pack`, so a mistyped tag is discovered
