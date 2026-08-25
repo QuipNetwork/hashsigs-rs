@@ -77,6 +77,9 @@ pub(crate) mod buf;
 pub mod error;
 pub mod profile;
 pub(crate) mod hash;
+// Temporary bridge from the cfg-selected profile to `profile::Profile`.
+// Task 5 deletes this together with `profiles`.
+pub(crate) mod profile_active;
 pub(crate) mod profiles;
 pub mod shrincs;
 pub mod sphincs_plus_c;
