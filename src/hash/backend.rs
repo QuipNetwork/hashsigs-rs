@@ -40,7 +40,7 @@ pub(crate) fn keccak256v(parts: &[&[u8]]) -> [u8; HASH_LEN] {
         test,
         feature = "std",
         not(feature = "parallel"),
-        not(any(feature = "profile-128s-q18", feature = "profile-128s-q20"))
+        not(any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20))
     ))]
     metrics::record(parts);
     #[cfg(any(target_os = "solana", feature = "solana"))]
@@ -71,13 +71,13 @@ pub(crate) fn keccak256(data: &[u8]) -> [u8; HASH_LEN] {
 /// SHA-256 over the concatenation of `parts` (scheme-hash suite for
 /// `profile-256s-sha2`). Vectored like `keccak256v`.
 #[inline]
-#[cfg_attr(not(shrincs_hash_suite_sha2), allow(dead_code))]
+#[cfg_attr(not(feature = "profile-256s-sha2"), allow(dead_code))]
 pub(crate) fn sha256v(parts: &[&[u8]]) -> [u8; HASH_LEN] {
     #[cfg(all(
         test,
         feature = "std",
         not(feature = "parallel"),
-        not(any(feature = "profile-128s-q18", feature = "profile-128s-q20"))
+        not(any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20))
     ))]
     metrics::record(parts);
     #[cfg(any(target_os = "solana", feature = "solana"))]
@@ -110,7 +110,7 @@ pub(crate) fn sha256v(parts: &[&[u8]]) -> [u8; HASH_LEN] {
     test,
     feature = "std",
     not(feature = "parallel"),
-    not(any(feature = "profile-128s-q18", feature = "profile-128s-q20"))
+    not(any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20))
 ))]
 pub(crate) mod metrics {
     use core::cell::Cell;

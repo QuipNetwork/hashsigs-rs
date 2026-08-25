@@ -22,6 +22,7 @@
 
 use crate::hash::suite::Sha2256Suite;
 use crate::profile::Profile;
+use crate::profiles::identity;
 
 /// Parameter tuple for `shrincs-256s-sha2`.
 pub struct Profile256sSha2;
@@ -29,6 +30,7 @@ pub struct Profile256sSha2;
 impl Profile for Profile256sSha2 {
     type Suite = Sha2256Suite;
     const PROFILE_NAME: &'static str = "shrincs-256s-sha2";
+    const PROFILE_ID: [u8; 32] = identity::p256s_sha2::PROFILE_ID;
     const HASH_TRUNC_LEN: usize = 32;
     const STATELESS_SIGNATURE_LIMIT: u64 = 1_048_576;
     const HYPERTREE_HEIGHT: u8 = 64;
@@ -40,6 +42,20 @@ impl Profile for Profile256sSha2 {
     const FORS_C_MAX_GRIND_COUNTER: u32 = 1 << 24;
     const WOTS_TARGET_SUM: u32 = 480;
 }
+
+/// Compile-time proof that the hand-transcribed `PROFILE_NAME` above is
+/// byte-identical to the one `build.rs` hashed into this profile's
+/// `PROFILE_ID`. `PROFILE_ID` is ABI-bearing: the Solidity contracts compare
+/// against it, so a typo in either copy is a wire break that no golden vector
+/// would catch. A `const` item forces const evaluation, making that a build
+/// failure rather than an unreached runtime assertion.
+const _: () = assert!(
+    crate::profile::str_eq(
+        <Profile256sSha2 as Profile>::PROFILE_NAME,
+        identity::p256s_sha2::PROFILE_NAME
+    ),
+    "profile type PROFILE_NAME disagrees with the build script's profile identity"
+);
 
 /// `shrincs-256s-sha2` instantiated.
 pub type Shrincs = crate::shrincs::ShrincsCore<Profile256sSha2, 64, 8>;

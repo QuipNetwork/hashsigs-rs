@@ -868,7 +868,10 @@ fn winning_fors_counter_and_digest<P: Profile>(
     winner
 }
 
-#[cfg(all(test, any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
+#[cfg(all(
+    test,
+    any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20)
+))]
 mod measurement_tests {
     use super::super::key::{Key, PkSeed, PrfSeed, PrivateKey, PublicKey, Root, SkSeed};
     use super::{signer_fors_digest, SigningForsDigest};

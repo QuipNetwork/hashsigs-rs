@@ -32,31 +32,26 @@
 //! select its suite from an independent cfg, which is precisely the defect
 //! this module does not reproduce.)
 //!
-//! TRANSITIONAL. The `shrincs_profile_*` cfgs come from `build.rs`, which still
-//! permits only one profile per build. When that restriction is lifted, each of
-//! the three surfaces above takes its own profile parameter and this module
-//! goes away.
+//! TRANSITIONAL. Every enabled profile compiles; the single
+//! `shrincs_default_profile_*` cfg from `build.rs` names only which one these
+//! surfaces bind to. When each of the three surfaces above takes its own
+//! profile parameter, this module goes away.
 
 use crate::hash::suite::HashSuite;
 use crate::profile::Profile;
 
-/// The build-script-generated profile identity: `PROFILE_NAME` and
-/// `PROFILE_ID`, the keccak256 of the name that the Solidity contracts match.
-mod identity {
-    include!(concat!(env!("OUT_DIR"), "/shrincs_profile_identity.rs"));
-}
-
-/// `keccak256(PROFILE_NAME)`. Wire identity, not part of the [`Profile`] trait.
-pub use identity::PROFILE_ID;
-
-#[cfg(shrincs_profile_128s_q18)]
+#[cfg(shrincs_default_profile_128s_q18)]
 pub use crate::profiles::p128s_q18::Profile128sQ18 as SelectedProfile;
-#[cfg(shrincs_profile_128s_q20)]
+#[cfg(shrincs_default_profile_128s_q20)]
 pub use crate::profiles::p128s_q20::Profile128sQ20 as SelectedProfile;
-#[cfg(shrincs_profile_256s)]
+#[cfg(shrincs_default_profile_256s)]
 pub use crate::profiles::p256s::Profile256s as SelectedProfile;
-#[cfg(shrincs_profile_256s_sha2)]
+#[cfg(shrincs_default_profile_256s_sha2)]
 pub use crate::profiles::p256s_sha2::Profile256sSha2 as SelectedProfile;
+
+/// `keccak256(PROFILE_NAME)` for the selected profile. Taken from the profile
+/// type, so it cannot drift to another profile's id in a multi-profile build.
+pub const PROFILE_ID: [u8; 32] = <SelectedProfile as Profile>::PROFILE_ID;
 
 /// `SelectedProfile::NUM_WOTS_CHAINS` as an array width. A plain `const`, not a
 /// generic expression, so it is legal in array-length position.
@@ -69,34 +64,9 @@ pub const NUM_LAYERS: usize = <SelectedProfile as Profile>::NUM_HYPERTREE_LAYERS
 /// constants, in the same associated-const form the core types use.
 const _: () = crate::profile::assert_widths::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>();
 
-/// Compile-time proof that the hand-transcribed `PROFILE_NAME` on the selected
-/// profile type is byte-identical to the one `build.rs` hashed into
-/// `PROFILE_ID`. `PROFILE_ID` is ABI-bearing: the Solidity contracts compare
-/// against it, so a typo in either copy is a wire break that no golden vector
-/// would catch. `const` evaluation makes that a build failure.
-const _: () = assert!(
-    konst_str_eq(
-        <SelectedProfile as Profile>::PROFILE_NAME,
-        identity::PROFILE_NAME
-    ),
-    "profile type PROFILE_NAME disagrees with the build script's profile identity"
-);
-
-/// `str` equality usable in a const context on stable Rust.
-const fn konst_str_eq(a: &str, b: &str) -> bool {
-    let (a, b) = (a.as_bytes(), b.as_bytes());
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut i = 0;
-    while i < a.len() {
-        if a[i] != b[i] {
-            return false;
-        }
-        i += 1;
-    }
-    true
-}
+// The `PROFILE_NAME`/`PROFILE_ID` agreement guard now lives per profile, in
+// each profile module, so it covers every compiled profile rather than only the
+// selected one.
 
 /// The scheme-hash suite id of the selected profile, for the sites that fold it
 /// into a preimage or a wire field.

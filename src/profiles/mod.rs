@@ -18,15 +18,23 @@
 //! One module per SHRINCS profile. The features are additive: enabling two
 //! profiles compiles two instantiations, which is the point of this design.
 //!
-//! `profile-256s` is also implied by the `default-profile-256s` default
-//! feature, so the default profile and its `crate::Shrincs` alias exist in a
-//! plain `cargo build`.
+//! `profile-256s` is in the crate's `default` feature list, so the default
+//! profile and its `crate::Shrincs` alias exist in a plain `cargo build`.
+
+/// Build-script-generated profile identity, one `pub mod` per profile, each
+/// holding that profile's `PROFILE_NAME` and `PROFILE_ID`
+/// (`keccak256(PROFILE_NAME)`). Every profile is generated regardless of which
+/// features are on, so the unused ones are dead code by construction.
+#[allow(dead_code)]
+pub(crate) mod identity {
+    include!(concat!(env!("OUT_DIR"), "/shrincs_profile_identities.rs"));
+}
 
 #[cfg(feature = "profile-128s-q18")]
 pub mod p128s_q18;
 #[cfg(feature = "profile-128s-q20")]
 pub mod p128s_q20;
-#[cfg(any(feature = "profile-256s", feature = "default-profile-256s"))]
+#[cfg(feature = "profile-256s")]
 pub mod p256s;
 #[cfg(feature = "profile-256s-sha2")]
 pub mod p256s_sha2;
@@ -71,15 +79,9 @@ mod tests {
 
 // The acceptance criterion for the whole plan: two profiles that differ only
 // by scheme hash suite, instantiated in the same build. Gated on the pair
-// rather than on all four features, because `build.rs` still rejects more than
-// one explicit profile feature per build — `--features profile-256s-sha2`
-// leaves the default `default-profile-256s` on, so this pair does compile
-// together today and the test actually runs.
-#[cfg(all(
-    test,
-    feature = "profile-256s-sha2",
-    any(feature = "profile-256s", feature = "default-profile-256s")
-))]
+// rather than on all four features so it still runs under
+// `--features profile-256s-sha2`, which leaves the default `profile-256s` on.
+#[cfg(all(test, feature = "profile-256s-sha2", feature = "profile-256s"))]
 mod coexistence_tests {
     use crate::profile::Profile;
 

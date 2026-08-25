@@ -87,7 +87,7 @@ fn assert_verify_budget(what: &str, allocs: u64) {
 }
 
 #[cfg_attr(
-    any(shrincs_profile_128s_q18, shrincs_profile_128s_q20),
+    any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20),
     ignore = "128s signing grinds ~2^24 counters; the allocation budget is profile-independent and enforced by the 256s lanes"
 )]
 #[cfg_attr(
@@ -152,7 +152,7 @@ fn stateless_verify_stays_within_allocation_budget() {
 }
 
 #[cfg_attr(
-    any(shrincs_profile_128s_q18, shrincs_profile_128s_q20),
+    any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20),
     ignore = "128s signing grinds ~2^24 counters; the allocation budget is profile-independent and enforced by the 256s lanes"
 )]
 #[cfg_attr(

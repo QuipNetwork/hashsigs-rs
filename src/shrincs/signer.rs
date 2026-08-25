@@ -401,7 +401,7 @@ mod tests {
     // The 256s profile pins these exact counts; the 128s profiles use a
     // different tuple (h=18, d=1, len=32), so this constant-identity check is
     // scoped to the default build. 256s behaviour is unchanged.
-    #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
+    #[cfg(not(any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20)))]
     #[test]
     fn signer_constants_match_verifier_constants() {
         use crate::shrincs::{
@@ -422,7 +422,7 @@ mod tests {
     // hypertree root exercises the real stateful WOTS-C and unbalanced-tree
     // hashing at n=16. This also confirms `mask_hash` actually truncates: every
     // masked node value must have a zero low half.
-    #[cfg(any(feature = "profile-128s-q18", feature = "profile-128s-q20"))]
+    #[cfg(any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20))]
     #[test]
     fn stateful_round_trip_verifies_under_128s_truncation() {
         use crate::shrincs::HASH_TRUNC_LEN;
@@ -531,7 +531,7 @@ mod tests {
     }
 
     #[cfg_attr(
-        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20),
         ignore = "128s full keygen remains manual; stateful signer behavior is covered by stateful fixtures"
     )]
     #[test]
@@ -546,7 +546,7 @@ mod tests {
     }
 
     #[cfg_attr(
-        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20),
         ignore = "128s full keygen remains manual; stateful signer behavior is covered by stateful fixtures"
     )]
     #[test]
@@ -563,7 +563,7 @@ mod tests {
     }
 
     #[cfg_attr(
-        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20),
         ignore = "128s full keygen remains manual; stateful signer behavior is covered by stateful fixtures"
     )]
     #[test]
@@ -645,7 +645,7 @@ mod tests {
         ));
     }
 
-    #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
+    #[cfg(not(any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20)))]
     #[test]
     fn stateless_sign_via_sphincs_plus_c_verifies_hybrid_and_independent() {
         use crate::sphincs_plus_c::{self};
@@ -671,7 +671,7 @@ mod tests {
     }
 
     #[cfg_attr(
-        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20),
         ignore = "128s stateless keygen/signing is compute-infeasible in-process"
     )]
     #[test]
@@ -721,7 +721,7 @@ mod tests {
     // signer object) and its output round-trips through the opaque
     // `VerifierInterface::verify`.
     #[cfg_attr(
-        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20),
         ignore = "128s full keygen remains manual; covered by stateful fixtures"
     )]
     #[test]
@@ -857,7 +857,7 @@ mod tests {
     }
 
     #[cfg_attr(
-        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20),
         ignore = "128s stateless keygen/signing is compute-infeasible in-process"
     )]
     #[test]
@@ -894,7 +894,7 @@ mod tests {
     }
 
     #[cfg_attr(
-        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20),
         ignore = "128s stateless keygen/signing is compute-infeasible in-process"
     )]
     #[test]
@@ -1230,7 +1230,7 @@ mod tests {
     // - 1` entries (the omitted final tree is forced to leaf index 0). The
     // empty-message signature must not verify a one-byte message. (Bead 0lh.)
     #[cfg_attr(
-        any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+        any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20),
         ignore = "128s stateless keygen/signing is compute-infeasible in-process"
     )]
     #[test]

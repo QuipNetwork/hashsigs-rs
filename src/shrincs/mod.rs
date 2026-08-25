@@ -93,7 +93,7 @@ impl<P: Profile, const NUM_CHAINS: usize, const NUM_LAYERS: usize> Default
     }
 }
 
-#[cfg(any(feature = "profile-256s", feature = "default-profile-256s"))]
+#[cfg(feature = "profile-256s")]
 pub use crate::profiles::p256s::Profile256s;
 pub use crate::verifier::{VerifierInterface, VerifyOutcome};
 pub use dispatch::prepare_stateless_delegation;
@@ -113,9 +113,9 @@ pub use crate::shrincs::verifier::{
 };
 pub const FORS_C_MAX_GRIND_COUNTER: u32 =
     <crate::profiles::selected::SelectedProfile as Profile>::FORS_C_MAX_GRIND_COUNTER;
-// `PROFILE_ID` is the build-script-generated identity hash, not part of the
-// `Profile` trait. `crate::profiles::selected` proves at compile time that the
-// name it hashed is the selected profile type's own `PROFILE_NAME`.
+// `PROFILE_ID` is `<SelectedProfile as Profile>::PROFILE_ID`, the identity hash
+// the build script generated for that profile. Each profile module proves at
+// compile time that the name hashed there is its own `PROFILE_NAME`.
 pub use crate::profiles::selected::PROFILE_ID;
 pub use crate::HASH_LEN;
 pub use action_context::ActionContext;
@@ -157,14 +157,14 @@ mod profile_tests {
         assert_eq!(super::PROFILE_ID, expected);
     }
 
-    #[cfg(any(feature = "profile-128s-q18", feature = "profile-128s-q20"))]
+    #[cfg(any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20))]
     #[test]
     fn active_128_profile_uses_raised_fors_grind_budget() {
         assert_eq!(super::FORS_TREE_HEIGHT, 24);
         assert_eq!(super::FORS_C_MAX_GRIND_COUNTER, 1 << 28);
     }
 
-    #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
+    #[cfg(not(any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20)))]
     #[test]
     fn active_non_128_profile_keeps_default_fors_grind_budget() {
         assert_eq!(super::FORS_C_MAX_GRIND_COUNTER, 1 << 24);

@@ -22,8 +22,9 @@
 //! (canonical action hashes, public-key commitments, profile identity) on
 //! keccak under every suite; Rust mirrors that split.
 //!
-//! The suite is selected by the `shrincs_hash_suite_sha2` cfg that build.rs
-//! derives from the active profile, not by a Cargo feature directly.
+//! The suite is never selected on its own: it is `<P as Profile>::Suite`, an
+//! associated type of the profile, so a profile can never be paired with the
+//! wrong suite and two profiles with different suites coexist in one build.
 
 pub const HASH_SUITE_KECCAK_256: u32 = 1;
 pub const HASH_SUITE_SHA2_256: u32 = 2;

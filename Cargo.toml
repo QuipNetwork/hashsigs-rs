@@ -49,10 +49,7 @@ members = [
 resolver = "2"
 
 [features]
-# Keep the default-profile selector internal so downstream additive feature use
-# works as expected: `--features profile-128s-q18` should override the default
-# 256s selection instead of conflicting with it.
-default = ["std", "default-profile-256s"]
+default = ["std", "profile-256s"]
 # Host/runtime surface: serde std, env-based debug traces.
 std = ["alloc", "serde/std"]
 # Heap types (Vec/Box/String) used by signature wire types and pack helpers.
@@ -60,17 +57,20 @@ alloc = []
 # Optional Solana program dependency + syscall hash routing (also auto-selected
 # on target_os = "solana" via cfg in hash_backend).
 solana = ["dep:solana-program"]
-# Compile-time SHRINCS parameter-profile selection. These mirror the Solidity
-# contracts/profiles/<profile>/SHRINCSParams.sol libraries selected by the
-# Foundry `shrincs-profile/` remapping: one parameter tuple is chosen at
-# build time, so counts stay compile-time constants (no runtime params
-# struct). `profile-256s-sha2` switches the internal scheme-hash suite to
-# SHA-256 while keeping EVM-domain hashes (profile identity, commitments,
-# canonical action hashes) on keccak to match Solidity. Consumers may either:
-# - rely on the default internal 256s selection
-# - enable one explicit public profile feature
-# Build selection logic lives in build.rs.
-default-profile-256s = []
+# SHRINCS parameter profiles. These are additive: enabling two features
+# compiles two instantiations that coexist in one build. Each mirrors the
+# Solidity contracts/profiles/<profile>/SHRINCSParams.sol library.
+#
+# Counts stay compile-time constants (no runtime params struct): each profile
+# is a type implementing `Profile`, and the algorithms are generic over it.
+# `profile-256s-sha2` uses SHA-256 for the internal scheme hashes while keeping
+# EVM-domain hashes (profile identity, commitments, canonical action hashes) on
+# keccak to match Solidity.
+#
+# The non-generic facades (`ShrincsVerifier`, the wasm bindings, the
+# golden-vector tests) still bind to one profile. build.rs picks it: the single
+# enabled profile, or, when several are on, the first of profile-256s,
+# profile-256s-sha2, profile-128s-q18, profile-128s-q20.
 profile-256s = []
 profile-128s-q18 = []
 profile-128s-q20 = []

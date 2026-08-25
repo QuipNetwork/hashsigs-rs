@@ -33,11 +33,10 @@ DEFAULT_PROFILE="256s-keccak"
 # The opt-in profiles, each published as a sibling package.
 SIBLING_PROFILES=(128s-q18 128s-q20 256s-sha2)
 
-# Map a profile name to the cargo feature that selects it. The default
-# profile builds with default features, so it maps to the internal selector.
+# Map a profile name to the cargo feature that compiles it.
 PROFILE_FEATURE() {
   case "$1" in
-  256s-keccak) echo "default-profile-256s" ;;
+  256s-keccak) echo "profile-256s" ;;
   128s-q18) echo "profile-128s-q18" ;;
   128s-q20) echo "profile-128s-q20" ;;
   256s-sha2) echo "profile-256s-sha2" ;;

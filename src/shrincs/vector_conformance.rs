@@ -64,22 +64,22 @@ fn vector_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(vector_filename())
 }
 
-#[cfg(shrincs_profile_256s)]
+#[cfg(shrincs_default_profile_256s)]
 fn vector_filename() -> &'static str {
     "tests/test_vectors/shrincs_sphincs_256s_keccak.json"
 }
 
-#[cfg(shrincs_profile_128s_q18)]
+#[cfg(shrincs_default_profile_128s_q18)]
 fn vector_filename() -> &'static str {
     "tests/test_vectors/shrincs_sphincs_128s_q18_keccak.json"
 }
 
-#[cfg(shrincs_profile_128s_q20)]
+#[cfg(shrincs_default_profile_128s_q20)]
 fn vector_filename() -> &'static str {
     "tests/test_vectors/shrincs_sphincs_128s_q20_keccak.json"
 }
 
-#[cfg(shrincs_profile_256s_sha2)]
+#[cfg(shrincs_default_profile_256s_sha2)]
 fn vector_filename() -> &'static str {
     "tests/test_vectors/shrincs_sphincs_256s_sha2.json"
 }
@@ -301,7 +301,7 @@ fn stateless_golden_vector_accepts_valid_and_rejects_tampered() {
     }
 }
 
-#[cfg(any(feature = "profile-128s-q18", feature = "profile-128s-q20"))]
+#[cfg(any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20))]
 #[test]
 fn logs_committed_128_stateless_fors_counter() {
     use crate::shrincs::{FORS_C_MAX_GRIND_COUNTER, PROFILE_NAME};
@@ -323,7 +323,7 @@ fn logs_committed_128_stateless_fors_counter() {
 /// This proves the signer still *reproduces* the reference bytes, not only that
 /// the verifier accepts them. (Bead 0y8.)
 #[cfg_attr(
-    any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+    any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20),
     ignore = "128s stateless keygen/signing is compute-infeasible in-process"
 )]
 #[test]
@@ -446,7 +446,7 @@ fn stateful_public_key_from_case(base: &PublicKey, case_public_key: &Value) -> P
 /// keygen: accept the valid case and reject wrongMessage / wrongPublicKey /
 /// corruptedSignature. (Bead p8a.)
 #[cfg_attr(
-    any(feature = "profile-128s-q18", feature = "profile-128s-q20"),
+    any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20),
     ignore = "128s stateful golden conformance still needs a full key fixture/manual regeneration path"
 )]
 #[test]

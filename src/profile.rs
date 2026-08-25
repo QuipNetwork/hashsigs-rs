@@ -39,6 +39,15 @@ pub trait Profile {
     /// Profile identity string, for example `shrincs-256s`.
     const PROFILE_NAME: &'static str;
 
+    /// `keccak256(PROFILE_NAME)`. Wire identity: the Solidity contracts compare
+    /// against this value, so it is ABI-bearing. Each profile module sets it
+    /// from the build script's generated identity for that profile, never by
+    /// hand, and [`str_eq`] proves the two copies of the name agree at compile
+    /// time. Binding it to the profile type rather than to a build-script
+    /// global is what lets two profiles coexist in one build without one of
+    /// them carrying the other's id.
+    const PROFILE_ID: [u8; 32];
+
     const HASH_TRUNC_LEN: usize;
     const STATELESS_SIGNATURE_LIMIT: u64;
     const HYPERTREE_HEIGHT: u8;
@@ -79,6 +88,29 @@ pub const fn assert_widths<P: Profile, const NUM_CHAINS: usize, const NUM_LAYERS
     );
 }
 
+/// `str` equality usable in a const context on stable Rust.
+///
+/// Each profile module consumes this from a `const _: () = assert!(...)` item
+/// to prove its hand-transcribed [`Profile::PROFILE_NAME`] is byte-identical to
+/// the name the build script hashed into that profile's `PROFILE_ID`. A typo in
+/// either copy is a wire break that no golden vector would catch. As with
+/// [`assert_widths`], the `const` item is what forces evaluation: a bare call
+/// from a runtime path would only panic at runtime.
+pub(crate) const fn str_eq(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < a.len() {
+        if a[i] != b[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -95,6 +127,7 @@ mod tests {
     impl Profile for FakeProfile {
         type Suite = FakeSuite;
         const PROFILE_NAME: &'static str = "fake";
+        const PROFILE_ID: [u8; 32] = [0u8; 32];
         const HASH_TRUNC_LEN: usize = 32;
         const STATELESS_SIGNATURE_LIMIT: u64 = 1_048_576;
         const HYPERTREE_HEIGHT: u8 = 64;

@@ -263,22 +263,22 @@ pub(crate) fn vectors_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(vectors_filename())
 }
 
-#[cfg(shrincs_profile_256s)]
+#[cfg(shrincs_default_profile_256s)]
 fn vectors_filename() -> &'static str {
     "tests/test_vectors/shrincs_account_wrapper_vectors.json"
 }
 
-#[cfg(shrincs_profile_256s_sha2)]
+#[cfg(shrincs_default_profile_256s_sha2)]
 fn vectors_filename() -> &'static str {
     "tests/test_vectors/shrincs_account_wrapper_vectors_256s_sha2.json"
 }
 
-#[cfg(shrincs_profile_128s_q18)]
+#[cfg(shrincs_default_profile_128s_q18)]
 fn vectors_filename() -> &'static str {
     "tests/test_vectors/shrincs_account_wrapper_vectors_128s_q18_keccak.json"
 }
 
-#[cfg(shrincs_profile_128s_q20)]
+#[cfg(shrincs_default_profile_128s_q20)]
 fn vectors_filename() -> &'static str {
     "tests/test_vectors/shrincs_account_wrapper_vectors_128s_q20_keccak.json"
 }

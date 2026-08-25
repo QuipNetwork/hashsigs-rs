@@ -20,13 +20,13 @@ use std::process::Command;
 // `--features <profile>`; note that 128s stateless generation is
 // the heavy, cache-backed regeneration event (2^24-leaf FORS trees, 2^18-leaf
 // hypertree) rather than an in-line run.
-#[cfg(shrincs_profile_256s)]
+#[cfg(shrincs_default_profile_256s)]
 const OUT_PATH: &str = "tests/test_vectors/shrincs_sphincs_256s_keccak.json.gz";
-#[cfg(shrincs_profile_128s_q18)]
+#[cfg(shrincs_default_profile_128s_q18)]
 const OUT_PATH: &str = "tests/test_vectors/shrincs_sphincs_128s_q18_keccak.json.gz";
-#[cfg(shrincs_profile_128s_q20)]
+#[cfg(shrincs_default_profile_128s_q20)]
 const OUT_PATH: &str = "tests/test_vectors/shrincs_sphincs_128s_q20_keccak.json.gz";
-#[cfg(shrincs_profile_256s_sha2)]
+#[cfg(shrincs_default_profile_256s_sha2)]
 const OUT_PATH: &str = "tests/test_vectors/shrincs_sphincs_256s_sha2.json.gz";
 
 #[test]
