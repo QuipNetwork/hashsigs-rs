@@ -8,8 +8,9 @@ default:
   tags: [linux, x86_64]
 
 # Shared cargo/target cache keyed on Cargo.lock + job name so stale deps cannot
-# drift under --locked and so mutually-exclusive profile feature jobs do not
-# share a single target/ tree (profile features overwrite each other).
+# drift under --locked and so jobs that select different profiles do not share a
+# single target/ tree. The profile features are additive, but each job still
+# builds with a different selected profile, so their artefacts differ.
 # Applied via extends on Rust jobs only (not publish-npm).
 #
 # Trust note: the tool binaries cached in .cargo-home/bin are sha256-verified
