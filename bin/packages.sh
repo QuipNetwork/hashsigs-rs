@@ -27,11 +27,30 @@
 # Names below are read by the sourcing script, never by this file.
 # shellcheck disable=SC2034
 
-# The profile that ships in the base package of every ecosystem.
+# One distribution per ecosystem carries every profile.
+#
+# Each ecosystem publishes exactly one artifact: one crate, one PyPI
+# distribution, one npm package. Every profile ships inside it and is imported
+# on its own path, so a caller takes the profile it wants without taking a
+# second dependency:
+#
+#   Rust    use hashsigs_rs::profiles::p128s_q18::Shrincs;
+#   Python  from hashsigs.profiles import p128s_q18
+#   npm     import { shrincs } from "@quip.network/hashsigs-wasm/128s-q18"
+#
+# This replaces an earlier sibling-package model, where each opt-in profile was
+# its own distribution pinning the base. Sibling packages multiply the release
+# surface by the profile count, and they let a caller install a profile package
+# whose version has drifted from the base it pins. One distribution cannot
+# drift from itself.
+
+# The profile the non-generic surfaces bind to: the wasm bindings, the
+# `ShrincsVerifier` facade, and the golden-vector generator. It is the profile
+# a caller gets from a bare import, not the only profile in the artifact.
 DEFAULT_PROFILE="256s-keccak"
 
-# The opt-in profiles, each published as a sibling package.
-SIBLING_PROFILES=(128s-q18 128s-q20 256s-sha2)
+# Every profile the published artifacts carry, default included.
+PROFILES=(256s-keccak 256s-sha2 128s-q18 128s-q20 128s-q18-sha2 128s-q20-sha2)
 
 # Map a profile name to the cargo feature that compiles AND selects it.
 #
@@ -42,12 +61,17 @@ SIBLING_PROFILES=(128s-q18 128s-q20 256s-sha2)
 # Adding --no-default-features is therefore unnecessary here, and would also
 # drop `std`. Verify with:
 #   cargo check --features <feature> -v | grep -o -- '--cfg shrincs_default_profile_[a-z0-9_]*'
+#
+# Selection matters only for the non-generic surfaces above. Building the
+# artifact that carries every profile enables them all at once.
 PROFILE_FEATURE() {
   case "$1" in
   256s-keccak) echo "profile-256s" ;;
+  256s-sha2) echo "profile-256s-sha2" ;;
   128s-q18) echo "profile-128s-q18" ;;
   128s-q20) echo "profile-128s-q20" ;;
-  256s-sha2) echo "profile-256s-sha2" ;;
+  128s-q18-sha2) echo "profile-128s-q18-sha2" ;;
+  128s-q20-sha2) echo "profile-128s-q20-sha2" ;;
   *)
     echo "unknown profile: $1" >&2
     return 1
@@ -55,25 +79,24 @@ PROFILE_FEATURE() {
   esac
 }
 
+# The import path each ecosystem exposes for a profile. Used by the packaging
+# checks so a profile cannot ship without a way to reach it.
+PROFILE_RUST_MODULE() {
+  local p="${1//-/_}"
+  case "$1" in
+  256s-keccak) echo "hashsigs_rs::profiles::p256s" ;;
+  *) echo "hashsigs_rs::profiles::p${p%_keccak}" ;;
+  esac
+}
+
 # crates.io. One publishable crate; the binding crates carry publish = false.
 CRATE=hashsigs-rs
 
-# PyPI. The base distribution and one sibling per opt-in profile, in publish
-# order: the base must be live before a sibling that pins it.
+# PyPI. One distribution, every profile inside it.
 PYPI_BASE=hashsigs
-PYPI_SIBLINGS=(
-  hashsigs-profile-128s-q18
-  hashsigs-profile-128s-q20
-  hashsigs-profile-256s-sha2
-)
 
-# npm. Same ordering rule as PyPI.
+# npm. One package, every profile inside it, each on its own subpath export.
 NPM_BASE="@quip.network/hashsigs-wasm"
-NPM_SIBLINGS=(
-  "@quip.network/hashsigs-wasm-128s-q18"
-  "@quip.network/hashsigs-wasm-128s-q20"
-  "@quip.network/hashsigs-wasm-256s-sha2"
-)
 
 # Target triples for wheels and C tarballs. Cross-compiled from Linux with
 # cargo-zigbuild; the crate has no C dependencies, so no target C toolchain

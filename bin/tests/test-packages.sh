@@ -19,8 +19,10 @@
 
 set -euo pipefail
 
-# Invariant test for bin/packages.sh. A profile with no sibling package is a
-# profile that never gets built, and nothing else in the tree would say so.
+# Invariant test for bin/packages.sh. Each ecosystem ships one artifact
+# carrying every profile, so the failure this guards is a profile that is
+# listed as shipped but has no cargo feature to compile it or no module to
+# import it by. Nothing else in the tree would say so.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source-path=SCRIPTDIR/..
@@ -33,31 +35,35 @@ fail() {
 }
 
 [[ -n "${DEFAULT_PROFILE}" ]] || fail "DEFAULT_PROFILE is empty"
-[[ ${#SIBLING_PROFILES[@]} -eq 3 ]] ||
-  fail "expected 3 sibling profiles, got ${#SIBLING_PROFILES[@]}"
-[[ ${#PYPI_SIBLINGS[@]} -eq ${#SIBLING_PROFILES[@]} ]] ||
-  fail "PYPI_SIBLINGS (${#PYPI_SIBLINGS[@]}) does not match SIBLING_PROFILES (${#SIBLING_PROFILES[@]})"
-[[ ${#NPM_SIBLINGS[@]} -eq ${#SIBLING_PROFILES[@]} ]] ||
-  fail "NPM_SIBLINGS (${#NPM_SIBLINGS[@]}) does not match SIBLING_PROFILES (${#SIBLING_PROFILES[@]})"
+[[ ${#PROFILES[@]} -eq 6 ]] ||
+  fail "expected 6 profiles, got ${#PROFILES[@]}"
 [[ ${#TRIPLES[@]} -eq 6 ]] || fail "expected 6 target triples, got ${#TRIPLES[@]}"
 
-# Equal lengths are not enough. Every later script zips these arrays by
-# index, so entry i of each must describe SIBLING_PROFILES[i]. Reordering
-# one array and not the other keeps the counts correct and ships the wrong
-# package name under a profile's feature flags.
-for i in "${!SIBLING_PROFILES[@]}"; do
-  sibling_profile="${SIBLING_PROFILES[${i}]}"
-  [[ "${PYPI_SIBLINGS[${i}]}" == "hashsigs-profile-${sibling_profile}" ]] ||
-    fail "PYPI_SIBLINGS[${i}] is ${PYPI_SIBLINGS[${i}]}, expected hashsigs-profile-${sibling_profile}"
-  [[ "${NPM_SIBLINGS[${i}]}" == "${NPM_BASE}-${sibling_profile}" ]] ||
-    fail "NPM_SIBLINGS[${i}] is ${NPM_SIBLINGS[${i}]}, expected ${NPM_BASE}-${sibling_profile}"
+# The sibling-package model is gone. Leaving one of its arrays behind would
+# leave a publish script iterating a package set that is no longer published.
+for stale in SIBLING_PROFILES PYPI_SIBLINGS NPM_SIBLINGS; do
+  [[ -z "${!stale+set}" ]] ||
+    fail "${stale} still exists; the sibling-package model was replaced by one distribution per ecosystem"
 done
 
-for profile in "${DEFAULT_PROFILE}" "${SIBLING_PROFILES[@]}"; do
+# The default profile must be one of the shipped profiles, not a seventh name.
+printf '%s\n' "${PROFILES[@]}" | grep -qx "${DEFAULT_PROFILE}" ||
+  fail "DEFAULT_PROFILE (${DEFAULT_PROFILE}) is not in PROFILES"
+
+# Every shipped profile needs both halves: a cargo feature that compiles it,
+# and a module a caller can import it by. A profile missing either one is
+# listed as shipped and is not reachable.
+for profile in "${PROFILES[@]}"; do
   feature="$(PROFILE_FEATURE "${profile}")"
   [[ -n "${feature}" ]] || fail "no cargo feature mapped for profile ${profile}"
   grep -q "^${feature} = " "${SCRIPT_DIR}/../Cargo.toml" ||
     fail "cargo feature ${feature} (profile ${profile}) is not declared in Cargo.toml"
+
+  module="$(PROFILE_RUST_MODULE "${profile}")"
+  [[ -n "${module}" ]] || fail "no rust module mapped for profile ${profile}"
+  module_file="${SCRIPT_DIR}/../src/profiles/${module##*::}.rs"
+  [[ -f "${module_file}" ]] ||
+    fail "profile ${profile} maps to ${module}, but ${module_file} does not exist"
 done
 
 echo "packages.sh invariants OK"

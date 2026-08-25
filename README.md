@@ -121,11 +121,43 @@ sha2 variant. The cryptographic constants match the Solidity verifier.
 `128s-q20` differs from `128s-q18` only in the stateless budget. The larger
 q20 budget still needs security-analysis backing before production use. The
 sha2 suite switches scheme hashes only, so `128s-q18-sha2` shares every row
-of this table with `128s-q18`, and `128s-q20-sha2` with `128s-q20`. EVM-domain hashes (profile identity,
-commitments, canonical action hashes) stay keccak under every profile, so the
-128s and sha2 profiles change hashing work, not commitment framing.
+of this table with `128s-q18`, and `128s-q20-sha2` with `128s-q20`.
+EVM-domain hashes (profile identity, commitments, canonical action hashes)
+stay keccak under every profile, so the 128s and sha2 profiles change hashing
+work, not commitment framing.
 
-Key material is constant across profiles:
+### Per-variation sizes and costs
+
+One table covers every published variation: key sizes, signature sizes,
+native times, and on-chain verify costs.
+
+Read it with four things in mind. Key sizes are constant across all six
+SHRINCS profiles, so those columns repeat by design and the layouts appear
+below the table. The stateful signature has no single size, because leaf `L`
+carries `L` auth nodes and signatures grow 32 B per consumed leaf. Stateful
+sign time shrinks as `L` grows, since the auth-path rebuild covers fewer
+remaining leaves. Native times come from one sweep on 2026-08-25, on one core
+of an AMD Ryzen 9 5950X, `--release`, `maxSignatures` = 1024, stateful sign at
+leaf 1, so every row compares to every other row. One keygen derives both
+paths of a profile, so the two rows of a profile share a keygen time.
+
+| Variation | Path | Secret key | Public bundle | On-chain key | Signature size | Keygen | Sign | Verify (native) | EVM verify gas | Solana verify (CU) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `shrincs-256s-keccak` | stateful | 264 B | 164 B | 32 B | 2,084 + 32·L B (2,116 at L = 1) | 440 ms | 350 ms | 0.16 ms | 190,792 | 111,586 |
+| `shrincs-256s-keccak` | stateless | 264 B | 164 B | 32 B | 29,092 B | 440 ms | ~1.2 s | 1.5 ms | 1,660,931 | 1,029,780 |
+| `shrincs-256s-sha2` | stateful | 264 B | 164 B | 32 B | 2,084 + 32·L B (2,116 at L = 1) | 117 ms | 91 ms | 0.05 ms | 281,063 | 101,909 |
+| `shrincs-256s-sha2` | stateless | 264 B | 164 B | 32 B | 29,092 B | 117 ms | ~0.33 s | 0.43 ms | 2,455,228 | 931,804 |
+| `shrincs-128s-q18-keccak` | stateful | 264 B | 164 B | 32 B | 1,060 + 32·L B (1,092 at L = 1) | 45.2 s | 172 ms | 0.08 ms | 117,759 | 58,461 |
+| `shrincs-128s-q18-keccak` | stateless | 264 B | 164 B | 32 B | 5,704 B | 45.2 s | ~2.8 min | 0.17 ms | 204,635 | 106,555 † |
+| `shrincs-128s-q20-keccak` | stateful | 264 B | 164 B | 32 B | 1,060 + 32·L B (1,092 at L = 1) | 44.9 s | 173 ms | 0.08 ms | 117,759 | derived from q18 |
+| `shrincs-128s-q20-keccak` | stateless | 264 B | 164 B | 32 B | 5,704 B | 44.9 s | ~2.8 min | 0.17 ms | 204,635 | derived from q18 |
+| `shrincs-128s-q18-sha2` | stateful | 264 B | 164 B | 32 B | 1,060 + 32·L B (1,092 at L = 1) | 12.8 s | 46 ms | 0.02 ms | not measured § | not measured ‡ |
+| `shrincs-128s-q18-sha2` | stateless | 264 B | 164 B | 32 B | 5,704 B | 12.8 s | ~47 s | 0.04 ms | not measured § | not measured ‡ |
+| `shrincs-128s-q20-sha2` | stateful | 264 B | 164 B | 32 B | 1,060 + 32·L B (1,092 at L = 1) | 13.3 s | 47 ms | 0.02 ms | not measured § | not measured ‡ |
+| `shrincs-128s-q20-sha2` | stateless | 264 B | 164 B | 32 B | 5,704 B | 13.3 s | ~51 s | 0.04 ms | not measured § | not measured ‡ |
+| `wotsplus` (v1, keccak, legacy) | one-time | 32 B | 64 B | none | 2,144 B | 0.41 ms | 0.20 ms | 0.23 ms | ~500,000 | 298,064 |
+
+Key layouts, constant across all six SHRINCS profiles:
 
 | Item | Bytes | Layout |
 |---|---|---|
@@ -136,33 +168,13 @@ Key material is constant across profiles:
 | Stateless (SPHINCS+C) public key | 64 | pkSeed(32) ‖ root(32) |
 | WOTS+ v1 key (legacy) | 32 secret / 64 public | seed / public_seed(32) ‖ pk_hash(32) |
 
-### Per-variation sizes and costs
+Signature sizes count packed field bytes. The `Signature size` column is the
+packed size, and ABI envelopes run larger, as the notes below explain.
 
-Signature sizes count packed field bytes. The stateful signature has no single
-size: leaf `L` carries `L` auth nodes, so signatures grow 32 B per consumed
-leaf. Sign time shrinks as `L` grows, because the auth-path rebuild covers
-fewer remaining leaves. Native times: measured 2026-08-25 on one core of an AMD Ryzen 9
-5950X, `--release`, `maxSignatures` = 1024, stateful sign at leaf 1. One
-keygen derives both paths of a profile. Every row comes from the same sweep,
-so the rows are comparable to each other.
-
-This table lists all six published profiles.
-
-| Variation | Path | Key size (secret / public) | Signature size | Keygen time | Sign time | Verify time | Solana verify cost (CU) |
-|---|---|---|---|---|---|---|---|
-| `shrincs-256s-keccak` | stateful | 264 B / 164 B | 2,084 + 32·L B (2,116 at L = 1) | 440 ms | 350 ms | 0.16 ms | 111,586 |
-| `shrincs-256s-keccak` | stateless | 264 B / 164 B | 29,092 B | 440 ms | ~1.2 s | 1.5 ms | 1,029,780 |
-| `shrincs-256s-sha2` | stateful | 264 B / 164 B | 2,084 + 32·L B (2,116 at L = 1) | 117 ms | 91 ms | 0.05 ms | 101,909 |
-| `shrincs-256s-sha2` | stateless | 264 B / 164 B | 29,092 B | 117 ms | ~0.33 s | 0.43 ms | 931,804 |
-| `shrincs-128s-q18-keccak` | stateful | 264 B / 164 B | 1,060 + 32·L B (1,092 at L = 1) | 45.2 s | 172 ms | 0.08 ms | 58,461 |
-| `shrincs-128s-q18-keccak` | stateless | 264 B / 164 B | 5,704 B | 45.2 s | ~2.8 min | 0.17 ms | 106,555 † |
-| `shrincs-128s-q20-keccak` | stateful | 264 B / 164 B | 1,060 + 32·L B (1,092 at L = 1) | 44.9 s | 173 ms | 0.08 ms | same as q18 (derived) |
-| `shrincs-128s-q20-keccak` | stateless | 264 B / 164 B | 5,704 B | 44.9 s | ~2.8 min | 0.17 ms | same as q18 (derived) |
-| `shrincs-128s-q18-sha2` | stateful | 264 B / 164 B | 1,060 + 32·L B (1,092 at L = 1) | 12.8 s | 46 ms | 0.02 ms | not measured ‡ |
-| `shrincs-128s-q18-sha2` | stateless | 264 B / 164 B | 5,704 B | 12.8 s | ~47 s | 0.04 ms | not measured ‡ |
-| `shrincs-128s-q20-sha2` | stateful | 264 B / 164 B | 1,060 + 32·L B (1,092 at L = 1) | 13.3 s | 47 ms | 0.02 ms | not measured ‡ |
-| `shrincs-128s-q20-sha2` | stateless | 264 B / 164 B | 5,704 B | 13.3 s | ~51 s | 0.04 ms | not measured ‡ |
-| `wotsplus` (v1, keccak, legacy) | one-time | 32 B / 64 B | 2,144 B | 0.41 ms | 0.20 ms | 0.23 ms | 298,064 |
+EVM verify gas is the account-wrapper call, measured in `hashsigs-solidity` on
+2026-07-13. The stateful path is 8–14× cheaper than stateless. That asymmetry
+is the design point: everyday operations ride the bounded stateful path, and
+the stateless authority stays reserved for recovery.
 
 † Measured through the `SphincsPlusCVerify` instruction. A SHRINCS stateless
 signature is a SPHINCS+C signature plus a commitment check, and the hybrid
@@ -172,6 +184,16 @@ signature is a SPHINCS+C signature plus a commitment check, and the hybrid
 through `--features hashsigs-rs/profile-128s-q18-sha2`, so the figure is
 missing, not unavailable. Do not read the keccak twin's cost across: the
 SHA-256 syscall and the keccak syscall have different costs.
+
+§ The wrapper-call figures need the account-wrapper vectors, which do not
+exist for the two 128s sha2 profiles yet. Instead this run measures the raw
+stateless verifier directly, on the same call under each profile
+(`SHRINCSSphincs128sVectors.testMeasureStateless128sVerifyGas`, 2026-08-25):
+242,552 gas under `128s-q18` and `128s-q20`, and 317,515 gas under
+`128s-q18-sha2` and `128s-q20-sha2`. That is the raw verifier, not the
+wrapper call, so compare it only against the other number in this footnote.
+The 1.31× ratio is the SHA-256 precompile against the `keccak256` opcode, and
+it matches the direction of the 256s pair in the table.
 
 Notes:
 
@@ -225,31 +247,6 @@ Notes:
   BENCH_LABEL=128s-q20-sha2 cargo run --release --example bench_table --no-default-features --features profile-128s-q20-sha2
   cargo run --release --example bench_wots
   ```
-
-### EVM verify gas
-
-Measured in `hashsigs-solidity` (account-wrapper call gas, 2026-07-13). The
-stateful path is 8–14× cheaper than stateless. That asymmetry is the design
-point: everyday operations ride the bounded stateful path, and the stateless
-authority stays reserved for recovery.
-
-| Call | 256s | 256s-sha2 | 128s-q18 / q20 | 128s-q18-sha2 / q20-sha2 |
-|---|---|---|---|---|
-| Stateful verify (wrapper call) | 190,792 | 281,063 | 117,759 | not measured § |
-| Stateless verify (delegation) | 1,660,931 | 2,455,228 | 204,635 | not measured § |
-
-§ The wrapper-call figures need the account-wrapper vectors, which do not
-exist for the two 128s sha2 profiles yet. Instead this run measures the raw
-stateless verifier directly, on the same call under each profile
-(`SHRINCSSphincs128sVectors.testMeasureStateless128sVerifyGas`, 2026-08-25):
-242,552 gas under `128s-q18` and `128s-q20`, and 317,515 gas under
-`128s-q18-sha2` and `128s-q20-sha2`. That is the raw verifier, not the
-wrapper call, so compare it only against the other number in this footnote.
-The 1.31× ratio is the SHA-256 precompile against the `keccak256` opcode, and
-it matches the direction of the preceding 256s pair.
-
-The legacy standalone WOTS+ v1 verification is ~500k gas with its 2,144-byte
-signatures.
 
 ## Building
 
@@ -381,6 +378,27 @@ use hashsigs_rs::profiles::p128s_q18::Shrincs as Shrincs128sQ18;
 `--features profile-128s-q18` it is the q18 type, not the `256s` one. Name a
 profile module's own alias, such as `hashsigs_rs::profiles::p256s::Shrincs`, to
 pin one profile explicitly.
+
+### Packaging model
+
+Each ecosystem publishes exactly one artifact, and every profile ships inside
+it on its own import path. A caller takes the profile it wants without taking
+a second dependency:
+
+| Ecosystem | Artifact | Importing one profile |
+|---|---|---|
+| crates.io | `hashsigs-rs` | `use hashsigs_rs::profiles::p128s_q18::Shrincs;` |
+| PyPI | `hashsigs` | `from hashsigs.profiles import p128s_q18` |
+| npm | `@quip.network/hashsigs-wasm` | `import { shrincs } from "@quip.network/hashsigs-wasm/128s-q18"` |
+
+`bin/packages.sh` is the single source of truth for that set, and
+`bin/tests/test-packages.sh` fails if a listed profile has no cargo feature to
+compile it or no module to import it by.
+
+The Rust side works this way today. The Python and npm profile subpaths are
+not built yet: the wasm bindings still bind to one profile per build through
+`profiles::selected`, so shipping all six behind subpath exports needs that
+module removed first.
 
 `build.rs` generates profile identity for every profile regardless of which
 features are on, and emits a cfg for each enabled one. Rust-side surfaces

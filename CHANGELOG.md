@@ -18,6 +18,14 @@ This file records changes to this project, in the
 
 ### Changed
 
+- Packaging ships one artifact per ecosystem instead of a base package plus
+  one sibling package per profile. `hashsigs-rs`, the `hashsigs` PyPI
+  distribution, and `@quip.network/hashsigs-wasm` each carry every profile,
+  and each profile is imported on its own path. `bin/packages.sh` no longer
+  declares `SIBLING_PROFILES`, `PYPI_SIBLINGS`, or `NPM_SIBLINGS`; it declares
+  `PROFILES` instead. The Rust import paths work today. The Python and npm
+  per-profile subpaths still need the `profiles::selected` module removed,
+  because the wasm bindings bind to one profile per build.
 - The six `profile-*` Cargo features (`profile-256s`, `profile-256s-sha2`,
   `profile-128s-q18`, `profile-128s-q20`, `profile-128s-q18-sha2`,
   `profile-128s-q20-sha2`) are additive. Enabling more than
