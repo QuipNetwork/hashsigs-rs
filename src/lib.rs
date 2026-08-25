@@ -99,10 +99,21 @@ pub(crate) mod test_support;
 // values inside this slot (see HASH_TRUNC_LEN and `mask_hash`).
 pub const HASH_LEN: usize = 32;
 
-/// The default profile, `shrincs-256s`. Existing consumers that name
-/// `hashsigs_rs::Shrincs` keep working unchanged.
-#[cfg(any(feature = "profile-256s", feature = "default-profile-256s"))]
-pub type Shrincs = profiles::p256s::Shrincs;
+/// The build-selected profile's SHRINCS type.
+///
+/// This follows `profiles::selected::SelectedProfile`, the same profile the
+/// verifiers, the wasm bindings and the `crate::shrincs` facade constants
+/// already use, so the crate root cannot disagree with the rest of the crate
+/// about which parameter set this build carries. Name a profile module's own
+/// alias (for example `profiles::p256s::Shrincs`) to pin one explicitly.
+///
+/// TRANSITIONAL: `build.rs` still selects exactly one profile per build. When
+/// Task 6 lifts that, this alias goes away and callers name a profile directly.
+pub type Shrincs = shrincs::ShrincsCore<
+    profiles::selected::SelectedProfile,
+    { profiles::selected::NUM_CHAINS },
+    { profiles::selected::NUM_LAYERS },
+>;
 
 pub use error::ErrorCode;
 pub use sphincs_plus_c::SphincsPlusCVerifier;
