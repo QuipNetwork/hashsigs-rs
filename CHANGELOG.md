@@ -43,6 +43,16 @@ This file records changes to this project, in the
 
 ### Changed
 
+- The FORS message digest binds to the profile. Both digest regimes hash
+  `P::PROFILE_ID` into the preimage, which is now
+  `H("fors-digest" || PROFILE_ID || pkSeed || hypertreeRoot || randomizer ||
+  counter || message [|| i])`. Without it, two profiles that share a hash suite
+  derive the same leaf indices for a message. This changes the wire format:
+  signatures from earlier versions do not verify, and this release regenerates
+  every committed golden vector. `ShrincsVerifier::version_tag()` and
+  `SphincsPlusCVerifier::version_tag()` move from `v1` to `v2`, so a Solidity
+  verifier pinned to the old tag rejects a new signature outright instead of
+  failing inside the FORS check. Answers external audit issue oak-sol-02.
 - Packaging ships one artifact per ecosystem instead of a base package plus
   one sibling package per profile. `hashsigs-rs`, the `hashsigs` PyPI
   distribution, and `@quip.network/hashsigs-wasm` each carry every profile,
