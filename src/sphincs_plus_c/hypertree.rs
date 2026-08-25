@@ -164,14 +164,6 @@ impl LayerSignature {
     }
 }
 
-impl TryFrom<&[u8]> for LayerSignature {
-    type Error = ();
-
-    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        Self::from_bytes::<crate::profile_active::ActiveProfile>(value).ok_or(())
-    }
-}
-
 /// Layer-0 seed coordinates selected by the FORS message digest.
 #[derive(Clone, Copy)]
 pub(crate) struct HypertreeSeed {
@@ -882,7 +874,7 @@ fn stateless_wots_c_chain<P: Profile>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::profile_active::{ActiveProfile, NUM_CHAINS, NUM_LAYERS};
+    use crate::profiles::selected::{SelectedProfile, NUM_CHAINS, NUM_LAYERS};
     use crate::wots_c::Signature as WotsCSignature;
     use alloc::vec;
 
@@ -904,7 +896,7 @@ mod tests {
     fn layer_signature_to_bytes_from_bytes_round_trips() {
         let layer = sample_layer_signature();
         let encoded = layer.to_bytes();
-        let decoded = LayerSignature::from_bytes::<ActiveProfile>(&encoded)
+        let decoded = LayerSignature::from_bytes::<SelectedProfile>(&encoded)
             .expect("valid encoding must decode");
         assert_eq!(decoded, layer);
         assert_eq!(decoded.to_bytes(), encoded);
@@ -915,12 +907,12 @@ mod tests {
         let mut encoded = sample_layer_signature().to_bytes();
         encoded.push(0x00);
         assert!(
-            LayerSignature::from_bytes::<ActiveProfile>(&encoded).is_none(),
+            LayerSignature::from_bytes::<SelectedProfile>(&encoded).is_none(),
             "trailing junk on a standalone layer body must be rejected"
         );
         encoded.pop();
         encoded.extend_from_slice(&[0xAA, 0xBB]);
-        assert!(LayerSignature::from_bytes::<ActiveProfile>(&encoded).is_none());
+        assert!(LayerSignature::from_bytes::<SelectedProfile>(&encoded).is_none());
     }
 
     #[test]
@@ -930,7 +922,7 @@ mod tests {
         let encoded = sample_layer_signature().to_bytes();
         let gapped = crate::test_support::insert_abi_head_gap(&encoded, 3, &[0, 1, 2]);
         assert!(
-            LayerSignature::from_bytes::<ActiveProfile>(&gapped).is_none(),
+            LayerSignature::from_bytes::<SelectedProfile>(&gapped).is_none(),
             "an encoding with unread interior bytes must be rejected"
         );
     }
@@ -939,19 +931,21 @@ mod tests {
     fn layer_signature_from_bytes_rejects_truncated() {
         let encoded = sample_layer_signature().to_bytes();
         assert!(
-            LayerSignature::from_bytes::<ActiveProfile>(&encoded[..encoded.len() - 1]).is_none()
+            LayerSignature::from_bytes::<SelectedProfile>(&encoded[..encoded.len() - 1]).is_none()
         );
-        assert!(LayerSignature::from_bytes::<ActiveProfile>(&[]).is_none());
+        assert!(LayerSignature::from_bytes::<SelectedProfile>(&[]).is_none());
     }
 
     #[test]
-    fn layer_signature_try_from_delegates_to_from_bytes() {
+    fn layer_signature_from_bytes_round_trips_and_rejects_truncation() {
         let layer = sample_layer_signature();
         let encoded = layer.to_bytes();
-        let decoded =
-            LayerSignature::try_from(encoded.as_slice()).expect("valid encoding must decode");
+        let decoded = LayerSignature::from_bytes::<SelectedProfile>(encoded.as_slice())
+            .expect("valid encoding must decode");
         assert_eq!(decoded, layer);
-        assert!(LayerSignature::try_from(&encoded[..encoded.len() - 1]).is_err());
+        assert!(
+            LayerSignature::from_bytes::<SelectedProfile>(&encoded[..encoded.len() - 1]).is_none()
+        );
     }
 
     /// Full hypertree sign→verify round-trip at a non-zero bottom leaf.
@@ -960,7 +954,7 @@ mod tests {
     #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
     #[test]
     fn hypertree_sign_verify_round_trip() {
-        let key = crate::sphincs_plus_c::keygen::<ActiveProfile, NUM_LAYERS>(
+        let key = crate::sphincs_plus_c::keygen::<SelectedProfile, NUM_LAYERS>(
             [0x11; HASH_LEN],
             [0x22; HASH_LEN],
             [0x33; HASH_LEN],
@@ -970,7 +964,7 @@ mod tests {
             tree_index: 0,
             leaf_index: 3,
         };
-        let layers = sign_hypertree::<ActiveProfile, NUM_LAYERS>(
+        let layers = sign_hypertree::<SelectedProfile, NUM_LAYERS>(
             &key,
             fors_root,
             seed.tree_index,
@@ -981,16 +975,16 @@ mod tests {
         for layer in &layers {
             assert_eq!(
                 layer.auth_path.len(),
-                hypertree_subtree_height::<ActiveProfile>()
+                hypertree_subtree_height::<SelectedProfile>()
             );
             // Each layer body must be a self-contained, trailing-clean blob.
             let encoded = layer.to_bytes();
             let decoded =
-                LayerSignature::from_bytes::<ActiveProfile>(&encoded).expect("layer codec");
+                LayerSignature::from_bytes::<SelectedProfile>(&encoded).expect("layer codec");
             assert_eq!(decoded, *layer);
         }
         assert!(
-            verify_hypertree::<ActiveProfile, NUM_CHAINS>(
+            verify_hypertree::<SelectedProfile, NUM_CHAINS>(
                 key.public_key.pk_seed.as_bytes(),
                 key.public_key.root.as_bytes(),
                 fors_root,
@@ -1000,7 +994,7 @@ mod tests {
             "fresh hypertree signature must verify against keygen root"
         );
         // Wrong FORS root must not verify.
-        assert!(!verify_hypertree::<ActiveProfile, NUM_CHAINS>(
+        assert!(!verify_hypertree::<SelectedProfile, NUM_CHAINS>(
             key.public_key.pk_seed.as_bytes(),
             key.public_key.root.as_bytes(),
             [0xCDu8; HASH_LEN],
@@ -1008,7 +1002,7 @@ mod tests {
             &layers,
         ));
         // Wrong leaf index must not verify (auth path is leaf-bound).
-        assert!(!verify_hypertree::<ActiveProfile, NUM_CHAINS>(
+        assert!(!verify_hypertree::<SelectedProfile, NUM_CHAINS>(
             key.public_key.pk_seed.as_bytes(),
             key.public_key.root.as_bytes(),
             fors_root,
@@ -1030,7 +1024,7 @@ mod tests {
             leaf_index: 0,
         };
         // Empty layers: always wrong count for every profile.
-        assert!(!verify_hypertree::<ActiveProfile, NUM_CHAINS>(
+        assert!(!verify_hypertree::<SelectedProfile, NUM_CHAINS>(
             &pk_seed,
             &root,
             fors_root,
@@ -1039,7 +1033,7 @@ mod tests {
         ));
         // One too many synthetic layers.
         let extra = vec![sample_layer_signature(); NUM_LAYERS + 1];
-        assert!(!verify_hypertree::<ActiveProfile, NUM_CHAINS>(
+        assert!(!verify_hypertree::<SelectedProfile, NUM_CHAINS>(
             &pk_seed, &root, fors_root, seed, &extra
         ));
     }

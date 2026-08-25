@@ -115,14 +115,6 @@ impl Signature {
     }
 }
 
-impl TryFrom<&[u8]> for Signature {
-    type Error = ();
-
-    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        Self::from_bytes::<crate::profile_active::ActiveProfile>(value).ok_or(())
-    }
-}
-
 /// Mirrors `SHRINCS.encodeStatelessKey`. Layout:
 /// `abi.encode(bytes32 pkSeed, bytes32 hypertreeRoot)`, which for two static
 /// words is exactly the 64-byte concatenation with no offsets. Byte-identical
@@ -137,7 +129,7 @@ pub fn encode_public_key(pk_seed: [u8; HASH_LEN], hypertree_root: [u8; HASH_LEN]
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::profile_active::ActiveProfile;
+    use crate::profiles::selected::SelectedProfile;
     use crate::sphincs_plus_c::fors_c::Entry;
     use crate::wots_c::Signature as WotsCSignature;
     use alloc::vec;
@@ -161,7 +153,7 @@ mod tests {
             // One layer per profile layer: 8 at 256s, 1 at 128s. A fixed count
             // would exceed the decoder's `<= NUM_HYPERTREE_LAYERS` cap on the
             // single-layer 128s profiles.
-            hypertree: (0..ActiveProfile::NUM_HYPERTREE_LAYERS)
+            hypertree: (0..SelectedProfile::NUM_HYPERTREE_LAYERS)
                 .map(|layer| LayerSignature {
                     wots_c_pk_hash: [0xB1 ^ layer; HASH_LEN],
                     wots_c_signature: WotsCSignature {
@@ -180,7 +172,7 @@ mod tests {
         let signature = sample_signature();
         let encoded = signature.to_bytes();
         let decoded =
-            Signature::from_bytes::<ActiveProfile>(&encoded).expect("valid encoding must decode");
+            Signature::from_bytes::<SelectedProfile>(&encoded).expect("valid encoding must decode");
         assert_eq!(decoded, signature);
         assert_eq!(decoded.to_bytes(), encoded);
     }
@@ -201,7 +193,7 @@ mod tests {
         };
         let encoded = signature.to_bytes();
         assert_eq!(
-            Signature::from_bytes::<ActiveProfile>(&encoded),
+            Signature::from_bytes::<SelectedProfile>(&encoded),
             Some(signature)
         );
     }
@@ -211,7 +203,7 @@ mod tests {
         let mut encoded = sample_signature().to_bytes();
         encoded.extend_from_slice(&[0xAA, 0xBB]);
         assert!(
-            Signature::from_bytes::<ActiveProfile>(&encoded).is_none(),
+            Signature::from_bytes::<SelectedProfile>(&encoded).is_none(),
             "trailing junk on the signature envelope must be rejected"
         );
     }
@@ -221,19 +213,20 @@ mod tests {
         let encoded = sample_signature().to_bytes();
         let gapped = crate::test_support::insert_abi_head_gap(&encoded, 1, &[0]);
         assert!(
-            Signature::from_bytes::<ActiveProfile>(&gapped).is_none(),
+            Signature::from_bytes::<SelectedProfile>(&gapped).is_none(),
             "an envelope with unread interior bytes must be rejected"
         );
     }
 
     #[test]
-    fn try_from_delegates_to_from_bytes() {
+    fn from_bytes_accepts_a_round_trip_and_rejects_truncation() {
         let signature = sample_signature();
         let encoded = signature.to_bytes();
-        let decoded = Signature::try_from(encoded.as_slice()).expect("valid encoding must decode");
+        let decoded = Signature::from_bytes::<SelectedProfile>(encoded.as_slice())
+            .expect("valid encoding must decode");
         assert_eq!(decoded, signature);
         let truncated = &encoded[..encoded.len() - 1];
-        assert!(Signature::try_from(truncated).is_err());
+        assert!(Signature::from_bytes::<SelectedProfile>(truncated).is_none());
     }
 
     /// Read a clean ABI length/offset word at `pos` (big-endian u64 in the
@@ -253,7 +246,7 @@ mod tests {
     #[test]
     fn oversized_fors_entries_length_is_rejected() {
         // FORS entries are a dynamic struct array capped at NUM_FORS_TREES.
-        let num_fors_trees = ActiveProfile::NUM_FORS_TREES;
+        let num_fors_trees = SelectedProfile::NUM_FORS_TREES;
         let mut encoded = sample_signature().to_bytes();
         // Outer head: one offset to the signature body.
         let sig_start = read_abi_usize(&encoded, 0);
@@ -263,7 +256,7 @@ mod tests {
         let entries_start = fors_start + read_abi_usize(&encoded, fors_start + 64);
         write_abi_usize(&mut encoded, entries_start, num_fors_trees as usize + 1);
         assert!(
-            Signature::from_bytes::<ActiveProfile>(&encoded).is_none(),
+            Signature::from_bytes::<SelectedProfile>(&encoded).is_none(),
             "FORS entries length NUM_FORS_TREES+1 must be rejected"
         );
     }
@@ -288,7 +281,7 @@ mod tests {
         let first_elem_rel = read_abi_usize(&encoded, auth_start + 32);
         write_abi_usize(&mut encoded, auth_start + 64, first_elem_rel);
         assert!(
-            Signature::from_bytes::<ActiveProfile>(&encoded).is_none(),
+            Signature::from_bytes::<SelectedProfile>(&encoded).is_none(),
             "aliased bytes[] element offsets must be rejected"
         );
     }

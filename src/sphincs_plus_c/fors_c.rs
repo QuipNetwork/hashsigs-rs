@@ -158,14 +158,6 @@ impl Entry {
     }
 }
 
-impl TryFrom<&[u8]> for Entry {
-    type Error = ();
-
-    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        Self::from_bytes::<crate::profile_active::ActiveProfile>(value).ok_or(())
-    }
-}
-
 /// FORS-C signature: randomizer, target-sum grind counter, and one revealed
 /// entry per signed FORS tree.
 ///
@@ -228,14 +220,6 @@ impl Signature {
             return None;
         }
         Some(decoded)
-    }
-}
-
-impl TryFrom<&[u8]> for Signature {
-    type Error = ();
-
-    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        Self::from_bytes::<crate::profile_active::ActiveProfile>(value).ok_or(())
     }
 }
 
@@ -578,7 +562,7 @@ fn fors_digest_bytes<P: Profile>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::profile_active::{ActiveProfile, NUM_LAYERS};
+    use crate::profiles::selected::{SelectedProfile, NUM_LAYERS};
     use alloc::vec;
 
     fn sample_entry() -> Entry {
@@ -594,7 +578,7 @@ mod tests {
         let encoded = sample_entry().to_bytes();
         let gapped = crate::test_support::insert_abi_head_gap(&encoded, 2, &[0, 1]);
         assert!(
-            Entry::from_bytes::<ActiveProfile>(&gapped).is_none(),
+            Entry::from_bytes::<SelectedProfile>(&gapped).is_none(),
             "an encoding with unread interior bytes must be rejected"
         );
     }
@@ -611,7 +595,7 @@ mod tests {
         let encoded = signature.to_bytes();
         let gapped = crate::test_support::insert_abi_head_gap(&encoded, 3, &[0, 2]);
         assert!(
-            Signature::from_bytes::<ActiveProfile>(&gapped).is_none(),
+            Signature::from_bytes::<SelectedProfile>(&gapped).is_none(),
             "an encoding with unread interior bytes must be rejected"
         );
     }
@@ -631,9 +615,9 @@ mod tests {
             fors_tree,
             leaf,
         };
-        let secret = fors_leaf_secret::<ActiveProfile>(&pk_seed, &sk_seed, coords);
-        let reused = fors_leaf_hash_from_secret::<ActiveProfile>(&pk_seed, coords, &secret);
-        let direct = fors_leaf_hash::<ActiveProfile>(&pk_seed, &sk_seed, coords);
+        let secret = fors_leaf_secret::<SelectedProfile>(&pk_seed, &sk_seed, coords);
+        let reused = fors_leaf_hash_from_secret::<SelectedProfile>(&pk_seed, coords, &secret);
+        let direct = fors_leaf_hash::<SelectedProfile>(&pk_seed, &sk_seed, coords);
 
         assert_eq!(reused, direct);
     }
@@ -645,20 +629,20 @@ mod tests {
     /// (`shrincs::vector_conformance`'s `tamperedFors` case).
     #[test]
     fn verify_rejects_tampered_secret_auth_path_and_counter() {
-        let key = crate::sphincs_plus_c::keygen::<ActiveProfile, NUM_LAYERS>(
+        let key = crate::sphincs_plus_c::keygen::<SelectedProfile, NUM_LAYERS>(
             [0x33u8; HASH_LEN],
             [0x44u8; HASH_LEN],
             [0x55u8; HASH_LEN],
         );
         let message = b"fors-c negative test message";
         let signed =
-            sign_fors_c::<ActiveProfile>(&key, message).expect("sign_fors_c should succeed");
+            sign_fors_c::<SelectedProfile>(&key, message).expect("sign_fors_c should succeed");
 
         let pk_seed = key.public_key.pk_seed.as_bytes();
         let hypertree_root = key.public_key.root.as_bytes();
 
         // Sanity: the honest signature verifies and reconstructs the signed root.
-        let (root, tree_index, leaf_index) = verify_fors_c_and_return_root::<ActiveProfile>(
+        let (root, tree_index, leaf_index) = verify_fors_c_and_return_root::<SelectedProfile>(
             pk_seed,
             hypertree_root,
             message,
@@ -670,7 +654,7 @@ mod tests {
         assert_eq!(leaf_index, signed.leaf_index);
 
         let recomputed_root = |signature: &Signature| {
-            verify_fors_c_and_return_root::<ActiveProfile>(
+            verify_fors_c_and_return_root::<SelectedProfile>(
                 pk_seed,
                 hypertree_root,
                 message,
@@ -890,17 +874,17 @@ mod measurement_tests {
     use super::{signer_fors_digest, SigningForsDigest};
     use crate::hash::hash_packed;
     use crate::profile::Profile;
-    use crate::profile_active::ActiveProfile;
-    const FORS_C_MAX_GRIND_COUNTER: u32 = ActiveProfile::FORS_C_MAX_GRIND_COUNTER;
+    use crate::profiles::selected::SelectedProfile;
+    const FORS_C_MAX_GRIND_COUNTER: u32 = SelectedProfile::FORS_C_MAX_GRIND_COUNTER;
     use crate::HASH_LEN;
 
     fn measurement_key(seed: &[u8], _max: u32) -> Key {
         hashsigs_println!(
             "measurement setup: deriving stateless key profile={}",
-            ActiveProfile::PROFILE_NAME
+            SelectedProfile::PROFILE_NAME
         );
         fn d(domain: &[u8], seed: &[u8]) -> [u8; HASH_LEN] {
-            hash_packed::<<ActiveProfile as crate::profile::Profile>::Suite>(&[domain, seed, &[]])
+            hash_packed::<<SelectedProfile as crate::profile::Profile>::Suite>(&[domain, seed, &[]])
         }
         let key = Key::new(
             PrivateKey::new(
@@ -950,11 +934,11 @@ mod measurement_tests {
             if counter > 0 && counter % progress.counter_progress_every == 0 {
                 hashsigs_println!(
                     "counter progress profile={} sample={}/? tried={counter}/{limit}",
-                    ActiveProfile::PROFILE_NAME,
+                    SelectedProfile::PROFILE_NAME,
                     progress.sample_index + 1
                 );
             }
-            let Some(digest) = signer_fors_digest::<ActiveProfile>(
+            let Some(digest) = signer_fors_digest::<SelectedProfile>(
                 signing_key.public_key.pk_seed.as_bytes(),
                 signing_key.public_key.root.as_bytes(),
                 message,
@@ -979,7 +963,7 @@ mod measurement_tests {
         let counter_progress_every = measurement_counter_progress_interval(limit);
         hashsigs_println!(
             "starting FORS measurement profile={} samples={samples} limit={limit} progress_every={progress_every} counter_progress_every={counter_progress_every}",
-            ActiveProfile::PROFILE_NAME,
+            SelectedProfile::PROFILE_NAME,
         );
         let signing_key = measurement_key(b"fors success-rate measurement key", 4);
 
@@ -990,11 +974,11 @@ mod measurement_tests {
 
         for i in 0..samples {
             let counter_bytes = i.to_be_bytes();
-            let message = hash_packed::<<ActiveProfile as crate::profile::Profile>::Suite>(&[
+            let message = hash_packed::<<SelectedProfile as crate::profile::Profile>::Suite>(&[
                 b"fors-success-rate-measurement".as_ref(),
                 counter_bytes.as_ref(),
             ]);
-            let randomizer = hash_packed::<<ActiveProfile as crate::profile::Profile>::Suite>(&[
+            let randomizer = hash_packed::<<SelectedProfile as crate::profile::Profile>::Suite>(&[
                 b"fors-randomizer".as_ref(),
                 signing_key.secret().as_prf_seed().as_bytes().as_ref(),
                 message.as_ref(),
@@ -1021,7 +1005,7 @@ mod measurement_tests {
             if completed % progress_every == 0 || completed == samples {
                 hashsigs_println!(
                     "progress profile={} completed={completed}/{samples} successes={successes} failures={failures}",
-                    ActiveProfile::PROFILE_NAME
+                    SelectedProfile::PROFILE_NAME
                 );
             }
         }
@@ -1044,7 +1028,7 @@ mod measurement_tests {
 
         hashsigs_println!(
             "profile={} samples={samples} limit={limit} successes={successes} failures={failures} success_pct={success_pct:.2} failure_pct={failure_pct:.2} avg_success_counter={avg_success_counter:.2} max_success_counter={max_success_counter}",
-            ActiveProfile::PROFILE_NAME
+            SelectedProfile::PROFILE_NAME
         );
     }
 }

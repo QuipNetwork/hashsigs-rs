@@ -51,37 +51,36 @@ use super::signature::{decode_stateful_envelope, decode_stateless_envelope};
 #[cfg(test)]
 use super::signature::{encode_stateful_envelope, encode_stateless_envelope};
 use crate::profile::Profile;
-use crate::profile_active::{ActiveProfile, NUM_CHAINS};
+use crate::profiles::selected::{SelectedProfile, NUM_CHAINS};
 
 // The parameter tuple of the profile this facade is bound to. Historically a
-// `pub use crate::profiles::*`; now read off `ActiveProfile`. Task 5 repoints
-// these at the default profile alias.
-pub const FORS_TREE_HEIGHT: u8 = ActiveProfile::FORS_TREE_HEIGHT;
-pub const HASH_TRUNC_LEN: usize = ActiveProfile::HASH_TRUNC_LEN;
-pub const HYPERTREE_HEIGHT: u8 = ActiveProfile::HYPERTREE_HEIGHT;
-pub const NUM_FORS_TREES: u8 = ActiveProfile::NUM_FORS_TREES;
-pub const NUM_HYPERTREE_LAYERS: u8 = ActiveProfile::NUM_HYPERTREE_LAYERS;
-pub const NUM_WOTS_CHAINS: u16 = ActiveProfile::NUM_WOTS_CHAINS;
-pub const PROFILE_NAME: &str = ActiveProfile::PROFILE_NAME;
-pub const STATELESS_SIGNATURE_LIMIT: u64 = ActiveProfile::STATELESS_SIGNATURE_LIMIT;
-pub const WOTS_CHAIN_LEN: u16 = ActiveProfile::WOTS_CHAIN_LEN;
+// `pub use crate::profiles::*`; now read off `SelectedProfile`.
+pub const FORS_TREE_HEIGHT: u8 = SelectedProfile::FORS_TREE_HEIGHT;
+pub const HASH_TRUNC_LEN: usize = SelectedProfile::HASH_TRUNC_LEN;
+pub const HYPERTREE_HEIGHT: u8 = SelectedProfile::HYPERTREE_HEIGHT;
+pub const NUM_FORS_TREES: u8 = SelectedProfile::NUM_FORS_TREES;
+pub const NUM_HYPERTREE_LAYERS: u8 = SelectedProfile::NUM_HYPERTREE_LAYERS;
+pub const NUM_WOTS_CHAINS: u16 = SelectedProfile::NUM_WOTS_CHAINS;
+pub const PROFILE_NAME: &str = SelectedProfile::PROFILE_NAME;
+pub const STATELESS_SIGNATURE_LIMIT: u64 = SelectedProfile::STATELESS_SIGNATURE_LIMIT;
+pub const WOTS_CHAIN_LEN: u16 = SelectedProfile::WOTS_CHAIN_LEN;
 
 /// Stateless hybrid SHRINCS verifier facade.
 ///
-/// Bound to `ActiveProfile`: this facade names one profile, unlike the
-/// algorithms it calls, which are generic over `P: Profile`. Task 5 repoints
-/// it at the default profile alias (or gives it its own profile parameter).
+/// Bound to `SelectedProfile`: this facade names one profile, unlike the
+/// algorithms it calls, which are generic over `P: Profile`. It gains its own
+/// profile parameter when `build.rs` stops pinning one profile per build.
 ///
 /// # Examples
 ///
 /// ```rust,no_run
 /// # fn main() -> Result<(), ()> {
-/// # use hashsigs_rs::profile_active::{ActiveProfile, NUM_CHAINS, NUM_LAYERS};
+/// # use hashsigs_rs::profiles::selected::{SelectedProfile, NUM_CHAINS, NUM_LAYERS};
 /// use hashsigs_rs::shrincs::{sign, ShrincsSigner, ShrincsVerifier, VerifierInterface};
 ///
-/// let (mut keys, public_key) = ShrincsSigner::keygen::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(b"verify-seed", 4).ok_or(())?;
+/// let (mut keys, public_key) = ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(b"verify-seed", 4).ok_or(())?;
 /// let hash = [9u8; 32];
-/// let envelope = sign::<ActiveProfile, NUM_CHAINS>(&mut keys, &hash).ok_or(())?;
+/// let envelope = sign::<SelectedProfile, NUM_CHAINS>(&mut keys, &hash).ok_or(())?;
 /// let ok = ShrincsVerifier::new().verify(
 ///     &public_key.public_key_commitment,
 ///     &hash,
@@ -118,7 +117,7 @@ impl ShrincsVerifier {
         context: &ActionContext,
         signature: &StatefulSignature,
     ) -> bool {
-        core_shrincs::verify_stateful::<ActiveProfile, NUM_CHAINS>(
+        core_shrincs::verify_stateful::<SelectedProfile, NUM_CHAINS>(
             expected_public_key_commitment,
             public_key,
             context,
@@ -136,7 +135,7 @@ impl ShrincsVerifier {
         context: &ActionContext,
         signature: &StatelessSignature,
     ) -> bool {
-        core_shrincs::verify_stateless::<ActiveProfile, NUM_CHAINS>(
+        core_shrincs::verify_stateless::<SelectedProfile, NUM_CHAINS>(
             expected_public_key_commitment,
             public_key,
             context,
@@ -152,7 +151,7 @@ impl ShrincsVerifier {
         message: &[u8],
         signature: &StatefulSignature,
     ) -> bool {
-        core_shrincs::verify_stateful_unsafe_raw::<ActiveProfile, NUM_CHAINS>(
+        core_shrincs::verify_stateful_unsafe_raw::<SelectedProfile, NUM_CHAINS>(
             expected_public_key_commitment,
             public_key,
             message,
@@ -168,7 +167,7 @@ impl ShrincsVerifier {
         message: &[u8],
         signature: &StatelessSignature,
     ) -> bool {
-        core_shrincs::verify_stateless_unsafe_raw::<ActiveProfile, NUM_CHAINS>(
+        core_shrincs::verify_stateless_unsafe_raw::<SelectedProfile, NUM_CHAINS>(
             expected_public_key_commitment,
             public_key,
             message,
@@ -184,7 +183,7 @@ impl ShrincsVerifier {
         expected_public_key_commitment: [u8; HASH_LEN],
         context: &ActionContext,
     ) -> [u8; HASH_LEN] {
-        stateful_action_message_hash::<ActiveProfile>(expected_public_key_commitment, context)
+        stateful_action_message_hash::<SelectedProfile>(expected_public_key_commitment, context)
     }
 
     /// The 32-byte message a stateless signature must sign: the same
@@ -194,7 +193,7 @@ impl ShrincsVerifier {
         expected_public_key_commitment: [u8; HASH_LEN],
         context: &ActionContext,
     ) -> [u8; HASH_LEN] {
-        stateless_action_message_hash::<ActiveProfile>(expected_public_key_commitment, context)
+        stateless_action_message_hash::<SelectedProfile>(expected_public_key_commitment, context)
     }
 
     /// Commitment binding an encoded stateful public key with a stateless
@@ -207,7 +206,8 @@ impl ShrincsVerifier {
         pk_seed: [u8; HASH_LEN],
         hypertree_root: [u8; HASH_LEN],
     ) -> [u8; HASH_LEN] {
-        *Commitment::of::<ActiveProfile>(stateful_public_key, &pk_seed, &hypertree_root).as_bytes()
+        *Commitment::of::<SelectedProfile>(stateful_public_key, &pk_seed, &hypertree_root)
+            .as_bytes()
     }
 }
 
@@ -255,11 +255,11 @@ impl ShrincsVerifierExt for ShrincsVerifier {
         // once more here, purely to split "framing that can't be read at
         // all" (Malformed) from "well-formed but rejected" (Invalid),
         // without duplicating its commitment/shape-check logic.
-        if decode_stateless_envelope::<ActiveProfile>(stateless_envelope).is_none() {
+        if decode_stateless_envelope::<SelectedProfile>(stateless_envelope).is_none() {
             return VerifyOutcome::Malformed;
         }
         let Some((delegate_key, delegate_signature_envelope)) =
-            super::prepare_stateless_delegation::<ActiveProfile>(commitment, stateless_envelope)
+            super::prepare_stateless_delegation::<SelectedProfile>(commitment, stateless_envelope)
         else {
             return VerifyOutcome::Invalid;
         };
@@ -269,9 +269,9 @@ impl ShrincsVerifierExt for ShrincsVerifier {
         // straight back into the typed form `SphincsPlusCVerifier::verify`
         // expects (an encode-then-decode round trip the Solidity adapter
         // never pays).
-        let Some(delegate_signature) = crate::sphincs_plus_c::Signature::from_bytes::<ActiveProfile>(
-            &delegate_signature_envelope,
-        ) else {
+        let Some(delegate_signature) = crate::sphincs_plus_c::Signature::from_bytes::<
+            SelectedProfile,
+        >(&delegate_signature_envelope) else {
             // `prepare_stateless_delegation` only ever emits a canonically
             // re-encoded envelope for a delegation it accepted, so this
             // should be unreachable; fail closed as Malformed rather than
@@ -301,13 +301,13 @@ impl crate::verifier::VerifierInterface for ShrincsVerifier {
             return VerifyOutcome::Invalid;
         };
         let Some((public_key, signature)) =
-            decode_stateful_envelope::<ActiveProfile>(signature_envelope)
+            decode_stateful_envelope::<SelectedProfile>(signature_envelope)
         else {
             return VerifyOutcome::Malformed;
         };
         // `SHRINCS.verify` packs the bytes32 hash into the signed message as
         // its raw 32 bytes (`SPHINCSPlusC.toMessage`); `hash` IS the message.
-        if super::verify_stateful_unsafe_raw::<ActiveProfile, NUM_CHAINS>(
+        if super::verify_stateful_unsafe_raw::<SelectedProfile, NUM_CHAINS>(
             commitment,
             &public_key,
             hash,
@@ -326,11 +326,11 @@ use crate::verifier::VerifierInterface as _;
 #[cfg(test)]
 mod interface_tests {
     use super::*;
-    use crate::profile_active::NUM_LAYERS;
+    use crate::profiles::selected::NUM_LAYERS;
     use crate::shrincs::{PublicKey, ShrincsSigner, StatelessSignature};
 
     fn keypair(seed: &[u8]) -> (crate::shrincs::Keys, PublicKey) {
-        ShrincsSigner::keygen::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(seed, 4)
+        ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(seed, 4)
             .expect("keygen must succeed for a valid seed/budget")
     }
 
@@ -359,9 +359,11 @@ mod interface_tests {
     fn verify_accepts_a_valid_stateful_signature_over_the_raw_hash() {
         let (mut signing_key, public_key) = keypair(b"verifier stateful accept seed");
         let hash = [0x42u8; HASH_LEN];
-        let signature =
-            ShrincsSigner::sign_stateful_raw::<ActiveProfile, NUM_CHAINS>(&mut signing_key, &hash)
-                .expect("signing must succeed for a fresh key");
+        let signature = ShrincsSigner::sign_stateful_raw::<SelectedProfile, NUM_CHAINS>(
+            &mut signing_key,
+            &hash,
+        )
+        .expect("signing must succeed for a fresh key");
         let envelope = encode_stateful_envelope(&public_key, &signature);
 
         let outcome = ShrincsVerifier::new().verify(&commitment_of(&public_key), &hash, &envelope);
@@ -372,9 +374,11 @@ mod interface_tests {
     fn verify_rejects_a_signature_over_a_different_hash() {
         let (mut signing_key, public_key) = keypair(b"verifier stateful reject seed");
         let hash = [0x11u8; HASH_LEN];
-        let signature =
-            ShrincsSigner::sign_stateful_raw::<ActiveProfile, NUM_CHAINS>(&mut signing_key, &hash)
-                .expect("signing must succeed for a fresh key");
+        let signature = ShrincsSigner::sign_stateful_raw::<SelectedProfile, NUM_CHAINS>(
+            &mut signing_key,
+            &hash,
+        )
+        .expect("signing must succeed for a fresh key");
         let envelope = encode_stateful_envelope(&public_key, &signature);
 
         let wrong_hash = [0x22u8; HASH_LEN];
@@ -387,9 +391,11 @@ mod interface_tests {
     fn verify_rejects_a_wrong_length_key() {
         let (mut signing_key, public_key) = keypair(b"verifier stateful wrong key seed");
         let hash = [0x33u8; HASH_LEN];
-        let signature =
-            ShrincsSigner::sign_stateful_raw::<ActiveProfile, NUM_CHAINS>(&mut signing_key, &hash)
-                .expect("signing must succeed for a fresh key");
+        let signature = ShrincsSigner::sign_stateful_raw::<SelectedProfile, NUM_CHAINS>(
+            &mut signing_key,
+            &hash,
+        )
+        .expect("signing must succeed for a fresh key");
         let envelope = encode_stateful_envelope(&public_key, &signature);
 
         let mut short_key = commitment_of(&public_key);
@@ -402,9 +408,11 @@ mod interface_tests {
     fn verify_reports_a_truncated_envelope_as_malformed() {
         let (mut signing_key, public_key) = keypair(b"verifier stateful malformed seed");
         let hash = [0x44u8; HASH_LEN];
-        let signature =
-            ShrincsSigner::sign_stateful_raw::<ActiveProfile, NUM_CHAINS>(&mut signing_key, &hash)
-                .expect("signing must succeed for a fresh key");
+        let signature = ShrincsSigner::sign_stateful_raw::<SelectedProfile, NUM_CHAINS>(
+            &mut signing_key,
+            &hash,
+        )
+        .expect("signing must succeed for a fresh key");
         let envelope = encode_stateful_envelope(&public_key, &signature);
 
         let outcome = ShrincsVerifier::new().verify(
@@ -427,9 +435,11 @@ mod interface_tests {
     fn verify_reports_a_mismatched_commitment_as_invalid_not_malformed() {
         let (mut signing_key, public_key) = keypair(b"verifier stateful wrong commitment seed");
         let hash = [0x5du8; HASH_LEN];
-        let signature =
-            ShrincsSigner::sign_stateful_raw::<ActiveProfile, NUM_CHAINS>(&mut signing_key, &hash)
-                .expect("signing must succeed for a fresh key");
+        let signature = ShrincsSigner::sign_stateful_raw::<SelectedProfile, NUM_CHAINS>(
+            &mut signing_key,
+            &hash,
+        )
+        .expect("signing must succeed for a fresh key");
         let envelope = encode_stateful_envelope(&public_key, &signature);
 
         // Structurally well-formed (correct-length, well-decoded) but wrong
@@ -448,7 +458,7 @@ mod interface_tests {
         let (signing_key, public_key) = keypair(b"verifier stateless accept seed");
         let hash = [0x66u8; HASH_LEN];
         let signature: StatelessSignature =
-            ShrincsSigner::sign_stateless_raw::<ActiveProfile, NUM_LAYERS>(&signing_key, &hash)
+            ShrincsSigner::sign_stateless_raw::<SelectedProfile, NUM_LAYERS>(&signing_key, &hash)
                 .expect("stateless signing must succeed for a fresh key");
         let envelope = encode_stateless_envelope(&public_key, &signature);
 
@@ -465,7 +475,7 @@ mod interface_tests {
         let (signing_key, public_key) = keypair(b"verifier stateless reject seed");
         let hash = [0x77u8; HASH_LEN];
         let signature =
-            ShrincsSigner::sign_stateless_raw::<ActiveProfile, NUM_LAYERS>(&signing_key, &hash)
+            ShrincsSigner::sign_stateless_raw::<SelectedProfile, NUM_LAYERS>(&signing_key, &hash)
                 .expect("stateless signing must succeed for a fresh key");
         let envelope = encode_stateless_envelope(&public_key, &signature);
 
@@ -483,7 +493,7 @@ mod interface_tests {
         let (signing_key, public_key) = keypair(b"verifier stateless wrong key seed");
         let hash = [0x99u8; HASH_LEN];
         let signature =
-            ShrincsSigner::sign_stateless_raw::<ActiveProfile, NUM_LAYERS>(&signing_key, &hash)
+            ShrincsSigner::sign_stateless_raw::<SelectedProfile, NUM_LAYERS>(&signing_key, &hash)
                 .expect("stateless signing must succeed for a fresh key");
         let envelope = encode_stateless_envelope(&public_key, &signature);
 
@@ -499,7 +509,7 @@ mod interface_tests {
         let (signing_key, public_key) = keypair(b"verifier stateless wrong commitment seed");
         let hash = [0xaau8; HASH_LEN];
         let signature =
-            ShrincsSigner::sign_stateless_raw::<ActiveProfile, NUM_LAYERS>(&signing_key, &hash)
+            ShrincsSigner::sign_stateless_raw::<SelectedProfile, NUM_LAYERS>(&signing_key, &hash)
                 .expect("stateless signing must succeed for a fresh key");
         let envelope = encode_stateless_envelope(&public_key, &signature);
 
@@ -515,7 +525,7 @@ mod interface_tests {
         let (signing_key, public_key) = keypair(b"verifier stateless malformed seed");
         let hash = [0xbbu8; HASH_LEN];
         let signature =
-            ShrincsSigner::sign_stateless_raw::<ActiveProfile, NUM_LAYERS>(&signing_key, &hash)
+            ShrincsSigner::sign_stateless_raw::<SelectedProfile, NUM_LAYERS>(&signing_key, &hash)
                 .expect("stateless signing must succeed for a fresh key");
         let envelope = encode_stateless_envelope(&public_key, &signature);
 

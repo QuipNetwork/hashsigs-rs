@@ -102,12 +102,12 @@ use crate::shrincs::ShrincsVerifier;
 ///
 /// ```rust,no_run
 /// # fn main() -> Result<(), ()> {
-/// # use hashsigs_rs::profile_active::{ActiveProfile, NUM_CHAINS, NUM_LAYERS};
+/// # use hashsigs_rs::profiles::selected::{SelectedProfile, NUM_CHAINS, NUM_LAYERS};
 /// use hashsigs_rs::shrincs::{sign, ShrincsSigner, ShrincsVerifier, VerifierInterface};
 ///
-/// let (mut keys, public_key) = ShrincsSigner::keygen::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(b"example-seed", 4).ok_or(())?;
+/// let (mut keys, public_key) = ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(b"example-seed", 4).ok_or(())?;
 /// let hash = [7u8; 32];
-/// let envelope = sign::<ActiveProfile, NUM_CHAINS>(&mut keys, &hash).ok_or(())?;
+/// let envelope = sign::<SelectedProfile, NUM_CHAINS>(&mut keys, &hash).ok_or(())?;
 /// let outcome = ShrincsVerifier::new().verify(
 ///     &public_key.public_key_commitment,
 ///     &hash,
@@ -299,7 +299,7 @@ impl ShrincsSigner {
 mod tests {
     use super::*;
     use crate::hash::hash_packed;
-    use crate::profile_active::{ActiveProfile, NUM_CHAINS, NUM_LAYERS};
+    use crate::profiles::selected::{SelectedProfile, NUM_CHAINS, NUM_LAYERS};
     use crate::shrincs::test_fixtures::{
         fixture_entry_opt, fixture_pair, fixture_path, load_fixture_file,
         stateful_signer_fixture_path, TestKeyMode,
@@ -329,7 +329,7 @@ mod tests {
         max_stateful_signatures: u32,
     ) -> (Keys, PublicKey) {
         match TestKeyMode::from_env() {
-            TestKeyMode::Fresh => ShrincsSigner::keygen::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(
+            TestKeyMode::Fresh => ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(
                 seed_label.as_bytes(),
                 max_stateful_signatures,
             )
@@ -340,7 +340,7 @@ mod tests {
                     let fixture_file = load_fixture_file(&path);
                     assert_eq!(
                         fixture_file.profile_name,
-                        crate::profiles::PROFILE_NAME,
+                        <crate::profiles::selected::SelectedProfile as crate::profile::Profile>::PROFILE_NAME,
                         "fixture profile mismatch",
                     );
                     if let Some(entry) = fixture_entry_opt(&fixture_file, seed_label) {
@@ -354,7 +354,7 @@ mod tests {
                     "shrincs test fixtures: no full-key entry for {seed_label:?}; \
                      falling back to fresh keygen"
                 );
-                ShrincsSigner::keygen::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(
+                ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(
                     seed_label.as_bytes(),
                     max_stateful_signatures,
                 )
@@ -368,7 +368,7 @@ mod tests {
         max_stateful_signatures: u32,
     ) -> (Keys, PublicKey) {
         match TestKeyMode::from_env() {
-            TestKeyMode::Fresh => stateful_only_key::<ActiveProfile, NUM_CHAINS>(
+            TestKeyMode::Fresh => stateful_only_key::<SelectedProfile, NUM_CHAINS>(
                 seed_label.as_bytes(),
                 max_stateful_signatures,
             ),
@@ -378,7 +378,7 @@ mod tests {
                     let fixture_file = load_fixture_file(&path);
                     assert_eq!(
                         fixture_file.profile_name,
-                        crate::profiles::PROFILE_NAME,
+                        <crate::profiles::selected::SelectedProfile as crate::profile::Profile>::PROFILE_NAME,
                         "fixture profile mismatch",
                     );
                     if let Some(entry) = fixture_entry_opt(&fixture_file, seed_label) {
@@ -390,7 +390,7 @@ mod tests {
                     "shrincs test fixtures: no stateful-only entry for {seed_label:?}; \
                      falling back to fresh keygen"
                 );
-                stateful_only_key::<ActiveProfile, NUM_CHAINS>(
+                stateful_only_key::<SelectedProfile, NUM_CHAINS>(
                     seed_label.as_bytes(),
                     max_stateful_signatures,
                 )
@@ -404,7 +404,7 @@ mod tests {
     #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
     #[test]
     fn signer_constants_match_verifier_constants() {
-        use crate::profiles::{
+        use crate::shrincs::{
             HYPERTREE_HEIGHT, NUM_HYPERTREE_LAYERS, NUM_WOTS_CHAINS, WOTS_CHAIN_LEN,
         };
         assert_eq!(HASH_LEN, 32);
@@ -425,38 +425,38 @@ mod tests {
     #[cfg(any(feature = "profile-128s-q18", feature = "profile-128s-q20"))]
     #[test]
     fn stateful_round_trip_verifies_under_128s_truncation() {
-        use crate::profiles::HASH_TRUNC_LEN;
+        use crate::shrincs::HASH_TRUNC_LEN;
         let seed = b"128s stateful truncation seed";
         let max = 4u32;
-        let stateful_sk_seed = derive32::<<ActiveProfile as crate::profile::Profile>::Suite>(
+        let stateful_sk_seed = derive32::<<SelectedProfile as crate::profile::Profile>::Suite>(
             b"shrincs-stateful-sk-seed",
             seed,
             &[],
         );
-        let stateful_prf_seed = derive32::<<ActiveProfile as crate::profile::Profile>::Suite>(
+        let stateful_prf_seed = derive32::<<SelectedProfile as crate::profile::Profile>::Suite>(
             b"shrincs-stateful-prf-seed",
             seed,
             &[],
         );
-        let stateful_pk_seed = derive32::<<ActiveProfile as crate::profile::Profile>::Suite>(
+        let stateful_pk_seed = derive32::<<SelectedProfile as crate::profile::Profile>::Suite>(
             b"shrincs-stateful-pk-seed",
             seed,
             &[],
         );
-        let stateful_root = uxmss::stateful_subtree_root::<ActiveProfile, NUM_CHAINS>(
+        let stateful_root = uxmss::stateful_subtree_root::<SelectedProfile, NUM_CHAINS>(
             &stateful_sk_seed,
             &stateful_pk_seed,
             INITIAL_STATEFUL_LEAF_INDEX,
             max,
         );
-        let pk_seed = derive32::<<ActiveProfile as crate::profile::Profile>::Suite>(
+        let pk_seed = derive32::<<SelectedProfile as crate::profile::Profile>::Suite>(
             b"shrincs-pk-seed",
             seed,
             &[],
         );
         // Placeholder: a real hypertree root is infeasible here and irrelevant to
         // the stateful path, but it is still committed by the public key.
-        let hypertree_root = derive32::<<ActiveProfile as crate::profile::Profile>::Suite>(
+        let hypertree_root = derive32::<<SelectedProfile as crate::profile::Profile>::Suite>(
             b"placeholder-hypertree-root",
             seed,
             &[],
@@ -477,12 +477,12 @@ mod tests {
         let stateless = sphincs_plus_c::Key::new(
             sphincs_plus_c::PrivateKey::new(
                 sphincs_plus_c::SkSeed::new(derive32::<
-                    <ActiveProfile as crate::profile::Profile>::Suite,
+                    <SelectedProfile as crate::profile::Profile>::Suite,
                 >(
                     b"shrincs-stateless-sk-seed", seed, &[]
                 )),
                 sphincs_plus_c::PrfSeed::new(derive32::<
-                    <ActiveProfile as crate::profile::Profile>::Suite,
+                    <SelectedProfile as crate::profile::Profile>::Suite,
                 >(
                     b"shrincs-stateless-prf-seed", seed, &[]
                 )),
@@ -492,18 +492,18 @@ mod tests {
                 root: sphincs_plus_c::Root::new(hypertree_root),
             },
         );
-        let signing_key = Keys::new::<ActiveProfile>(stateless, stateful);
-        let public_key = public_key_from_components::<ActiveProfile>(
+        let signing_key = Keys::new::<SelectedProfile>(stateless, stateful);
+        let public_key = public_key_from_components::<SelectedProfile>(
             encode_stateful_public_key(stateful_pk_seed, stateful_root, max),
             pk_seed,
             hypertree_root,
         );
         let expected = word32(&public_key.public_key_commitment).unwrap();
-        let message = hash_packed::<<ActiveProfile as crate::profile::Profile>::Suite>(&[
+        let message = hash_packed::<<SelectedProfile as crate::profile::Profile>::Suite>(&[
             b"128s stateful message",
         ]);
 
-        let signature = ShrincsSigner::sign_stateful_raw_at_leaf::<ActiveProfile, NUM_CHAINS>(
+        let signature = ShrincsSigner::sign_stateful_raw_at_leaf::<SelectedProfile, NUM_CHAINS>(
             &signing_key,
             2,
             &message,
@@ -580,10 +580,10 @@ mod tests {
     fn generated_stateful_signature_verifies() {
         let (mut signing_key, public_key) = fixture_or_stateful_only_key("stateful signer seed", 4);
         let expected = expected_key(&public_key);
-        let message = hash_packed::<<ActiveProfile as crate::profile::Profile>::Suite>(&[
+        let message = hash_packed::<<SelectedProfile as crate::profile::Profile>::Suite>(&[
             b"stateful test message",
         ]);
-        let signature = ShrincsSigner::sign_stateful_raw::<ActiveProfile, NUM_CHAINS>(
+        let signature = ShrincsSigner::sign_stateful_raw::<SelectedProfile, NUM_CHAINS>(
             &mut signing_key,
             &message,
         )
@@ -604,7 +604,7 @@ mod tests {
         let (mut signing_key, public_key) = fixture_or_stateful_only_key("action signer seed", 4);
         let context = action_context();
         let expected = expected_key(&public_key);
-        let signature = ShrincsSigner::sign_stateful_action::<ActiveProfile, NUM_CHAINS>(
+        let signature = ShrincsSigner::sign_stateful_action::<SelectedProfile, NUM_CHAINS>(
             &mut signing_key,
             &public_key,
             &context,
@@ -626,10 +626,10 @@ mod tests {
         let (signing_key, public_key) =
             fixture_or_stateful_only_key("explicit leaf helper seed", 4);
         let expected = expected_key(&public_key);
-        let message = hash_packed::<<ActiveProfile as crate::profile::Profile>::Suite>(&[
+        let message = hash_packed::<<SelectedProfile as crate::profile::Profile>::Suite>(&[
             b"explicit leaf test message",
         ]);
-        let signature = ShrincsSigner::sign_stateful_raw_at_leaf::<ActiveProfile, NUM_CHAINS>(
+        let signature = ShrincsSigner::sign_stateful_raw_at_leaf::<SelectedProfile, NUM_CHAINS>(
             &signing_key,
             2,
             &message,
@@ -651,14 +651,14 @@ mod tests {
         use crate::sphincs_plus_c::{self};
         let (signing_key, public_key) =
             fixture_or_fresh_full_key("sphincs-plus-c hybrid cross-check", 4);
-        let message = hash_packed::<<ActiveProfile as crate::profile::Profile>::Suite>(&[
+        let message = hash_packed::<<SelectedProfile as crate::profile::Profile>::Suite>(&[
             b"sphincs-plus-c-hybrid-cross",
         ]);
         let spk = signing_key.stateless().clone();
-        let sig = sphincs_plus_c::sign::<ActiveProfile, NUM_LAYERS>(&spk, &message)
+        let sig = sphincs_plus_c::sign::<SelectedProfile, NUM_LAYERS>(&spk, &message)
             .expect("independent sign");
         let pk = spk.public_key;
-        assert!(sphincs_plus_c::verify::<ActiveProfile, NUM_CHAINS>(
+        assert!(sphincs_plus_c::verify::<SelectedProfile, NUM_CHAINS>(
             &pk, &message, &sig
         ));
         let expected = expected_key(&public_key);
@@ -677,16 +677,19 @@ mod tests {
     #[test]
     fn generated_stateless_raw_signature_verifies() {
         let (signing_key, public_key) = ShrincsSigner::keygen::<
-            ActiveProfile,
+            SelectedProfile,
             NUM_CHAINS,
             NUM_LAYERS,
         >(b"stateless signer seed", 2)
         .unwrap();
-        let message =
-            hash_packed::<<ActiveProfile as crate::profile::Profile>::Suite>(&[b"stateless test"]);
-        let signature =
-            ShrincsSigner::sign_stateless_raw::<ActiveProfile, NUM_LAYERS>(&signing_key, &message)
-                .unwrap();
+        let message = hash_packed::<<SelectedProfile as crate::profile::Profile>::Suite>(&[
+            b"stateless test",
+        ]);
+        let signature = ShrincsSigner::sign_stateless_raw::<SelectedProfile, NUM_LAYERS>(
+            &signing_key,
+            &message,
+        )
+        .unwrap();
         let expected = expected_key(&public_key);
 
         // Stateless signatures should verify through the FORS-C opening and all
@@ -702,10 +705,10 @@ mod tests {
     #[test]
     fn keygen_rejects_empty_or_excessive_stateful_budget() {
         assert!(
-            ShrincsSigner::keygen::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(b"seed", 0).is_none()
+            ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(b"seed", 0).is_none()
         );
         assert!(
-            ShrincsSigner::keygen::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(
+            ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(
                 b"seed",
                 MAX_STATEFUL_SIGNATURES_LIMIT + 1
             )
@@ -725,12 +728,12 @@ mod tests {
     fn sign_round_trips_and_advances_the_key() {
         use crate::verifier::{VerifierInterface, VerifyOutcome};
         let (mut keys, public_key) =
-            ShrincsSigner::keygen::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(
+            ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(
                 b"signer iface shrincs seed",
                 4,
             )
             .expect("keygen");
-        let hash = hash_packed::<<ActiveProfile as crate::profile::Profile>::Suite>(&[
+        let hash = hash_packed::<<SelectedProfile as crate::profile::Profile>::Suite>(&[
             b"signer-interface-round-trip",
         ]);
         let key = public_key.public_key_commitment.clone();
@@ -739,7 +742,7 @@ mod tests {
             keys.stateful().next_leaf_index(),
             INITIAL_STATEFUL_LEAF_INDEX
         );
-        let sig1 = sign::<ActiveProfile, NUM_CHAINS>(&mut keys, &hash).expect("first sign");
+        let sig1 = sign::<SelectedProfile, NUM_CHAINS>(&mut keys, &hash).expect("first sign");
         assert_eq!(
             ShrincsVerifier::new().verify(&key, &hash, &sig1),
             VerifyOutcome::Valid
@@ -750,7 +753,7 @@ mod tests {
             INITIAL_STATEFUL_LEAF_INDEX + 1
         );
 
-        let sig2 = sign::<ActiveProfile, NUM_CHAINS>(&mut keys, &hash).expect("second sign");
+        let sig2 = sign::<SelectedProfile, NUM_CHAINS>(&mut keys, &hash).expect("second sign");
         assert_ne!(sig1, sig2, "distinct leaves yield distinct signatures");
         assert_eq!(
             ShrincsVerifier::new().verify(&key, &hash, &sig2),
@@ -763,11 +766,11 @@ mod tests {
         let (mut signing_key, public_key) =
             fixture_or_stateful_only_key("stateful exhaustion seed", 1);
         let expected = expected_key(&public_key);
-        let message = hash_packed::<<ActiveProfile as crate::profile::Profile>::Suite>(&[
+        let message = hash_packed::<<SelectedProfile as crate::profile::Profile>::Suite>(&[
             b"first and only stateful signature",
         ]);
 
-        let signature = ShrincsSigner::sign_stateful_raw::<ActiveProfile, NUM_CHAINS>(
+        let signature = ShrincsSigner::sign_stateful_raw::<SelectedProfile, NUM_CHAINS>(
             &mut signing_key,
             &message,
         )
@@ -786,7 +789,7 @@ mod tests {
         // The stateful signer is one-time per leaf. With a budget of one, the
         // next signing attempt must fail instead of reusing the previous leaf.
         assert!(
-            ShrincsSigner::sign_stateful_raw::<ActiveProfile, NUM_CHAINS>(
+            ShrincsSigner::sign_stateful_raw::<SelectedProfile, NUM_CHAINS>(
                 &mut signing_key,
                 &message
             )
@@ -799,13 +802,13 @@ mod tests {
         let (mut signing_key, public_key) =
             fixture_or_stateful_only_key("stateful negative seed", 4);
         let expected = expected_key(&public_key);
-        let message = hash_packed::<<ActiveProfile as crate::profile::Profile>::Suite>(&[
+        let message = hash_packed::<<SelectedProfile as crate::profile::Profile>::Suite>(&[
             b"stateful valid message",
         ]);
-        let wrong_message = hash_packed::<<ActiveProfile as crate::profile::Profile>::Suite>(&[
+        let wrong_message = hash_packed::<<SelectedProfile as crate::profile::Profile>::Suite>(&[
             b"stateful wrong message",
         ]);
-        let signature = ShrincsSigner::sign_stateful_raw::<ActiveProfile, NUM_CHAINS>(
+        let signature = ShrincsSigner::sign_stateful_raw::<SelectedProfile, NUM_CHAINS>(
             &mut signing_key,
             &message,
         )
@@ -833,7 +836,7 @@ mod tests {
         let (mut signing_key, public_key) = fixture_or_stateful_only_key("action negative seed", 4);
         let expected = expected_key(&public_key);
         let context = action_context();
-        let signature = ShrincsSigner::sign_stateful_action::<ActiveProfile, NUM_CHAINS>(
+        let signature = ShrincsSigner::sign_stateful_action::<SelectedProfile, NUM_CHAINS>(
             &mut signing_key,
             &public_key,
             &context,
@@ -860,15 +863,17 @@ mod tests {
     #[test]
     fn stateless_signature_rejects_wrong_message_and_tampered_hypertree_path() {
         let (signing_key, public_key) = fixture_or_fresh_full_key("stateless negative seed", 2);
-        let message = hash_packed::<<ActiveProfile as crate::profile::Profile>::Suite>(&[
+        let message = hash_packed::<<SelectedProfile as crate::profile::Profile>::Suite>(&[
             b"stateless valid message",
         ]);
-        let wrong_message = hash_packed::<<ActiveProfile as crate::profile::Profile>::Suite>(&[
+        let wrong_message = hash_packed::<<SelectedProfile as crate::profile::Profile>::Suite>(&[
             b"stateless wrong message",
         ]);
-        let signature =
-            ShrincsSigner::sign_stateless_raw::<ActiveProfile, NUM_LAYERS>(&signing_key, &message)
-                .unwrap();
+        let signature = ShrincsSigner::sign_stateless_raw::<SelectedProfile, NUM_LAYERS>(
+            &signing_key,
+            &message,
+        )
+        .unwrap();
         let expected = expected_key(&public_key);
         let verifier = ShrincsVerifier::new();
 
@@ -895,12 +900,14 @@ mod tests {
     #[test]
     fn stateless_signature_rejects_malformed_lengths() {
         let (signing_key, public_key) = fixture_or_fresh_full_key("stateless malformed seed", 2);
-        let message = hash_packed::<<ActiveProfile as crate::profile::Profile>::Suite>(&[
+        let message = hash_packed::<<SelectedProfile as crate::profile::Profile>::Suite>(&[
             b"stateless malformed message",
         ]);
-        let signature =
-            ShrincsSigner::sign_stateless_raw::<ActiveProfile, NUM_LAYERS>(&signing_key, &message)
-                .unwrap();
+        let signature = ShrincsSigner::sign_stateless_raw::<SelectedProfile, NUM_LAYERS>(
+            &signing_key,
+            &message,
+        )
+        .unwrap();
         let expected = expected_key(&public_key);
         let verifier = ShrincsVerifier::new();
 
@@ -932,10 +939,10 @@ mod tests {
         let (mut signing_key, mut public_key) =
             fixture_or_stateful_only_key("public key negative seed", 4);
         let expected = expected_key(&public_key);
-        let message = hash_packed::<<ActiveProfile as crate::profile::Profile>::Suite>(&[
+        let message = hash_packed::<<SelectedProfile as crate::profile::Profile>::Suite>(&[
             b"public key commitment message",
         ]);
-        let signature = ShrincsSigner::sign_stateful_raw::<ActiveProfile, NUM_CHAINS>(
+        let signature = ShrincsSigner::sign_stateful_raw::<SelectedProfile, NUM_CHAINS>(
             &mut signing_key,
             &message,
         )
@@ -956,15 +963,15 @@ mod tests {
 
     #[test]
     fn import_round_trips_a_keygen_key() {
-        let (key, pk) = ShrincsSigner::keygen::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(
+        let (key, pk) = ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(
             b"import round trip seed",
             4,
         )
         .unwrap();
         let (imported_key, imported_pk) =
-            ShrincsSigner::import_signing_key::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(key)
+            ShrincsSigner::import_signing_key::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(key)
                 .unwrap();
-        let (key_again, _) = ShrincsSigner::keygen::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(
+        let (key_again, _) = ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(
             b"import round trip seed",
             4,
         )
@@ -975,7 +982,7 @@ mod tests {
 
     /// Rebuild `key` with a different stateful leaf index (tests only).
     fn with_next_leaf(key: &Keys, next_leaf_index: u32) -> Keys {
-        Keys::new::<ActiveProfile>(
+        Keys::new::<SelectedProfile>(
             key.stateless().clone(),
             uxmss::Key::new(
                 key.stateful().secret().clone(),
@@ -987,28 +994,28 @@ mod tests {
 
     #[test]
     fn import_accepts_advanced_and_exhausted_counters() {
-        let (key, _) = ShrincsSigner::keygen::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(
+        let (key, _) = ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(
             b"import counter seed",
             4,
         )
         .unwrap();
         let key = with_next_leaf(&key, 3);
         let (imported, _) =
-            ShrincsSigner::import_signing_key::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(key)
+            ShrincsSigner::import_signing_key::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(key)
                 .unwrap();
         assert_eq!(imported.stateful().next_leaf_index(), 3);
 
-        let (key, _) = ShrincsSigner::keygen::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(
+        let (key, _) = ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(
             b"import counter seed",
             4,
         )
         .unwrap();
         let key = with_next_leaf(&key, 5); // max + 1: exhausted, still valid
         let (imported, _) =
-            ShrincsSigner::import_signing_key::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(key)
+            ShrincsSigner::import_signing_key::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(key)
                 .unwrap();
         assert!(
-            ShrincsSigner::sign_stateful_raw::<ActiveProfile, NUM_CHAINS>(
+            ShrincsSigner::sign_stateful_raw::<SelectedProfile, NUM_CHAINS>(
                 &mut { imported },
                 b"no leaves left"
             )
@@ -1018,36 +1025,36 @@ mod tests {
 
     #[test]
     fn import_rejects_out_of_range_counters_and_budgets() {
-        let (key, _) = ShrincsSigner::keygen::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(
+        let (key, _) = ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(
             b"import bounds seed",
             4,
         )
         .unwrap();
         let key = with_next_leaf(&key, 0);
         assert!(
-            ShrincsSigner::import_signing_key::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(key)
+            ShrincsSigner::import_signing_key::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(key)
                 .is_none()
         );
 
-        let (key, _) = ShrincsSigner::keygen::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(
+        let (key, _) = ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(
             b"import bounds seed",
             4,
         )
         .unwrap();
         let key = with_next_leaf(&key, 6); // max + 2
         assert!(
-            ShrincsSigner::import_signing_key::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(key)
+            ShrincsSigner::import_signing_key::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(key)
                 .is_none()
         );
 
-        let (key, _) = ShrincsSigner::keygen::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(
+        let (key, _) = ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(
             b"import bounds seed",
             4,
         )
         .unwrap();
         let mut public_key = *key.stateful().public_key();
         public_key.max_signatures = 0;
-        let key = Keys::new::<ActiveProfile>(
+        let key = Keys::new::<SelectedProfile>(
             key.stateless().clone(),
             uxmss::Key::new(
                 key.stateful().secret().clone(),
@@ -1056,18 +1063,18 @@ mod tests {
             ),
         );
         assert!(
-            ShrincsSigner::import_signing_key::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(key)
+            ShrincsSigner::import_signing_key::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(key)
                 .is_none()
         );
 
-        let (key, _) = ShrincsSigner::keygen::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(
+        let (key, _) = ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(
             b"import bounds seed",
             4,
         )
         .unwrap();
         let mut public_key = *key.stateful().public_key();
         public_key.max_signatures = 4097; // > MAX_STATEFUL_SIGNATURES_LIMIT
-        let key = Keys::new::<ActiveProfile>(
+        let key = Keys::new::<SelectedProfile>(
             key.stateless().clone(),
             uxmss::Key::new(
                 key.stateful().secret().clone(),
@@ -1076,14 +1083,14 @@ mod tests {
             ),
         );
         assert!(
-            ShrincsSigner::import_signing_key::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(key)
+            ShrincsSigner::import_signing_key::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(key)
                 .is_none()
         );
     }
 
     #[test]
     fn import_rejects_tampered_roots() {
-        let (key, _) = ShrincsSigner::keygen::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(
+        let (key, _) = ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(
             b"import tamper seed",
             4,
         )
@@ -1092,7 +1099,7 @@ mod tests {
         stateful_root[0] ^= 0x01;
         let mut public_key = *key.stateful().public_key();
         public_key.root = uxmss::Root::new(stateful_root);
-        let key = Keys::new::<ActiveProfile>(
+        let key = Keys::new::<SelectedProfile>(
             key.stateless().clone(),
             uxmss::Key::new(
                 key.stateful().secret().clone(),
@@ -1101,11 +1108,11 @@ mod tests {
             ),
         );
         assert!(
-            ShrincsSigner::import_signing_key::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(key)
+            ShrincsSigner::import_signing_key::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(key)
                 .is_none()
         );
 
-        let (key, _) = ShrincsSigner::keygen::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(
+        let (key, _) = ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(
             b"import tamper seed",
             4,
         )
@@ -1114,26 +1121,26 @@ mod tests {
         hypertree_root[0] ^= 0x01;
         let mut stateless = key.stateless().clone();
         stateless.public_key.root = sphincs_plus_c::Root::new(hypertree_root);
-        let key = Keys::new::<ActiveProfile>(stateless, key.stateful().clone());
+        let key = Keys::new::<SelectedProfile>(stateless, key.stateful().clone());
         assert!(
-            ShrincsSigner::import_signing_key::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(key)
+            ShrincsSigner::import_signing_key::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(key)
                 .is_none()
         );
 
         // Field splice: seeds from one key, roots from another.
-        let (key_a, _) = ShrincsSigner::keygen::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(
+        let (key_a, _) = ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(
             b"import splice seed A",
             4,
         )
         .unwrap();
-        let (key_b, _) = ShrincsSigner::keygen::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(
+        let (key_b, _) = ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(
             b"import splice seed B",
             4,
         )
         .unwrap();
         let mut public_key = *key_b.stateful().public_key();
         public_key.root = key_a.stateful().public_key().root;
-        let key_b = Keys::new::<ActiveProfile>(
+        let key_b = Keys::new::<SelectedProfile>(
             key_b.stateless().clone(),
             uxmss::Key::new(
                 key_b.stateful().secret().clone(),
@@ -1142,24 +1149,28 @@ mod tests {
             ),
         );
         assert!(
-            ShrincsSigner::import_signing_key::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(key_b)
+            ShrincsSigner::import_signing_key::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(key_b)
                 .is_none()
         );
     }
 
     #[test]
     fn imported_key_signs_and_verifies() {
-        let (key, _) =
-            ShrincsSigner::keygen::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(b"import sign seed", 4)
-                .unwrap();
+        let (key, _) = ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(
+            b"import sign seed",
+            4,
+        )
+        .unwrap();
         let key = with_next_leaf(&key, 2);
         let (mut imported, pk) =
-            ShrincsSigner::import_signing_key::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(key)
+            ShrincsSigner::import_signing_key::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(key)
                 .unwrap();
         let message = b"signed after import".to_vec();
-        let signature =
-            ShrincsSigner::sign_stateful_raw::<ActiveProfile, NUM_CHAINS>(&mut imported, &message)
-                .unwrap();
+        let signature = ShrincsSigner::sign_stateful_raw::<SelectedProfile, NUM_CHAINS>(
+            &mut imported,
+            &message,
+        )
+        .unwrap();
         assert_eq!(signature.auth_path.len(), 2);
         let expected = word32(&pk.public_key_commitment).unwrap();
         assert!(
@@ -1176,15 +1187,15 @@ mod tests {
     fn stateful_boundary_leaves_and_empty_message_round_trip() {
         let budget = 4u32;
         let (signing_key, public_key) =
-            stateful_only_key::<ActiveProfile, NUM_CHAINS>(b"stateful boundary seed", budget);
+            stateful_only_key::<SelectedProfile, NUM_CHAINS>(b"stateful boundary seed", budget);
         let expected = expected_key(&public_key);
         let verifier = ShrincsVerifier::new();
-        let message = hash_packed::<<ActiveProfile as crate::profile::Profile>::Suite>(&[
+        let message = hash_packed::<<SelectedProfile as crate::profile::Profile>::Suite>(&[
             b"stateful boundary message",
         ]);
 
         // Leaf 1: the first live leaf.
-        let leaf_one = ShrincsSigner::sign_stateful_raw_at_leaf::<ActiveProfile, NUM_CHAINS>(
+        let leaf_one = ShrincsSigner::sign_stateful_raw_at_leaf::<SelectedProfile, NUM_CHAINS>(
             &signing_key,
             1,
             &message,
@@ -1194,7 +1205,7 @@ mod tests {
         assert!(verifier.verify_stateful_unsafe_raw(expected, &public_key, &message, &leaf_one));
 
         // Leaf == budget: the last usable leaf.
-        let leaf_budget = ShrincsSigner::sign_stateful_raw_at_leaf::<ActiveProfile, NUM_CHAINS>(
+        let leaf_budget = ShrincsSigner::sign_stateful_raw_at_leaf::<SelectedProfile, NUM_CHAINS>(
             &signing_key,
             budget,
             &message,
@@ -1204,7 +1215,7 @@ mod tests {
         assert!(verifier.verify_stateful_unsafe_raw(expected, &public_key, &message, &leaf_budget));
 
         // Empty message round-trips; the same signature must reject a 1-byte message.
-        let empty = ShrincsSigner::sign_stateful_raw_at_leaf::<ActiveProfile, NUM_CHAINS>(
+        let empty = ShrincsSigner::sign_stateful_raw_at_leaf::<SelectedProfile, NUM_CHAINS>(
             &signing_key,
             1,
             &[],
@@ -1224,14 +1235,14 @@ mod tests {
     )]
     #[test]
     fn stateless_empty_message_round_trip_and_fors_boundary() {
-        use crate::profiles::NUM_FORS_TREES;
+        use crate::shrincs::NUM_FORS_TREES;
         let (signing_key, public_key) =
             fixture_or_fresh_full_key("stateless empty message seed", 2);
         let expected = expected_key(&public_key);
         let verifier = ShrincsVerifier::new();
 
         let signature =
-            ShrincsSigner::sign_stateless_raw::<ActiveProfile, NUM_LAYERS>(&signing_key, &[])
+            ShrincsSigner::sign_stateless_raw::<SelectedProfile, NUM_LAYERS>(&signing_key, &[])
                 .unwrap();
         // FORS-C forces the omitted final tree's leaf to 0: only k - 1 entries.
         assert_eq!(signature.fors.entries.len(), NUM_FORS_TREES as usize - 1);
@@ -1257,11 +1268,11 @@ mod tests {
             tamper_chain in 0usize..NUM_CHAINS,
             tamper_byte in 0usize..HASH_LEN,
         ) {
-            let (signing_key, public_key) = stateful_only_key::<ActiveProfile, NUM_CHAINS>(b"proptest stateful seed", 4);
+            let (signing_key, public_key) = stateful_only_key::<SelectedProfile, NUM_CHAINS>(b"proptest stateful seed", 4);
             let expected = word32(&public_key.public_key_commitment).unwrap();
             let verifier = ShrincsVerifier::new();
             let signature =
-                ShrincsSigner::sign_stateful_raw_at_leaf::<ActiveProfile, NUM_CHAINS>(&signing_key, leaf, &message).unwrap();
+                ShrincsSigner::sign_stateful_raw_at_leaf::<SelectedProfile, NUM_CHAINS>(&signing_key, leaf, &message).unwrap();
 
             // Round-trip: a freshly produced signature verifies.
             prop_assert!(verifier.verify_stateful_unsafe_raw(

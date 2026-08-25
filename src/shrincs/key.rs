@@ -269,14 +269,6 @@ impl Keys {
     }
 }
 
-impl TryFrom<&[u8]> for Keys {
-    type Error = ();
-
-    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        Self::from_bytes::<crate::profile_active::ActiveProfile>(value).ok_or(())
-    }
-}
-
 // `Keys` intentionally does not derive `Zeroize`: its secret halves
 // (`sphincs_plus_c::PrivateKey`, `uxmss::PrivateKey`) are `ZeroizeOnDrop`, so their
 // seeds are wiped when a `Keys` drops, and its derived `Debug` delegates to
@@ -472,19 +464,19 @@ mod public_key_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::profile_active::{ActiveProfile, NUM_CHAINS, NUM_LAYERS};
+    use crate::profiles::selected::{SelectedProfile, NUM_CHAINS, NUM_LAYERS};
 
     fn sample() -> Keys {
         // Structural sample: any 264 bytes parse; roots/commitment are not
         // validated against seeds here (that is the signer's job).
-        Keys::from_bytes::<ActiveProfile>(&[7u8; KEYS_BYTES]).expect("264 bytes parse")
+        Keys::from_bytes::<SelectedProfile>(&[7u8; KEYS_BYTES]).expect("264 bytes parse")
     }
 
     #[test]
     fn bytes_round_trip() {
         let keys = sample();
         assert_eq!(
-            Keys::from_bytes::<ActiveProfile>(&keys.to_bytes()),
+            Keys::from_bytes::<SelectedProfile>(&keys.to_bytes()),
             Some(keys)
         );
     }
@@ -492,7 +484,7 @@ mod tests {
     #[test]
     fn from_bytes_reproduces_input_bytes() {
         let input = [9u8; KEYS_BYTES];
-        let keys = Keys::from_bytes::<ActiveProfile>(&input).expect("parse");
+        let keys = Keys::from_bytes::<SelectedProfile>(&input).expect("parse");
         assert_eq!(keys.to_bytes(), input);
     }
 
@@ -501,21 +493,21 @@ mod tests {
         let keys = sample();
         assert_eq!(
             *keys.public_key_commitment(),
-            Keys::compute_commitment::<ActiveProfile>(keys.stateful(), keys.stateless())
+            Keys::compute_commitment::<SelectedProfile>(keys.stateful(), keys.stateless())
         );
     }
 
     #[test]
     fn from_bytes_rejects_wrong_length() {
-        assert!(Keys::from_bytes::<ActiveProfile>(&[0u8; KEYS_BYTES - 1]).is_none());
-        assert!(Keys::from_bytes::<ActiveProfile>(&[0u8; KEYS_BYTES + 1]).is_none());
+        assert!(Keys::from_bytes::<SelectedProfile>(&[0u8; KEYS_BYTES - 1]).is_none());
+        assert!(Keys::from_bytes::<SelectedProfile>(&[0u8; KEYS_BYTES + 1]).is_none());
     }
 
     /// A `Keys` with real, seed-derived roots, plus the `PublicKey` production
     /// `keygen` installs — for cross-checking commitment and import.
     fn production_keys() -> (Keys, crate::shrincs::key::PublicKey) {
         use crate::shrincs::signer::ShrincsSigner;
-        ShrincsSigner::keygen::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(
+        ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(
             b"keys import cross-check",
             4,
         )
@@ -537,7 +529,7 @@ mod tests {
     fn import_accepts_valid_seed_derived_key() {
         let (keys, _) = production_keys();
         assert_eq!(
-            Keys::import::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(&keys.to_bytes()),
+            Keys::import::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(&keys.to_bytes()),
             Some(keys)
         );
     }
@@ -547,7 +539,7 @@ mod tests {
         let (keys, _) = production_keys();
         let mut bytes = keys.to_bytes();
         bytes[96] ^= 0x01; // stateful root occupies bytes 96..128
-        assert!(Keys::import::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(&bytes).is_none());
+        assert!(Keys::import::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(&bytes).is_none());
     }
 
     #[test]
@@ -555,7 +547,7 @@ mod tests {
         let (keys, _) = production_keys();
         let mut bytes = keys.to_bytes();
         bytes[232] ^= 0x01; // stateless hypertree root occupies bytes 232..264
-        assert!(Keys::import::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(&bytes).is_none());
+        assert!(Keys::import::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(&bytes).is_none());
     }
 
     #[test]
@@ -563,7 +555,7 @@ mod tests {
         let (keys, _) = production_keys();
         let mut bytes = keys.to_bytes();
         bytes[128..132].copy_from_slice(&0u32.to_be_bytes()); // max_signatures = 0
-        assert!(Keys::import::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(&bytes).is_none());
+        assert!(Keys::import::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(&bytes).is_none());
     }
 
     #[test]
@@ -573,7 +565,7 @@ mod tests {
         // next_leaf_index (bytes 132..136) = max + 1 (exhausted but legal).
         let exhausted = keys.stateful().public_key().max_signatures + 1;
         bytes[132..136].copy_from_slice(&exhausted.to_be_bytes());
-        assert!(Keys::import::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(&bytes).is_some());
+        assert!(Keys::import::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(&bytes).is_some());
     }
 
     #[test]
@@ -583,7 +575,7 @@ mod tests {
         let original_commitment = *keys.public_key_commitment();
         let original_max = keys.stateful().public_key().max_signatures;
 
-        keys.reset::<ActiveProfile, NUM_CHAINS>(b"a completely different reset seed");
+        keys.reset::<SelectedProfile, NUM_CHAINS>(b"a completely different reset seed");
 
         assert_ne!(*keys.public_key_commitment(), original_commitment);
         assert_eq!(keys.stateless(), &original_stateless);
@@ -592,7 +584,9 @@ mod tests {
             INITIAL_STATEFUL_LEAF_INDEX
         );
         assert_eq!(keys.stateful().public_key().max_signatures, original_max);
-        assert!(Keys::import::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(&keys.to_bytes()).is_some());
+        assert!(
+            Keys::import::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(&keys.to_bytes()).is_some()
+        );
     }
 
     #[test]
@@ -600,8 +594,8 @@ mod tests {
         let (mut keys_a, _) = production_keys();
         let (mut keys_b, _) = production_keys();
 
-        keys_a.reset::<ActiveProfile, NUM_CHAINS>(b"same reset seed");
-        keys_b.reset::<ActiveProfile, NUM_CHAINS>(b"same reset seed");
+        keys_a.reset::<SelectedProfile, NUM_CHAINS>(b"same reset seed");
+        keys_b.reset::<SelectedProfile, NUM_CHAINS>(b"same reset seed");
 
         assert_eq!(keys_a.stateful(), keys_b.stateful());
         assert_eq!(
@@ -625,13 +619,13 @@ mod tests {
             .try_into()
             .expect("commitment is 32 bytes");
 
-        keys.reset::<ActiveProfile, NUM_CHAINS>(b"reset then sign test seed");
+        keys.reset::<SelectedProfile, NUM_CHAINS>(b"reset then sign test seed");
 
         // `reset` only mutates the stateful half in place; round-trip through
         // `import_signing_key` to get the `PublicKey` bundle matching the
         // freshly reset key (and confirm the reset roots still import clean).
         let (mut keys, new_pk) =
-            ShrincsSigner::import_signing_key::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(keys)
+            ShrincsSigner::import_signing_key::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(keys)
                 .expect("reset key must still import");
         let new_commitment: [u8; HASH_LEN] = new_pk
             .public_key_commitment
@@ -647,7 +641,7 @@ mod tests {
             action_type: [2u8; HASH_LEN],
             payload_hash: [3u8; HASH_LEN],
         };
-        let signature = ShrincsSigner::sign_stateful_action::<ActiveProfile, NUM_CHAINS>(
+        let signature = ShrincsSigner::sign_stateful_action::<SelectedProfile, NUM_CHAINS>(
             &mut keys, &new_pk, &context,
         )
         .expect("sign under the reset key");
@@ -667,7 +661,7 @@ mod tests {
     fn recompute_commitment_matches_current_commitment() {
         let (keys, _pk) = production_keys();
         assert_eq!(
-            keys.recompute_commitment::<ActiveProfile>(),
+            keys.recompute_commitment::<SelectedProfile>(),
             *keys.public_key_commitment()
         );
     }
@@ -677,13 +671,13 @@ mod tests {
         let (mut keys, pk) = production_keys();
         let pre_sign_commitment = *keys.public_key_commitment();
         let sig = crate::shrincs::signer::ShrincsSigner::sign_stateful_raw::<
-            ActiveProfile,
+            SelectedProfile,
             NUM_CHAINS,
         >(&mut keys, &[0x11; 32])
         .expect("sign");
         let env = crate::shrincs::signature::encode_stateful_envelope(&pk, &sig);
 
-        let recovered = Keys::recover_commitment::<ActiveProfile>(&env).expect("recover");
+        let recovered = Keys::recover_commitment::<SelectedProfile>(&env).expect("recover");
 
         assert_eq!(recovered, pre_sign_commitment);
         assert_eq!(recovered, *production_keys().0.public_key_commitment());
@@ -691,7 +685,7 @@ mod tests {
 
     #[test]
     fn recover_commitment_rejects_garbage_envelope() {
-        assert!(Keys::recover_commitment::<ActiveProfile>(&[0u8; 4]).is_none());
+        assert!(Keys::recover_commitment::<SelectedProfile>(&[0u8; 4]).is_none());
     }
 
     /// `recover_commitment` must recompute the commitment from the envelope's
@@ -703,7 +697,7 @@ mod tests {
         let (mut keys, pk) = production_keys();
         let real = *keys.public_key_commitment();
         let sig = crate::shrincs::signer::ShrincsSigner::sign_stateful_raw::<
-            ActiveProfile,
+            SelectedProfile,
             NUM_CHAINS,
         >(&mut keys, &[0x11u8; 32])
         .expect("sign");
@@ -712,9 +706,12 @@ mod tests {
         bad_pk.public_key_commitment = alloc::vec![0xFFu8; 32];
         let env = crate::shrincs::signature::encode_stateful_envelope(&bad_pk, &sig);
 
-        assert_eq!(Keys::recover_commitment::<ActiveProfile>(&env), Some(real));
+        assert_eq!(
+            Keys::recover_commitment::<SelectedProfile>(&env),
+            Some(real)
+        );
         assert_ne!(
-            Keys::recover_commitment::<ActiveProfile>(&env)
+            Keys::recover_commitment::<SelectedProfile>(&env)
                 .unwrap()
                 .as_bytes(),
             &[0xFFu8; 32]
@@ -729,7 +726,7 @@ mod tests {
         let mut bytes = [0x07u8; KEYS_BYTES];
         bytes[..64].fill(0xAA); // stateful sk_seed ‖ prf_seed
         bytes[136..200].fill(0xAA); // stateless sk_seed ‖ prf_seed
-        let keys = Keys::from_bytes::<ActiveProfile>(&bytes).expect("parse");
+        let keys = Keys::from_bytes::<SelectedProfile>(&bytes).expect("parse");
         let shown = alloc::format!("{keys:?}");
         // Four secret seeds, each redacted.
         assert_eq!(shown.matches("redacted").count(), 4);

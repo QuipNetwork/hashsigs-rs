@@ -236,12 +236,12 @@ pub fn prepare_stateless_delegation<P: Profile>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::profile_active::{ActiveProfile, NUM_CHAINS, NUM_LAYERS};
+    use crate::profiles::selected::{SelectedProfile, NUM_CHAINS, NUM_LAYERS};
     use crate::shrincs::signature::encode_stateless_envelope;
     use crate::shrincs::signer::ShrincsSigner;
 
     fn keypair(seed: &[u8]) -> (crate::shrincs::Keys, PublicKey) {
-        ShrincsSigner::keygen::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(seed, 4)
+        ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(seed, 4)
             .expect("keygen must succeed for a valid seed/budget")
     }
 
@@ -288,7 +288,7 @@ mod tests {
             keypair(b"dispatch prepare_stateless_delegation wrong commitment");
         let hash = [0x77u8; HASH_LEN];
         let signature =
-            ShrincsSigner::sign_stateless_raw::<ActiveProfile, NUM_LAYERS>(&signing_key, &hash)
+            ShrincsSigner::sign_stateless_raw::<SelectedProfile, NUM_LAYERS>(&signing_key, &hash)
                 .expect("sign");
         let envelope = encode_stateless_envelope(&public_key, &signature);
 
@@ -297,7 +297,7 @@ mod tests {
         wrong_commitment[0] ^= 0x01;
 
         assert!(
-            prepare_stateless_delegation::<ActiveProfile>(wrong_commitment, &envelope).is_none()
+            prepare_stateless_delegation::<SelectedProfile>(wrong_commitment, &envelope).is_none()
         );
     }
 
@@ -310,7 +310,9 @@ mod tests {
             .try_into()
             .expect("commitment is 32 bytes");
 
-        assert!(prepare_stateless_delegation::<ActiveProfile>(commitment, &[]).is_none());
-        assert!(prepare_stateless_delegation::<ActiveProfile>(commitment, &[0xffu8; 3]).is_none());
+        assert!(prepare_stateless_delegation::<SelectedProfile>(commitment, &[]).is_none());
+        assert!(
+            prepare_stateless_delegation::<SelectedProfile>(commitment, &[0xffu8; 3]).is_none()
+        );
     }
 }

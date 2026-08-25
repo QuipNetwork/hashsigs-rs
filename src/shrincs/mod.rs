@@ -49,7 +49,8 @@ pub(crate) mod test_fixtures;
 #[cfg(test)]
 mod vector_conformance;
 
-use crate::profile::{assert_widths, Profile};
+use crate::profile::assert_widths;
+pub use crate::profile::Profile;
 use core::marker::PhantomData;
 
 /// A SHRINCS instance for one profile.
@@ -92,6 +93,8 @@ impl<P: Profile, const NUM_CHAINS: usize, const NUM_LAYERS: usize> Default
     }
 }
 
+#[cfg(any(feature = "profile-256s", feature = "default-profile-256s"))]
+pub use crate::profiles::p256s::Profile256s;
 pub use crate::verifier::{VerifierInterface, VerifyOutcome};
 pub use dispatch::prepare_stateless_delegation;
 pub use key::{Commitment, Keys};
@@ -99,21 +102,21 @@ pub use signer::{sign, ShrincsSigner, ShrincsSignerResult};
 pub use verifier::{ShrincsVerifier, ShrincsVerifierExt};
 
 /// Scheme-hash suite id of the profile this module's facades are bound to.
-/// Task 5 repoints this at the default profile alias.
-pub const HASH_SUITE_ID: u32 = crate::profile_active::ACTIVE_HASH_SUITE_ID;
+pub const HASH_SUITE_ID: u32 = crate::profiles::selected::SELECTED_HASH_SUITE_ID;
 pub use crate::hash::suite::{HASH_SUITE_KECCAK_256, HASH_SUITE_SHA2_256};
 pub use crate::hash::{ADDRESS_TYPE_FORS_TREE, ADDRESS_TYPE_TREE, ADDRESS_TYPE_WOTS_HASH};
-// Parameter tuple of the profile this module's facades are bound to. Task 5
-// repoints these at the default profile alias.
+// Parameter tuple of the profile this module's facades are bound to, read off
+// `crate::profiles::selected::SelectedProfile`.
 pub use crate::shrincs::verifier::{
     FORS_TREE_HEIGHT, HASH_TRUNC_LEN, HYPERTREE_HEIGHT, NUM_FORS_TREES, NUM_HYPERTREE_LAYERS,
     NUM_WOTS_CHAINS, PROFILE_NAME, STATELESS_SIGNATURE_LIMIT, WOTS_CHAIN_LEN,
 };
 pub const FORS_C_MAX_GRIND_COUNTER: u32 =
-    <crate::profile_active::ActiveProfile as Profile>::FORS_C_MAX_GRIND_COUNTER;
+    <crate::profiles::selected::SelectedProfile as Profile>::FORS_C_MAX_GRIND_COUNTER;
 // `PROFILE_ID` is the build-script-generated identity hash, not part of the
-// `Profile` trait; Task 5 moves it with the rest of `crate::profiles`.
-pub use crate::profiles::PROFILE_ID;
+// `Profile` trait. `crate::profiles::selected` proves at compile time that the
+// name it hashed is the selected profile type's own `PROFILE_NAME`.
+pub use crate::profiles::selected::PROFILE_ID;
 pub use crate::HASH_LEN;
 pub use action_context::ActionContext;
 pub use key::PublicKey;
@@ -150,20 +153,20 @@ pub(crate) use signer::public_key_from_components;
 mod profile_tests {
     #[test]
     fn active_profile_id_matches_keccak_of_profile_name() {
-        let expected = crate::hash::backend::keccak256(crate::profiles::PROFILE_NAME.as_bytes());
-        assert_eq!(crate::profiles::PROFILE_ID, expected);
+        let expected = crate::hash::backend::keccak256(super::PROFILE_NAME.as_bytes());
+        assert_eq!(super::PROFILE_ID, expected);
     }
 
     #[cfg(any(feature = "profile-128s-q18", feature = "profile-128s-q20"))]
     #[test]
     fn active_128_profile_uses_raised_fors_grind_budget() {
-        assert_eq!(crate::profiles::FORS_TREE_HEIGHT, 24);
-        assert_eq!(crate::profiles::FORS_C_MAX_GRIND_COUNTER, 1 << 28);
+        assert_eq!(super::FORS_TREE_HEIGHT, 24);
+        assert_eq!(super::FORS_C_MAX_GRIND_COUNTER, 1 << 28);
     }
 
     #[cfg(not(any(feature = "profile-128s-q18", feature = "profile-128s-q20")))]
     #[test]
     fn active_non_128_profile_keeps_default_fors_grind_budget() {
-        assert_eq!(crate::profiles::FORS_C_MAX_GRIND_COUNTER, 1 << 24);
+        assert_eq!(super::FORS_C_MAX_GRIND_COUNTER, 1 << 24);
     }
 }

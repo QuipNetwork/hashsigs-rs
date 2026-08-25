@@ -228,18 +228,10 @@ impl Signature {
     }
 }
 
-impl TryFrom<&[u8]> for Signature {
-    type Error = ();
-
-    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        Self::from_bytes::<crate::profile_active::ActiveProfile>(value).ok_or(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::profile_active::ActiveProfile;
+    use crate::profiles::selected::SelectedProfile;
     use alloc::vec;
 
     fn sample_signature() -> Signature {
@@ -255,7 +247,7 @@ mod tests {
         let signature = sample_signature();
         let encoded = signature.to_bytes();
         let decoded =
-            Signature::from_bytes::<ActiveProfile>(&encoded).expect("valid encoding must decode");
+            Signature::from_bytes::<SelectedProfile>(&encoded).expect("valid encoding must decode");
         assert_eq!(decoded, signature);
         assert_eq!(decoded.to_bytes(), encoded);
     }
@@ -264,7 +256,7 @@ mod tests {
     fn from_bytes_rejects_trailing_bytes() {
         let mut encoded = sample_signature().to_bytes();
         encoded.push(0x00);
-        assert!(Signature::from_bytes::<ActiveProfile>(&encoded).is_none());
+        assert!(Signature::from_bytes::<SelectedProfile>(&encoded).is_none());
     }
 
     #[test]
@@ -274,7 +266,7 @@ mod tests {
         let encoded = sample_signature().to_bytes();
         let gapped = crate::test_support::insert_abi_head_gap(&encoded, 3, &[0, 2]);
         assert!(
-            Signature::from_bytes::<ActiveProfile>(&gapped).is_none(),
+            Signature::from_bytes::<SelectedProfile>(&gapped).is_none(),
             "an encoding with unread interior bytes must be rejected"
         );
     }
@@ -293,8 +285,10 @@ mod tests {
             start: 0,
             steps: 5,
         };
-        let a = wots_chain_walk::<ActiveProfile>(b"test-chain", &pk_seed, test_address_word, walk);
-        let b = wots_chain_walk::<ActiveProfile>(b"test-chain", &pk_seed, test_address_word, walk);
+        let a =
+            wots_chain_walk::<SelectedProfile>(b"test-chain", &pk_seed, test_address_word, walk);
+        let b =
+            wots_chain_walk::<SelectedProfile>(b"test-chain", &pk_seed, test_address_word, walk);
         assert_eq!(a, b);
     }
 
@@ -308,7 +302,7 @@ mod tests {
         let pk_seed = [0x33u8; HASH_LEN];
         let value = [0x44u8; HASH_LEN];
 
-        let direct = wots_chain_walk::<ActiveProfile>(
+        let direct = wots_chain_walk::<SelectedProfile>(
             b"test-chain",
             &pk_seed,
             test_address_word,
@@ -318,7 +312,7 @@ mod tests {
                 steps: 7,
             },
         );
-        let midpoint = wots_chain_walk::<ActiveProfile>(
+        let midpoint = wots_chain_walk::<SelectedProfile>(
             b"test-chain",
             &pk_seed,
             test_address_word,
@@ -328,7 +322,7 @@ mod tests {
                 steps: 3,
             },
         );
-        let composed = wots_chain_walk::<ActiveProfile>(
+        let composed = wots_chain_walk::<SelectedProfile>(
             b"test-chain",
             &pk_seed,
             test_address_word,
@@ -346,7 +340,7 @@ mod tests {
         let pk_seed = [0x55u8; HASH_LEN];
         let value = [0x66u8; HASH_LEN];
 
-        let none = wots_chain_walk::<ActiveProfile>(
+        let none = wots_chain_walk::<SelectedProfile>(
             b"test-chain",
             &pk_seed,
             test_address_word,
@@ -358,7 +352,7 @@ mod tests {
         );
         assert_eq!(none, value, "zero steps must return the input unchanged");
 
-        let short = wots_chain_walk::<ActiveProfile>(
+        let short = wots_chain_walk::<SelectedProfile>(
             b"test-chain",
             &pk_seed,
             test_address_word,
@@ -368,7 +362,7 @@ mod tests {
                 steps: 4,
             },
         );
-        let full = wots_chain_walk::<ActiveProfile>(
+        let full = wots_chain_walk::<SelectedProfile>(
             b"test-chain",
             &pk_seed,
             test_address_word,

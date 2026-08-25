@@ -77,13 +77,7 @@ pub(crate) mod buf;
 pub mod error;
 pub(crate) mod hash;
 pub mod profile;
-// Temporary bridge from the cfg-selected profile to `profile::Profile`.
-// `pub` + `doc(hidden)` only because the integration tests and doctests need
-// a nameable profile type until Task 5 publishes the real ones; it is not a
-// supported public API. Task 5 deletes this together with `profiles`.
-#[doc(hidden)]
-pub mod profile_active;
-pub(crate) mod profiles;
+pub mod profiles;
 pub mod shrincs;
 pub mod sphincs_plus_c;
 pub(crate) mod treehash;
@@ -104,6 +98,11 @@ pub(crate) mod test_support;
 // the parameter set. A truncated profile emits high-aligned, zero-padded node
 // values inside this slot (see HASH_TRUNC_LEN and `mask_hash`).
 pub const HASH_LEN: usize = 32;
+
+/// The default profile, `shrincs-256s`. Existing consumers that name
+/// `hashsigs_rs::Shrincs` keep working unchanged.
+#[cfg(any(feature = "profile-256s", feature = "default-profile-256s"))]
+pub type Shrincs = profiles::p256s::Shrincs;
 
 pub use error::ErrorCode;
 pub use sphincs_plus_c::SphincsPlusCVerifier;

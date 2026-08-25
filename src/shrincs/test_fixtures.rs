@@ -17,7 +17,7 @@
 
 //! Test-only fixture helpers for expensive SHRINCS key material.
 
-use crate::profile_active::{ActiveProfile, NUM_CHAINS, NUM_LAYERS};
+use crate::profiles::selected::{SelectedProfile, NUM_CHAINS, NUM_LAYERS};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -119,7 +119,7 @@ impl From<SigningKeyDto> for Keys {
                 root: sphincs_plus_c::Root::new(value.hypertree_root),
             },
         );
-        Keys::new::<ActiveProfile>(stateless, stateful)
+        Keys::new::<SelectedProfile>(stateless, stateful)
     }
 }
 
@@ -422,7 +422,7 @@ mod tests {
         let entries = full_key_fixture_specs()
             .into_iter()
             .map(|(seed_label, max_stateful_signatures)| {
-                let (signing_key, public_key) = ShrincsSigner::keygen::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(
+                let (signing_key, public_key) = ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(
                     seed_label.as_bytes(),
                     max_stateful_signatures,
                 )
@@ -452,7 +452,7 @@ mod tests {
         let entries = stateful_signer_fixture_specs()
             .into_iter()
             .map(|(seed_label, max_stateful_signatures)| {
-                let (signing_key, public_key) = stateful_only_key::<ActiveProfile, NUM_CHAINS>(
+                let (signing_key, public_key) = stateful_only_key::<SelectedProfile, NUM_CHAINS>(
                     seed_label.as_bytes(),
                     max_stateful_signatures,
                 );

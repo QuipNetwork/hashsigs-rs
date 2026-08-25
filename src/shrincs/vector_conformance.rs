@@ -32,7 +32,7 @@
 //! verify path requires — covering it needs a generator/schema change (see the
 //! `review` bead).
 
-use crate::profile_active::{ActiveProfile, NUM_CHAINS, NUM_LAYERS};
+use crate::profiles::selected::{SelectedProfile, NUM_CHAINS, NUM_LAYERS};
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -101,7 +101,7 @@ fn fixture_or_fresh_full_key(
     max_stateful_signatures: u32,
 ) -> (super::Keys, PublicKey) {
     match TestKeyMode::from_env() {
-        TestKeyMode::Fresh => ShrincsSigner::keygen::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(
+        TestKeyMode::Fresh => ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(
             seed_label.as_bytes(),
             max_stateful_signatures,
         )
@@ -119,7 +119,7 @@ fn fixture_or_fresh_full_key(
                     return fixture_pair(entry);
                 }
             }
-            ShrincsSigner::keygen::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(
+            ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(
                 seed_label.as_bytes(),
                 max_stateful_signatures,
             )
@@ -261,7 +261,7 @@ fn verify_stateless_case(case: &Value) -> bool {
         )
         .expect("vector pk_seed/root are 32 bytes");
         assert!(
-            crate::sphincs_plus_c::verify::<ActiveProfile, NUM_CHAINS>(&pk, &message, &signature),
+            crate::sphincs_plus_c::verify::<SelectedProfile, NUM_CHAINS>(&pk, &message, &signature),
             "stateless vector must verify through independent sphincs_plus_c::verify"
         );
     }
@@ -331,14 +331,15 @@ fn signer_reproduces_committed_stateless_vector_bytes() {
     let vectors = load_vectors();
     let section = &vectors["stateless"];
 
-    let (signing_key, public_key) = ShrincsSigner::keygen::<ActiveProfile, NUM_CHAINS, NUM_LAYERS>(
-        STATELESS_SEED,
-        STATELESS_MAX_SIGNATURES,
-    )
-    .expect("stateless keygen");
+    let (signing_key, public_key) =
+        ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(
+            STATELESS_SEED,
+            STATELESS_MAX_SIGNATURES,
+        )
+        .expect("stateless keygen");
     let message = hex_to_vec(&section["message"]);
     let signature =
-        ShrincsSigner::sign_stateless_raw::<ActiveProfile, NUM_LAYERS>(&signing_key, &message)
+        ShrincsSigner::sign_stateless_raw::<SelectedProfile, NUM_LAYERS>(&signing_key, &message)
             .expect("stateless signature");
 
     assert_eq!(
