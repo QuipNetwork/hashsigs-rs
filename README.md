@@ -105,7 +105,7 @@ from the FORS digest, and each upper layer follows a fixed recurrence
 ## Parameters, sizes, and measured costs
 
 Four compile-time profiles ship. The cryptographic constants match the
-Solidity verifier. `src/profiles.rs` is the Rust source of truth.
+Solidity verifier. `src/profiles/` is the Rust source of truth.
 
 | Parameter | `256s` / `256s-sha2` | `128s-q18` / `128s-q20` |
 |---|---|---|
@@ -319,15 +319,33 @@ verifier:
 - `shrincs-128s-q18-keccak`
 - `shrincs-128s-q20-keccak`
 
-The profile selects the compile-time parameter tuple and profile identity.
-The scheme-hash suite follows the selected profile:
+Each profile selects a compile-time parameter tuple and profile identity.
+The scheme-hash suite follows the profile:
 
 - `256s-keccak`, `128s-q18-keccak`, `128s-q20-keccak`: internal scheme hashes use keccak
 - `256s-sha2`: internal scheme hashes use SHA-256
 
-`build.rs` is the single owner of Rust-side profile selection and profile
-identity generation. It selects exactly one active profile for the build and
-emits the corresponding profile cfg plus generated identity constants.
+The four `profile-*` Cargo features are additive: enabling more than one
+compiles more than one profile into the same build. Each profile is a type
+that carries the `Profile` trait, named by its own module under
+`hashsigs_rs::profiles`:
+
+```rust
+use hashsigs_rs::profiles::p256s::Shrincs as Shrincs256s;
+use hashsigs_rs::profiles::p128s_q18::Shrincs as Shrincs128sQ18;
+```
+
+`hashsigs_rs::Shrincs` remains an alias for the `256s` profile.
+
+`build.rs` generates profile identity for every profile regardless of which
+features are on, and emits a cfg for each enabled one. Rust-side surfaces
+that still name exactly one profile (the non-generic `ShrincsVerifier`, the
+wasm bindings, the golden-vector generator, and `hashsigs_rs::Shrincs`) bind
+to a single profile chosen by a fixed priority order: `profile-256s`,
+`profile-256s-sha2`, `profile-128s-q18`, `profile-128s-q20`. Naming a profile
+feature explicitly overrides the default (`profile-256s`), and enabling
+several, or building with `--all-features`, resolves deterministically to
+the first name in that order that is enabled.
 
 Profile identity follows the Solidity `SHRINCSParams` model:
 
@@ -374,7 +392,7 @@ cargo test --no-run --no-default-features --features profile-128s-q18
 cargo test --no-run --no-default-features --features profile-128s-q20
 ```
 
-Select at most one explicit profile feature at a time:
+The four profile features:
 
 - default build selects `shrincs-256s-keccak`
 - `profile-256s`
@@ -382,7 +400,11 @@ Select at most one explicit profile feature at a time:
 - `profile-128s-q18`
 - `profile-128s-q20`
 
-To regenerate the ignored SHRINCS golden vectors for the active profile:
+Enabling more than one, or running `cargo test --all-features`, compiles
+every enabled profile into the build and tests it. `cargo test --all-features`
+also proves the profiles coexist correctly.
+
+To regenerate the ignored SHRINCS golden vectors for the profile the build binds:
 
 ```bash
 cargo test generate_shrincs_sphincs_vectors -- --ignored --nocapture
@@ -468,7 +490,7 @@ reruns the selected `test-fast.sh` area whenever something changes.
 The stateless half, `sphincs_plus_c`, is a sibling top-level module at
 `src/sphincs_plus_c/`, not a child of `shrincs/`. FORS-C and hypertree logic
 live there (`fors_c.rs`, `hypertree.rs`). The scheme-neutral building blocks
-(`hash/`, `abi.rs`, `buf.rs`, `profiles.rs`, `treehash.rs`) sit at the crate
+(`hash/`, `abi.rs`, `buf.rs`, `profile.rs`, `profiles/`, `treehash.rs`) sit at the crate
 root.
 
 ## WASM testing
@@ -793,7 +815,8 @@ https://www.rust-lang.org/tools/install instead.
 ├── src/
 │   ├── hash/            # tagged hash suite (keccak / sha2)
 │   ├── abi.rs           # Solidity-compatible ABI encode/decode
-│   ├── profiles.rs      # compile-time parameter sets
+│   ├── profile.rs       # the Profile trait
+│   ├── profiles/        # one module per compile-time parameter set
 │   ├── treehash.rs      # Merkle tree hashing
 │   ├── wots_c/, wotsplus/  # WOTS-C primitives / legacy v1 WOTS+
 │   ├── sphincs_plus_c/  # stateless SPHINCS+C scheme (fors_c, hypertree, key)

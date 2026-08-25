@@ -14,6 +14,9 @@ build-test:
     # run rather than a check: it is the only profile whose scheme hashes are
     # SHA-256, and its committed vectors anchor the Solidity sha2 verifier.
     - cargo test --locked --features profile-256s-sha2
+    # All four profiles compile into one build; this is the only job that
+    # proves they coexist, including profiles::tests::profiles_that_differ_only_by_suite_coexist.
+    - cargo test --locked --all-features
     # Default-profile wasm build (no profile-* feature). ts-conformance rebuilds
     # only when packaging via npm run build → build-wasm.sh.
     - cargo build --locked --release --target wasm32-unknown-unknown --features wasm-bindings
@@ -46,9 +49,10 @@ test-solana:
   script:
     - cargo test --locked -p hashsigs-rs-solana
 
-# Static clippy gate. Profile features are mutually exclusive, so lint each
-# feature set CI tests in a separate invocation (not --all-features). Also lint
-# the non-default Solana workspace member. Formatting is enforced separately by
+# Static clippy gate. The profile features are additive, so one --all-features
+# invocation lints every profile plus wasm-bindings, solana, heap-buffers, and
+# parallel together. Also lint the non-default Solana workspace member, which
+# the profile features do not apply to. Formatting is enforced separately by
 # the `fmt` job below.
 clippy:
   stage: test
@@ -60,10 +64,8 @@ clippy:
   before_script:
     - rustup component add clippy
   script:
-    - cargo clippy --all-targets --features wasm-bindings --locked -- -D warnings
     - cargo clippy --all-targets -p hashsigs-rs-solana --locked -- -D warnings
-    - cargo clippy --all-targets --features profile-128s-q18 --locked -- -D warnings
-    - cargo clippy --all-targets --features profile-256s-sha2 --locked -- -D warnings
+    - cargo clippy --all-targets --all-features --locked -- -D warnings
 
 # Formatting gate. rustfmt only parses (no compile), so this is fast and needs
 # no build cache. The tree is fully rustfmt-clean; this keeps it that way.
