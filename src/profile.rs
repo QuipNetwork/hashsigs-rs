@@ -51,8 +51,23 @@ pub trait Profile {
     const WOTS_TARGET_SUM: u32;
 }
 
-/// Fails to compile when the const generic array widths disagree with the
-/// profile's own constants. Call this from every core constructor.
+/// Checks that the const generic array widths agree with the profile's own
+/// constants.
+///
+/// Being a `const fn` makes this callable in a const context; it does not by
+/// itself make a mismatch fail compilation. Called from an ordinary runtime
+/// path, a mismatch is only a runtime panic. To get the compile-time
+/// guarantee, the caller must force const evaluation by consuming the call
+/// from an associated const, for example:
+///
+/// ```ignore
+/// const WIDTHS_AGREE: () = assert_widths::<P, NUM_CHAINS, NUM_LAYERS>();
+/// ```
+///
+/// and then reading that associated const (`let () = Self::WIDTHS_AGREE;`)
+/// from the constructor. Evaluated that way, a mismatch fails compilation
+/// with `error[E0080]: evaluation panicked: ...` at monomorphisation. Every
+/// core constructor must use this pattern, not a bare call.
 pub const fn assert_widths<P: Profile, const NUM_CHAINS: usize, const NUM_LAYERS: usize>() {
     assert!(
         P::NUM_WOTS_CHAINS as usize == NUM_CHAINS,
@@ -103,4 +118,13 @@ mod tests {
     fn matching_widths_pass_the_check() {
         assert_widths::<FakeProfile, 64, 8>();
     }
+
+    // Genuine compile-time assertion: forces `assert_widths` to run at const
+    // evaluation, in the same const-item pattern real constructors use. If
+    // the width-agreement check regressed into a runtime-only check, this
+    // item would still compile whether or not the widths agree, which is
+    // exactly the failure mode the runtime test above cannot catch. As
+    // written, with matching widths, this item must compile; a mismatched
+    // pair here would fail with `error[E0080]: evaluation panicked`.
+    const _: () = assert_widths::<FakeProfile, 64, 8>();
 }
