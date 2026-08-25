@@ -11,8 +11,10 @@ This file records changes to this project, in the
   behind the `profile-128s-q18-sha2` and `profile-128s-q20-sha2` features.
   Each is the exact numeric twin of the keccak profile of the same name and
   differs only in the scheme hash suite (SHA-256 instead of keccak-256) and in
-  the profile identity string. Golden vectors for the two are not generated
-  yet, so CI compiles them rather than running the vector-conformance suite.
+  the profile identity string. Both carry committed SPHINCS golden vectors and
+  run the library suite in CI. Their ERC-7913 adapter tests are held back until
+  the matching account-wrapper vectors, which are generated in
+  hashsigs-solidity, are copied across.
 
 ### Changed
 

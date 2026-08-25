@@ -35,10 +35,17 @@ test-128s:
   script:
     - cargo test --locked --release --features profile-128s-q18
     - cargo test --locked --release --features profile-128s-q20
-    # The sha2 twins of those two are compiled, not tested: their golden vectors
-    # are not generated yet, so the vector-conformance tests would fail on a
-    # missing file rather than on a real defect. Raise these to `cargo test`
-    # once tests/test_vectors/shrincs_sphincs_128s_q{18,20}_sha2.json.gz exist.
+    # The sha2 twins run the library suite, which includes the SPHINCS
+    # vector-conformance tests against their committed golden vectors (171
+    # passed under each). Their integration tests are held back: the ERC-7913
+    # adapter pins bytes against account-wrapper vectors, a separate family
+    # generated in hashsigs-solidity and copied here, which does not exist for
+    # these two profiles. --all-targets is still checked so the integration
+    # tests keep compiling. Raise --lib to a full `cargo test` once
+    # tests/test_vectors/shrincs_account_wrapper_vectors_128s_q{18,20}_sha2.json.gz
+    # land.
+    - cargo test --locked --release --lib --features profile-128s-q18-sha2
+    - cargo test --locked --release --lib --features profile-128s-q20-sha2
     - cargo check --locked --release --all-targets --features profile-128s-q18-sha2
     - cargo check --locked --release --all-targets --features profile-128s-q20-sha2
 
