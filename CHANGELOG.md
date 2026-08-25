@@ -7,6 +7,10 @@ This file records changes to this project, in the
 
 ### Added
 
+- `profileName()` on the wasm surface, returning the SHRINCS profile the loaded
+  binary carries. The npm package is moving to one binary per profile, and every
+  binary exports the same function names, so this is how a caller confirms it
+  loaded the profile it imported.
 - Two SHRINCS profiles, `shrincs-128s-q18-sha2` and `shrincs-128s-q20-sha2`,
   behind the `profile-128s-q18-sha2` and `profile-128s-q20-sha2` features.
   Each is the exact numeric twin of the keccak profile of the same name and
@@ -23,15 +27,25 @@ This file records changes to this project, in the
   distribution, and `@quip.network/hashsigs-wasm` each carry every profile,
   and each profile is imported on its own path. `bin/packages.sh` no longer
   declares `SIBLING_PROFILES`, `PYPI_SIBLINGS`, or `NPM_SIBLINGS`; it declares
-  `PROFILES` instead. The Rust import paths work today. The Python and npm
-  per-profile subpaths still need the `profiles::selected` module removed,
-  because the wasm bindings bind to one profile per build.
+  `PROFILES` instead. The Rust import paths work today. The npm subpaths still
+  need the TypeScript package layout: the wasm surface is now generic over the
+  profile, but the package still builds and ships one binary. The PyPI subpaths
+  need a Python API, which does not exist yet.
 - The six `profile-*` Cargo features (`profile-256s`, `profile-256s-sha2`,
   `profile-128s-q18`, `profile-128s-q20`, `profile-128s-q18-sha2`,
   `profile-128s-q20-sha2`) are additive. Enabling more than
   one now compiles more than one profile into the same build, instead of
   build.rs panicking on two. `cargo test --all-features` compiles and tests
   every profile in one build.
+- The wasm surface is generic over the profile. `src/wasm/core.rs` holds every
+  operation as a function over `P: Profile` plus that profile's two array
+  widths, and `src/wasm/export.rs` carries the macro that stamps those out as
+  concrete `#[wasm_bindgen]` items. `#[wasm_bindgen]` cannot annotate a generic
+  function, so the export boundary is monomorphized by macro instead. The
+  exported names and behavior do not change. The core verifies through the
+  generic free functions rather than the `ShrincsVerifier` and
+  `SphincsPlusCVerifier` facades, which name the build-selected profile and
+  would otherwise pin every verify to it.
 - A `Profile` trait and per-profile types are now public, under
   `hashsigs_rs::profiles`, such as `hashsigs_rs::profiles::p256s::Shrincs`.
   `hashsigs_rs::Shrincs` now follows the profile the build binds to, rather

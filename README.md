@@ -396,9 +396,27 @@ a second dependency:
 compile it or no module to import it by.
 
 The Rust side works this way today. The Python and npm profile subpaths are
-not built yet: the wasm bindings still bind to one profile per build through
-`profiles::selected`, so shipping all six behind subpath exports needs that
-module removed first.
+not built yet, and each needs a different thing.
+
+For npm, the plan is one wasm binary per profile, each reached through its own
+subpath export. `src/wasm/core.rs` holds the whole surface generic over
+`P: Profile`, and `src/wasm/export.rs` stamps it out as concrete
+`#[wasm_bindgen]` items for one profile, because `#[wasm_bindgen]` cannot
+annotate a generic function. One binary per profile keeps the browser payload
+at one profile's worth: the browser build inlines the wasm as base64, where no
+bundler can remove the profiles a caller did not import. A measured profile
+build is about 385 KB of wasm, so a single six-profile binary would cost every
+consumer roughly 2 MB of base64. `profileName()` reports which profile a loaded
+binary carries, because all six export identical names. What remains is the
+TypeScript package layout: the build loop, the six subpath exports, and the
+per-profile loaders.
+
+For PyPI, there is no API to package yet. `py/src/lib.rs` registers only
+`__version__`. The profile layout has to be designed as part of writing that
+surface, and it follows the npm shape: one compiled extension per profile
+inside the single wheel. PyO3 constrains it the same way wasm-bindgen does,
+because `#[pyfunction]` cannot be generic either, so the same generic-core plus
+macro-emitter split applies.
 
 `build.rs` generates profile identity for every profile regardless of which
 features are on, and emits a cfg for each enabled one. Rust-side surfaces
