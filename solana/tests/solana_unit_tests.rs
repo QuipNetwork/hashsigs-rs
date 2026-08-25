@@ -490,6 +490,7 @@ pub mod wotsplus_solana_test {
 
 pub mod sphincs_plus_c_solana_test {
     use borsh::BorshSerialize;
+    use hashsigs_rs::profiles::selected::{SelectedProfile, NUM_LAYERS};
     use hashsigs_rs::sphincs_plus_c::Key as SphincsPlusCSigningKey;
     use hashsigs_rs::{sphincs_plus_c_keygen, sphincs_plus_c_sign};
     use hashsigs_rs_solana::processor::WOTSPlusInstruction;
@@ -547,7 +548,11 @@ pub mod sphincs_plus_c_solana_test {
         let stateless_sk_seed = derive32(b"sphincs-plus-c-solana-sk-seed", seed);
         let stateless_prf_seed = derive32(b"sphincs-plus-c-solana-prf-seed", seed);
         let pk_seed = derive32(b"sphincs-plus-c-solana-pk-seed", seed);
-        let signing_key = sphincs_plus_c_keygen(stateless_sk_seed, stateless_prf_seed, pk_seed);
+        let signing_key = sphincs_plus_c_keygen::<SelectedProfile, NUM_LAYERS>(
+            stateless_sk_seed,
+            stateless_prf_seed,
+            pk_seed,
+        );
         let mut key = [0u8; 64];
         key[..32].copy_from_slice(signing_key.public_key.pk_seed.as_bytes());
         key[32..].copy_from_slice(signing_key.public_key.root.as_bytes());
@@ -561,7 +566,8 @@ pub mod sphincs_plus_c_solana_test {
 
         let (signing_key, key) = test_keypair(b"sphincs-plus-c solana happy path");
         let hash = derive32(b"sphincs-plus-c-solana-message", b"happy path");
-        let signature = sphincs_plus_c_sign(&signing_key, &hash).expect("sign");
+        let signature = sphincs_plus_c_sign::<SelectedProfile, NUM_LAYERS>(&signing_key, &hash)
+            .expect("sign");
 
         let instruction = WOTSPlusInstruction::SphincsPlusCVerify {
             key,
@@ -596,7 +602,8 @@ pub mod sphincs_plus_c_solana_test {
 
         let (signing_key, key) = test_keypair(b"sphincs-plus-c solana tampered");
         let hash = derive32(b"sphincs-plus-c-solana-message", b"tampered");
-        let signature = sphincs_plus_c_sign(&signing_key, &hash).expect("sign");
+        let signature = sphincs_plus_c_sign::<SelectedProfile, NUM_LAYERS>(&signing_key, &hash)
+            .expect("sign");
 
         let mut tampered_hash = hash;
         tampered_hash[0] ^= 0xff;
@@ -624,14 +631,18 @@ pub mod sphincs_plus_c_solana_test {
 
     #[tokio::test]
     async fn test_shrincs_verify_stateless_valid_signature() {
+        use hashsigs_rs::profiles::selected::{SelectedProfile, NUM_CHAINS, NUM_LAYERS};
         use hashsigs_rs::shrincs::{ActionContext, ShrincsSigner, ShrincsVerifier};
         use hashsigs_rs_solana::sphincs_plus_c::{ActionContextDto, ShrincsPublicKeyDto};
 
         let (program_test, program_id) = setup_test().await;
         let mut context = program_test.start_with_context().await;
 
-        let (signing_key, public_key) =
-            ShrincsSigner::keygen(b"shrincs solana hybrid stateless", 4096).expect("keygen");
+        let (signing_key, public_key) = ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(
+            b"shrincs solana hybrid stateless",
+            4096,
+        )
+        .expect("keygen");
         let commitment: [u8; 32] = public_key
             .public_key_commitment
             .clone()
@@ -646,7 +657,11 @@ pub mod sphincs_plus_c_solana_test {
         };
         let verifier = ShrincsVerifier::new();
         let message = verifier.stateless_action_message_hash(commitment, &action_context);
-        let signature = ShrincsSigner::sign_stateless_raw(&signing_key, &message).expect("sign");
+        let signature = ShrincsSigner::sign_stateless_raw::<SelectedProfile, NUM_LAYERS>(
+            &signing_key,
+            &message,
+        )
+        .expect("sign");
 
         let instruction = WOTSPlusInstruction::ShrincsVerifyStateless {
             expected_public_key_commitment: commitment,
@@ -677,6 +692,7 @@ pub mod sphincs_plus_c_solana_test {
 
     #[tokio::test]
     async fn test_shrincs_verify_stateful_valid_and_tampered() {
+        use hashsigs_rs::profiles::selected::{SelectedProfile, NUM_CHAINS, NUM_LAYERS};
         use hashsigs_rs::shrincs::{ActionContext, ShrincsSigner, ShrincsVerifier};
         use hashsigs_rs_solana::sphincs_plus_c::{
             ActionContextDto, ShrincsPublicKeyDto, StatefulSignatureDto,
@@ -685,8 +701,11 @@ pub mod sphincs_plus_c_solana_test {
         let (program_test, program_id) = setup_test().await;
         let mut context = program_test.start_with_context().await;
 
-        let (mut signing_key, public_key) =
-            ShrincsSigner::keygen(b"shrincs solana hybrid stateful", 4).expect("keygen");
+        let (mut signing_key, public_key) = ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(
+            b"shrincs solana hybrid stateful",
+            4,
+        )
+        .expect("keygen");
         let commitment: [u8; 32] = public_key
             .public_key_commitment
             .clone()
@@ -699,9 +718,12 @@ pub mod sphincs_plus_c_solana_test {
             action_type: derive32(b"shrincs-solana-action", b"stateful"),
             payload_hash: derive32(b"shrincs-solana-payload", b"stateful"),
         };
-        let signature =
-            ShrincsSigner::sign_stateful_action(&mut signing_key, &public_key, &action_context)
-                .expect("sign");
+        let signature = ShrincsSigner::sign_stateful_action::<SelectedProfile, NUM_CHAINS>(
+            &mut signing_key,
+            &public_key,
+            &action_context,
+        )
+        .expect("sign");
         // Host-side sanity before the on-chain round trip.
         assert!(ShrincsVerifier::new().verify_stateful(
             commitment,
