@@ -28,11 +28,14 @@
 pub const HASH_SUITE_KECCAK_256: u32 = 1;
 pub const HASH_SUITE_SHA2_256: u32 = 2;
 
-#[cfg(not(shrincs_hash_suite_sha2))]
 mod keccak;
-#[cfg(shrincs_hash_suite_sha2)]
 mod sha2;
 
+// `src/hash/ops.rs` (Task 3) and `src/shrincs/{mod,dispatch,verifier}.rs`
+// still read the suite through this cfg-selected re-export rather than
+// through `HashSuite`. build.rs keeps emitting `shrincs_hash_suite_sha2`
+// until Task 6 retires it, so this stays in place until Task 3 threads
+// `HashSuite` through those callers and Task 7 removes it.
 #[cfg(not(shrincs_hash_suite_sha2))]
 pub use keccak::HASH_SUITE_ID;
 #[cfg(shrincs_hash_suite_sha2)]
@@ -42,3 +45,60 @@ pub use sha2::HASH_SUITE_ID;
 pub(crate) use keccak::scheme_hash_parts;
 #[cfg(shrincs_hash_suite_sha2)]
 pub(crate) use sha2::scheme_hash_parts;
+
+/// A scheme hash suite. Selected per profile as `Profile::Suite`, not by a
+/// global cfg, so that profiles using different suites coexist in one build.
+// Not yet consumed outside tests: `src/hash/ops.rs` starts reading this
+// through `Profile::Suite` in Task 3.
+#[allow(dead_code)]
+pub trait HashSuite {
+    /// Wire identifier for this suite. An ABI value: never renumber it.
+    const HASH_SUITE_ID: u32;
+
+    /// Hash the concatenation of `parts` under this suite.
+    fn scheme_hash_parts(parts: &[&[u8]]) -> [u8; crate::HASH_LEN];
+}
+
+/// Keccak-256 scheme hashes. The default under every profile except
+/// `shrincs-256s-sha2`.
+#[allow(dead_code)]
+pub struct Keccak256Suite;
+
+impl HashSuite for Keccak256Suite {
+    const HASH_SUITE_ID: u32 = HASH_SUITE_KECCAK_256;
+
+    fn scheme_hash_parts(parts: &[&[u8]]) -> [u8; crate::HASH_LEN] {
+        keccak::scheme_hash_parts(parts)
+    }
+}
+
+/// SHA2-256 scheme hashes, used by `shrincs-256s-sha2`.
+#[allow(dead_code)]
+pub struct Sha2256Suite;
+
+impl HashSuite for Sha2256Suite {
+    const HASH_SUITE_ID: u32 = HASH_SUITE_SHA2_256;
+
+    fn scheme_hash_parts(parts: &[&[u8]]) -> [u8; crate::HASH_LEN] {
+        sha2::scheme_hash_parts(parts)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn suites_have_distinct_ids() {
+        assert_eq!(Keccak256Suite::HASH_SUITE_ID, HASH_SUITE_KECCAK_256);
+        assert_eq!(Sha2256Suite::HASH_SUITE_ID, HASH_SUITE_SHA2_256);
+    }
+
+    #[test]
+    fn both_suites_compile_together_and_differ() {
+        let parts: &[&[u8]] = &[b"shrincs", b"suite"];
+        let k = Keccak256Suite::scheme_hash_parts(parts);
+        let s = Sha2256Suite::scheme_hash_parts(parts);
+        assert_ne!(k, s, "keccak and sha2 must not agree on the same input");
+    }
+}
