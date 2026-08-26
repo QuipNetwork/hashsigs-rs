@@ -34,7 +34,9 @@ use crate::sphincs_plus_c::Signature as StatelessSignature;
 use crate::sphincs_plus_c::{self};
 use crate::HASH_LEN;
 
-use super::dispatch::stateful_action_message_hash;
+use super::dispatch::{
+    stateful_action_message_hash, stateful_raw_message_hash, stateless_raw_message_hash,
+};
 use super::key::Keys;
 
 /// Signer operations return `None` when stateful leaves are exhausted or
@@ -79,14 +81,17 @@ fn public_key_of<P: Profile>(keys: &Keys) -> PublicKey {
 ///
 /// The one-time UXMSS leaf is consumed and the counter advances **in `keys`**,
 /// not in any signer object — that is why `keys` is `&mut` and no signer
-/// struct exists. Returns `None` once the leaf budget is exhausted. The signed
-/// message is the raw 32-byte hash, matching the verifier's stateful path.
+/// struct exists. Returns `None` once the leaf budget is exhausted. The
+/// caller hash is wrapped with the stateful operation tag, suite ID, and
+/// complete public-key commitment before the stateful primitive signs it.
 pub fn sign<P: Profile, const NUM_CHAINS: usize>(
     keys: &mut Keys,
     hash: &[u8; HASH_LEN],
 ) -> Option<Vec<u8>> {
     let public_key = public_key_of::<P>(keys);
-    let signature = ShrincsSigner::sign_stateful_raw::<P, NUM_CHAINS>(keys, hash)?;
+    let commitment = word32(&public_key.public_key_commitment)?;
+    let message = stateful_raw_message_hash::<P>(commitment, *hash);
+    let signature = ShrincsSigner::sign_stateful_raw::<P, NUM_CHAINS>(keys, &message)?;
     Some(super::signature::encode_stateful_envelope(
         &public_key,
         &signature,
@@ -242,6 +247,28 @@ impl ShrincsSigner {
         let expected = word32(&public_key.public_key_commitment)?;
         let message = stateful_action_message_hash::<P>(expected, context);
         uxmss::sign_stateful_raw::<P, NUM_CHAINS>(signing_key.stateful_mut(), &message)
+    }
+
+    /// Sign a caller hash for the commitment-bound stateful ERC-7913 adapter.
+    pub fn sign_stateful_adapter<P: Profile, const NUM_CHAINS: usize>(
+        signing_key: &mut Keys,
+        public_key: &PublicKey,
+        hash: [u8; HASH_LEN],
+    ) -> ShrincsSignerResult<Signature> {
+        let expected = word32(&public_key.public_key_commitment)?;
+        let message = stateful_raw_message_hash::<P>(expected, hash);
+        Self::sign_stateful_raw::<P, NUM_CHAINS>(signing_key, &message)
+    }
+
+    /// Sign a caller hash for the commitment-bound stateless ERC-7913 adapter.
+    pub fn sign_stateless_adapter<P: Profile, const NUM_LAYERS: usize>(
+        signing_key: &Keys,
+        public_key: &PublicKey,
+        hash: [u8; HASH_LEN],
+    ) -> ShrincsSignerResult<StatelessSignature> {
+        let expected = word32(&public_key.public_key_commitment)?;
+        let message = stateless_raw_message_hash::<P>(expected, hash);
+        Self::sign_stateless_raw::<P, NUM_LAYERS>(signing_key, &message)
     }
 
     /// Sign raw bytes with the next unused stateful leaf.

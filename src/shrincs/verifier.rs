@@ -45,7 +45,10 @@ pub use crate::sphincs_plus_c::Signature as StatelessSignature;
 // Profile parameter tuple also lived in main's shrincs_verifier_types (via
 // `pub use profile::*`); re-export from the current profiles module.
 use super::dispatch as core_shrincs;
-use super::dispatch::{stateful_action_message_hash, stateless_action_message_hash};
+use super::dispatch::{
+    stateful_action_message_hash, stateful_raw_message_hash, stateless_action_message_hash,
+    stateless_raw_message_hash,
+};
 use super::key::Commitment;
 use super::signature::{decode_stateful_envelope, decode_stateless_envelope};
 #[cfg(test)]
@@ -196,6 +199,24 @@ impl ShrincsVerifier {
         stateless_action_message_hash::<SelectedProfile>(expected_public_key_commitment, context)
     }
 
+    /// Commitment-bound digest verified by the stateful ERC-7913 adapter.
+    pub fn stateful_raw_message_hash(
+        &self,
+        expected_public_key_commitment: [u8; HASH_LEN],
+        hash: [u8; HASH_LEN],
+    ) -> [u8; HASH_LEN] {
+        stateful_raw_message_hash::<SelectedProfile>(expected_public_key_commitment, hash)
+    }
+
+    /// Commitment-bound digest verified by the stateless ERC-7913 adapter.
+    pub fn stateless_raw_message_hash(
+        &self,
+        expected_public_key_commitment: [u8; HASH_LEN],
+        hash: [u8; HASH_LEN],
+    ) -> [u8; HASH_LEN] {
+        stateless_raw_message_hash::<SelectedProfile>(expected_public_key_commitment, hash)
+    }
+
     /// Commitment binding an encoded stateful public key with a stateless
     /// `pk_seed`/`hypertree_root` pair, mirroring
     /// `SHRINCS.publicKeyCommitmentFromParts`. Exposed for callers that need
@@ -212,11 +233,11 @@ impl ShrincsVerifier {
 }
 
 impl ShrincsVerifier {
-    /// `keccak256("quip.shrincs-verifier.v3")`. Mirrors
+    /// `keccak256("quip.shrincs-verifier.v4")`. Mirrors
     /// `SHRINCSVerifier.VERSION_TAG`: names this verifier's key/envelope
     /// format family, not the compiled parameter profile.
     pub fn version_tag() -> [u8; HASH_LEN] {
-        keccak_packed(&[b"quip.shrincs-verifier.v3"])
+        keccak_packed(&[b"quip.shrincs-verifier.v4"])
     }
 }
 
@@ -278,7 +299,12 @@ impl ShrincsVerifierExt for ShrincsVerifier {
             // silently treating a codec-internal inconsistency as Invalid.
             return VerifyOutcome::Malformed;
         };
-        if SphincsPlusCVerifier::new().verify_signature(&delegate_key, hash, &delegate_signature) {
+        let message = stateless_raw_message_hash::<SelectedProfile>(commitment, *hash);
+        if SphincsPlusCVerifier::new().verify_signature(
+            &delegate_key,
+            &message,
+            &delegate_signature,
+        ) {
             VerifyOutcome::Valid
         } else {
             VerifyOutcome::Invalid
@@ -305,12 +331,11 @@ impl crate::verifier::VerifierInterface for ShrincsVerifier {
         else {
             return VerifyOutcome::Malformed;
         };
-        // `SHRINCS.verify` packs the bytes32 hash into the signed message as
-        // its raw 32 bytes (`SPHINCSPlusC.toMessage`); `hash` IS the message.
+        let message = stateful_raw_message_hash::<SelectedProfile>(commitment, *hash);
         if super::verify_stateful_unsafe_raw::<SelectedProfile, NUM_CHAINS>(
             commitment,
             &public_key,
-            hash,
+            &message,
             &signature,
         ) {
             VerifyOutcome::Valid
@@ -338,19 +363,63 @@ mod interface_tests {
         public_key.public_key_commitment.clone()
     }
 
+    fn hex32(value: &str) -> [u8; HASH_LEN] {
+        fn nibble(byte: u8) -> u8 {
+            match byte {
+                b'0'..=b'9' => byte - b'0',
+                b'a'..=b'f' => byte - b'a' + 10,
+                _ => panic!("invalid pinned hex vector"),
+            }
+        }
+        assert_eq!(value.len(), HASH_LEN * 2);
+        let bytes = value.as_bytes();
+        let mut out = [0u8; HASH_LEN];
+        for (i, slot) in out.iter_mut().enumerate() {
+            *slot = (nibble(bytes[2 * i]) << 4) | nibble(bytes[2 * i + 1]);
+        }
+        out
+    }
+
     // --- version tag -------------------------------------------------------
 
     #[test]
     fn version_tag_matches_pinned_solidity_constant() {
-        // keccak256("quip.shrincs-verifier.v3"), computed independently and
+        // keccak256("quip.shrincs-verifier.v4"), computed independently and
         // pinned here so drift in either the literal string or the hash
         // routine fails loud instead of silently matching itself.
         const EXPECTED: [u8; HASH_LEN] = [
-            0x9d, 0x7f, 0x6d, 0x3f, 0xaa, 0x8e, 0xd9, 0x80, 0x20, 0xae, 0x66, 0xa8, 0x18, 0x3d,
-            0x35, 0x65, 0x9b, 0xbc, 0x84, 0xac, 0xd6, 0x76, 0x8c, 0xe8, 0x56, 0xca, 0x62, 0x24,
-            0xef, 0xff, 0xae, 0x2e,
+            0xb8, 0x4d, 0x51, 0xf9, 0x5c, 0x5f, 0xd4, 0xf6, 0xae, 0xa8, 0x8c, 0x05, 0xec, 0xbe,
+            0xbb, 0xcc, 0xc7, 0xa9, 0x5d, 0x25, 0x79, 0x8d, 0x30, 0x77, 0x07, 0xd0, 0xbd, 0x4a,
+            0x83, 0x32, 0x97, 0xe2,
         ];
         assert_eq!(ShrincsVerifier::version_tag(), EXPECTED);
+    }
+
+    #[test]
+    fn raw_adapter_hashes_match_pinned_solidity_vectors() {
+        let commitment = [0x11u8; HASH_LEN];
+        let hash = [0x22u8; HASH_LEN];
+        let (expected_stateful, expected_stateless) =
+            if crate::shrincs::HASH_SUITE_ID == HASH_SUITE_KECCAK_256 {
+                (
+                    hex32("d6ef31520a66945c976ef04b8b5b00c381139e3bed92bfb173babaecaf4b1737"),
+                    hex32("75ce97e4e088f9a487640a5a88d457fedd1beaaa535b4c10de475cac3c73cbb3"),
+                )
+            } else {
+                (
+                    hex32("6824c89e304f78f1ea53256e73315b087e5b5d921b731ffd23c7eaad68a77bbc"),
+                    hex32("49f97748938a6c92e764b7c1096904219c4e05a1ea20512fd9145f0055748205"),
+                )
+            };
+        let verifier = ShrincsVerifier::new();
+        assert_eq!(
+            verifier.stateful_raw_message_hash(commitment, hash),
+            expected_stateful
+        );
+        assert_eq!(
+            verifier.stateless_raw_message_hash(commitment, hash),
+            expected_stateless
+        );
     }
 
     // --- stateful verify -----------------------------------------------------
@@ -359,9 +428,10 @@ mod interface_tests {
     fn verify_accepts_a_valid_stateful_signature_over_the_raw_hash() {
         let (mut signing_key, public_key) = keypair(b"verifier stateful accept seed");
         let hash = [0x42u8; HASH_LEN];
-        let signature = ShrincsSigner::sign_stateful_raw::<SelectedProfile, NUM_CHAINS>(
+        let signature = ShrincsSigner::sign_stateful_adapter::<SelectedProfile, NUM_CHAINS>(
             &mut signing_key,
-            &hash,
+            &public_key,
+            hash,
         )
         .expect("signing must succeed for a fresh key");
         let envelope = encode_stateful_envelope(&public_key, &signature);
@@ -374,9 +444,10 @@ mod interface_tests {
     fn verify_rejects_a_signature_over_a_different_hash() {
         let (mut signing_key, public_key) = keypair(b"verifier stateful reject seed");
         let hash = [0x11u8; HASH_LEN];
-        let signature = ShrincsSigner::sign_stateful_raw::<SelectedProfile, NUM_CHAINS>(
+        let signature = ShrincsSigner::sign_stateful_adapter::<SelectedProfile, NUM_CHAINS>(
             &mut signing_key,
-            &hash,
+            &public_key,
+            hash,
         )
         .expect("signing must succeed for a fresh key");
         let envelope = encode_stateful_envelope(&public_key, &signature);
@@ -457,9 +528,11 @@ mod interface_tests {
     fn verify_stateless_accepts_a_valid_stateless_signature_over_the_raw_hash() {
         let (signing_key, public_key) = keypair(b"verifier stateless accept seed");
         let hash = [0x66u8; HASH_LEN];
-        let signature: StatelessSignature =
-            ShrincsSigner::sign_stateless_raw::<SelectedProfile, NUM_LAYERS>(&signing_key, &hash)
-                .expect("stateless signing must succeed for a fresh key");
+        let signature: StatelessSignature = ShrincsSigner::sign_stateless_adapter::<
+            SelectedProfile,
+            NUM_LAYERS,
+        >(&signing_key, &public_key, hash)
+        .expect("stateless signing must succeed for a fresh key");
         let envelope = encode_stateless_envelope(&public_key, &signature);
 
         let outcome = ShrincsVerifier::new().verify_stateless_signature(
@@ -471,12 +544,42 @@ mod interface_tests {
     }
 
     #[test]
+    fn verify_stateless_rejects_a_signature_under_a_sibling_commitment() {
+        let (signing_key, public_key) = keypair(b"verifier stateless sibling seed");
+        let hash = [0x6au8; HASH_LEN];
+        let signature = ShrincsSigner::sign_stateless_adapter::<SelectedProfile, NUM_LAYERS>(
+            &signing_key,
+            &public_key,
+            hash,
+        )
+        .expect("stateless adapter signing must succeed");
+
+        let mut sibling = public_key.clone();
+        sibling.stateful_public_key[0] ^= 1;
+        sibling.public_key_commitment = sibling
+            .commitment::<SelectedProfile>()
+            .expect("sibling bundle must be well formed")
+            .as_bytes()
+            .to_vec();
+        let envelope = encode_stateless_envelope(&sibling, &signature);
+        let outcome = ShrincsVerifier::new().verify_stateless_signature(
+            &commitment_of(&sibling),
+            &hash,
+            &envelope,
+        );
+        assert_eq!(outcome, VerifyOutcome::Invalid);
+    }
+
+    #[test]
     fn verify_stateless_rejects_a_signature_over_a_different_hash() {
         let (signing_key, public_key) = keypair(b"verifier stateless reject seed");
         let hash = [0x77u8; HASH_LEN];
-        let signature =
-            ShrincsSigner::sign_stateless_raw::<SelectedProfile, NUM_LAYERS>(&signing_key, &hash)
-                .expect("stateless signing must succeed for a fresh key");
+        let signature = ShrincsSigner::sign_stateless_adapter::<SelectedProfile, NUM_LAYERS>(
+            &signing_key,
+            &public_key,
+            hash,
+        )
+        .expect("stateless signing must succeed for a fresh key");
         let envelope = encode_stateless_envelope(&public_key, &signature);
 
         let wrong_hash = [0x88u8; HASH_LEN];

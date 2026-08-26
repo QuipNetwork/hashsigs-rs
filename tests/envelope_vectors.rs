@@ -35,7 +35,7 @@ use hashsigs_rs::shrincs::{
 use hashsigs_rs::VerifierInterface as _;
 
 #[test]
-fn stateful_erc7913_adapter_byte_pins_against_solidity_vector() {
+fn stateful_v4_adapter_rejects_legacy_raw_hash_solidity_vector() {
     let vectors = load_vectors();
     let bundle = &vectors["testExportStatefulActionBundle"];
     let vector_abi = hex_to_bytes(
@@ -45,7 +45,7 @@ fn stateful_erc7913_adapter_byte_pins_against_solidity_vector() {
     );
     let oracle = AbiDecoder::new(&vector_abi).decode_root_stateful_action_vector();
 
-    // The ERC-7913 raw-hash `verify` entrypoint is not itself one of the
+    // The ERC-7913 `verify` entrypoint is not itself one of the
     // exported Solidity vector shapes (only the mode-prefixed ERC-1271
     // action envelope and the `verifyStatefulAction` calldata are exported);
     // build the plain `abi.encode(PublicKey, SHRINCS.Signature)` envelope
@@ -53,8 +53,8 @@ fn stateful_erc7913_adapter_byte_pins_against_solidity_vector() {
     // the same pattern `stateful_only_rotation_bundle_feeds_prepare_stateless_delegation`
     // uses below for `prepare_stateless_delegation`. `oracle.message` is
     // already proven (in `solidity_account_vectors.rs`) to equal the
-    // canonical stateful action hash, which is exactly the `hash` this
-    // adapter's raw-hash path expects.
+    // canonical stateful action hash. It predates V4 commitment binding, so
+    // the V4 adapter must reject it below.
     let hash: [u8; 32] = oracle
         .message
         .clone()
@@ -64,7 +64,7 @@ fn stateful_erc7913_adapter_byte_pins_against_solidity_vector() {
 
     let outcome =
         ShrincsVerifier::new().verify(&oracle.current_shrincs_public_key, &hash, &envelope_bytes);
-    assert_eq!(outcome, VerifyOutcome::Valid);
+    assert_eq!(outcome, VerifyOutcome::Invalid);
 
     // A key of the wrong length is reported Invalid (Solidity: 0xffffffff),
     // never Malformed.
@@ -87,7 +87,7 @@ fn stateful_erc7913_adapter_byte_pins_against_solidity_vector() {
 }
 
 #[test]
-fn stateless_erc7913_adapter_byte_pins_against_solidity_vector() {
+fn stateless_v4_adapter_rejects_legacy_raw_hash_solidity_vector() {
     let vectors = load_vectors();
     let bundle = &vectors["testExportStatelessActionBundle"];
     let vector_abi = hex_to_bytes(
@@ -113,7 +113,7 @@ fn stateless_erc7913_adapter_byte_pins_against_solidity_vector() {
         &hash,
         &envelope_bytes,
     );
-    assert_eq!(outcome, VerifyOutcome::Valid);
+    assert_eq!(outcome, VerifyOutcome::Invalid);
 
     let mut short_key = oracle.current_shrincs_public_key.to_vec();
     short_key.pop();

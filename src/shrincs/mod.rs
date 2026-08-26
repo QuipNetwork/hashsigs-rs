@@ -140,6 +140,7 @@ pub use crate::sphincs_plus_c::Signature as StatelessSignature;
 // in a plain library build — hence the per-item `unused_imports` allows.
 #[allow(unused_imports)] // consumed by test_support/wasm under cfg
 pub(crate) use crate::hash::derive32;
+pub(crate) use dispatch::stateful_raw_message_hash;
 #[allow(unused_imports)] // consumed by dispatch tests under cfg(test)
 #[cfg(test)]
 pub(crate) use dispatch::verify_stateless_unsafe_raw;
