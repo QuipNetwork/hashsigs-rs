@@ -125,3 +125,11 @@ This file records changes to this project, in the
   tag and the extension count. The release job, the merge request gate, and
   `make check-python-dists` all call it, so a wheel PyPI would reject now
   fails on a merge request instead of at upload.
+
+- `valid_public_key` rejects a SHRINCS public bundle whose stateful root
+  carries nonzero bytes past `P::HASH_TRUNC_LEN`. The 128-bit profiles hold a
+  16-byte root in a 32-byte word and zero the unused suffix. A bundle with a
+  dirty suffix is not a key any signer produces, and no stateful signature
+  verifies against it. The validator used to check only the encoded length, so
+  it accepted such a bundle whenever the commitment matched. Answers external
+  audit issue oak-sol-09.
