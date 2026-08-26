@@ -20,8 +20,10 @@
 use crate::HASH_LEN;
 
 pub const ADDRESS_TYPE_WOTS_HASH: u32 = 0;
+pub const ADDRESS_TYPE_WOTS_PK: u32 = 1;
 pub const ADDRESS_TYPE_TREE: u32 = 2;
 pub const ADDRESS_TYPE_FORS_TREE: u32 = 3;
+pub const ADDRESS_TYPE_FORS_ROOTS: u32 = 4;
 
 /// Full ADRS word fields for `address_word32` (layer / tree / type / keypair /
 /// chain / step). Bundled so the helper stays within the positional-arg limit.
@@ -54,6 +56,17 @@ pub(crate) fn wots_address_base(layer: u32, tree: u64, keypair: u32) -> [u8; HAS
     out
 }
 
+pub(crate) fn wots_pk_address_word(layer: u32, tree: u64, keypair: u32) -> [u8; HASH_LEN] {
+    address_word32(AddressWord32 {
+        layer,
+        tree,
+        address_type: ADDRESS_TYPE_WOTS_PK,
+        keypair,
+        chain: 0,
+        step: 0,
+    })
+}
+
 pub(crate) fn wots_chain_address_word(
     mut address_base: [u8; HASH_LEN],
     chain_index: u32,
@@ -79,6 +92,17 @@ pub(crate) fn fors_address_word(
     out
 }
 
+pub(crate) fn fors_roots_address_word(tree_index: u64, leaf_index: u32) -> [u8; HASH_LEN] {
+    address_word32(AddressWord32 {
+        layer: 0,
+        tree: tree_index,
+        address_type: ADDRESS_TYPE_FORS_ROOTS,
+        keypair: leaf_index,
+        chain: 0,
+        step: 0,
+    })
+}
+
 pub(crate) fn hypertree_address_word(
     layer: u32,
     tree_index: u64,
@@ -92,4 +116,30 @@ pub(crate) fn hypertree_address_word(
     let low = (u64::from(node_height) << 32) | parent_index;
     out[24..32].copy_from_slice(&low.to_be_bytes());
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{fors_roots_address_word, wots_pk_address_word};
+
+    #[test]
+    fn wots_pk_address_carries_position_and_type_one() {
+        let word = wots_pk_address_word(0x0102_0304, 0x0506_0708_090a_0b0c, 0x0d0e_0f10);
+        assert_eq!(&word[0..4], &0x0102_0304u32.to_be_bytes());
+        assert_eq!(&word[4..8], &[0; 4]);
+        assert_eq!(&word[8..16], &0x0506_0708_090a_0b0cu64.to_be_bytes());
+        assert_eq!(&word[16..20], &1u32.to_be_bytes());
+        assert_eq!(&word[20..24], &0x0d0e_0f10u32.to_be_bytes());
+        assert_eq!(&word[24..32], &[0; 8]);
+    }
+
+    #[test]
+    fn fors_roots_address_carries_position_and_type_four() {
+        let word = fors_roots_address_word(0x0102_0304_0506_0708, 0x090a_0b0c);
+        assert_eq!(&word[0..8], &[0; 8]);
+        assert_eq!(&word[8..16], &0x0102_0304_0506_0708u64.to_be_bytes());
+        assert_eq!(&word[16..20], &4u32.to_be_bytes());
+        assert_eq!(&word[20..24], &0x090a_0b0cu32.to_be_bytes());
+        assert_eq!(&word[24..32], &[0; 8]);
+    }
 }
