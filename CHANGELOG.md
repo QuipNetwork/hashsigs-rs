@@ -8,9 +8,30 @@ This file records changes to this project, in the
 ### Added
 
 - `profileName()` on the wasm surface, returning the SHRINCS profile the loaded
-  binary carries. The npm package is moving to one binary per profile, and every
-  binary exports the same function names, so this is how a caller confirms it
-  loaded the profile it imported.
+  binary carries. Every profile binary exports the same function names, so this
+  is how a caller confirms it loaded the profile it imported.
+- `@quip.network/hashsigs-wasm` ships every profile, each on its own subpath
+  export: `@quip.network/hashsigs-wasm/128s-q18` and the five siblings. The
+  package root stays the default profile, so a bare import is unchanged. Each
+  subpath carries its own wasm binary, built by a `bin/build-wasm.sh` loop, so
+  a browser consumer downloads one profile rather than six -- the browser build
+  inlines the wasm as base64, where no bundler can drop the profiles nobody
+  imported. A shipped binary is 133-147 KB, or 178-196 KB base64.
+  `ts/src/api.ts` holds the profile-independent surface, and the per-profile
+  loaders and entry points are generated from the profile list by
+  `ts/scripts/gen-profile-entries.mjs`.
+- The `hashsigs` PyPI distribution has a signing API. It previously exposed
+  only `__version__`. `hashsigs.shrincs` and `hashsigs.sphincs_plus_c` cover
+  keygen, stateful and stateless signing, verification, key import and export,
+  and stateful-chain reset, over decomposed key objects rather than opaque
+  blobs. Every failure raises `HashSigsError` with a stable `code`.
+- Every SHRINCS profile ships in that one distribution, each as its own module:
+  `from hashsigs.profiles import p128s_q18`, and five siblings. The package
+  root stays the default profile. Each module carries its own compiled
+  extension under `hashsigs._ext`, built from a crate in `py/profiles/`,
+  because one Cargo package builds at most one cdylib. Importing a profile
+  maps only that profile's code, at the cost of a wheel roughly six times the
+  size of a single-profile build.
 - Two SHRINCS profiles, `shrincs-128s-q18-sha2` and `shrincs-128s-q20-sha2`,
   behind the `profile-128s-q18-sha2` and `profile-128s-q20-sha2` features.
   Each is the exact numeric twin of the keccak profile of the same name and
@@ -22,15 +43,22 @@ This file records changes to this project, in the
 
 ### Changed
 
+- The FORS message digest binds to the profile. Both digest regimes hash
+  `P::PROFILE_ID` into the preimage, which is now
+  `H("fors-digest" || PROFILE_ID || pkSeed || hypertreeRoot || randomizer ||
+  counter || message [|| i])`. Without it, two profiles that share a hash suite
+  derive the same leaf indices for a message. This changes the wire format:
+  signatures from earlier versions do not verify, and this release regenerates
+  every committed golden vector. `ShrincsVerifier::version_tag()` and
+  `SphincsPlusCVerifier::version_tag()` move from `v1` to `v2`, so a Solidity
+  verifier pinned to the old tag rejects a new signature outright instead of
+  failing inside the FORS check. Answers external audit issue oak-sol-02.
 - Packaging ships one artifact per ecosystem instead of a base package plus
   one sibling package per profile. `hashsigs-rs`, the `hashsigs` PyPI
   distribution, and `@quip.network/hashsigs-wasm` each carry every profile,
   and each profile is imported on its own path. `bin/packages.sh` no longer
   declares `SIBLING_PROFILES`, `PYPI_SIBLINGS`, or `NPM_SIBLINGS`; it declares
-  `PROFILES` instead. The Rust import paths work today. The npm subpaths still
-  need the TypeScript package layout: the wasm surface is now generic over the
-  profile, but the package still builds and ships one binary. The PyPI subpaths
-  need a Python API, which does not exist yet.
+  `PROFILES` instead. All three ecosystems now work this way.
 - The six `profile-*` Cargo features (`profile-256s`, `profile-256s-sha2`,
   `profile-128s-q18`, `profile-128s-q20`, `profile-128s-q18-sha2`,
   `profile-128s-q20-sha2`) are additive. Enabling more than
@@ -53,6 +81,28 @@ This file records changes to this project, in the
   enabled, a fixed priority order decides which one that is. Name a profile
   module's own alias to pin one explicitly.
 
+- The PyPI distribution builds through `py/hashsigs_build.py`, a PEP 517
+  backend that compiles one extension per profile and stages them into the
+  package before delegating to maturin. `python -m build` and `pip install .`
+  go through it; a bare `maturin build` does not, and produces a wheel whose
+  `hashsigs._ext` is empty. The source distribution works: `pip install
+  hashsigs --no-binary hashsigs` runs the same backend from the unpacked sdist
+  and rebuilds every extension.
+- `pyproject.toml` moved from `py/` to the repository root. maturin resolves
+  `include` paths against the directory holding it, and that directory becomes
+  the sdist root, while path dependencies are vendored at their
+  workspace-relative locations. Rooting the file here makes those agree: the
+  profile crates sit at `py/profiles/` in the sdist, the same place they
+  occupy in the repository, so their path dependencies back to the core
+  resolve.
+- `hashsigs.ERROR_CODES` comes from the Rust `ErrorCode` enum through the root
+  extension, rather than a tuple restated in Python.
+- The profile-generic binding core moved from `src/wasm/core.rs` to
+  `src/bindings.rs` and is now `#[doc(hidden)] pub`. Both the WebAssembly
+  surface and the Python extension crates build on it, and the Python crates
+  are separate packages, so they cannot reach a `pub(crate)` module. It is not
+  a stable API.
+
 ### Removed
 
 - `TryFrom<&[u8]>` no longer exists on seven public wire types:
@@ -60,3 +110,18 @@ This file records changes to this project, in the
   `sphincs_plus_c::LayerSignature`, `fors_c::Entry`, `fors_c::Signature`, and
   `sphincs_plus_c::Signature`. Callers must use the explicit
   `from_bytes::<P>` constructor for the profile they target.
+
+### Fixed
+
+- The `hashsigs` wheel carries a `manylinux` platform tag again. The build
+  moved from the maturin command line to `python -m build`, which builds the
+  wheel from the sdist and so proves the sdist is complete. The two entry
+  points disagree on one default. The command line tags the wheel for the
+  lowest compatible `manylinux`. The PEP 517 hook it exposes defaults to
+  `--compatibility off`, which produces a bare `linux_x86_64` tag. PyPI
+  rejects that tag with a 400, because it makes no promise about the glibc the
+  extensions need. `py/hashsigs_build.py` now passes `--compatibility pypi`,
+  and every build path inherits it. `bin/check-wheel.py` checks the platform
+  tag and the extension count. The release job, the merge request gate, and
+  `make check-python-dists` all call it, so a wheel PyPI would reject now
+  fails on a merge request instead of at upload.

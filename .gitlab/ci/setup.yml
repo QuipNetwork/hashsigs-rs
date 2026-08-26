@@ -65,6 +65,22 @@ default:
         *) echo "expected Node ${NODE_MAJOR}.x, got $(node --version)" >&2; exit 1 ;;
       esac
 
+# Python packaging tooling, in a virtual environment at /tmp/py-venv.
+#
+# A venv rather than the system interpreter: Debian marks that one externally
+# managed, so a bare `pip install` refuses to run, and these checks install the
+# wheel they just built, which does not belong in system site-packages.
+#
+# Shared rather than copied into each job. Both `py-tests` and
+# `release:validate` reach `python3 -m build` through the Makefile, and when
+# only one of them carried the setup, a Makefile change that moved the build
+# off maturin passed py-tests and failed release:validate at the publish gate.
+.install-python-build:
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq python3-venv > /dev/null
+    - python3 -m venv /tmp/py-venv
+    - /tmp/py-venv/bin/pip install --quiet build pytest
+
 # Download the prebuilt wasm-bindgen CLI (musl) instead of compiling from
 # source via `cargo install`. Version is pinned in WASM_BINDGEN_VERSION;
 # tarball integrity is checked against WASM_BINDGEN_SHA256 before extract.

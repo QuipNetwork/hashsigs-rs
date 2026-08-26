@@ -18,6 +18,49 @@ Two schemes ship in one package:
 npm install @quip.network/hashsigs-wasm
 ```
 
+## Profiles
+
+This one package carries every SHRINCS profile. Each has its own import path,
+and the package root is the default profile, `256s-keccak`:
+
+```ts
+// The default profile.
+import { loadHashSigs } from "@quip.network/hashsigs-wasm";
+
+// Any other profile, on its own path.
+import { loadHashSigs as load128s } from "@quip.network/hashsigs-wasm/128s-q18";
+```
+
+| Import path | Profile | Scheme hash |
+|---|---|---|
+| `@quip.network/hashsigs-wasm` | `shrincs-256s-keccak` | keccak-256 |
+| `@quip.network/hashsigs-wasm/256s-keccak` | `shrincs-256s-keccak` | keccak-256 |
+| `@quip.network/hashsigs-wasm/256s-sha2` | `shrincs-256s-sha2` | SHA-256 |
+| `@quip.network/hashsigs-wasm/128s-q18` | `shrincs-128s-q18-keccak` | keccak-256 |
+| `@quip.network/hashsigs-wasm/128s-q20` | `shrincs-128s-q20-keccak` | keccak-256 |
+| `@quip.network/hashsigs-wasm/128s-q18-sha2` | `shrincs-128s-q18-sha2` | SHA-256 |
+| `@quip.network/hashsigs-wasm/128s-q20-sha2` | `shrincs-128s-q20-sha2` | SHA-256 |
+
+Every path exports the same names with the same shapes. They differ only in
+what they compute, and **a signature made under one profile does not verify
+under any other**. Pick one profile per key and keep it.
+
+Each path carries its own wasm binary, so a browser bundle contains only the
+profile you import, not all six. Read the loaded profile back with
+`profileName`, which comes from the binary itself rather than the import path:
+
+```ts
+const { shrincs, profileName } = await load128s();
+// profileName === "shrincs-128s-q18-keccak"
+```
+
+Choose on cost. The 128s profiles produce far smaller signatures and verify
+faster, at the price of slow signing. Through wasm, 128s keygen takes roughly
+53 seconds and a stateless signature roughly 52 more, against about 0.1 seconds
+each at 256s. The sha2 variants sign about three times faster than their keccak
+twins natively, yet cost more gas on-chain, where keccak is an opcode and
+SHA-256 is a precompile. The root README carries the full measured table.
+
 ## Quick start
 
 `loadHashSigs()` awaits the wasm module once and resolves to

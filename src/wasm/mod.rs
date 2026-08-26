@@ -25,18 +25,19 @@
 //! ImportSigningKey,Reset,ComputePublicKeyCommitment,
 //! RecoverPublicKeyCommitment}`), plus `version()` and `profileName()`.
 //!
-//! It is split in two. [`core`] holds every operation generic over
+//! It is split in two. [`crate::bindings`] holds every operation generic over
 //! `P: Profile` and that profile's two array widths, with no `wasm_bindgen` in
-//! sight. [`export`] holds the macro that stamps those operations out as
-//! concrete `#[wasm_bindgen]` items for one profile. This module invokes that
-//! macro exactly once, over the build-selected profile.
+//! sight, shared with the Python bindings. The private `export` submodule holds
+//! the macro that
+//! stamps those operations out as concrete `#[wasm_bindgen]` items for one
+//! profile. This module invokes that macro exactly once, over the
+//! build-selected profile.
 //!
 //! One binary therefore carries one profile, and the npm package ships six
 //! binaries — one per subpath export — so a browser consumer downloads only
 //! the profile it imports. `profileName()` reports which one a loaded binary
 //! is, because all six export identical names.
 
-pub(crate) mod core;
 #[cfg(feature = "wasm-bindings")]
 mod export;
 
@@ -47,7 +48,7 @@ use crate::profiles::selected::{SelectedProfile, NUM_CHAINS, NUM_LAYERS};
 use wasm_bindgen::prelude::*;
 
 #[cfg(feature = "wasm-bindings")]
-use self::core::WasmErr;
+use crate::bindings::BindingError;
 
 // Plain constant so `typescript_union_lists_every_error_code` (below) can read
 // it under a native test build. `#[wasm_bindgen(typescript_custom_section)]`
@@ -90,7 +91,7 @@ pub fn version() -> String {
 /// Convert a boundary error into the `Error` object with a machine-readable
 /// `code` property that every throwing export raises. Profile-independent.
 #[cfg(feature = "wasm-bindings")]
-pub(crate) fn js_error(err: WasmErr) -> JsValue {
+pub(crate) fn js_error(err: BindingError) -> JsValue {
     let e = js_sys::Error::new(&err.message);
     if js_sys::Reflect::set(&e, &JsValue::from_str("code"), &JsValue::from_str(err.code)).is_err() {
         // Reflect::set failed, so the machine-readable code would be lost off the
@@ -109,11 +110,11 @@ export::wasm_profile_surface!(SelectedProfile, NUM_CHAINS, NUM_LAYERS);
 
 #[cfg(test)]
 mod tests {
-    use super::core::{
+    use super::*;
+    use crate::bindings::{
         bytes_fixed, bytes_word32, deserialize_shrincs_signing_key,
         deserialize_sphincs_plus_c_signing_key, serialize_shrincs_signing_key,
     };
-    use super::*;
     #[cfg(all(feature = "wasm-bindings", target_arch = "wasm32"))]
     use crate::shrincs::test_fixtures::{
         fixture_entry_opt, fixture_pair, load_fixture_file, stateful_signer_fixture_path,
@@ -201,13 +202,15 @@ mod tests {
         const L: usize,
     >() {
         let seed = [0x33u8; 32];
-        let (signing_key, public_key) = super::core::shrincs_keygen::<P, N, L>(&seed, 4).unwrap();
+        let (signing_key, public_key) =
+            crate::bindings::shrincs_keygen::<P, N, L>(&seed, 4).unwrap();
         let mut secret_key = serialize_shrincs_signing_key(&signing_key);
         let commitment = public_key.public_key_commitment.clone();
 
         let message = [0x03u8; 32];
-        let signature = super::core::shrincs_sign::<P, N, L>(&message, &mut secret_key).unwrap();
-        assert!(super::core::shrincs_verify::<P, N>(
+        let signature =
+            crate::bindings::shrincs_sign::<P, N, L>(&message, &mut secret_key).unwrap();
+        assert!(crate::bindings::shrincs_verify::<P, N>(
             &signature,
             &message,
             &commitment
@@ -215,21 +218,21 @@ mod tests {
 
         // Wrong message, tampered signature, and wrong commitment must all
         // fail — otherwise "verify" is not verifying.
-        assert!(!super::core::shrincs_verify::<P, N>(
+        assert!(!crate::bindings::shrincs_verify::<P, N>(
             &signature,
             &[0xEEu8; 32],
             &commitment
         ));
         let mut tampered = signature.clone();
         tampered[0] ^= 1;
-        assert!(!super::core::shrincs_verify::<P, N>(
+        assert!(!crate::bindings::shrincs_verify::<P, N>(
             &tampered,
             &message,
             &commitment
         ));
         let mut wrong_commitment = commitment.clone();
         wrong_commitment[0] ^= 1;
-        assert!(!super::core::shrincs_verify::<P, N>(
+        assert!(!crate::bindings::shrincs_verify::<P, N>(
             &signature,
             &message,
             &wrong_commitment
@@ -238,7 +241,7 @@ mod tests {
         // Recovery must recompute the same commitment from the envelope's
         // carried public key, under this profile's hashing.
         let recovered =
-            super::core::shrincs_recover_public_key_commitment::<P>(&signature).unwrap();
+            crate::bindings::shrincs_recover_public_key_commitment::<P>(&signature).unwrap();
         assert_eq!(recovered, commitment);
     }
 
@@ -268,21 +271,25 @@ mod tests {
 
         let seed = [0x5au8; 32];
         let (signing_key, public_key) =
-            super::core::shrincs_keygen::<Profile256s, 64, 8>(&seed, 4).unwrap();
+            crate::bindings::shrincs_keygen::<Profile256s, 64, 8>(&seed, 4).unwrap();
         let mut secret_key = serialize_shrincs_signing_key(&signing_key);
         let commitment = public_key.public_key_commitment.clone();
 
         let message = [0x5bu8; 32];
         let signature =
-            super::core::shrincs_sign::<Profile256s, 64, 8>(&message, &mut secret_key).unwrap();
+            crate::bindings::shrincs_sign::<Profile256s, 64, 8>(&message, &mut secret_key).unwrap();
 
-        assert!(super::core::shrincs_verify::<Profile256s, 64>(
+        assert!(crate::bindings::shrincs_verify::<Profile256s, 64>(
             &signature,
             &message,
             &commitment
         ));
         assert!(
-            !super::core::shrincs_verify::<Profile256sSha2, 64>(&signature, &message, &commitment),
+            !crate::bindings::shrincs_verify::<Profile256sSha2, 64>(
+                &signature,
+                &message,
+                &commitment
+            ),
             "a keccak-suite signature verified under the sha2 twin: the core is \
              hashing under something other than its own P"
         );
@@ -297,11 +304,11 @@ mod tests {
     #[test]
     fn core_monomorphizes_at_the_128s_widths() {
         use crate::profiles::p128s_q18::Profile128sQ18;
-        assert!(!super::core::shrincs_verify::<Profile128sQ18, 32>(
+        assert!(!crate::bindings::shrincs_verify::<Profile128sQ18, 32>(
             &[0u8; 8], &[0u8; 32], &[0u8; 32]
         ));
         assert!(
-            super::core::shrincs_recover_public_key_commitment::<Profile128sQ18>(&[0u8; 8])
+            crate::bindings::shrincs_recover_public_key_commitment::<Profile128sQ18>(&[0u8; 8])
                 .is_err()
         );
     }

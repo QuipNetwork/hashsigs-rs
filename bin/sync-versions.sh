@@ -132,6 +132,16 @@ check_json "${root}/ts/package.json"
 # PEP 440 conversion (0.2.1-rc3 -> 0.2.1rc3) at build time.
 check_toml "${root}/py/Cargo.toml"
 
+# The per-profile extension crates and the shared PyO3 layer all ship inside
+# that one wheel, so a version drifting here would put mismatched extensions
+# next to each other in a single artifact. `version()` is exported from every
+# extension and the Python suite asserts they agree, but this catches it before
+# anything is built.
+check_toml "${root}/py/common/Cargo.toml"
+for manifest in "${root}"/py/profiles/*/Cargo.toml; do
+  check_toml "${manifest}"
+done
+
 # The caller named a version, so Cargo.toml gets checked too instead of being
 # taken as the truth everything else is measured against.
 if [[ -n "${expected}" && "${expected}" != "${crate_version}" ]]; then
