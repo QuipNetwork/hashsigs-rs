@@ -1,6 +1,6 @@
 {
   "name": "@quip.network/hashsigs-wasm",
-  "version": "0.2.1-rc6",
+  "version": "0.2.1-rc7",
   "description": "SHRINCS hash-based signature verifier/signer, compiled from the audited hashsigs-rs crate to WebAssembly. Works in Node.js and the browser. Every SHRINCS profile ships in this one package, each on its own import path.",
   "type": "module",
   "main": "./dist/index.js",

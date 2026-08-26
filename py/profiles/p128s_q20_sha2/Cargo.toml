@@ -1,7 +1,7 @@
 [package]
 name = "hashsigs-py-p128s-q20-sha2"
 # Keep in lockstep with the root crate; bin/sync-versions.sh checks it.
-version = "0.2.1-rc6"
+version = "0.2.1-rc7"
 edition = "2021"
 rust-version = "1.95"
 authors = ["Richard T. Carback III <rick.carback@gmail.com>"]
