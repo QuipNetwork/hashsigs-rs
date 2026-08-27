@@ -113,7 +113,7 @@ fn generate_shrincs_sphincs_vectors() {
         },
         "stateless": {
             "publicKey": public_key_json(&stateless_public_key),
-            "callerHash": hex(&stateless_caller_hash),
+            "callerHash": hex(stateless_caller_hash),
             "message": hex(&stateless_message),
             "signature": stateless_signature_json(&stateless_signature),
             "cases": {
