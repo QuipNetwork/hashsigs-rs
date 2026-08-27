@@ -33,6 +33,11 @@ import { createHash } from "node:crypto";
 const hash32 = (label) => new Uint8Array(createHash("sha256").update(label).digest());
 const MSG = hash32("hashsigs-noble-conformance-message");
 
+// Big-endian u32 read, for asserting the maxSignatures word inside the
+// decoded 68-byte statefulPublicKey (pkSeed ‖ root ‖ maxSignatures u32 BE).
+const readU32BE = (bytes, offset) =>
+  new DataView(bytes.buffer, bytes.byteOffset + offset, 4).getUint32(0, false);
+
 // The web loader yields the same module shape as the node loader, so both get
 // the same noble-style surface from the package's own `makeHashSigs`. This
 // used to be a hand-copied reimplementation of every ser/de helper; binding
