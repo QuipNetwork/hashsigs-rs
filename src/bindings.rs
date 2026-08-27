@@ -95,8 +95,9 @@ pub fn bytes_fixed<const N: usize>(input: &[u8]) -> Result<[u8; N], BindingError
 
 /// The 32-byte message every noble-style sign/verify free function operates
 /// on. The message IS the hash: callers pre-hash arbitrary-length data and
-/// pass the 32-byte digest, matching the on-chain / envelope verifier, which
-/// treats its `hash` argument as the signed message. A wrong length is an
+/// pass the 32-byte digest. SHRINCS stateful adapter operations subsequently
+/// bind that digest to the operation, suite, and public-key commitment;
+/// standalone SPHINCS+C operations use it directly. A wrong length is an
 /// error (for signing) or a rejected verify.
 pub fn message_hash(message: &[u8]) -> Result<[u8; HASH_LEN], BindingError> {
     bytes_word32(message).map_err(|_| BindingError {
@@ -282,11 +283,12 @@ pub fn shrincs_sign<P: Profile, const NUM_CHAINS: usize, const NUM_LAYERS: usize
         });
     }
     let hash = message_hash(message)?;
-    let signature = ShrincsSigner::sign_stateful_raw::<P, NUM_CHAINS>(&mut signing_key, &hash)
-        .ok_or_else(|| BindingError {
-            code: ErrorCode::SigningFailed.as_str(),
-            message: "stateful signing failed for the supplied key/message".into(),
-        })?;
+    let signature =
+        ShrincsSigner::sign_stateful_adapter::<P, NUM_CHAINS>(&mut signing_key, &public_key, hash)
+            .ok_or_else(|| BindingError {
+                code: ErrorCode::SigningFailed.as_str(),
+                message: "stateful signing failed for the supplied key/message".into(),
+            })?;
     secret_key.copy_from_slice(&serialize_shrincs_signing_key(&signing_key));
     // Return the PublicKey-carrying envelope, not the bare signature: the
     // verifier pins only the 32-byte commitment, so the signature itself must
@@ -334,12 +336,11 @@ pub fn shrincs_verify<P: Profile, const NUM_CHAINS: usize>(
     else {
         return false;
     };
-    // The hash IS the message: it is packed into the signed preimage as its
-    // raw 32 bytes, matching `SHRINCS.verify` on the Solidity side.
+    let bound_hash = crate::shrincs::stateful_raw_message_hash::<P>(commitment, hash);
     crate::shrincs::verify_stateful_unsafe_raw::<P, NUM_CHAINS>(
         commitment,
         &public_key,
-        &hash,
+        &bound_hash,
         &decoded,
     )
 }

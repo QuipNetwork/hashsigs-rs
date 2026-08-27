@@ -6,7 +6,8 @@ use flate2::write::GzEncoder;
 use flate2::Compression;
 use hashsigs_rs::profiles::selected::{SelectedProfile, NUM_CHAINS, NUM_LAYERS};
 use hashsigs_rs::shrincs::{
-    PublicKey, ShrincsSigner, Signature as StatefulSignature, StatelessSignature, HASH_LEN,
+    PublicKey, ShrincsSigner, ShrincsVerifier, Signature as StatefulSignature, StatelessSignature,
+    HASH_LEN,
 };
 use serde_json::{json, Value};
 use std::fs;
@@ -57,7 +58,15 @@ fn generate_shrincs_sphincs_vectors() {
             256,
         )
         .expect("stateless keygen");
-    let stateless_message = hash_word(b"shrincs solidity stateless message").to_vec();
+    let stateless_caller_hash = hash_word(b"shrincs solidity stateless message");
+    let stateless_commitment: [u8; HASH_LEN] = stateless_public_key
+        .public_key_commitment
+        .as_slice()
+        .try_into()
+        .expect("32-byte stateless commitment");
+    let stateless_message = ShrincsVerifier::new()
+        .stateless_raw_message_hash(stateless_commitment, stateless_caller_hash)
+        .to_vec();
     let stateless_signature = ShrincsSigner::sign_stateless_raw::<SelectedProfile, NUM_LAYERS>(
         &stateless_key,
         &stateless_message,
@@ -104,6 +113,7 @@ fn generate_shrincs_sphincs_vectors() {
         },
         "stateless": {
             "publicKey": public_key_json(&stateless_public_key),
+            "callerHash": hex(stateless_caller_hash),
             "message": hex(&stateless_message),
             "signature": stateless_signature_json(&stateless_signature),
             "cases": {

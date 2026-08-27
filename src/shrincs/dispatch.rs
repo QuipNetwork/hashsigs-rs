@@ -63,6 +63,45 @@ fn action_message_hash<P: Profile>(
     ])
 }
 
+/// ERC-7913 adapter message hash. Unlike the typed action hash, the final
+/// field is the caller-supplied 32-byte hash rather than an ActionContext.
+pub(crate) fn raw_message_hash<P: Profile>(
+    op_tag: &[u8],
+    expected_public_key_commitment: [u8; HASH_LEN],
+    hash: [u8; HASH_LEN],
+) -> [u8; HASH_LEN] {
+    let suite_id = <P::Suite as HashSuite>::HASH_SUITE_ID;
+    let op = keccak_packed(&[op_tag]);
+    keccak_packed(&[
+        &op,
+        &suite_id.to_be_bytes(),
+        &expected_public_key_commitment,
+        &hash,
+    ])
+}
+
+pub(crate) fn stateful_raw_message_hash<P: Profile>(
+    expected_public_key_commitment: [u8; HASH_LEN],
+    hash: [u8; HASH_LEN],
+) -> [u8; HASH_LEN] {
+    raw_message_hash::<P>(
+        b"shrincs-verify-stateful",
+        expected_public_key_commitment,
+        hash,
+    )
+}
+
+pub(crate) fn stateless_raw_message_hash<P: Profile>(
+    expected_public_key_commitment: [u8; HASH_LEN],
+    hash: [u8; HASH_LEN],
+) -> [u8; HASH_LEN] {
+    raw_message_hash::<P>(
+        b"shrincs-verify-stateless",
+        expected_public_key_commitment,
+        hash,
+    )
+}
+
 /// Canonical message hash for a stateful action verify. See
 /// `action_message_hash`.
 pub(crate) fn stateful_action_message_hash<P: Profile>(
