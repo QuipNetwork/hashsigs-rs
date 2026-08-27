@@ -1,6 +1,6 @@
 [package]
 name = "hashsigs-rs"
-version = "0.2.1-rc7"
+version = "0.2.1-rc8"
 edition = "2021"
 rust-version = "1.95"
 authors = ["Richard T. Carback III <rick.rust.cargo.383d5@passmail.net>"]

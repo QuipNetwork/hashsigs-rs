@@ -133,3 +133,16 @@ This file records changes to this project, in the
   verifies against it. The validator used to check only the encoded length, so
   it accepted such a bundle whenever the commitment matched. Answers external
   audit issue oak-sol-09.
+
+- The Rust SHRINCS signing and verification facades bind the full public-key
+  commitment into the signed digest, and they use a separate domain tag for the
+  stateful adapter and the stateless adapter. The facades used to sign the
+  caller hash on its own. A signature over that hash therefore stayed valid
+  after a change to the half of the bundle the primitive does not read, so an
+  attacker could pair a stateful signature with a substituted stateless half,
+  or the reverse. The verifier identity moves to V4, and the compressed
+  Solidity interoperability vectors record the caller hash and the bound
+  message separately. The old vectors remain as negative tests, which prove the
+  V4 boundary rejects the earlier construction. Rust and Solidity now derive
+  the same two digests. Answers external audit issues oak-sol-03 and
+  oak-sol-06.
