@@ -21,9 +21,10 @@
 //!
 //! This module exports a small noble-style API: flat `Uint8Array` free
 //! functions (`sphincsPlusC{Keygen,Sign,Verify}`,
-//! `shrincs{Keygen,Sign,SignStateless,Verify,VerifyStateless,
-//! ImportSigningKey,Reset,ComputePublicKeyCommitment,
-//! RecoverPublicKeyCommitment}`), plus `version()` and `profileName()`.
+//! `shrincs{Keygen,Sign,SignAtLeaf,SignStatefulRawAt,SignStateless,Verify,
+//! VerifyStatefulRaw,VerifyStateless,ImportSigningKey,Reset,
+//! ComputePublicKeyCommitment,RecoverPublicKeyCommitment}`), plus
+//! `version()` and `profileName()`.
 //!
 //! It is split in two. [`crate::bindings`] holds every operation generic over
 //! `P: Profile` and that profile's two array widths, with no `wasm_bindgen` in
@@ -582,6 +583,134 @@ mod tests {
                 .unwrap(),
             ErrorCode::StatefulLeavesExhausted.as_str(),
         );
+    }
+
+    #[cfg(feature = "wasm-bindings")]
+    #[test]
+    fn shrincs_noble_sign_at_leaf_matches_sign_and_never_mutates() {
+        let seed = [0xb0u8; 32];
+        let keys = super::shrincs_keygen(&seed, 4).unwrap();
+        let secret_key = keys.secret_key();
+        let public_key_commitment = keys.public_key_commitment();
+        let message = [0x0bu8; 32].to_vec();
+
+        // At-leaf signing at the next unused leaf must be byte-identical to
+        // what `shrincsSign` would produce there — same binding, same
+        // envelope — while leaving the secret key untouched.
+        let at_leaf = super::shrincs_sign_at_leaf(&message, &secret_key, 1).unwrap();
+        assert_eq!(
+            keys.secret_key(),
+            secret_key,
+            "signAtLeaf must not mutate secretKey"
+        );
+
+        let mut advancing = secret_key.clone();
+        let advanced = super::shrincs_sign(&message, &mut advancing).unwrap();
+        assert_eq!(
+            at_leaf, advanced,
+            "signAtLeaf(leaf=1) must equal shrincsSign's first signature"
+        );
+        assert!(super::shrincs_verify(
+            &at_leaf,
+            &message,
+            &public_key_commitment
+        ));
+
+        // Deterministic: the same leaf yields the identical signature, and a
+        // different leaf yields a different one that still verifies.
+        let again = super::shrincs_sign_at_leaf(&message, &secret_key, 1).unwrap();
+        assert_eq!(at_leaf, again);
+        let other_leaf = super::shrincs_sign_at_leaf(&message, &secret_key, 3).unwrap();
+        assert_ne!(at_leaf, other_leaf);
+        assert!(super::shrincs_verify(
+            &other_leaf,
+            &message,
+            &public_key_commitment
+        ));
+    }
+
+    #[cfg(feature = "wasm-bindings")]
+    #[test]
+    fn shrincs_noble_sign_stateful_raw_at_skips_the_adapter_binding() {
+        let seed = [0xb1u8; 32];
+        let keys = super::shrincs_keygen(&seed, 4).unwrap();
+        let secret_key = keys.secret_key();
+        let public_key_commitment = keys.public_key_commitment();
+        let message = [0x1bu8; 32].to_vec();
+
+        let raw = super::shrincs_sign_stateful_raw_at(&message, &secret_key, 2).unwrap();
+        assert_eq!(
+            keys.secret_key(),
+            secret_key,
+            "signStatefulRawAt must not mutate secretKey"
+        );
+
+        // Raw signs the message as-is, so it must NOT verify through the
+        // adapter-bound `shrincsVerify` — but the raw verify counterpart
+        // accepts it over the same as-is message, and rejects a wrong
+        // message or wrong commitment.
+        assert!(!super::shrincs_verify(
+            &raw,
+            &message,
+            &public_key_commitment
+        ));
+        assert!(super::shrincs_verify_stateful_raw(
+            &raw,
+            &message,
+            &public_key_commitment
+        ));
+        assert!(!super::shrincs_verify_stateful_raw(
+            &raw,
+            &[0xEEu8; 32],
+            &public_key_commitment
+        ));
+        assert!(!super::shrincs_verify_stateful_raw(
+            &raw,
+            &message,
+            &[0xFFu8; 32]
+        ));
+
+        // ...but signing the pre-bound digest raw must reproduce the bound
+        // path exactly: raw(bind(m)) == signAtLeaf(m). This pins "raw" as
+        // precisely "the adapter path minus the binding".
+        let commitment = bytes_word32(&public_key_commitment).unwrap();
+        let hash = bytes_word32(&message).unwrap();
+        let bound = crate::shrincs::stateful_raw_message_hash::<SelectedProfile>(commitment, hash);
+        let raw_over_bound = super::shrincs_sign_stateful_raw_at(&bound, &secret_key, 2).unwrap();
+        let adapter = super::shrincs_sign_at_leaf(&message, &secret_key, 2).unwrap();
+        assert_eq!(raw_over_bound, adapter);
+    }
+
+    #[cfg(all(feature = "wasm-bindings", target_arch = "wasm32"))]
+    #[wasm_bindgen_test]
+    fn shrincs_noble_sign_at_leaf_rejects_out_of_range_leaves() {
+        let seed = [0xb2u8; 32];
+        let keys = super::shrincs_keygen(&seed, 2).unwrap();
+        let secret_key = keys.secret_key();
+        let message = [0x2bu8; 32].to_vec();
+
+        for leaf in [0u32, 3] {
+            let err = expect_err(super::shrincs_sign_at_leaf(&message, &secret_key, leaf));
+            assert_eq!(
+                js_sys::Reflect::get(&err, &JsValue::from_str("code"))
+                    .unwrap()
+                    .as_string()
+                    .unwrap(),
+                ErrorCode::InvalidInput.as_str(),
+            );
+            let err = expect_err(super::shrincs_sign_stateful_raw_at(
+                &message,
+                &secret_key,
+                leaf,
+            ));
+            assert_eq!(
+                js_sys::Reflect::get(&err, &JsValue::from_str("code"))
+                    .unwrap()
+                    .as_string()
+                    .unwrap(),
+                ErrorCode::InvalidInput.as_str(),
+            );
+        }
     }
 
     #[cfg(feature = "wasm-bindings")]

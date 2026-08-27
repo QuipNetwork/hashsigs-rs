@@ -296,6 +296,76 @@ pub fn shrincs_sign<P: Profile, const NUM_CHAINS: usize, const NUM_LAYERS: usize
     Ok(encode_stateful_envelope(&public_key, &signature))
 }
 
+/// Reject a leaf index the stateful tree cannot contain. Shared by both
+/// at-leaf signing entry points so the range error is reported as
+/// `ERR_INVALID_INPUT` (caller chose a bad leaf) instead of surfacing as a
+/// misleading `ERR_SIGNING_FAILED` out of the core's `None`.
+fn check_leaf_index(leaf_index: u32, max_signatures: u32) -> Result<(), BindingError> {
+    if leaf_index == 0 || leaf_index > max_signatures {
+        return Err(BindingError {
+            code: ErrorCode::InvalidInput.as_str(),
+            message: format!("leafIndex must be in 1..={max_signatures}, got {leaf_index}"),
+        });
+    }
+    Ok(())
+}
+
+/// Sign a 32-byte message at a caller-supplied stateful leaf through the
+/// commitment-bound ERC-7913 adapter path. Never mutates `secret_key` — the
+/// caller owns leaf-reuse discipline. Returns the commitment-path envelope.
+pub(crate) fn shrincs_sign_at_leaf<P: Profile, const NUM_CHAINS: usize, const NUM_LAYERS: usize>(
+    message: &[u8],
+    secret_key: &[u8],
+    leaf_index: u32,
+) -> Result<alloc::vec::Vec<u8>, BindingError> {
+    let (signing_key, public_key) = import_secret_key::<P, NUM_CHAINS, NUM_LAYERS>(secret_key)?;
+    check_leaf_index(
+        leaf_index,
+        signing_key.stateful().public_key().max_signatures,
+    )?;
+    let hash = message_hash(message)?;
+    let signature = ShrincsSigner::sign_stateful_adapter_at_leaf::<P, NUM_CHAINS>(
+        &signing_key,
+        &public_key,
+        leaf_index,
+        hash,
+    )
+    .ok_or_else(|| BindingError {
+        code: ErrorCode::SigningFailed.as_str(),
+        message: "stateful signing failed for the supplied key/message".into(),
+    })?;
+    Ok(encode_stateful_envelope(&public_key, &signature))
+}
+
+/// Sign a 32-byte message at a caller-supplied stateful leaf WITHOUT the
+/// adapter commitment binding: the message is signed as-is. For signers that
+/// build already-bound canonical hashes themselves (e.g. typed wallet action
+/// hashes, which bind the commitment by construction). Never mutates
+/// `secret_key`. Returns the commitment-path envelope.
+pub(crate) fn shrincs_sign_stateful_raw_at_leaf<
+    P: Profile,
+    const NUM_CHAINS: usize,
+    const NUM_LAYERS: usize,
+>(
+    message: &[u8],
+    secret_key: &[u8],
+    leaf_index: u32,
+) -> Result<alloc::vec::Vec<u8>, BindingError> {
+    let (signing_key, public_key) = import_secret_key::<P, NUM_CHAINS, NUM_LAYERS>(secret_key)?;
+    check_leaf_index(
+        leaf_index,
+        signing_key.stateful().public_key().max_signatures,
+    )?;
+    let hash = message_hash(message)?;
+    let signature =
+        ShrincsSigner::sign_stateful_raw_at_leaf::<P, NUM_CHAINS>(&signing_key, leaf_index, &hash)
+            .ok_or_else(|| BindingError {
+                code: ErrorCode::SigningFailed.as_str(),
+                message: "stateful signing failed for the supplied key/message".into(),
+            })?;
+    Ok(encode_stateful_envelope(&public_key, &signature))
+}
+
 /// Sign a 32-byte message via the stateless recovery path: consumes no leaf
 /// and never mutates `secret_key`.
 pub fn shrincs_sign_stateless<P: Profile, const NUM_CHAINS: usize, const NUM_LAYERS: usize>(
@@ -341,6 +411,37 @@ pub fn shrincs_verify<P: Profile, const NUM_CHAINS: usize>(
         commitment,
         &public_key,
         &bound_hash,
+        &decoded,
+    )
+}
+
+/// Verify a stateful SHRINCS envelope over the message AS-IS — the raw
+/// counterpart of `shrincs_verify`, without the adapter digest binding.
+/// Accepts what `shrincs_sign_stateful_raw_at_leaf` produces; mirrors the
+/// on-chain typed action paths, which sign already-bound canonical hashes
+/// directly. Never fails loudly.
+pub(crate) fn shrincs_verify_stateful_raw<P: Profile, const NUM_CHAINS: usize>(
+    signature: &[u8],
+    message: &[u8],
+    public_key_commitment: &[u8],
+) -> bool {
+    let Ok(hash) = message_hash(message) else {
+        return false;
+    };
+    let Some(commitment) =
+        crate::shrincs::Commitment::from_bytes(public_key_commitment).map(|c| *c.as_bytes())
+    else {
+        return false;
+    };
+    let Some((public_key, decoded)) =
+        crate::shrincs::signature::decode_stateful_envelope::<P>(signature)
+    else {
+        return false;
+    };
+    crate::shrincs::verify_stateful_unsafe_raw::<P, NUM_CHAINS>(
+        commitment,
+        &public_key,
+        &hash,
         &decoded,
     )
 }

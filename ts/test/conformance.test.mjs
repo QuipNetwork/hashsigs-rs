@@ -18,6 +18,8 @@ import {
   loadHashSigs as loadHashSigsNode,
   shrincsKeysToSecretBytes,
   makeHashSigs,
+  decodeStatefulEnvelope,
+  decodeStatelessSignature,
 } from "../dist/index.js";
 import { loadShrincsWasm as loadWeb } from "../dist/profiles/256s-keccak/loader.browser.js";
 import * as entryNode from "../dist/index.js";
@@ -46,18 +48,31 @@ const loaders = [
   ["web", loadWeb],
 ];
 
-test("entry: node exposes the value surface, web exposes only the loader", () => {
+test("entry: node exposes the value surface, web the loader plus decoders", () => {
   // WasmShrincsKeys / WasmSphincsPlusCKeys are exported TYPE-ONLY from
   // src/index.ts, and that is load-bearing: the `browser`
   // exports condition maps the package entry to loader.browser.js, so a
   // VALUE export added to index.js would exist in Node and silently be
-  // missing in browser bundles. `shrincsKeysToSecretBytes` is pure byte
-  // manipulation (no wasm dependency), so it is safe as a value export.
+  // missing in browser bundles. `shrincsKeysToSecretBytes` and the two
+  // envelope decoders are pure byte manipulation (no wasm dependency), so
+  // they are safe as value exports.
   assert.deepEqual(
     Object.keys(entryNode).sort(),
-    ["PROFILE", "PROFILE_NAME", "loadHashSigs", "loadShrincsWasm", "makeHashSigs", "shrincsKeysToSecretBytes"],
+    [
+      "PROFILE",
+      "PROFILE_NAME",
+      "decodeStatefulEnvelope",
+      "decodeStatelessSignature",
+      "loadHashSigs",
+      "loadShrincsWasm",
+      "makeHashSigs",
+      "shrincsKeysToSecretBytes",
+    ],
   );
-  assert.deepEqual(Object.keys(entryWeb).sort(), ["loadShrincsWasm"]);
+  assert.deepEqual(
+    Object.keys(entryWeb).sort(),
+    ["decodeStatefulEnvelope", "decodeStatelessSignature", "loadShrincsWasm"],
+  );
 });
 
 for (const [name, load] of loaders) {
@@ -69,8 +84,11 @@ for (const [name, load] of loaders) {
       "sphincsPlusCVerify",
       "shrincsKeygen",
       "shrincsSign",
+      "shrincsSignAtLeaf",
+      "shrincsSignStatefulRawAt",
       "shrincsSignStateless",
       "shrincsVerify",
+      "shrincsVerifyStatefulRaw",
       "shrincsVerifyStateless",
       "shrincsImportSigningKey",
       "shrincsReset",
@@ -220,6 +238,123 @@ for (const [name, load] of loaders) {
     assert.equal(
       shrincs.verifyStateless(sig, hash32("different"), keys.stateless.publicKey),
       false,
+    );
+  });
+
+  test(`${name}: shrincs.signAtLeaf never mutates keys, matches sign at the next leaf, and pins authPath.length === leafIndex`, async () => {
+    const { shrincs } = await loadHashSigsFor(load);
+    const keys = shrincs.keygen(SEED, 4);
+
+    const atLeaf = shrincs.signAtLeaf(MSG, keys, 1);
+    assert.equal(keys.stateful.nextLeafIndex, 1, "signAtLeaf must not advance the counter");
+    assert.equal(shrincs.verify(atLeaf, MSG, keys.publicKeyCommitment), true);
+
+    // Byte-identical to what the counter-advancing sign produces at the
+    // same leaf, and deterministic on repeat.
+    const advancing = shrincs.keygen(SEED, 4);
+    assert.deepEqual(atLeaf, shrincs.sign(MSG, advancing));
+    assert.deepEqual(atLeaf, shrincs.signAtLeaf(MSG, keys, 1));
+
+    // A different leaf yields a different signature that still verifies,
+    // with the leaf index visible as the decoded authPath length.
+    const atThree = shrincs.signAtLeaf(MSG, keys, 3);
+    assert.notDeepEqual(atLeaf, atThree);
+    assert.equal(shrincs.verify(atThree, MSG, keys.publicKeyCommitment), true);
+    assert.equal(decodeStatefulEnvelope(atThree).signature.authPath.length, 3);
+
+    for (const leafIndex of [0, 5]) {
+      assert.throws(
+        () => shrincs.signAtLeaf(MSG, keys, leafIndex),
+        (e) => e instanceof Error && e.code === "ERR_INVALID_INPUT",
+      );
+    }
+  });
+
+  test(`${name}: shrincs.signStatefulRawAt signs the message unbound and never mutates keys`, async () => {
+    const { shrincs } = await loadHashSigsFor(load);
+    const keys = shrincs.keygen(SEED, 4);
+
+    const raw = shrincs.signStatefulRawAt(MSG, keys, 2);
+    assert.equal(keys.stateful.nextLeafIndex, 1, "signStatefulRawAt must not advance the counter");
+    assert.deepEqual(raw, shrincs.signStatefulRawAt(MSG, keys, 2), "deterministic per leaf");
+
+    // Raw signing skips the shrincsSign/shrincsSignAtLeaf commitment
+    // binding, so the adapter-bound verify must NOT accept it — proving the
+    // two entry points sign different digests. (The bound-digest equivalence
+    // raw(bind(m)) == signAtLeaf(m) is pinned on the Rust side, where the
+    // binding construction is reachable.)
+    assert.equal(shrincs.verify(raw, MSG, keys.publicKeyCommitment), false);
+    assert.equal(shrincs.verifyStatefulRaw(raw, MSG, keys.publicKeyCommitment), true);
+    assert.equal(shrincs.verifyStatefulRaw(raw, hash32("different"), keys.publicKeyCommitment), false);
+    assert.equal(decodeStatefulEnvelope(raw).signature.authPath.length, 2);
+
+    for (const leafIndex of [0, 5]) {
+      assert.throws(
+        () => shrincs.signStatefulRawAt(MSG, keys, leafIndex),
+        (e) => e instanceof Error && e.code === "ERR_INVALID_INPUT",
+      );
+    }
+  });
+
+  test(`${name}: decodeStatefulEnvelope exposes the PublicKey and Signature fields`, async () => {
+    const { shrincs } = await loadHashSigsFor(load);
+    const keys = shrincs.keygen(SEED, 4);
+    const sig = shrincs.sign(MSG, keys);
+
+    const decoded = decodeStatefulEnvelope(sig);
+    assert.deepEqual(decoded.publicKey.publicKeyCommitment, keys.publicKeyCommitment);
+    assert.deepEqual(decoded.publicKey.pkSeed, keys.stateless.publicKey.pkSeed);
+    assert.deepEqual(decoded.publicKey.hypertreeRoot, keys.stateless.publicKey.root);
+    assert.equal(decoded.publicKey.statefulPublicKey.length, 68);
+    // statefulPublicKey = pkSeed ‖ root ‖ maxSignatures(u32 BE)
+    assert.deepEqual(
+      decoded.publicKey.statefulPublicKey.slice(0, 32),
+      keys.stateful.publicKey.pkSeed,
+    );
+    assert.deepEqual(
+      decoded.publicKey.statefulPublicKey.slice(32, 64),
+      keys.stateful.publicKey.root,
+    );
+    assert.equal(readU32BE(decoded.publicKey.statefulPublicKey, 64), 4);
+
+    assert.equal(decoded.signature.randomizer.length, 32);
+    assert.equal(typeof decoded.signature.counter, "number");
+    assert.ok(decoded.signature.chains.length > 0, "chains must not be empty");
+    for (const chain of decoded.signature.chains) assert.equal(chain.length, 32);
+    assert.equal(decoded.signature.authPath.length, 1, "first leaf -> authPath length 1");
+
+    assert.throws(
+      () => decodeStatefulEnvelope(sig.slice(0, sig.length - 32)),
+      (e) => e instanceof Error && e.code === "ERR_ENVELOPE_MALFORMED",
+    );
+  });
+
+  test(`${name}: decodeStatelessSignature exposes the FORS and hypertree fields`, async () => {
+    const { shrincs } = await loadHashSigsFor(load);
+    const keys = shrincs.keygen(SEED, 4);
+    const sig = shrincs.signStateless(MSG, keys);
+
+    const decoded = decodeStatelessSignature(sig);
+    assert.equal(decoded.fors.randomizer.length, 32);
+    assert.equal(typeof decoded.fors.counter, "number");
+    assert.ok(decoded.fors.entries.length > 0, "FORS entries must not be empty");
+    for (const entry of decoded.fors.entries) {
+      assert.equal(entry.secretLeaf.length, 32);
+      assert.ok(entry.authPath.length > 0);
+      for (const node of entry.authPath) assert.equal(node.length, 32);
+    }
+    assert.ok(decoded.hypertree.length > 0, "hypertree layers must not be empty");
+    for (const layer of decoded.hypertree) {
+      assert.equal(layer.wotsCPkHash.length, 32);
+      assert.equal(layer.wotsCSignature.randomizer.length, 32);
+      assert.ok(layer.wotsCSignature.chains.length > 0);
+      for (const chain of layer.wotsCSignature.chains) assert.equal(chain.length, 32);
+      for (const node of layer.authPath) assert.equal(node.length, 32);
+    }
+
+    assert.throws(
+      () => decodeStatelessSignature(sig.slice(0, 64)),
+      (e) => e instanceof Error && e.code === "ERR_ENVELOPE_MALFORMED",
     );
   });
 

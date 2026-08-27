@@ -269,6 +269,79 @@ macro_rules! wasm_profile_surface {
             .map_err($crate::wasm::js_error)
         }
 
+        /// Sign a 32-byte `message` (typically a pre-computed hash) at a
+        /// caller-supplied stateful `leafIndex` (`1..=maxSignatures`;
+        /// `authPath.length === leafIndex` in the result). Applies the same
+        /// commitment binding as `shrincsSign`, so the result verifies
+        /// through `shrincsVerify` and the on-chain ERC-7913 raw adapters.
+        ///
+        /// Unlike `shrincsSign`, `secretKey` is NEVER mutated: no leaf
+        /// counter advances, and signing the same leaf twice returns the
+        /// identical signature. The caller owns leaf-reuse discipline —
+        /// intended for signers whose used-leaf state is authoritative
+        /// elsewhere (e.g. an on-chain used-leaf bitmap), enabling
+        /// out-of-order submission and resuming from persisted chain state.
+        ///
+        /// # Errors
+        ///
+        /// Returns a `JsValue` error with:
+        /// - `ERR_BAD_LENGTH` when `secretKey` is not 264 bytes or `message`
+        ///   is not 32 bytes
+        /// - `ERR_IMPORT_INVALID` when the secret fails root/counter validation
+        /// - `ERR_INVALID_INPUT` when `leafIndex` is 0 or greater than the
+        ///   key's `maxSignatures`
+        /// - `ERR_SIGNING_FAILED` when WOTS-C grinding fails for the
+        ///   leaf/message
+        #[wasm_bindgen(js_name = shrincsSignAtLeaf)]
+        pub fn shrincs_sign_at_leaf(
+            message: &[u8],
+            secret_key: &[u8],
+            leaf_index: u32,
+        ) -> Result<alloc::vec::Vec<u8>, JsValue> {
+            $crate::bindings::shrincs_sign_at_leaf::<
+                        $profile,
+                        PROFILE_NUM_CHAINS,
+                        PROFILE_NUM_LAYERS,
+                    >(message, secret_key, leaf_index)
+                    .map_err($crate::wasm::js_error)
+        }
+
+        /// Sign a 32-byte `message` at a caller-supplied stateful `leafIndex`
+        /// WITHOUT the ERC-7913 commitment binding: the message is signed
+        /// as-is. For callers that construct already-bound canonical hashes
+        /// themselves (typed wallet action hashes bind the installed-key
+        /// commitment by construction); such signatures verify through the
+        /// on-chain typed action paths, NOT through `shrincsVerify` (which
+        /// expects the `shrincsSign`/`shrincsSignAtLeaf` binding). Like
+        /// `shrincsSignAtLeaf`, `secretKey` is NEVER mutated and the caller
+        /// owns leaf-reuse discipline. Returns the same
+        /// `PublicKey ‖ StatefulSignature` envelope shape as `shrincsSign`
+        /// (decode it with the package's `decodeStatefulEnvelope`).
+        ///
+        /// # Errors
+        ///
+        /// Returns a `JsValue` error with:
+        /// - `ERR_BAD_LENGTH` when `secretKey` is not 264 bytes or `message`
+        ///   is not 32 bytes
+        /// - `ERR_IMPORT_INVALID` when the secret fails root/counter validation
+        /// - `ERR_INVALID_INPUT` when `leafIndex` is 0 or greater than the
+        ///   key's `maxSignatures`
+        /// - `ERR_SIGNING_FAILED` when WOTS-C grinding fails for the
+        ///   leaf/message
+        #[wasm_bindgen(js_name = shrincsSignStatefulRawAt)]
+        pub fn shrincs_sign_stateful_raw_at(
+            message: &[u8],
+            secret_key: &[u8],
+            leaf_index: u32,
+        ) -> Result<alloc::vec::Vec<u8>, JsValue> {
+            $crate::bindings::shrincs_sign_stateful_raw_at_leaf::<
+                $profile,
+                PROFILE_NUM_CHAINS,
+                PROFILE_NUM_LAYERS,
+            >(message, secret_key, leaf_index)
+            .map_err($crate::wasm::js_error)
+        }
+
         /// Sign a 32-byte `message` (typically a pre-computed hash) via the
         /// stateless recovery path: consumes no leaf and never mutates
         /// `secretKey`, safe to repeat indefinitely.
@@ -307,6 +380,26 @@ macro_rules! wasm_profile_surface {
             public_key_commitment: &[u8],
         ) -> bool {
             $crate::bindings::shrincs_verify::<$profile, PROFILE_NUM_CHAINS>(
+                signature,
+                message,
+                public_key_commitment,
+            )
+        }
+
+        /// Verify a stateful SHRINCS envelope over the 32-byte `message`
+        /// AS-IS — the raw counterpart of `shrincsVerify`, without the
+        /// ERC-7913 digest binding. Accepts what `shrincsSignStatefulRawAt`
+        /// produces: callers that sign already-bound canonical hashes verify
+        /// them here (the on-chain typed action paths do the same). Like
+        /// `shrincsVerify`, pins the commitment against the envelope's
+        /// carried public key. Never throws.
+        #[wasm_bindgen(js_name = shrincsVerifyStatefulRaw)]
+        pub fn shrincs_verify_stateful_raw(
+            signature: &[u8],
+            message: &[u8],
+            public_key_commitment: &[u8],
+        ) -> bool {
+            $crate::bindings::shrincs_verify_stateful_raw::<$profile, PROFILE_NUM_CHAINS>(
                 signature,
                 message,
                 public_key_commitment,

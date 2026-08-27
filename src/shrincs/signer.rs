@@ -260,6 +260,25 @@ impl ShrincsSigner {
         Self::sign_stateful_raw::<P, NUM_CHAINS>(signing_key, &message)
     }
 
+    /// Sign a caller hash for the commitment-bound stateful ERC-7913 adapter
+    /// at a caller-supplied leaf; does NOT advance the counter. The at-leaf
+    /// counterpart of `sign_stateful_adapter` for signers that read the
+    /// authoritative used-leaf state from elsewhere (e.g. on-chain bitmaps).
+    ///
+    /// Returns `None` if the public key's commitment field is not exactly
+    /// 32 bytes, if `leaf_index` is 0 or beyond `max_signatures`, or if
+    /// WOTS-C grinding fails.
+    pub fn sign_stateful_adapter_at_leaf<P: Profile, const NUM_CHAINS: usize>(
+        signing_key: &Keys,
+        public_key: &PublicKey,
+        leaf_index: u32,
+        hash: [u8; HASH_LEN],
+    ) -> ShrincsSignerResult<Signature> {
+        let expected = word32(&public_key.public_key_commitment)?;
+        let message = stateful_raw_message_hash::<P>(expected, hash);
+        Self::sign_stateful_raw_at_leaf::<P, NUM_CHAINS>(signing_key, leaf_index, &message)
+    }
+
     /// Sign a caller hash for the commitment-bound stateless ERC-7913 adapter.
     pub fn sign_stateless_adapter<P: Profile, const NUM_LAYERS: usize>(
         signing_key: &Keys,
@@ -282,12 +301,15 @@ impl ShrincsSigner {
         uxmss::sign_stateful_raw::<P, NUM_CHAINS>(signing_key.stateful_mut(), message)
     }
 
-    /// Sign raw bytes with a caller-supplied stateful leaf; does NOT advance the
-    /// counter. Test-only: the wasm surface dropped its `signStatefulRawAt`
-    /// binding (see the wasm-noble delivery report) in favor of the
-    /// noble-style `shrincsSign`/`shrincsSignStateless` free functions.
-    #[cfg(test)]
-    pub(crate) fn sign_stateful_raw_at_leaf<P: Profile, const NUM_CHAINS: usize>(
+    /// Sign raw bytes with a caller-supplied stateful leaf; does NOT advance
+    /// the counter. The caller is responsible for leaf-reuse discipline: the
+    /// wasm `shrincsSignStatefulRawAt` binding exposes this for signers whose
+    /// used-leaf state is authoritative elsewhere (e.g. an on-chain bitmap),
+    /// and for tests and vector generation. The message is signed as-is —
+    /// commitment binding, if required by the verifying path, is the
+    /// caller's responsibility (canonical action hashes already carry it;
+    /// ERC-7913 raw-adapter callers use `sign_stateful_adapter_at_leaf`).
+    pub fn sign_stateful_raw_at_leaf<P: Profile, const NUM_CHAINS: usize>(
         signing_key: &Keys,
         leaf_index: u32,
         message: &[u8],
