@@ -298,12 +298,12 @@ macro_rules! wasm_profile_surface {
             secret_key: &[u8],
             leaf_index: u32,
         ) -> Result<alloc::vec::Vec<u8>, JsValue> {
-            $crate::bindings::shrincs_sign_at_leaf::<
-                        $profile,
-                        PROFILE_NUM_CHAINS,
-                        PROFILE_NUM_LAYERS,
-                    >(message, secret_key, leaf_index)
-                    .map_err($crate::wasm::js_error)
+            let signature = $crate::bindings::shrincs_sign_at_leaf::<
+                $profile,
+                PROFILE_NUM_CHAINS,
+                PROFILE_NUM_LAYERS,
+            >(message, secret_key, leaf_index);
+            signature.map_err($crate::wasm::js_error)
         }
 
         /// Sign a 32-byte `message` at a caller-supplied stateful `leafIndex`
