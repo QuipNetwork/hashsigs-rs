@@ -31,8 +31,8 @@ mod ops;
 pub(crate) mod suite;
 
 pub(crate) use address::{
-    address_word32, fors_address_word, hypertree_address_word, wots_address_base,
-    wots_chain_address_word, AddressWord32,
+    address_word32, fors_address_word, fors_roots_address_word, hypertree_address_word,
+    wots_address_base, wots_chain_address_word, wots_pk_address_word, AddressWord32,
 };
 pub(crate) use ops::{
     base_w16_digit, base_w_digit, derive32, hash_node, hash_packed, keccak_packed, read_bits32,

@@ -35,7 +35,7 @@ use crate::abi::{
 };
 use crate::hash::{
     base_w_digit, derive32, hash_node, hash_packed, hypertree_address_word, word32,
-    wots_address_base, wots_chain_address_word, wots_digest_bytes,
+    wots_address_base, wots_chain_address_word, wots_digest_bytes, wots_pk_address_word,
 };
 use crate::profile::Profile;
 use crate::wots_c::{wots_chain_walk, ChainWalk, Signature, WOTS_C_MAX_GRIND_COUNTER};
@@ -251,6 +251,9 @@ pub(crate) fn stateless_wots_message_digest<P: Profile>(
 
 pub(crate) fn stateless_wots_public_key_hash<P: Profile>(
     pk_seed: &[u8; HASH_LEN],
+    layer: u32,
+    tree: u64,
+    keypair: u32,
     endpoints: &[[u8; HASH_LEN]],
 ) -> [u8; HASH_LEN] {
     // Vectored preimage: tag ‖ pk_seed ‖ endpoint_0 ‖ … — byte-identical to
@@ -263,9 +266,11 @@ pub(crate) fn stateless_wots_public_key_hash<P: Profile>(
     // `NUM_WOTS_CHAINS + 2` array length, which is a generic const expression
     // and not expressible on stable Rust once the chain count comes from `P`.
     let used = endpoints.len().min(P::NUM_WOTS_CHAINS as usize);
+    let address = wots_pk_address_word(layer, tree, keypair);
     hash_node::<P>(&[
         b"wots-c-pk".as_ref(),
         pk_seed.as_ref(),
+        address.as_ref(),
         endpoints[..used].as_flattened(),
     ])
 }
@@ -355,7 +360,13 @@ fn verify_wots_c32<P: Profile, const NUM_CHAINS: usize>(
         return false;
     }
 
-    let computed_pk_hash = stateless_wots_public_key_hash::<P>(pk_seed, segments.as_ref());
+    let computed_pk_hash = stateless_wots_public_key_hash::<P>(
+        pk_seed,
+        coords.layer,
+        coords.tree,
+        coords.keypair,
+        segments.as_ref(),
+    );
     computed_pk_hash == *expected_pk_hash
 }
 
@@ -749,7 +760,13 @@ fn stateless_wots_c_public_key<P: Profile>(
 
     let endpoints: Vec<[u8; HASH_LEN]> = map_chains(chain_count, endpoint_at);
 
-    stateless_wots_public_key_hash::<P>(pk_seed, &endpoints)
+    stateless_wots_public_key_hash::<P>(
+        pk_seed,
+        coords.layer,
+        coords.tree,
+        coords.keypair,
+        &endpoints,
+    )
 }
 
 fn sign_stateless_wots_c<P: Profile>(

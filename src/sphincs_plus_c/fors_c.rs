@@ -39,7 +39,9 @@ use crate::abi::{
     collect_hash_words, encode_bytes, encode_dynamic_array, encode_tuple, word_from_u32, AbiReader,
     Field,
 };
-use crate::hash::{fors_address_word, hash_node, hash_packed, read_bits32, read_bits64};
+use crate::hash::{
+    fors_address_word, fors_roots_address_word, hash_node, hash_packed, read_bits32, read_bits64,
+};
 use crate::profile::Profile;
 use crate::HASH_LEN;
 use core::marker::PhantomData;
@@ -292,7 +294,12 @@ pub(crate) fn verify_fors_c_and_return_root<P: Profile>(
     }
 
     Some((
-        fors_public_key_hash::<P>(pk_seed, &roots[..signed_trees]),
+        fors_public_key_hash::<P>(
+            pk_seed,
+            digest.tree_index,
+            digest.leaf_index,
+            &roots[..signed_trees],
+        ),
         digest.tree_index,
         digest.leaf_index,
     ))
@@ -307,8 +314,14 @@ pub(crate) fn verify_fors_c_and_return_root<P: Profile>(
 /// parts. The array-of-slices form this replaces needed a `SIGNED_TREES + 2`
 /// array length, which is a generic const expression and not expressible on
 /// stable Rust once the tree count comes from `P`.
-fn fors_public_key_hash<P: Profile>(pk_seed: &[u8], roots: &[[u8; HASH_LEN]]) -> [u8; HASH_LEN] {
-    hash_node::<P>(&[b"fors-pk", pk_seed, roots.as_flattened()])
+fn fors_public_key_hash<P: Profile>(
+    pk_seed: &[u8],
+    tree_index: u64,
+    leaf_index: u32,
+    roots: &[[u8; HASH_LEN]],
+) -> [u8; HASH_LEN] {
+    let address = fors_roots_address_word(tree_index, leaf_index);
+    hash_node::<P>(&[b"fors-pk", pk_seed, address.as_ref(), roots.as_flattened()])
 }
 
 pub(crate) fn signer_fors_digest<P: Profile>(
@@ -776,6 +789,8 @@ pub(crate) fn sign_fors_c<P: Profile>(signing_key: &Key, message: &[u8]) -> Opti
         return Some(SignedForsC {
             root: fors_public_key_hash::<P>(
                 signing_key.public_key.pk_seed.as_bytes(),
+                digest.tree_index,
+                digest.leaf_index,
                 &roots[..signed],
             ),
             signature: Signature {

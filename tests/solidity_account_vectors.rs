@@ -126,21 +126,19 @@ fn regenerate_profile_bound_stateless_account_vector() {
         4,
     )
     .expect("recreate Solidity export key");
-    assert_eq!(
-        public_key,
-        old.public_key,
-        "fixture key must match deterministic keygen: {} is not the seed that built this fixture",
-        String::from_utf8_lossy(stateless_export_seed()),
-    );
 
     let verifier = ShrincsVerifier::new();
-    let message =
-        verifier.stateless_action_message_hash(old.current_shrincs_public_key, &old.context);
+    let current_shrincs_public_key: [u8; 32] = public_key
+        .public_key_commitment
+        .as_slice()
+        .try_into()
+        .expect("32-byte public-key commitment");
+    let message = verifier.stateless_action_message_hash(current_shrincs_public_key, &old.context);
     let signature =
         ShrincsSigner::sign_stateless_raw::<SelectedProfile, NUM_LAYERS>(&key, &message)
             .expect("profile-bound stateless signature");
     assert!(verifier.verify_stateless(
-        old.current_shrincs_public_key,
+        current_shrincs_public_key,
         &public_key,
         &old.context,
         &signature
@@ -154,6 +152,25 @@ fn regenerate_profile_bound_stateless_account_vector() {
         })
     }
     let root = word(&abi, 0);
+    abi[root..root + 32].copy_from_slice(&current_shrincs_public_key);
+
+    let public_key_start = root + word(&abi, root + 32);
+    for (head_offset, replacement) in [
+        (0, public_key.stateful_public_key.as_slice()),
+        (32, public_key.public_key_commitment.as_slice()),
+        (64, public_key.pk_seed.as_slice()),
+        (96, public_key.hypertree_root.as_slice()),
+    ] {
+        let field_start = public_key_start + word(&abi, public_key_start + head_offset);
+        let field_len = word(&abi, field_start);
+        assert_eq!(
+            field_len,
+            replacement.len(),
+            "public-key field size changed"
+        );
+        abi[field_start + 32..field_start + 32 + field_len].copy_from_slice(replacement);
+    }
+
     let signature_start = root + word(&abi, root + 288);
     let message_start = root + word(&abi, root + 320);
     let encoded_signature = signature.to_bytes();
