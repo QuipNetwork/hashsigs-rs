@@ -25,9 +25,9 @@
 //! ImportSigningKey,Reset,ComputePublicKeyCommitment,
 //! RecoverPublicKeyCommitment}`), plus `version()` and `profileName()`.
 //!
-//! It is split in two. [`core`] holds every operation generic over
+//! It is split in two. `core` holds every operation generic over
 //! `P: Profile` and that profile's two array widths, with no `wasm_bindgen` in
-//! sight. [`export`] holds the macro that stamps those operations out as
+//! sight. `export` holds the macro that stamps those operations out as
 //! concrete `#[wasm_bindgen]` items for one profile. This module invokes that
 //! macro exactly once, over the build-selected profile.
 //!

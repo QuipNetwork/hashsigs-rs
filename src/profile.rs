@@ -42,7 +42,7 @@ pub trait Profile {
     /// `keccak256(PROFILE_NAME)`. Wire identity: the Solidity contracts compare
     /// against this value, so it is ABI-bearing. Each profile module sets it
     /// from the build script's generated identity for that profile, never by
-    /// hand, and [`str_eq`] proves the two copies of the name agree at compile
+    /// hand, and `str_eq` proves the two copies of the name agree at compile
     /// time. Binding it to the profile type rather than to a build-script
     /// global is what lets two profiles coexist in one build without one of
     /// them carrying the other's id.
