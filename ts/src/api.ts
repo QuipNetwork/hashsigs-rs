@@ -15,6 +15,21 @@
 // read it at runtime.
 export type ShrincsWasmModule = typeof import("./profiles/256s-keccak/nodejs/hashsigs_rs.js");
 
+// Pure-TS signature envelope decoders (see decode.ts), profile-independent.
+// Re-exported here (so every generated profile entry and the package root
+// carry them in Node) AND from each generated loader.browser.ts (see
+// scripts/gen-profile-entries.mjs) -- the `browser` exports condition swaps
+// the entry module, and a value exported only here would silently be missing
+// in browser bundles.
+export { decodeStatefulEnvelope, decodeStatelessSignature } from "./decode.js";
+export type {
+  StatefulEnvelopeParts,
+  StatefulEnvelopePublicKey,
+  StatefulSignatureParts,
+  StatelessSignatureParts,
+  WotsCSignatureParts,
+} from "./decode.js";
+
 // The serde DTO interface generated from the Rust error codes (via Tsify),
 // so consumers can name the error codes every function here throws.
 export type { ShrincsErrorCode } from "./profiles/256s-keccak/nodejs/hashsigs_rs.js";
@@ -205,6 +220,32 @@ function makeShrincs(wasm: ShrincsWasmModule) {
       keys.stateful.remaining = keys.stateful.publicKey.maxSignatures - (keys.stateful.nextLeafIndex - 1);
       return signature;
     },
+    /**
+     * STATEFUL, at an explicit `leafIndex` (`1..=maxSignatures`;
+     * `authPath.length === leafIndex` in the decoded result). Applies the
+     * same commitment binding as `sign`, so the result verifies through
+     * `verify`. Unlike `sign`, NEVER mutates `keys` — no counter advances,
+     * and the same leaf yields the identical signature. The caller owns
+     * leaf-reuse discipline (e.g. an on-chain used-leaf bitmap is
+     * authoritative), which is what enables out-of-order submission and
+     * resuming from persisted chain state.
+     */
+    signAtLeaf(message: Uint8Array, keys: ShrincsKeys, leafIndex: number): Uint8Array {
+      return wasm.shrincsSignAtLeaf(message, shrincsKeysToSecretBytes(keys), leafIndex);
+    },
+    /**
+     * STATEFUL, at an explicit `leafIndex`, WITHOUT the commitment binding:
+     * `message` is signed as-is. For callers that construct already-bound
+     * canonical hashes themselves (typed wallet action hashes bind the
+     * installed-key commitment by construction); such signatures verify
+     * through the on-chain typed action paths, NOT through `verify`. Like
+     * `signAtLeaf`, NEVER mutates `keys` and the caller owns leaf-reuse
+     * discipline. Returns the same envelope shape as `sign` — decode it
+     * with `decodeStatefulEnvelope`.
+     */
+    signStatefulRawAt(message: Uint8Array, keys: ShrincsKeys, leafIndex: number): Uint8Array {
+      return wasm.shrincsSignStatefulRawAt(message, shrincsKeysToSecretBytes(keys), leafIndex);
+    },
     /** Stateless recovery path: never mutates `keys`. */
     signStateless(message: Uint8Array, keys: ShrincsKeys): Uint8Array {
       return wasm.shrincsSignStateless(message, shrincsKeysToSecretBytes(keys));
@@ -217,6 +258,19 @@ function makeShrincs(wasm: ShrincsWasmModule) {
      */
     verify(signature: Uint8Array, message: Uint8Array, publicKeyCommitment: Uint8Array): boolean {
       return wasm.shrincsVerify(signature, message, publicKeyCommitment);
+    },
+    /**
+     * Verify a stateful signature over `message` AS-IS — the raw
+     * counterpart of `verify`, without the commitment binding. Accepts
+     * what `signStatefulRawAt` produces (signatures over already-bound
+     * canonical hashes). Pass `keys.publicKeyCommitment`.
+     */
+    verifyStatefulRaw(
+      signature: Uint8Array,
+      message: Uint8Array,
+      publicKeyCommitment: Uint8Array,
+    ): boolean {
+      return wasm.shrincsVerifyStatefulRaw(signature, message, publicKeyCommitment);
     },
     /**
      * A stateless SHRINCS signature is a SPHINCS+C signature, so this is a

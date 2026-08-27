@@ -7,6 +7,16 @@ This file records changes to this project, in the
 
 ### Added
 
+- Explicit-leaf stateful signing on the wasm surface: `shrincsSignAtLeaf`
+  (commitment-bound, like `shrincsSign`) and `shrincsSignStatefulRawAt`
+  (signs the message as-is, for callers whose canonical hashes already bind
+  the commitment). Both are non-mutating -- no leaf counter advances, and the
+  caller owns leaf-reuse discipline, for signers whose used-leaf state is
+  authoritative elsewhere (an on-chain bitmap). `shrincsVerifyStatefulRaw` is
+  the raw verify counterpart. `decodeStatefulEnvelope` and
+  `decodeStatelessSignature` decode the ABI signature envelopes into typed
+  fields in pure TS, from the node and browser entries alike.
+
 - `profileName()` on the wasm surface, returning the SHRINCS profile the loaded
   binary carries. Every profile binary exports the same function names, so this
   is how a caller confirms it loaded the profile it imported.
