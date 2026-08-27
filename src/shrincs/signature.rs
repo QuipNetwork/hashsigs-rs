@@ -367,6 +367,11 @@ mod tests {
     #[test]
     fn prepare_stateless_delegation_extracts_pinned_sibling_shapes() {
         let mut public_key = sample_public_key();
+        // The 128-bit profiles encode their 16-byte stateful root in a
+        // 32-byte word. Keep the unused suffix canonical so this fixture
+        // represents a public key that production validation can accept.
+        public_key.stateful_public_key[HASH_LEN + SelectedProfile::HASH_TRUNC_LEN..2 * HASH_LEN]
+            .fill(0);
         // Build a self-consistent commitment via the `Commitment::of` helper
         // instead of hand-rolling the keccak call.
         let commitment = *crate::shrincs::key::Commitment::of::<SelectedProfile>(

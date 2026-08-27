@@ -26,7 +26,6 @@ use super::action_context::ActionContext;
 use super::key::decode_stateful_public_key;
 use super::key::PublicKey;
 use super::signature::Signature;
-use super::uxmss::STATEFUL_PUBLIC_KEY_BYTES;
 use crate::hash::keccak_packed;
 use crate::hash::suite::HashSuite;
 use crate::hash::word32;
@@ -128,7 +127,14 @@ pub(crate) fn matches_expected_public_key_commitment<P: Profile>(
 }
 
 pub(crate) fn valid_public_key<P: Profile>(public_key: &PublicKey) -> bool {
-    public_key.stateful_public_key.len() == STATEFUL_PUBLIC_KEY_BYTES
+    let Some(stateful_key) = decode_stateful_public_key(&public_key.stateful_public_key) else {
+        return false;
+    };
+    stateful_key
+        .root
+        .iter()
+        .skip(P::HASH_TRUNC_LEN)
+        .all(|byte| *byte == 0)
         && public_key.public_key_commitment.len() == HASH_LEN
         && public_key.pk_seed.len() == HASH_LEN
         && public_key.hypertree_root.len() == HASH_LEN
@@ -280,6 +286,25 @@ mod tests {
         zero_nonce_and_key_version.nonce = [0u8; HASH_LEN];
         zero_nonce_and_key_version.key_version = [0u8; HASH_LEN];
         assert!(valid_action_context(&zero_nonce_and_key_version));
+    }
+
+    #[cfg(any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    ))]
+    #[test]
+    fn valid_public_key_rejects_a_dirty_stateful_root() {
+        let (_signing_key, mut public_key) = keypair(b"dispatch dirty stateful root");
+        let dirty_index = HASH_LEN + SelectedProfile::HASH_TRUNC_LEN;
+        public_key.stateful_public_key[dirty_index] = 1;
+        let commitment = public_key
+            .commitment::<SelectedProfile>()
+            .expect("well-shaped public key");
+        public_key.public_key_commitment = commitment.as_bytes().to_vec();
+
+        assert!(!valid_public_key::<SelectedProfile>(&public_key));
     }
 
     #[test]
