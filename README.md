@@ -395,28 +395,49 @@ a second dependency:
 `bin/tests/test-packages.sh` fails if a listed profile has no cargo feature to
 compile it or no module to import it by.
 
-The Rust side works this way today. The Python and npm profile subpaths are
-not built yet, and each needs a different thing.
+All three ecosystems work this way today.
 
-For npm, the plan is one wasm binary per profile, each reached through its own
-subpath export. `src/wasm/core.rs` holds the whole surface generic over
-`P: Profile`, and `src/wasm/export.rs` stamps it out as concrete
-`#[wasm_bindgen]` items for one profile, because `#[wasm_bindgen]` cannot
-annotate a generic function. One binary per profile keeps the browser payload
-at one profile's worth: the browser build inlines the wasm as base64, where no
-bundler can remove the profiles a caller did not import. A measured profile
-build is about 385 KB of wasm, so a single six-profile binary would cost every
-consumer roughly 2 MB of base64. `profileName()` reports which profile a loaded
-binary carries, because all six export identical names. What remains is the
-TypeScript package layout: the build loop, the six subpath exports, and the
-per-profile loaders.
+`src/bindings.rs` holds the whole surface generic over `P: Profile`, and each
+language stamps it out as concrete exports for one profile: `src/wasm/export.rs`
+for WebAssembly, `py/common/src/lib.rs` for Python. Neither `#[wasm_bindgen]`
+nor `#[pyfunction]` can annotate a generic function, which forces an export
+boundary to be monomorphized somewhere. A macro does that without a second copy
+of the logic.
 
-For PyPI, there is no API to package yet. `py/src/lib.rs` registers only
-`__version__`. The profile layout has to be designed as part of writing that
-surface, and it follows the npm shape: one compiled extension per profile
-inside the single wheel. PyO3 constrains it the same way wasm-bindgen does,
-because `#[pyfunction]` cannot be generic either, so the same generic-core plus
-macro-emitter split applies.
+npm ships one wasm binary per profile, each behind its own subpath export, built
+by a `bin/build-wasm.sh` loop. One binary per profile keeps the browser payload
+at one profile's worth. The browser build inlines the wasm as base64, and no
+bundler can remove unused profiles from a base64 string literal. A shipped
+binary measures 133-147 KB, or 178-196 KB once encoded.
+
+PyPI ships one compiled extension per profile inside the single wheel, built by
+`py/hashsigs_build.py`, a PEP 517 backend that stages the extensions before
+handing off to maturin. One Cargo package builds at most one cdylib, so each
+profile needs its own crate, and the backend is what builds them all. Build
+through it, with `python -m build` or `pip install .`: a bare `maturin build`
+skips the backend and produces a wheel with no extensions. The backend also
+runs from an unpacked sdist, so a source install rebuilds every extension.
+Importing a profile maps only that profile's code. Each extension links its own
+copy of the crate, at about 715 KB, so the six add roughly 4.3 MB against 715 KB
+for a single-profile build, and the released wheel is about 2.0 MB compressed. A
+wheel downloads whole, so unlike the browser there is no per-import transfer
+saving to offset that.
+
+Every artifact in a language exports identical names, so nothing about a
+module's shape says which profile it is. Each one reports its own profile at
+runtime, read from the compiled `<P as Profile>::PROFILE_NAME` rather than from
+the import path. The npm and Python suites assert that against the profile each
+import path claims, and check that no two profiles report the same name.
+
+They also check that a 256s keccak signature fails under the 256s sha2 twin.
+Those twins share every parameter and differ only in the hash suite, which makes
+them the pair a size or width check could never separate.
+
+Both suites drive the full crypto surface on the 256s profiles only, and
+identity check the rest. Signing at 128s costs about 53 seconds through wasm and
+tens of seconds through Python, which does not belong in a suite that gates
+every publish. `cargo test` covers that ground natively under each `profile-*`
+feature.
 
 `build.rs` generates profile identity for every profile regardless of which
 features are on, and emits a cfg for each enabled one. Rust-side surfaces

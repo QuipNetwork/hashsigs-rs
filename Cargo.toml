@@ -1,6 +1,6 @@
 [package]
 name = "hashsigs-rs"
-version = "0.2.1-rc4"
+version = "0.2.1-rc7"
 edition = "2021"
 rust-version = "1.95"
 authors = ["Richard T. Carback III <rick.rust.cargo.383d5@passmail.net>"]
@@ -43,10 +43,27 @@ crate-type = ["rlib"]
 [workspace]
 members = [
     "py",
+    "py/common",
+    "py/profiles/p256s",
+    "py/profiles/p256s_sha2",
+    "py/profiles/p128s_q18",
+    "py/profiles/p128s_q20",
+    "py/profiles/p128s_q18_sha2",
+    "py/profiles/p128s_q20_sha2",
     "solana",
     "solana/examples/shrincs-account"
 ]
 resolver = "2"
+
+# One pyo3 version for every crate that builds a Python extension. The PyO3
+# attribute macros expand to `::pyo3` paths, so each profile crate needs the
+# dependency directly even though the surface it stamps out comes from
+# hashsigs-py-common. Pinning it here is what stops seven manifests drifting.
+#
+# abi3-py39: one wheel per platform covers CPython 3.9+. extension-module
+# leaves libpython unlinked, as a wheel requires.
+[workspace.dependencies]
+pyo3 = { version = "0.29.2", features = ["abi3-py39", "extension-module"] }
 
 [features]
 default = ["std", "default-profile-256s"]

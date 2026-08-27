@@ -1,19 +1,60 @@
 {
   "name": "@quip.network/hashsigs-wasm",
-  "version": "0.2.1-rc4",
-  "description": "SHRINCS hash-based signature verifier/signer, compiled from the audited hashsigs-rs crate to WebAssembly. Works in Node.js and the browser.",
+  "version": "0.2.1-rc7",
+  "description": "SHRINCS hash-based signature verifier/signer, compiled from the audited hashsigs-rs crate to WebAssembly. Works in Node.js and the browser. Every SHRINCS profile ships in this one package, each on its own import path.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "browser": {
-    "./dist/loader.node.js": "./dist/loader.browser.js"
+    "./dist/profiles/256s-keccak/loader.node.js": "./dist/profiles/256s-keccak/loader.browser.js",
+    "./dist/profiles/256s-sha2/loader.node.js": "./dist/profiles/256s-sha2/loader.browser.js",
+    "./dist/profiles/128s-q18/loader.node.js": "./dist/profiles/128s-q18/loader.browser.js",
+    "./dist/profiles/128s-q20/loader.node.js": "./dist/profiles/128s-q20/loader.browser.js",
+    "./dist/profiles/128s-q18-sha2/loader.node.js": "./dist/profiles/128s-q18-sha2/loader.browser.js",
+    "./dist/profiles/128s-q20-sha2/loader.node.js": "./dist/profiles/128s-q20-sha2/loader.browser.js"
   },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "browser": "./dist/loader.browser.js",
+      "browser": "./dist/profiles/256s-keccak/loader.browser.js",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./256s-keccak": {
+      "types": "./dist/profiles/256s-keccak/index.d.ts",
+      "browser": "./dist/profiles/256s-keccak/loader.browser.js",
+      "import": "./dist/profiles/256s-keccak/index.js",
+      "default": "./dist/profiles/256s-keccak/index.js"
+    },
+    "./256s-sha2": {
+      "types": "./dist/profiles/256s-sha2/index.d.ts",
+      "browser": "./dist/profiles/256s-sha2/loader.browser.js",
+      "import": "./dist/profiles/256s-sha2/index.js",
+      "default": "./dist/profiles/256s-sha2/index.js"
+    },
+    "./128s-q18": {
+      "types": "./dist/profiles/128s-q18/index.d.ts",
+      "browser": "./dist/profiles/128s-q18/loader.browser.js",
+      "import": "./dist/profiles/128s-q18/index.js",
+      "default": "./dist/profiles/128s-q18/index.js"
+    },
+    "./128s-q20": {
+      "types": "./dist/profiles/128s-q20/index.d.ts",
+      "browser": "./dist/profiles/128s-q20/loader.browser.js",
+      "import": "./dist/profiles/128s-q20/index.js",
+      "default": "./dist/profiles/128s-q20/index.js"
+    },
+    "./128s-q18-sha2": {
+      "types": "./dist/profiles/128s-q18-sha2/index.d.ts",
+      "browser": "./dist/profiles/128s-q18-sha2/loader.browser.js",
+      "import": "./dist/profiles/128s-q18-sha2/index.js",
+      "default": "./dist/profiles/128s-q18-sha2/index.js"
+    },
+    "./128s-q20-sha2": {
+      "types": "./dist/profiles/128s-q20-sha2/index.d.ts",
+      "browser": "./dist/profiles/128s-q20-sha2/loader.browser.js",
+      "import": "./dist/profiles/128s-q20-sha2/index.js",
+      "default": "./dist/profiles/128s-q20-sha2/index.js"
     }
   },
   "files": [
@@ -26,8 +67,10 @@
   },
   "scripts": {
     "build:wasm": "bash ../bin/build-wasm.sh ts/src",
+    "gen-entries": "node scripts/gen-profile-entries.mjs",
     "gen-wasm-inline": "node scripts/gen-wasm-inline.mjs",
-    "build": "bash ../bin/sync-versions.sh check .. && npm run build:wasm && npm run gen-wasm-inline && tsc -p tsconfig.json && npm run copy-wasm && npm run test",
+    "check-exports": "node scripts/check-exports.mjs",
+    "build": "bash ../bin/sync-versions.sh check .. && npm run build:wasm && npm run gen-entries && npm run gen-wasm-inline && npm run check-exports && tsc -p tsconfig.json && npm run copy-wasm && npm run test",
     "copy-wasm": "node scripts/copy-wasm.js",
     "test": "node --test",
     "prepack": "npm run build"
