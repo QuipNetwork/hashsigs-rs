@@ -2340,15 +2340,78 @@ dependencies = [
 
 [[package]]
 name = "hashsigs-py"
-version = "0.2.1-rc4"
+version = "0.2.1-rc7"
+dependencies = [
+ "hashsigs-py-common",
+ "hashsigs-rs",
+ "pyo3",
+]
+
+[[package]]
+name = "hashsigs-py-common"
+version = "0.2.1-rc7"
 dependencies = [
  "hashsigs-rs",
  "pyo3",
 ]
 
 [[package]]
+name = "hashsigs-py-p128s-q18"
+version = "0.2.1-rc7"
+dependencies = [
+ "hashsigs-py-common",
+ "hashsigs-rs",
+ "pyo3",
+]
+
+[[package]]
+name = "hashsigs-py-p128s-q18-sha2"
+version = "0.2.1-rc7"
+dependencies = [
+ "hashsigs-py-common",
+ "hashsigs-rs",
+ "pyo3",
+]
+
+[[package]]
+name = "hashsigs-py-p128s-q20"
+version = "0.2.1-rc7"
+dependencies = [
+ "hashsigs-py-common",
+ "hashsigs-rs",
+ "pyo3",
+]
+
+[[package]]
+name = "hashsigs-py-p128s-q20-sha2"
+version = "0.2.1-rc7"
+dependencies = [
+ "hashsigs-py-common",
+ "hashsigs-rs",
+ "pyo3",
+]
+
+[[package]]
+name = "hashsigs-py-p256s"
+version = "0.2.1-rc7"
+dependencies = [
+ "hashsigs-py-common",
+ "hashsigs-rs",
+ "pyo3",
+]
+
+[[package]]
+name = "hashsigs-py-p256s-sha2"
+version = "0.2.1-rc7"
+dependencies = [
+ "hashsigs-py-common",
+ "hashsigs-rs",
+ "pyo3",
+]
+
+[[package]]
 name = "hashsigs-rs"
-version = "0.2.1-rc4"
+version = "0.2.1-rc7"
 dependencies = [
  "flate2",
  "getrandom 0.2.16",

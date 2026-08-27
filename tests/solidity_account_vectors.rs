@@ -95,7 +95,17 @@ fn solidity_exported_stateless_action_vector_verifies_in_rust() {
 // The wrapper context and ABI layout remain the Solidity export oracle; Rust
 // deterministically recreates the same key, signs the V2 profile-bound message,
 // and replaces the equal-sized signature body and message word in place.
-#[cfg(any(shrincs_default_profile_256s, shrincs_default_profile_256s_sha2))]
+//
+// Runs for every profile that has a committed wrapper fixture: the 256s pair,
+// whose fixture the Solidity export oracle produced, and the 128s keccak pair,
+// whose fixture a Rust generator produced. The 128s-sha2 twins have no fixture,
+// which is why their ERC-7913 tests stay held back in CI.
+#[cfg(any(
+    shrincs_default_profile_256s,
+    shrincs_default_profile_256s_sha2,
+    shrincs_default_profile_128s_q18,
+    shrincs_default_profile_128s_q20
+))]
 #[test]
 #[ignore = "run explicitly after a stateless digest migration"]
 fn regenerate_profile_bound_stateless_account_vector() {
@@ -112,10 +122,11 @@ fn regenerate_profile_bound_stateless_account_vector() {
     let mut abi = hex_to_bytes(encoded);
     let old = AbiDecoder::new(&abi).decode_root_stateless_action_vector();
     let (key, public_key) = ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(
-        b"export-stateless-current-key",
+        stateless_export_seed(),
         4,
     )
     .expect("recreate Solidity export key");
+
     let verifier = ShrincsVerifier::new();
     let current_shrincs_public_key: [u8; 32] = public_key
         .public_key_commitment
@@ -191,7 +202,35 @@ fn regenerate_profile_bound_stateless_account_vector() {
     gzip.finish().expect("finish wrapper vector");
 }
 
-#[cfg(any(shrincs_default_profile_256s, shrincs_default_profile_256s_sha2))]
+// The seed the fixture's key was built from. It is a property of the generator
+// that produced the fixture, not of the profile: the 256s fixtures come from the
+// Solidity export oracle, the 128s keccak ones from a Rust generator that lived
+// in tests/generate_shrincs_vectors.rs until the account subsystem was removed.
+// Sign with the wrong one and keygen yields a different key, which the assertion
+// above catches rather than writing a fixture nothing can verify.
+#[cfg(any(
+    shrincs_default_profile_256s,
+    shrincs_default_profile_256s_sha2,
+    shrincs_default_profile_128s_q18,
+    shrincs_default_profile_128s_q20
+))]
+fn stateless_export_seed() -> &'static [u8] {
+    #[cfg(any(shrincs_default_profile_256s, shrincs_default_profile_256s_sha2))]
+    {
+        b"export-stateless-current-key"
+    }
+    #[cfg(any(shrincs_default_profile_128s_q18, shrincs_default_profile_128s_q20))]
+    {
+        b"128s account vectors: stateless action current key"
+    }
+}
+
+#[cfg(any(
+    shrincs_default_profile_256s,
+    shrincs_default_profile_256s_sha2,
+    shrincs_default_profile_128s_q18,
+    shrincs_default_profile_128s_q20
+))]
 fn account_vector_out_path() -> &'static str {
     #[cfg(shrincs_default_profile_256s)]
     {

@@ -2,23 +2,32 @@
 name = "hashsigs-py"
 # Keep in lockstep with the root crate: maturin derives the PyPI version
 # (0.2.1-rc1 -> 0.2.1rc1 under PEP 440) from this field.
-version = "0.2.1-rc4"
+version = "0.2.1-rc7"
 edition = "2021"
 rust-version = "1.95"
 authors = ["Richard T. Carback III <rick.carback@gmail.com>"]
-description = "Python bindings for hashsigs-rs (WOTS+ and SHRINCS)"
+description = "Root extension for the hashsigs wheel (version metadata)"
 license = "AGPL-3.0-or-later"
 repository = "https://gitlab.com/quip.network/hashsigs-rs"
 # PyPI-only artifact: the wheel ships through maturin, never through cargo.
 publish = false
 
 [lib]
-name = "hashsigs"
+# Imported as `hashsigs._hashsigs`. The signing surface is NOT here: it lives
+# in one extension per profile under `hashsigs._ext`, built from py/profiles/.
+name = "_hashsigs"
 crate-type = ["cdylib"]
 
 [dependencies]
-hashsigs-rs = { path = ".." }
-# abi3-py39: one wheel per platform covers CPython 3.9+. extension-module
-# leaves libpython unlinked, as a wheel requires; it also means `cargo test`
-# cannot link this crate, so tests run through maturin/pytest, not cargo.
-pyo3 = { version = "0.29.2", features = ["abi3-py39", "extension-module"] }
+pyo3.workspace = true
+# The default profile, for the canonical error-code list this module exposes.
+# It also makes maturin vendor hashsigs-rs into the sdist, which the profile
+# crates need: they are not in this package's dependency closure, so nothing
+# else would pull the core in.
+hashsigs-rs = { path = "..", default-features = false, features = [
+  "std",
+  "profile-256s",
+] }
+# Vendored into the sdist for the same reason. py/profiles/* depend on it, and
+# they are built directly rather than as dependencies of this package.
+hashsigs-py-common = { path = "common" }

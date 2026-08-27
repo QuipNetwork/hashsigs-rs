@@ -42,8 +42,15 @@ pub trait HashSuite {
     fn scheme_hash_parts(parts: &[&[u8]]) -> [u8; crate::HASH_LEN];
 }
 
-/// Keccak-256 scheme hashes. The default under every profile except
-/// `shrincs-256s-sha2`.
+/// Keccak-256 scheme hashes, used by the three keccak profiles
+/// (`shrincs-256s-keccak`, `shrincs-128s-q18-keccak`, `shrincs-128s-q20-keccak`).
+///
+/// A profile selects its suite through `<P as Profile>::Suite`, so a build
+/// enabling only sha2 profiles compiles this one and constructs it nowhere.
+/// That is a legitimate configuration -- the wasm and Python packages build
+/// exactly one profile per artifact -- so the dead-code warning it produces is
+/// noise rather than a finding.
+#[allow(dead_code)]
 pub struct Keccak256Suite;
 
 impl HashSuite for Keccak256Suite {

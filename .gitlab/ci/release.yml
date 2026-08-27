@@ -171,11 +171,14 @@ publish-crates:
         https://crates.io/api/v1/trusted_publishing/tokens \
         || echo "WARN: token revocation failed; the token expires within 30 minutes"
 
-# Publish the Python wheel + sdist via PyPI Trusted Publishing (OIDC). The
-# py/ crate is currently a stub that exposes only __version__; publishing it
-# is deliberate, to prove this pipe end to end before the bindings land.
-# Every stub release is a prerelease, so default pip resolution never picks
-# it. maturin both builds and uploads, so no twine is needed.
+# Publish the Python wheel and sdist via PyPI Trusted Publishing (OIDC).
+#
+# Both go through py/hashsigs_build.py, the PEP 517 backend that compiles one
+# extension per profile before handing off to maturin. That is what makes the
+# sdist usable: `pip install hashsigs --no-binary` runs the same backend from
+# the unpacked sdist and rebuilds every extension. `maturin publish` would
+# bypass the backend and upload a wheel with no extensions, so this job builds
+# through `python -m build` and uploads with twine.
 publish-pypi:
   stage: publish
   image: rust:1.95.0
@@ -196,7 +199,7 @@ publish-pypi:
     # maturin out of the system interpreter.
     - apt-get update -qq && apt-get install -y -qq python3-venv > /dev/null
     - python3 -m venv /tmp/pypi-venv
-    - /tmp/pypi-venv/bin/pip install --quiet maturin==1.14.1
+    - /tmp/pypi-venv/bin/pip install --quiet build twine
   script:
     - |
       set -euo pipefail
@@ -231,7 +234,17 @@ publish-pypi:
       # trimmed workspace forces cargo to prune the packaged Cargo.lock, and
       # --locked forbids that. tag-gate and release:validate already enforce
       # the lock on this SHA.
-      /tmp/pypi-venv/bin/maturin publish -m py/Cargo.toml --non-interactive
+      # No flags: build the sdist, then build the wheel from it. The wheel
+      # PyPI receives is therefore one a source install could reproduce.
+      /tmp/pypi-venv/bin/python -m build --outdir /tmp/dist .
+      # Refuse to upload a wheel that lost its extensions or that PyPI will
+      # reject on its platform tag. Both failures are silent until too late:
+      # a published filename is spent forever, and a bare linux tag 400s only
+      # after the upload starts. Shared with `make check-python-dists` so the
+      # publish path and the dry-run gate agree on what a good wheel is.
+      /tmp/pypi-venv/bin/python bin/check-wheel.py /tmp/dist
+      TWINE_USERNAME=__token__ TWINE_PASSWORD="$MATURIN_PYPI_TOKEN" \
+        /tmp/pypi-venv/bin/twine upload --non-interactive /tmp/dist/*
 
 # The dry-run gate. Runs on merge request pipelines, on the default branch,
 # and on every tag, using the same build path the publish jobs use. A push to
@@ -278,10 +291,14 @@ release:validate:
     # check-npm-dists packs the npm tarball, and prepack rebuilds the wasm.
     # Without this, bin/build-wasm.sh exits 1 with "wasm-bindgen CLI not found".
     - !reference [.install-wasm-bindgen, before_script]
+    # check-python-dists runs `python3 -m build`, which the rust image has no
+    # module for.
+    - !reference [.install-python-build, before_script]
   script:
     # The wasm-bindgen template installs into ${CARGO_HOME}/bin, which is not
-    # on PATH in a fresh script step.
-    - export PATH="${CARGO_HOME}/bin:${PATH}"
+    # on PATH in a fresh script step. The python venv is prepended for the same
+    # reason: the Makefile calls a bare `python3`, so the venv has to win.
+    - export PATH="/tmp/py-venv/bin:${CARGO_HOME}/bin:${PATH}"
     # Assert the tag against the manifests FIRST, before anything is built.
     # Without this the only thing enforcing tag-versus-crate agreement is the
     # sync check buried inside `npm pack`, so a mistyped tag is discovered
