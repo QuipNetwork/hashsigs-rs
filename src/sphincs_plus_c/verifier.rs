@@ -134,31 +134,41 @@ mod tests {
         assert_eq!(SphincsPlusCVerifier::version_tag(), EXPECTED);
     }
 
-    /// Build a 64-byte `pk_seed || hypertree_root` key and a signed hash +
-    /// stateless envelope for `VerifierInterface` tests. Gated off the 128s
-    /// profiles because independent SPHINCS+C keygen/sign grinds too hard.
+    /// One 64-byte `pk_seed || hypertree_root` key plus a signed hash and
+    /// stateless envelope for `VerifierInterface` tests, ground once per
+    /// process: SPHINCS+C signing grinds FORS-C/WOTS-C counters, so tests
+    /// that only need a valid envelope share this artifact. Gated off the
+    /// 128s profiles because independent SPHINCS+C keygen/sign grinds too
+    /// hard.
     #[cfg(not(any(
         shrincs_default_profile_128s_q18,
         shrincs_default_profile_128s_q20,
         shrincs_default_profile_128s_q18_sha2,
         shrincs_default_profile_128s_q20_sha2
     )))]
-    fn signed_stateless_envelope(seed_label: &[u8], hash: [u8; HASH_LEN]) -> ([u8; 64], Vec<u8>) {
+    fn signed_stateless_envelope() -> &'static ([u8; 64], [u8; HASH_LEN], Vec<u8>) {
         use crate::hash::hash_packed;
         use crate::profile::Profile;
         use crate::profiles::selected::NUM_LAYERS;
         use crate::sphincs_plus_c;
+        use std::sync::OnceLock;
         type Suite = <SelectedProfile as Profile>::Suite;
 
-        let sk_seed = hash_packed::<Suite>(&[b"sphincs-plus-c-verifier-sk", seed_label]);
-        let prf_seed = hash_packed::<Suite>(&[b"sphincs-plus-c-verifier-prf", seed_label]);
-        let pk_seed = hash_packed::<Suite>(&[b"sphincs-plus-c-verifier-pk", seed_label]);
-        let sk = sphincs_plus_c::keygen::<SelectedProfile, NUM_LAYERS>(sk_seed, prf_seed, pk_seed);
-        let signature = sphincs_plus_c::sign::<SelectedProfile, NUM_LAYERS>(&sk, &hash)
-            .expect("stateless sign");
-        let envelope = signature.to_bytes();
-        let key = key64(&sk.public_key);
-        (key, envelope)
+        static CELL: OnceLock<([u8; 64], [u8; HASH_LEN], Vec<u8>)> = OnceLock::new();
+        CELL.get_or_init(|| {
+            let seed_label: &[u8] = b"verify-envelope shared";
+            let hash = [0x42u8; HASH_LEN];
+            let sk_seed = hash_packed::<Suite>(&[b"sphincs-plus-c-verifier-sk", seed_label]);
+            let prf_seed = hash_packed::<Suite>(&[b"sphincs-plus-c-verifier-prf", seed_label]);
+            let pk_seed = hash_packed::<Suite>(&[b"sphincs-plus-c-verifier-pk", seed_label]);
+            let sk =
+                sphincs_plus_c::keygen::<SelectedProfile, NUM_LAYERS>(sk_seed, prf_seed, pk_seed);
+            let signature = sphincs_plus_c::sign::<SelectedProfile, NUM_LAYERS>(&sk, &hash)
+                .expect("stateless sign");
+            let envelope = signature.to_bytes();
+            let key = key64(&sk.public_key);
+            (key, hash, envelope)
+        })
     }
 
     #[cfg(not(any(
@@ -182,10 +192,9 @@ mod tests {
     )))]
     #[test]
     fn verify_accepts_valid_64_byte_key_and_stateless_envelope() {
-        let hash = [0x42u8; HASH_LEN];
-        let (key, envelope) = signed_stateless_envelope(b"verify-envelope valid", hash);
+        let (key, hash, envelope) = signed_stateless_envelope();
 
-        let outcome = SphincsPlusCVerifier::new().verify(&key, &hash, &envelope);
+        let outcome = SphincsPlusCVerifier::new().verify(key, hash, envelope);
         assert_eq!(outcome, VerifyOutcome::Valid);
     }
 
@@ -197,15 +206,14 @@ mod tests {
     )))]
     #[test]
     fn verify_rejects_wrong_length_key() {
-        let hash = [0x43u8; HASH_LEN];
-        let (key, envelope) = signed_stateless_envelope(b"verify-envelope wrong key", hash);
+        let (key, hash, envelope) = signed_stateless_envelope();
 
         let short_key = &key[..63];
-        let outcome = SphincsPlusCVerifier::new().verify(short_key, &hash, &envelope);
+        let outcome = SphincsPlusCVerifier::new().verify(short_key, hash, envelope);
         assert_eq!(outcome, VerifyOutcome::Invalid);
 
         let long_key = [&key[..], &[0u8]].concat();
-        let outcome = SphincsPlusCVerifier::new().verify(&long_key, &hash, &envelope);
+        let outcome = SphincsPlusCVerifier::new().verify(&long_key, hash, envelope);
         assert_eq!(outcome, VerifyOutcome::Invalid);
     }
 
@@ -217,17 +225,16 @@ mod tests {
     )))]
     #[test]
     fn verify_reports_malformed_envelope() {
-        let hash = [0x44u8; HASH_LEN];
-        let (key, envelope) = signed_stateless_envelope(b"verify-envelope malformed", hash);
+        let (key, hash, envelope) = signed_stateless_envelope();
 
         let outcome = SphincsPlusCVerifier::new().verify(
-            &key,
-            &hash,
+            key,
+            hash,
             &envelope[..envelope.len().saturating_sub(1)],
         );
         assert_eq!(outcome, VerifyOutcome::Malformed);
 
-        let outcome = SphincsPlusCVerifier::new().verify(&key, &hash, &[]);
+        let outcome = SphincsPlusCVerifier::new().verify(key, hash, &[]);
         assert_eq!(outcome, VerifyOutcome::Malformed);
     }
 }

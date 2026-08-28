@@ -863,30 +863,24 @@ mod tests {
     )]
     #[test]
     fn stateless_signature_rejects_wrong_message_and_tampered_hypertree_path() {
-        let (signing_key, public_key) = fixture_or_fresh_full_key("stateless negative seed", 2);
-        let message = hash_packed::<<SelectedProfile as crate::profile::Profile>::Suite>(&[
-            b"stateless valid message",
-        ]);
+        let (_, public_key) = crate::shrincs::test_fixtures::shared::keypair();
+        let message = crate::shrincs::test_fixtures::shared::HASH;
         let wrong_message = hash_packed::<<SelectedProfile as crate::profile::Profile>::Suite>(&[
             b"stateless wrong message",
         ]);
-        let signature = ShrincsSigner::sign_stateless_raw::<SelectedProfile, NUM_LAYERS>(
-            &signing_key,
-            &message,
-        )
-        .unwrap();
-        let expected = expected_key(&public_key);
+        let signature = crate::shrincs::test_fixtures::shared::stateless_raw_signature().clone();
+        let expected = expected_key(public_key);
         let verifier = ShrincsVerifier::new();
 
         // Positive control: stateless signatures verify through the FORS-C
         // opening and all hypertree layers up to the generated public root.
-        assert!(verifier.verify_stateless_unsafe_raw(expected, &public_key, &message, &signature,));
+        assert!(verifier.verify_stateless_unsafe_raw(expected, public_key, &message, &signature,));
 
         // The FORS-C digest binds the stateless signature to the signed raw
         // message, so a different message must not verify.
         assert!(!verifier.verify_stateless_unsafe_raw(
             expected,
-            &public_key,
+            public_key,
             &wrong_message,
             &signature,
         ));
@@ -895,7 +889,7 @@ mod tests {
         tampered.hypertree[0].auth_path[0][0] ^= 1;
         // A changed auth-path sibling should stop the verifier from climbing to
         // the committed hypertree root.
-        assert!(!verifier.verify_stateless_unsafe_raw(expected, &public_key, &message, &tampered,));
+        assert!(!verifier.verify_stateless_unsafe_raw(expected, public_key, &message, &tampered,));
     }
 
     #[cfg_attr(
@@ -909,16 +903,10 @@ mod tests {
     )]
     #[test]
     fn stateless_signature_rejects_malformed_lengths() {
-        let (signing_key, public_key) = fixture_or_fresh_full_key("stateless malformed seed", 2);
-        let message = hash_packed::<<SelectedProfile as crate::profile::Profile>::Suite>(&[
-            b"stateless malformed message",
-        ]);
-        let signature = ShrincsSigner::sign_stateless_raw::<SelectedProfile, NUM_LAYERS>(
-            &signing_key,
-            &message,
-        )
-        .unwrap();
-        let expected = expected_key(&public_key);
+        let (_, public_key) = crate::shrincs::test_fixtures::shared::keypair();
+        let message = crate::shrincs::test_fixtures::shared::HASH;
+        let signature = crate::shrincs::test_fixtures::shared::stateless_raw_signature().clone();
+        let expected = expected_key(public_key);
         let verifier = ShrincsVerifier::new();
 
         let mut missing_layer = signature.clone();
@@ -927,7 +915,7 @@ mod tests {
         // hypertree must carry exactly one proof per configured layer.
         assert!(!verifier.verify_stateless_unsafe_raw(
             expected,
-            &public_key,
+            public_key,
             &message,
             &missing_layer,
         ));
@@ -938,7 +926,7 @@ mod tests {
         // WOTS chain.
         assert!(!verifier.verify_stateless_unsafe_raw(
             expected,
-            &public_key,
+            public_key,
             &message,
             &missing_chain,
         ));

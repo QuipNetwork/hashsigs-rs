@@ -368,6 +368,58 @@ pub(crate) fn fixture_pair(entry: &KeyFixtureEntry) -> (Keys, PublicKey) {
     )
 }
 
+/// Shared, lazily-ground stateless artifacts for read-only tests.
+///
+/// Stateless (SPHINCS+C) signing grinds WOTS-C/FORS-C counters, so every live
+/// sign costs seconds regardless of optimization level. Tests that only need
+/// *a* valid signature — not a fresh grind — share these `OnceLock` artifacts
+/// so the grind is paid once per test process instead of once per test. Tests
+/// whose property IS the live signing path must not use these.
+pub(crate) mod shared {
+    use std::sync::OnceLock;
+
+    use super::{Keys, PublicKey, StatelessSignature, HASH_LEN};
+    use crate::profiles::selected::{SelectedProfile, NUM_CHAINS, NUM_LAYERS};
+    use crate::shrincs::signer::ShrincsSigner;
+
+    /// The 32-byte message every shared stateless signature is bound to.
+    pub(crate) const HASH: [u8; HASH_LEN] = [0x42u8; HASH_LEN];
+
+    /// One full keypair, generated once per process.
+    pub(crate) fn keypair() -> &'static (Keys, PublicKey) {
+        static CELL: OnceLock<(Keys, PublicKey)> = OnceLock::new();
+        CELL.get_or_init(|| {
+            ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(
+                b"shared stateless fixture seed",
+                4,
+            )
+            .expect("keygen must succeed for a valid seed/budget")
+        })
+    }
+
+    /// One raw stateless signature over [`HASH`] (one grind per process).
+    pub(crate) fn stateless_raw_signature() -> &'static StatelessSignature {
+        static CELL: OnceLock<StatelessSignature> = OnceLock::new();
+        CELL.get_or_init(|| {
+            let (keys, _) = keypair();
+            ShrincsSigner::sign_stateless_raw::<SelectedProfile, NUM_LAYERS>(keys, &HASH)
+                .expect("stateless signing must succeed for a fresh key")
+        })
+    }
+
+    /// One commitment-bound adapter stateless signature over [`HASH`].
+    pub(crate) fn stateless_adapter_signature() -> &'static StatelessSignature {
+        static CELL: OnceLock<StatelessSignature> = OnceLock::new();
+        CELL.get_or_init(|| {
+            let (keys, public_key) = keypair();
+            ShrincsSigner::sign_stateless_adapter::<SelectedProfile, NUM_LAYERS>(
+                keys, public_key, HASH,
+            )
+            .expect("stateless adapter signing must succeed for a fresh key")
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

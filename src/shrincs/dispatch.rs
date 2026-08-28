@@ -348,13 +348,11 @@ mod tests {
 
     #[test]
     fn prepare_stateless_delegation_rejects_a_mismatched_commitment() {
-        let (signing_key, public_key) =
-            keypair(b"dispatch prepare_stateless_delegation wrong commitment");
-        let hash = [0x77u8; HASH_LEN];
-        let signature =
-            ShrincsSigner::sign_stateless_raw::<SelectedProfile, NUM_LAYERS>(&signing_key, &hash)
-                .expect("sign");
-        let envelope = encode_stateless_envelope(&public_key, &signature);
+        let (_, public_key) = crate::shrincs::test_fixtures::shared::keypair();
+        let envelope = encode_stateless_envelope(
+            public_key,
+            crate::shrincs::test_fixtures::shared::stateless_raw_signature(),
+        );
 
         let mut wrong_commitment = [0u8; HASH_LEN];
         wrong_commitment.copy_from_slice(&public_key.public_key_commitment);
