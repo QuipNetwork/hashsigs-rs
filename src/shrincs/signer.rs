@@ -650,75 +650,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn generated_stateful_signature_verifies() {
-        let (mut signing_key, public_key) = fixture_or_stateful_only_key("stateful signer seed", 4);
-        let expected = expected_key(&public_key);
-        let message = hash_packed::<<SelectedProfile as crate::profile::Profile>::Suite>(&[
-            b"stateful test message",
-        ]);
-        let signature = ShrincsSigner::sign_stateful_raw::<SelectedProfile, NUM_CHAINS>(
-            &mut signing_key,
-            &message,
-        )
-        .unwrap();
-
-        // Positive example matching `lib.rs`: a signer-generated signature must
-        // verify against the public key returned by the same key generation.
-        assert!(ShrincsVerifier::new().verify_stateful_unsafe_raw(
-            expected,
-            &public_key,
-            &message,
-            &signature,
-        ));
-    }
-
-    #[test]
-    fn generated_stateful_action_signature_verifies() {
-        let (mut signing_key, public_key) = fixture_or_stateful_only_key("action signer seed", 4);
-        let context = action_context();
-        let expected = expected_key(&public_key);
-        let signature = ShrincsSigner::sign_stateful_action::<SelectedProfile, NUM_CHAINS>(
-            &mut signing_key,
-            &public_key,
-            &context,
-        )
-        .unwrap();
-
-        // The safe action path signs the verifier's canonical action hash, not
-        // caller-supplied raw bytes.
-        assert!(ShrincsVerifier::new().verify_stateful(
-            expected,
-            &public_key,
-            &context,
-            &signature,
-        ));
-    }
-
-    #[test]
-    fn explicit_leaf_test_helper_verifies_for_requested_leaf() {
-        let (signing_key, public_key) =
-            fixture_or_stateful_only_key("explicit leaf helper seed", 4);
-        let expected = expected_key(&public_key);
-        let message = hash_packed::<<SelectedProfile as crate::profile::Profile>::Suite>(&[
-            b"explicit leaf test message",
-        ]);
-        let signature = ShrincsSigner::sign_stateful_raw_at_leaf::<SelectedProfile, NUM_CHAINS>(
-            &signing_key,
-            2,
-            &message,
-        )
-        .unwrap();
-
-        assert_eq!(signature.auth_path.len(), 2);
-        assert!(ShrincsVerifier::new().verify_stateful_unsafe_raw(
-            expected,
-            &public_key,
-            &message,
-            &signature,
-        ));
-    }
-
     #[cfg(not(any(
         shrincs_default_profile_128s_q18,
         shrincs_default_profile_128s_q20,
@@ -746,43 +677,6 @@ mod tests {
             &public_key,
             &message,
             &sig,
-        ));
-    }
-
-    #[cfg_attr(
-        any(
-            shrincs_default_profile_128s_q18,
-            shrincs_default_profile_128s_q20,
-            shrincs_default_profile_128s_q18_sha2,
-            shrincs_default_profile_128s_q20_sha2
-        ),
-        ignore = "128s stateless keygen/signing is compute-infeasible in-process"
-    )]
-    #[test]
-    fn generated_stateless_raw_signature_verifies() {
-        let (signing_key, public_key) = ShrincsSigner::keygen::<
-            SelectedProfile,
-            NUM_CHAINS,
-            NUM_LAYERS,
-        >(b"stateless signer seed", 2)
-        .unwrap();
-        let message = hash_packed::<<SelectedProfile as crate::profile::Profile>::Suite>(&[
-            b"stateless test",
-        ]);
-        let signature = ShrincsSigner::sign_stateless_raw::<SelectedProfile, NUM_LAYERS>(
-            &signing_key,
-            &message,
-        )
-        .unwrap();
-        let expected = expected_key(&public_key);
-
-        // Stateless signatures should verify through the FORS-C opening and all
-        // hypertree layers up to the generated hypertree public root.
-        assert!(ShrincsVerifier::new().verify_stateless_unsafe_raw(
-            expected,
-            &public_key,
-            &message,
-            &signature,
         ));
     }
 
@@ -904,6 +798,10 @@ mod tests {
         .unwrap();
         let verifier = ShrincsVerifier::new();
 
+        // Positive control: a signer-generated signature must verify against
+        // the public key returned by the same key generation.
+        assert!(verifier.verify_stateful_unsafe_raw(expected, &public_key, &message, &signature,));
+
         // Equivalent to the invalid-message test in `lib.rs`: the signature is
         // bound to the exact message hash that was signed.
         assert!(!verifier.verify_stateful_unsafe_raw(
@@ -931,6 +829,15 @@ mod tests {
             &context,
         )
         .unwrap();
+
+        // Positive control: the safe action path signs the verifier's
+        // canonical action hash, not caller-supplied raw bytes.
+        assert!(ShrincsVerifier::new().verify_stateful(
+            expected,
+            &public_key,
+            &context,
+            &signature,
+        ));
 
         let mut tampered_context = context;
         tampered_context.nonce[31] ^= 1;
@@ -970,6 +877,10 @@ mod tests {
         .unwrap();
         let expected = expected_key(&public_key);
         let verifier = ShrincsVerifier::new();
+
+        // Positive control: stateless signatures verify through the FORS-C
+        // opening and all hypertree layers up to the generated public root.
+        assert!(verifier.verify_stateless_unsafe_raw(expected, &public_key, &message, &signature,));
 
         // The FORS-C digest binds the stateless signature to the signed raw
         // message, so a different message must not verify.

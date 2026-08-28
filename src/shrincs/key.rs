@@ -515,7 +515,8 @@ mod tests {
     }
 
     /// `compute_commitment` must match the commitment production `keygen`
-    /// installs in the public key — same preimage, same keccak.
+    /// installs in the public key — same preimage, same keccak — and
+    /// `recompute_commitment` must agree with the stored value.
     #[test]
     fn commitment_matches_production_keygen() {
         let (keys, pk) = production_keys();
@@ -523,49 +524,43 @@ mod tests {
             keys.public_key_commitment().as_bytes().as_slice(),
             pk.public_key_commitment.as_slice()
         );
-    }
-
-    #[test]
-    fn import_accepts_valid_seed_derived_key() {
-        let (keys, _) = production_keys();
         assert_eq!(
-            Keys::import::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(&keys.to_bytes()),
-            Some(keys)
+            keys.recompute_commitment::<SelectedProfile>(),
+            *keys.public_key_commitment()
         );
     }
 
     #[test]
-    fn import_rejects_tampered_stateful_root() {
+    fn import_accepts_valid_and_exhausted_keys() {
         let (keys, _) = production_keys();
+        let bytes = keys.to_bytes();
+        // next_leaf_index (bytes 132..136) = max + 1 (exhausted but legal).
+        let exhausted = keys.stateful().public_key().max_signatures + 1;
+        assert_eq!(
+            Keys::import::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(&bytes),
+            Some(keys)
+        );
+
+        let mut bytes = bytes;
+        bytes[132..136].copy_from_slice(&exhausted.to_be_bytes());
+        assert!(Keys::import::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(&bytes).is_some());
+    }
+
+    #[test]
+    fn import_rejects_tampered_roots_and_out_of_bounds_max() {
+        let (keys, _) = production_keys();
+
         let mut bytes = keys.to_bytes();
         bytes[96] ^= 0x01; // stateful root occupies bytes 96..128
         assert!(Keys::import::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(&bytes).is_none());
-    }
 
-    #[test]
-    fn import_rejects_tampered_hypertree_root() {
-        let (keys, _) = production_keys();
         let mut bytes = keys.to_bytes();
         bytes[232] ^= 0x01; // stateless hypertree root occupies bytes 232..264
         assert!(Keys::import::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(&bytes).is_none());
-    }
 
-    #[test]
-    fn import_rejects_out_of_bounds_max() {
-        let (keys, _) = production_keys();
         let mut bytes = keys.to_bytes();
         bytes[128..132].copy_from_slice(&0u32.to_be_bytes()); // max_signatures = 0
         assert!(Keys::import::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(&bytes).is_none());
-    }
-
-    #[test]
-    fn import_accepts_exhausted_counter() {
-        let (keys, _) = production_keys();
-        let mut bytes = keys.to_bytes();
-        // next_leaf_index (bytes 132..136) = max + 1 (exhausted but legal).
-        let exhausted = keys.stateful().public_key().max_signatures + 1;
-        bytes[132..136].copy_from_slice(&exhausted.to_be_bytes());
-        assert!(Keys::import::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(&bytes).is_some());
     }
 
     #[test]
@@ -658,32 +653,6 @@ mod tests {
     }
 
     #[test]
-    fn recompute_commitment_matches_current_commitment() {
-        let (keys, _pk) = production_keys();
-        assert_eq!(
-            keys.recompute_commitment::<SelectedProfile>(),
-            *keys.public_key_commitment()
-        );
-    }
-
-    #[test]
-    fn recover_commitment_from_envelope_matches_keygen_commitment() {
-        let (mut keys, pk) = production_keys();
-        let pre_sign_commitment = *keys.public_key_commitment();
-        let sig = crate::shrincs::signer::ShrincsSigner::sign_stateful_raw::<
-            SelectedProfile,
-            NUM_CHAINS,
-        >(&mut keys, &[0x11; 32])
-        .expect("sign");
-        let env = crate::shrincs::signature::encode_stateful_envelope(&pk, &sig);
-
-        let recovered = Keys::recover_commitment::<SelectedProfile>(&env).expect("recover");
-
-        assert_eq!(recovered, pre_sign_commitment);
-        assert_eq!(recovered, *production_keys().0.public_key_commitment());
-    }
-
-    #[test]
     fn recover_commitment_rejects_garbage_envelope() {
         assert!(Keys::recover_commitment::<SelectedProfile>(&[0u8; 4]).is_none());
     }
@@ -693,7 +662,7 @@ mod tests {
     /// envelope's own `public_key_commitment` field: an attacker controls the
     /// envelope bytes and could claim any commitment there.
     #[test]
-    fn recover_commitment_ignores_tampered_commitment_field() {
+    fn recover_commitment_matches_keygen_and_ignores_tampered_commitment_field() {
         let (mut keys, pk) = production_keys();
         let real = *keys.public_key_commitment();
         let sig = crate::shrincs::signer::ShrincsSigner::sign_stateful_raw::<
@@ -702,19 +671,20 @@ mod tests {
         >(&mut keys, &[0x11u8; 32])
         .expect("sign");
 
-        let mut bad_pk = pk.clone();
-        bad_pk.public_key_commitment = alloc::vec![0xFFu8; 32];
-        let env = crate::shrincs::signature::encode_stateful_envelope(&bad_pk, &sig);
-
+        // Honest envelope: recovery reproduces the keygen commitment.
+        let env = crate::shrincs::signature::encode_stateful_envelope(&pk, &sig);
         assert_eq!(
             Keys::recover_commitment::<SelectedProfile>(&env),
             Some(real)
         );
-        assert_ne!(
-            Keys::recover_commitment::<SelectedProfile>(&env)
-                .unwrap()
-                .as_bytes(),
-            &[0xFFu8; 32]
+
+        // Tampered commitment field: recovery still reports the real value.
+        let mut bad_pk = pk.clone();
+        bad_pk.public_key_commitment = alloc::vec![0xFFu8; 32];
+        let env = crate::shrincs::signature::encode_stateful_envelope(&bad_pk, &sig);
+        assert_eq!(
+            Keys::recover_commitment::<SelectedProfile>(&env),
+            Some(real)
         );
     }
 

@@ -419,30 +419,13 @@ mod tests {
             &message,
             &public_key_commitment
         ));
-    }
-
-    #[cfg(feature = "wasm-bindings")]
-    #[test]
-    fn shrincs_noble_verify_rejects_wrong_public_key_commitment() {
-        let seed = [0x55u8; 32];
-        let keys = super::shrincs_keygen(&seed, 4).unwrap();
-        let mut secret_key = keys.secret_key();
-        let real_commitment = keys.public_key_commitment();
-
-        let message = [0x05u8; 32].to_vec();
-        let signature = super::shrincs_sign(&message, &mut secret_key).unwrap();
-        assert!(super::shrincs_verify(
-            &signature,
-            &message,
-            &real_commitment
-        ));
 
         // The envelope carries the full PublicKey; `shrincsVerify` must check
         // that it actually hashes to the supplied commitment, not just that
         // the signature verifies under whatever PublicKey it happens to
         // carry. A wrong-but-well-formed 32-byte commitment must fail even
         // though the signature and message are untouched.
-        let mut wrong_commitment = real_commitment.clone();
+        let mut wrong_commitment = public_key_commitment.clone();
         wrong_commitment[0] ^= 1;
         assert!(!super::shrincs_verify(
             &signature,

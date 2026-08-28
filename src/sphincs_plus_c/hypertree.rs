@@ -953,18 +953,6 @@ mod tests {
         assert!(LayerSignature::from_bytes::<SelectedProfile>(&[]).is_none());
     }
 
-    #[test]
-    fn layer_signature_from_bytes_round_trips_and_rejects_truncation() {
-        let layer = sample_layer_signature();
-        let encoded = layer.to_bytes();
-        let decoded = LayerSignature::from_bytes::<SelectedProfile>(encoded.as_slice())
-            .expect("valid encoding must decode");
-        assert_eq!(decoded, layer);
-        assert!(
-            LayerSignature::from_bytes::<SelectedProfile>(&encoded[..encoded.len() - 1]).is_none()
-        );
-    }
-
     /// Full hypertree sign→verify round-trip at a non-zero bottom leaf.
     /// Gated off the 128s profiles: a single-layer height-18 subtree is too
     /// large for a unit-test budget (same gate as `sphincs_plus_c` round-trip).

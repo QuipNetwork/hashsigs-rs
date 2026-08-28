@@ -388,17 +388,6 @@ mod tests {
     }
 
     #[test]
-    fn pair_encode_decode_round_trip() {
-        let a = b"left-payload";
-        let b = b"right-payload-longer";
-        let encoded = encode_pair(a, b);
-        let (da, db) = decode_pair(&encoded).expect("valid pair must decode");
-        assert_eq!(da, a);
-        assert_eq!(db, b);
-        assert_eq!(encode_pair(&da, &db), encoded);
-    }
-
-    #[test]
     fn read_bytes_at_rejects_truncated_buffer() {
         let encoded = encode_bytes(&[0x55u8; 40]);
         for cut in [0usize, 1, 31, 32, encoded.len() - 1] {

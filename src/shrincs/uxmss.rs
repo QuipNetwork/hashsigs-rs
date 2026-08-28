@@ -938,38 +938,27 @@ mod stateful_core_tests {
     }
 
     #[test]
-    fn tampered_auth_path_node_is_rejected() {
+    fn tampered_auth_path_node_or_chain_value_is_rejected() {
         let max = 8u32;
         let key = test_key(b"tamper-auth", max);
         let pk = flat_public_key(&key);
         let message = b"tamper auth path";
-        let mut sig = sign_stateful_raw_at_leaf::<SelectedProfile, NUM_CHAINS>(&key, 4, message)
+        let sig = sign_stateful_raw_at_leaf::<SelectedProfile, NUM_CHAINS>(&key, 4, message)
             .expect("sign");
         assert!(verify_stateful_unsafe_raw::<SelectedProfile, NUM_CHAINS>(
             &pk, message, &sig
         ));
 
-        sig.auth_path[0][0] ^= 0x01;
+        let mut tampered = sig.clone();
+        tampered.auth_path[0][0] ^= 0x01;
         assert!(!verify_stateful_unsafe_raw::<SelectedProfile, NUM_CHAINS>(
-            &pk, message, &sig
-        ));
-    }
-
-    #[test]
-    fn tampered_chain_value_is_rejected() {
-        let max = 8u32;
-        let key = test_key(b"tamper-chain", max);
-        let pk = flat_public_key(&key);
-        let message = b"tamper chain value";
-        let mut sig = sign_stateful_raw_at_leaf::<SelectedProfile, NUM_CHAINS>(&key, 2, message)
-            .expect("sign");
-        assert!(verify_stateful_unsafe_raw::<SelectedProfile, NUM_CHAINS>(
-            &pk, message, &sig
+            &pk, message, &tampered
         ));
 
-        sig.chains[0][0] ^= 0x01;
+        let mut tampered = sig;
+        tampered.chains[0][0] ^= 0x01;
         assert!(!verify_stateful_unsafe_raw::<SelectedProfile, NUM_CHAINS>(
-            &pk, message, &sig
+            &pk, message, &tampered
         ));
     }
 

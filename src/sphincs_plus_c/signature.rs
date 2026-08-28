@@ -168,13 +168,15 @@ mod tests {
     }
 
     #[test]
-    fn to_bytes_from_bytes_round_trips() {
+    fn to_bytes_from_bytes_round_trips_and_rejects_truncation() {
         let signature = sample_signature();
         let encoded = signature.to_bytes();
         let decoded =
             Signature::from_bytes::<SelectedProfile>(&encoded).expect("valid encoding must decode");
         assert_eq!(decoded, signature);
         assert_eq!(decoded.to_bytes(), encoded);
+        let truncated = &encoded[..encoded.len() - 1];
+        assert!(Signature::from_bytes::<SelectedProfile>(truncated).is_none());
     }
 
     #[test]
@@ -216,17 +218,6 @@ mod tests {
             Signature::from_bytes::<SelectedProfile>(&gapped).is_none(),
             "an envelope with unread interior bytes must be rejected"
         );
-    }
-
-    #[test]
-    fn from_bytes_accepts_a_round_trip_and_rejects_truncation() {
-        let signature = sample_signature();
-        let encoded = signature.to_bytes();
-        let decoded = Signature::from_bytes::<SelectedProfile>(encoded.as_slice())
-            .expect("valid encoding must decode");
-        assert_eq!(decoded, signature);
-        let truncated = &encoded[..encoded.len() - 1];
-        assert!(Signature::from_bytes::<SelectedProfile>(truncated).is_none());
     }
 
     /// Read a clean ABI length/offset word at `pos` (big-endian u64 in the
