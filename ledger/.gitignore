@@ -1,0 +1,5 @@
+/artifacts/
+/app/target/
+/host/target/
+__pycache__/
+.pytest_cache/

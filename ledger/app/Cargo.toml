@@ -1,0 +1,23 @@
+[package]
+name = "hashsigs-ledger"
+version = "0.1.0"
+authors = ["hashsigs-rs contributors"]
+edition = "2021"
+license = "AGPL-3.0-or-later"
+
+[workspace]
+
+[dependencies]
+hashsigs-rs = { path = "../..", default-features = false, features = ["alloc", "profile-256s-sha2", "heap-buffers"] }
+ledger_device_sdk = { version = "=1.36.1", features = ["io_new"] }
+hex = { version = "=0.4.3", default-features = false }
+
+[package.metadata.ledger]
+name = "SHRINCS Lab"
+curve = []
+path = []
+flags = "0"
+apex_p = { icon = "icons/crab_32x32.png" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("apex_p"))'] }

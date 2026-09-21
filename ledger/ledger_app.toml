@@ -1,0 +1,7 @@
+[app]
+build_directory = "./app"
+sdk = "Rust"
+devices = ["apex_p"]
+
+[pytest.standalone]
+directory = "./tests/"
