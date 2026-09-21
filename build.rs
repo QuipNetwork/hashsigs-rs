@@ -39,25 +39,25 @@ const PROFILES: [ProfileIdentity; 6] = [
     },
     ProfileIdentity {
         module: "p128s_q18",
-        feature_env: "CARGO_FEATURE_PROFILE_128S_Q18",
+        feature_env: "CARGO_FEATURE_EXPERIMENTAL_PROFILE_128S_Q18",
         default_cfg: "shrincs_default_profile_128s_q18",
         profile_name: "shrincs-128s-q18-keccak",
     },
     ProfileIdentity {
         module: "p128s_q20",
-        feature_env: "CARGO_FEATURE_PROFILE_128S_Q20",
+        feature_env: "CARGO_FEATURE_EXPERIMENTAL_PROFILE_128S_Q20",
         default_cfg: "shrincs_default_profile_128s_q20",
         profile_name: "shrincs-128s-q20-keccak",
     },
     ProfileIdentity {
         module: "p128s_q18_sha2",
-        feature_env: "CARGO_FEATURE_PROFILE_128S_Q18_SHA2",
+        feature_env: "CARGO_FEATURE_EXPERIMENTAL_PROFILE_128S_Q18_SHA2",
         default_cfg: "shrincs_default_profile_128s_q18_sha2",
         profile_name: "shrincs-128s-q18-sha2",
     },
     ProfileIdentity {
         module: "p128s_q20_sha2",
-        feature_env: "CARGO_FEATURE_PROFILE_128S_Q20_SHA2",
+        feature_env: "CARGO_FEATURE_EXPERIMENTAL_PROFILE_128S_Q20_SHA2",
         default_cfg: "shrincs_default_profile_128s_q20_sha2",
         profile_name: "shrincs-128s-q20-sha2",
     },
@@ -72,7 +72,7 @@ fn feature_enabled(name: &str) -> bool {
 /// to it. Every enabled profile compiles regardless; this only picks which one
 /// those non-generic surfaces use.
 ///
-/// Cargo features are additive, so `--features profile-128s-q18` leaves the
+/// Cargo features are additive, so `--features experimental-profile-128s-q18` leaves the
 /// default `profile-256s` enabled too. Picking by priority alone would then bind
 /// to 256s and silently test the wrong profile's constants and golden vectors.
 /// `default-profile-256s` exists to tell the two cases apart: it is set only
@@ -103,8 +103,8 @@ fn default_profile() -> &'static ProfileIdentity {
         .unwrap_or_else(|| {
             panic!(
                 "select a SHRINCS profile feature \
-                 (profile-256s, profile-256s-sha2, profile-128s-q18, \
-                  profile-128s-q20, profile-128s-q18-sha2, or profile-128s-q20-sha2)"
+                 (profile-256s, profile-256s-sha2, experimental-profile-128s-q18, \
+                  experimental-profile-128s-q20, experimental-profile-128s-q18-sha2, or experimental-profile-128s-q20-sha2)"
             )
         })
 }

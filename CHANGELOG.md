@@ -43,7 +43,7 @@ This file records changes to this project, in the
   maps only that profile's code, at the cost of a wheel roughly six times the
   size of a single-profile build.
 - Two SHRINCS profiles, `shrincs-128s-q18-sha2` and `shrincs-128s-q20-sha2`,
-  behind the `profile-128s-q18-sha2` and `profile-128s-q20-sha2` features.
+  behind the `experimental-profile-128s-q18-sha2` and `experimental-profile-128s-q20-sha2` features.
   Each is the exact numeric twin of the keccak profile of the same name and
   differs only in the scheme hash suite (SHA-256 instead of keccak-256) and in
   the profile identity string. Both carry committed SPHINCS golden vectors and
@@ -70,8 +70,8 @@ This file records changes to this project, in the
   declares `SIBLING_PROFILES`, `PYPI_SIBLINGS`, or `NPM_SIBLINGS`; it declares
   `PROFILES` instead. All three ecosystems now work this way.
 - The six `profile-*` Cargo features (`profile-256s`, `profile-256s-sha2`,
-  `profile-128s-q18`, `profile-128s-q20`, `profile-128s-q18-sha2`,
-  `profile-128s-q20-sha2`) are additive. Enabling more than
+  `experimental-profile-128s-q18`, `experimental-profile-128s-q20`, `experimental-profile-128s-q18-sha2`,
+  `experimental-profile-128s-q20-sha2`) are additive. Enabling more than
   one now compiles more than one profile into the same build, instead of
   build.rs panicking on two. `cargo test --all-features` compiles and tests
   every profile in one build.

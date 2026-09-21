@@ -79,8 +79,8 @@ pub(crate) fn keccak256(data: &[u8]) -> [u8; HASH_LEN] {
 #[cfg_attr(
     not(any(
         feature = "profile-256s-sha2",
-        feature = "profile-128s-q18-sha2",
-        feature = "profile-128s-q20-sha2"
+        feature = "experimental-profile-128s-q18-sha2",
+        feature = "experimental-profile-128s-q20-sha2"
     )),
     allow(dead_code)
 )]

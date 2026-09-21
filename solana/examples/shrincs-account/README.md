@@ -124,7 +124,7 @@ that authority, not a one-shot ticket.
 
 ## Build and deploy
 
-The example targets the `128s` profile (`profile-128s-q18` on
+The example targets the `128s` profile (`experimental-profile-128s-q18` on
 `hashsigs-rs`). A 256s stateless signature is ~30 KB, which exceeds the
 Solana transaction Maximum Transmission Unit (1,232 bytes) and would need
 delivery staged across several transactions. The 128s profile keeps

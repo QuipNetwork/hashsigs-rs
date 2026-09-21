@@ -301,7 +301,7 @@ mod tests {
     /// of seconds, far too slow for a unit test, so this drives only the
     /// verify path on a garbage envelope. It still forces the core to
     /// monomorphize at those widths, which is what a wrong width would break.
-    #[cfg(feature = "profile-128s-q18")]
+    #[cfg(feature = "experimental-profile-128s-q18")]
     #[test]
     fn core_monomorphizes_at_the_128s_widths() {
         use crate::profiles::p128s_q18::Profile128sQ18;

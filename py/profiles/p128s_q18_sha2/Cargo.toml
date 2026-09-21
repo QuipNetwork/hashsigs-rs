@@ -23,4 +23,4 @@ crate-type = ["cdylib"]
 # to `::pyo3` paths in THIS crate.
 pyo3.workspace = true
 hashsigs-py-common = { path = "../../common" }
-hashsigs-rs = { path = "../../..", default-features = false, features = ["std", "profile-128s-q18-sha2"] }
+hashsigs-rs = { path = "../../..", default-features = false, features = ["std", "experimental-profile-128s-q18-sha2"] }

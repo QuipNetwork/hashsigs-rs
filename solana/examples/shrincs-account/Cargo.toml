@@ -22,7 +22,7 @@ default = ["custom-heap"]
 solana-program = "4.0"
 solana-system-interface = { version = "3.2", features = ["bincode"] }
 borsh = "1.5.7"
-hashsigs-rs = { path = "../../..", features = ["solana", "profile-128s-q18"] }
+hashsigs-rs = { path = "../../..", features = ["solana", "experimental-profile-128s-q18"] }
 hashsigs-rs-solana = { path = "../..", default-features = false, features = ["no-entrypoint"] }
 
 [dev-dependencies]

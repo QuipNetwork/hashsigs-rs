@@ -151,7 +151,7 @@ fn write_gzip_json(path: &Path, json: &[u8]) {
 // compile-time profile. The Solidity test drives keygen("solidity public key
 // seed", 4); this reproduces the same call so the printed constants can be
 // pasted directly into the per-profile golden block. Run once per profile
-// feature (`--features profile-128s-q18` / `-q20`);
+// feature (`--features experimental-profile-128s-q18` / `-q20`);
 // under a 128s profile this performs the heavy 2^18-leaf hypertree keygen.
 #[test]
 #[ignore = "run explicitly to refresh SHRINCSSignerKeygen anchors"]

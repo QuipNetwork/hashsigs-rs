@@ -33,8 +33,8 @@ test-128s:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   script:
-    - cargo test --locked --release --features profile-128s-q18
-    - cargo test --locked --release --features profile-128s-q20
+    - cargo test --locked --release --features experimental-profile-128s-q18
+    - cargo test --locked --release --features experimental-profile-128s-q20
     # The sha2 twins run the library suite, which includes the SPHINCS
     # vector-conformance tests against their committed golden vectors (171
     # passed under each). Their integration tests are held back: the ERC-7913
@@ -44,10 +44,10 @@ test-128s:
     # tests keep compiling. Raise --lib to a full `cargo test` once
     # tests/test_vectors/shrincs_account_wrapper_vectors_128s_q{18,20}_sha2.json.gz
     # land.
-    - cargo test --locked --release --lib --features profile-128s-q18-sha2
-    - cargo test --locked --release --lib --features profile-128s-q20-sha2
-    - cargo check --locked --release --all-targets --features profile-128s-q18-sha2
-    - cargo check --locked --release --all-targets --features profile-128s-q20-sha2
+    - cargo test --locked --release --lib --features experimental-profile-128s-q18-sha2
+    - cargo test --locked --release --lib --features experimental-profile-128s-q20-sha2
+    - cargo check --locked --release --all-targets --features experimental-profile-128s-q18-sha2
+    - cargo check --locked --release --all-targets --features experimental-profile-128s-q20-sha2
 
 # Solana workspace member is not a default member of the root package, so it
 # never ran under bare `cargo test`. solana-program-test spins up a validator
@@ -90,6 +90,7 @@ fmt:
     - rustup component add rustfmt
   script:
     - cargo fmt --all --check
+    - bin/check-production-profiles.sh
 
 # Rustdoc lint gate: broken intra-doc links and rustdoc warnings fail CI,
 # guarding the public-API docs and the runnable doc examples.
@@ -214,4 +215,3 @@ py-tests:
     - /tmp/py-venv/bin/pip install --quiet --force-reinstall /tmp/dist/*.whl
     # Run from py/ so the installed package is imported, never py/python/.
     - cd py && /tmp/py-venv/bin/python -m pytest tests/ -q
-

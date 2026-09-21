@@ -24,7 +24,7 @@
       "module": "p128s_q18",
       "ext": "_hashsigs_p128s_q18",
       "crate": "hashsigs-py-p128s-q18",
-      "feature": "profile-128s-q18"
+      "feature": "experimental-profile-128s-q18"
     },
     {
       "key": "128s-q20",
@@ -32,7 +32,7 @@
       "module": "p128s_q20",
       "ext": "_hashsigs_p128s_q20",
       "crate": "hashsigs-py-p128s-q20",
-      "feature": "profile-128s-q20"
+      "feature": "experimental-profile-128s-q20"
     },
     {
       "key": "128s-q18-sha2",
@@ -40,7 +40,7 @@
       "module": "p128s_q18_sha2",
       "ext": "_hashsigs_p128s_q18_sha2",
       "crate": "hashsigs-py-p128s-q18-sha2",
-      "feature": "profile-128s-q18-sha2"
+      "feature": "experimental-profile-128s-q18-sha2"
     },
     {
       "key": "128s-q20-sha2",
@@ -48,7 +48,7 @@
       "module": "p128s_q20_sha2",
       "ext": "_hashsigs_p128s_q20_sha2",
       "crate": "hashsigs-py-p128s-q20-sha2",
-      "feature": "profile-128s-q20-sha2"
+      "feature": "experimental-profile-128s-q20-sha2"
     }
   ]
 }

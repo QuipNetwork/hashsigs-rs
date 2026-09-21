@@ -91,7 +91,7 @@ account-wrapper audit. A 2026-07-24 pass refreshed the module paths for the
   102,574, stateless verify 247,632, rotations ~255K. The Solidity-side
   test lives uncommitted in the hashsigs-solidity worktree pending
   upstream adoption. Regenerate a fixture with `cargo test --release
-  --features profile-128s-q18 --test generate_shrincs_vectors
+  --features experimental-profile-128s-q18 --test generate_shrincs_vectors
   generate_shrincs_account_wrapper_vectors -- --ignored --nocapture` (the
   run takes minutes per profile). The ten dependent tests in
   `solidity_account_vectors.rs` and `envelope_vectors.rs` run un-ignored
@@ -137,7 +137,7 @@ All figures come from the real program binary in the SBF virtual machine.
 | SHRINCS stateful verify | 111,586 | 101,909 | 58,461 | — |
 
 No SBF run has covered `128s-q18-sha2` or `128s-q20-sha2`. The program builds
-against them through `--features hashsigs-rs/profile-128s-q18-sha2`, so these
+against them through `--features hashsigs-rs/experimental-profile-128s-q18-sha2`, so these
 cells are unmeasured rather than unavailable. Do not copy the keccak twin's
 figure across: the SHA-256 syscall and the keccak syscall charge differently.
 `128s-q20` and `128s-q20-sha2` share every crypto constant with their q18

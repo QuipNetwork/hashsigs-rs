@@ -104,8 +104,9 @@ from the FORS digest, and each upper layer follows a fixed recurrence
 
 ## Parameters, sizes, and measured costs
 
-Six compile-time profiles ship: three parameter sets, each in a keccak and a
-sha2 variant. The cryptographic constants match the Solidity verifier.
+Six compile-time profiles exist: three parameter sets, each in a keccak and a
+sha2 variant. The four 128-bit variants are experimental. Their cryptographic
+constants match the Solidity verifier.
 `src/profiles/` is the Rust source of truth.
 
 | Parameter | `256s` / `256s-sha2` | `128s-q18` / `128s-q20` and their sha2 twins |
@@ -118,8 +119,11 @@ sha2 variant. The cryptographic constants match the Solidity verifier.
 | Stateless signature budget | 2^20 | 2^18 (q18) / 2^20 (q20) |
 | FORS-C grind bound | 2^24 | 2^28 |
 
-`128s-q20` differs from `128s-q18` only in the stateless budget. The larger
-q20 budget still needs security-analysis backing before production use. The
+`128s-q20` differs from `128s-q18` only in the stateless budget. Neither limit
+has an approved documented birthday-bound security analysis. All 128-bit
+features therefore use the `experimental-profile-*` prefix, are excluded from
+default and release builds, and are retained only for tests, vectors, and
+research. The
 sha2 suite switches scheme hashes only, so `128s-q18-sha2` shares every row
 of this table with `128s-q18`, and `128s-q20-sha2` with `128s-q20`.
 EVM-domain hashes (profile identity, commitments, canonical action hashes)
@@ -181,7 +185,7 @@ signature is a SPHINCS+C signature plus a commitment check, and the hybrid
 `ShrincsVerifyStateless` cost was not recorded at 128s.
 
 ‡ No SBF run has recorded these two profiles. The program builds against them
-through `--features hashsigs-rs/profile-128s-q18-sha2`, so the figure is
+through `--features hashsigs-rs/experimental-profile-128s-q18-sha2`, so the figure is
 missing, not unavailable. Do not read the keccak twin's cost across: the
 SHA-256 syscall and the keccak syscall have different costs.
 
@@ -241,10 +245,10 @@ Notes:
   ```bash
   BENCH_LABEL=256s-keccak   cargo run --release --example bench_table
   BENCH_LABEL=256s-sha2     cargo run --release --example bench_table --no-default-features --features profile-256s-sha2
-  BENCH_LABEL=128s-q18      cargo run --release --example bench_table --no-default-features --features profile-128s-q18
-  BENCH_LABEL=128s-q20      cargo run --release --example bench_table --no-default-features --features profile-128s-q20
-  BENCH_LABEL=128s-q18-sha2 cargo run --release --example bench_table --no-default-features --features profile-128s-q18-sha2
-  BENCH_LABEL=128s-q20-sha2 cargo run --release --example bench_table --no-default-features --features profile-128s-q20-sha2
+  BENCH_LABEL=128s-q18      cargo run --release --example bench_table --no-default-features --features experimental-profile-128s-q18
+  BENCH_LABEL=128s-q20      cargo run --release --example bench_table --no-default-features --features experimental-profile-128s-q20
+  BENCH_LABEL=128s-q18-sha2 cargo run --release --example bench_table --no-default-features --features experimental-profile-128s-q18-sha2
+  BENCH_LABEL=128s-q20-sha2 cargo run --release --example bench_table --no-default-features --features experimental-profile-128s-q20-sha2
   cargo run --release --example bench_wots
   ```
 
@@ -375,7 +379,7 @@ use hashsigs_rs::profiles::p128s_q18::Shrincs as Shrincs128sQ18;
 ```
 
 `hashsigs_rs::Shrincs` follows the profile the build binds to, so under
-`--features profile-128s-q18` it is the q18 type, not the `256s` one. Name a
+`--features experimental-profile-128s-q18` it is the q18 type, not the `256s` one. Name a
 profile module's own alias, such as `hashsigs_rs::profiles::p256s::Shrincs`, to
 pin one profile explicitly.
 
@@ -444,8 +448,8 @@ features are on, and emits a cfg for each enabled one. Rust-side surfaces
 that still name exactly one profile (the non-generic `ShrincsVerifier`, the
 wasm bindings, the golden-vector generator, and `hashsigs_rs::Shrincs`) bind
 to a single profile chosen by a fixed priority order: `profile-256s`,
-`profile-256s-sha2`, `profile-128s-q18`, `profile-128s-q20`,
-`profile-128s-q18-sha2`, `profile-128s-q20-sha2`. Naming a profile
+`profile-256s-sha2`, `experimental-profile-128s-q18`, `experimental-profile-128s-q20`,
+`experimental-profile-128s-q18-sha2`, `experimental-profile-128s-q20-sha2`. Naming a profile
 feature explicitly overrides the default (`profile-256s`), and enabling
 several, or building with `--all-features`, resolves deterministically to
 the first name in that order that is enabled.
@@ -487,10 +491,10 @@ Run a specific non-default profile:
 
 ```bash
 cargo test --no-default-features --features profile-256s-sha2
-cargo test --no-default-features --features profile-128s-q18
-cargo test --no-default-features --features profile-128s-q20
-cargo test --release --lib --no-default-features --features profile-128s-q18-sha2
-cargo test --release --lib --no-default-features --features profile-128s-q20-sha2
+cargo test --no-default-features --features experimental-profile-128s-q18
+cargo test --no-default-features --features experimental-profile-128s-q20
+cargo test --release --lib --no-default-features --features experimental-profile-128s-q18-sha2
+cargo test --release --lib --no-default-features --features experimental-profile-128s-q20-sha2
 ```
 
 The two 128s sha2 profiles run `--lib`, not the whole suite. Their
@@ -505,10 +509,10 @@ For a fast compile-only check:
 ```bash
 cargo test --no-run
 cargo test --no-run --no-default-features --features profile-256s-sha2
-cargo test --no-run --no-default-features --features profile-128s-q18
-cargo test --no-run --no-default-features --features profile-128s-q20
-cargo test --no-run --no-default-features --features profile-128s-q18-sha2
-cargo test --no-run --no-default-features --features profile-128s-q20-sha2
+cargo test --no-run --no-default-features --features experimental-profile-128s-q18
+cargo test --no-run --no-default-features --features experimental-profile-128s-q20
+cargo test --no-run --no-default-features --features experimental-profile-128s-q18-sha2
+cargo test --no-run --no-default-features --features experimental-profile-128s-q20-sha2
 ```
 
 The six profile features:
@@ -516,10 +520,10 @@ The six profile features:
 - default build selects `shrincs-256s-keccak`
 - `profile-256s`
 - `profile-256s-sha2`
-- `profile-128s-q18`
-- `profile-128s-q20`
-- `profile-128s-q18-sha2`
-- `profile-128s-q20-sha2`
+- `experimental-profile-128s-q18`
+- `experimental-profile-128s-q20`
+- `experimental-profile-128s-q18-sha2`
+- `experimental-profile-128s-q20-sha2`
 
 Enabling more than one, or running `cargo test --all-features`, compiles
 every enabled profile into the build and tests it. `cargo test --all-features`
@@ -530,10 +534,10 @@ To regenerate the ignored SHRINCS golden vectors for the profile the build binds
 ```bash
 cargo test generate_shrincs_sphincs_vectors -- --ignored --nocapture
 cargo test --no-default-features --features profile-256s-sha2 generate_shrincs_sphincs_vectors -- --ignored --nocapture
-cargo test --no-default-features --features profile-128s-q18 generate_shrincs_sphincs_vectors -- --ignored --nocapture
-cargo test --no-default-features --features profile-128s-q20 generate_shrincs_sphincs_vectors -- --ignored --nocapture
-cargo test --no-default-features --features profile-128s-q18-sha2 generate_shrincs_sphincs_vectors -- --ignored --nocapture
-cargo test --no-default-features --features profile-128s-q20-sha2 generate_shrincs_sphincs_vectors -- --ignored --nocapture
+cargo test --no-default-features --features experimental-profile-128s-q18 generate_shrincs_sphincs_vectors -- --ignored --nocapture
+cargo test --no-default-features --features experimental-profile-128s-q20 generate_shrincs_sphincs_vectors -- --ignored --nocapture
+cargo test --no-default-features --features experimental-profile-128s-q18-sha2 generate_shrincs_sphincs_vectors -- --ignored --nocapture
+cargo test --no-default-features --features experimental-profile-128s-q20-sha2 generate_shrincs_sphincs_vectors -- --ignored --nocapture
 ```
 
 ### Fast local loops
@@ -809,8 +813,8 @@ Or run the generator for a specific profile:
 ```bash
 cargo test --test generate_shrincs_vectors -- --ignored --nocapture
 cargo test --features profile-256s-sha2 --test generate_shrincs_vectors -- --ignored --nocapture
-cargo test --features profile-128s-q18 --test generate_shrincs_vectors -- --ignored --nocapture
-cargo test --features profile-128s-q20 --test generate_shrincs_vectors -- --ignored --nocapture
+cargo test --features experimental-profile-128s-q18 --test generate_shrincs_vectors -- --ignored --nocapture
+cargo test --features experimental-profile-128s-q20 --test generate_shrincs_vectors -- --ignored --nocapture
 ```
 
 The generator writes the profile-selected SHRINCS vector JSON inside this Rust

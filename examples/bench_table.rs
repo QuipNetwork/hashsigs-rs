@@ -10,10 +10,10 @@
 //! ```bash
 //! BENCH_LABEL=256s-keccak   cargo run --release --example bench_table
 //! BENCH_LABEL=256s-sha2     cargo run --release --example bench_table --features profile-256s-sha2
-//! BENCH_LABEL=128s-q18      cargo run --release --example bench_table --features profile-128s-q18
-//! BENCH_LABEL=128s-q20      cargo run --release --example bench_table --features profile-128s-q20
-//! BENCH_LABEL=128s-q18-sha2 cargo run --release --example bench_table --features profile-128s-q18-sha2
-//! BENCH_LABEL=128s-q20-sha2 cargo run --release --example bench_table --features profile-128s-q20-sha2
+//! BENCH_LABEL=128s-q18      cargo run --release --example bench_table --features experimental-profile-128s-q18
+//! BENCH_LABEL=128s-q20      cargo run --release --example bench_table --features experimental-profile-128s-q20
+//! BENCH_LABEL=128s-q18-sha2 cargo run --release --example bench_table --features experimental-profile-128s-q18-sha2
+//! BENCH_LABEL=128s-q20-sha2 cargo run --release --example bench_table --features experimental-profile-128s-q20-sha2
 //! ```
 //!
 //! Stateless sign times vary run to run: FORS-C signing grinds a counter

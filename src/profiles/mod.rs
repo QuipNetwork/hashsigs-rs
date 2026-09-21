@@ -30,13 +30,13 @@ pub(crate) mod identity {
     include!(concat!(env!("OUT_DIR"), "/shrincs_profile_identities.rs"));
 }
 
-#[cfg(feature = "profile-128s-q18")]
+#[cfg(feature = "experimental-profile-128s-q18")]
 pub mod p128s_q18;
-#[cfg(feature = "profile-128s-q18-sha2")]
+#[cfg(feature = "experimental-profile-128s-q18-sha2")]
 pub mod p128s_q18_sha2;
-#[cfg(feature = "profile-128s-q20")]
+#[cfg(feature = "experimental-profile-128s-q20")]
 pub mod p128s_q20;
-#[cfg(feature = "profile-128s-q20-sha2")]
+#[cfg(feature = "experimental-profile-128s-q20-sha2")]
 pub mod p128s_q20_sha2;
 #[cfg(feature = "profile-256s")]
 pub mod p256s;
@@ -52,10 +52,10 @@ pub mod selected;
     test,
     feature = "profile-256s",
     feature = "profile-256s-sha2",
-    feature = "profile-128s-q18",
-    feature = "profile-128s-q20",
-    feature = "profile-128s-q18-sha2",
-    feature = "profile-128s-q20-sha2"
+    feature = "experimental-profile-128s-q18",
+    feature = "experimental-profile-128s-q20",
+    feature = "experimental-profile-128s-q18-sha2",
+    feature = "experimental-profile-128s-q20-sha2"
 ))]
 mod tests {
     use crate::profile::Profile;

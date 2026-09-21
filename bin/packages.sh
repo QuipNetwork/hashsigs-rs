@@ -68,10 +68,10 @@ PROFILE_FEATURE() {
   case "$1" in
   256s-keccak) echo "profile-256s" ;;
   256s-sha2) echo "profile-256s-sha2" ;;
-  128s-q18) echo "profile-128s-q18" ;;
-  128s-q20) echo "profile-128s-q20" ;;
-  128s-q18-sha2) echo "profile-128s-q18-sha2" ;;
-  128s-q20-sha2) echo "profile-128s-q20-sha2" ;;
+  128s-q18) echo "experimental-profile-128s-q18" ;;
+  128s-q20) echo "experimental-profile-128s-q20" ;;
+  128s-q18-sha2) echo "experimental-profile-128s-q18-sha2" ;;
+  128s-q20-sha2) echo "experimental-profile-128s-q20-sha2" ;;
   *)
     echo "unknown profile: $1" >&2
     return 1

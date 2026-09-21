@@ -1,7 +1,7 @@
 //! The four profile features must be additive, not mutually exclusive.
 
 #[test]
-#[cfg(all(feature = "profile-256s", feature = "profile-128s-q18"))]
+#[cfg(all(feature = "profile-256s", feature = "experimental-profile-128s-q18"))]
 fn two_profiles_coexist_in_one_build() {
     use hashsigs_rs::profile::Profile;
     use hashsigs_rs::profiles::{p128s_q18::Profile128sQ18, p256s::Profile256s};
