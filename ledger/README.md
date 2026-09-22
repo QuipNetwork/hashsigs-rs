@@ -20,7 +20,7 @@ hardware-wallet signer or an independent cryptographic audit.
 
 ## Build and test
 
-Docker is the only host build dependency. From the `hashsigs-rs` root:
+Make and Docker are the host build dependencies. From the `hashsigs-rs` root:
 
 ```sh
 make -C ledger test
@@ -39,15 +39,21 @@ the pinned toolchain and locked dependencies; later builds use Docker's cache.
 `artifacts/SHA256SUMS` inside this folder. These generated files are ignored by
 Git. `run` exposes the emulator UI at <http://localhost:5000>; Ctrl-C stops it.
 
+Every build checks Docker availability before doing any work. A missing CLI,
+an unreachable daemon, or denied access stops the flow with Docker's diagnostic
+(when available) and instructions to install Docker, start the daemon, or fix
+user access. Run just this check with `make -C ledger check-docker`.
+
 Docker must be accessible to your user. If a new Docker group membership has
 not reached your shell, use `sg docker -c 'make -C ledger test'`. The Docker
-command and image tag can be overridden with `DOCKER` and `IMAGE`.
+command and image tag can be overridden with `DOCKER` and `IMAGE`; the availability
+check uses the same `DOCKER` command and selected context as the build.
 
 The Dockerfile is in this folder but uses the repository root as its build
 context, so the app can depend on the current Rust source via `path = "../.."`.
-`Dockerfile.dockerignore` limits the context. Python/Solana manifests are copied
-for Cargo workspace resolution; their bindings are not linked into the device.
-The app and host tool are independent Cargo workspaces with separate lockfiles.
+`Dockerfile.dockerignore` limits the context to the root crate and Ledger files.
+The app and host tool are independent Cargo workspaces with separate lockfiles;
+the Python and Solana bindings are not needed in the image or build context.
 Ordinary root `cargo test` does not build the Ledger SDK.
 
 Validated on 2026-09-21: **45 Speculos tests passed**, including a canonical

@@ -5,17 +5,21 @@ REPO_DIR := $(abspath $(LEDGER_DIR)/..)
 USB_DEVICE ?=
 RUN = $(DOCKER) run --rm --network none --user "$$(id -u):$$(id -g)"
 
-.PHONY: help build check test run test-hardware
+.PHONY: help check-docker build check test run test-hardware
 .DEFAULT_GOAL := help
 
 help:
+	@echo 'make -C ledger check-docker   Check Docker installation and daemon access'
 	@echo 'make -C ledger build          Build the app and export ELF and public test vectors'
 	@echo 'make -C ledger check          Check app and host Rust formatting'
 	@echo 'make -C ledger test           Run the Gen5 Speculos suite'
 	@echo 'make -C ledger run            Open Speculos at http://localhost:5000'
 	@echo 'make -C ledger test-hardware USB_DEVICE=/dev/bus/usb/BBB/DDD'
 
-build:
+check-docker:
+	@sh "$(LEDGER_DIR)/check-docker.sh" $(DOCKER)
+
+build: check-docker
 	$(DOCKER) build --file $(LEDGER_DIR)/Dockerfile --tag $(IMAGE) $(REPO_DIR)
 	mkdir -p $(LEDGER_DIR)/artifacts
 	$(RUN) --mount "type=bind,src=$(LEDGER_DIR)/artifacts,dst=/out" $(IMAGE) \

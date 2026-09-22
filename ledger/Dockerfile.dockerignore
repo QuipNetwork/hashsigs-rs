@@ -3,10 +3,6 @@
 !build.rs
 !src/
 !src/**
-!py/
-!py/**
-!solana/
-!solana/**
 !ledger/
 !ledger/**
 **/target/
@@ -15,5 +11,3 @@
 **/*.so
 **/.git/
 ledger/artifacts/
-py/python/hashsigs/profiles/
-py/python/hashsigs/_ext/

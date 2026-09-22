@@ -19,9 +19,6 @@ RUN python -m pip install --no-cache-dir -r /opt/hashsigs-ledger-requirements.tx
 WORKDIR /repo
 COPY Cargo.toml build.rs ./
 COPY src/ src/
-# Cargo resolves parent workspace manifests; bindings are not linked into the app.
-COPY py/ py/
-COPY solana/ solana/
 COPY ledger/app/ ledger/app/
 WORKDIR /repo/ledger/app
 RUN cargo ledger build apex_p -- --locked
