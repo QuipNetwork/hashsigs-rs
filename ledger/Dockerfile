@@ -15,6 +15,9 @@ RUN python3 -m venv --system-site-packages /opt/hashsigs-ledger-venv
 ENV PATH="/opt/hashsigs-ledger-venv/bin:${PATH}"
 COPY ledger/requirements.txt /opt/hashsigs-ledger-requirements.txt
 RUN python -m pip install --no-cache-dir -r /opt/hashsigs-ledger-requirements.txt
+# Import concrete modules: Ragger's public API substitutes missing backends with
+# functions that raise only when a test starts. This check needs no USB device.
+RUN python -c "from ragger.backend.ledgerwallet import LedgerWalletBackend; from ragger.backend.speculos import SpeculosBackend"
 
 WORKDIR /repo
 COPY Cargo.toml build.rs ./
@@ -29,6 +32,7 @@ RUN cargo run --locked --release --manifest-path host/Cargo.toml > /tmp/ledger-v
 RUN mkdir -p artifacts && cp /tmp/ledger-vectors.json artifacts/vectors.json
 COPY ledger/ledger_app.toml ledger/pytest.ini ledger/conftest.py ./
 COPY ledger/tests/ tests/
+COPY ledger/benchmarks/ benchmarks/
 # Ragger discovers ledger_app.toml from this container-local Git root.
 RUN git init --quiet /repo/ledger
 ENTRYPOINT []
