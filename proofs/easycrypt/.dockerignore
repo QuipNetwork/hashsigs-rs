@@ -1,0 +1,7 @@
+# The image needs the EasyCrypt sources and the generated replay files only.
+kat/src
+kat/target
+kat/Cargo.toml
+kat/Cargo.lock
+reports
+**/*.eco

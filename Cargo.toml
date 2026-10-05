@@ -28,6 +28,8 @@ exclude = [
   # automatically; ts/ is not, and ~40 KB of TypeScript packaging
   # infrastructure has no value to a Rust consumer).
   "ts/",
+  # The EasyCrypt development and its known-answer test generator.
+  "proofs/",
   "AGENTS.md",
   "CLAUDE.md",
 ]
@@ -53,6 +55,10 @@ members = [
     "solana",
     "solana/examples/shrincs-account"
 ]
+# The known-answer test generator of the EasyCrypt development enables the
+# `kat-trace` feature. Outside the workspace, it cannot unify that feature
+# into the builds of the other members.
+exclude = ["proofs/easycrypt/kat"]
 resolver = "2"
 
 # One pyo3 version for every crate that builds a Python extension. The PyO3

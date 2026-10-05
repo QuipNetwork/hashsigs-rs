@@ -1,0 +1,6 @@
+[general]
+timeout = 3
+provers = Alt-Ergo@2.6.0
+provers = Z3@4.13.4
+idirs = spec
+idirs = kat
