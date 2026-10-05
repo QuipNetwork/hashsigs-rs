@@ -73,13 +73,21 @@ pub(crate) fn record(parts: &[&[u8]], digest: &[u8; HASH_LEN]) {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
+
     use super::{arm, disarm};
     use crate::hash::backend::keccak256v;
 
-    // The recorder is process-wide, so other tests that hash while it is
-    // armed add entries. Each assertion checks only the inputs of its own test.
+    // The recorder is process-wide. Tests that arm or disarm it hold this lock,
+    // so one test cannot clear the trace of another. Other tests that hash
+    // while it is armed add entries, so each assertion checks only its own inputs.
+    static SERIAL: Mutex<()> = Mutex::new(());
+
     #[test]
     fn armed_recorder_captures_the_input_and_digest_of_each_call() {
+        let _serial = SERIAL
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         arm();
         let digest = keccak256v(&[b"kat-trace/", b"armed"]);
         let trace = disarm();
@@ -88,6 +96,9 @@ mod tests {
 
     #[test]
     fn unarmed_recorder_captures_nothing() {
+        let _serial = SERIAL
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let _ = disarm();
         keccak256v(&[b"kat-trace/unarmed"]);
         arm();

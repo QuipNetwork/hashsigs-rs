@@ -31,6 +31,9 @@ security notion. The review covers both.
      counter on. A key whose counter is past its budget signs nothing.
    - The stateless path signs while fewer than `STATELESS_SIGNATURE_LIMIT`
      stateless signatures exist. The profile sets 1,048,576.
+     This cap is the query bound of the profile. The library signer and the
+     two byte verifiers do not count signatures, so the game bounds the
+     adversary and not the code.
 4. **Freshness.** A forgery wins on a path for a hash that the oracle did not
    sign on that path. A stateful signature and a stateless signature on the
    same hash are different, because the two message hashes carry different
