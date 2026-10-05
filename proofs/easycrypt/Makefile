@@ -12,7 +12,8 @@ EC_JOBS      ?= 4
 
 KAT_OUT := build/kat
 REPORTS := reports
-GEN     := $(CARGO) run --quiet --release --manifest-path kat/Cargo.toml --
+GEN     := $(CARGO) run --quiet --release --manifest-path kat/Cargo.toml -- \
+           --golden ../../tests/test_vectors/shrincs_sphincs_256s_keccak.json.gz
 
 .DEFAULT_GOAL := help
 

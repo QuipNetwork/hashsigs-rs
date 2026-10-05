@@ -33,6 +33,7 @@ mod group;
 mod toy;
 mod value;
 
+pub use cases::golden::{golden_group, GoldenStateful, GoldenStateless};
 pub use cases::{catalog, Builder};
 pub use group::{Case, Group};
 pub use toy::{Toy, TOY_CHAINS, TOY_LAYERS};

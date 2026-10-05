@@ -27,8 +27,10 @@ mod abi;
 mod addresses;
 mod envelopes;
 mod fors;
+pub(crate) mod golden;
 mod helpers;
 mod hypertree;
+mod shrincs;
 mod uxmss;
 mod wire;
 mod wots_c;
@@ -53,6 +55,8 @@ pub fn catalog() -> Vec<(&'static str, Builder)> {
         ("toy_sphincs", hypertree::toy_group),
         ("envelopes", envelopes::group),
         ("toy_envelopes", envelopes::toy_group),
+        ("shrincs", shrincs::group),
+        ("toy_shrincs", shrincs::toy_group),
     ]
 }
 

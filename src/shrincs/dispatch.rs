@@ -236,7 +236,7 @@ pub(crate) fn verify_stateful_unsafe_raw<P: Profile, const NUM_CHAINS: usize>(
     uxmss::verify_stateful_unsafe_raw::<P, NUM_CHAINS>(&stateful_key, message, signature)
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "kat-trace"))]
 pub(crate) fn verify_stateless_unsafe_raw<P: Profile, const NUM_CHAINS: usize>(
     expected_public_key_commitment: [u8; HASH_LEN],
     public_key: &PublicKey,
@@ -379,4 +379,16 @@ mod tests {
             prepare_stateless_delegation::<SelectedProfile>(commitment, &[0xffu8; 3]).is_none()
         );
     }
+}
+
+/// Access to the dispatch steps for the EasyCrypt known-answer tests in
+/// `proofs/easycrypt`.
+#[cfg(feature = "kat-trace")]
+pub(crate) mod kat_access {
+    pub(crate) use super::{
+        matches_expected_public_key_commitment, stateful_action_message_hash,
+        stateful_raw_message_hash, stateless_action_message_hash, stateless_raw_message_hash,
+        valid_action_context, valid_public_key, verify_stateful, verify_stateless,
+        verify_stateless_unsafe_raw,
+    };
 }

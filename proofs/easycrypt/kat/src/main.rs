@@ -33,7 +33,12 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use hashsigs_rs::kat::{catalog, Group, Value};
+use hashsigs_rs::kat::{catalog, golden_group, GoldenStateful, GoldenStateless, Group, Value};
+use hashsigs_rs::shrincs::{PublicKey, Signature as StatefulSignature};
+use hashsigs_rs::sphincs_plus_c::{
+    ForsEntry, ForsSignature, LayerSignature, Signature as StatelessSignature,
+};
+use hashsigs_rs::wots_c::Signature as WotsCSignature;
 use serde_json::{json, Map, Value as Json};
 
 /// Children of one node of the lookup tree.
@@ -43,26 +48,28 @@ const MAX_TABLE: usize = 20_000;
 
 fn main() -> ExitCode {
     let mut out = None;
+    let mut golden = None;
     let mut only = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match (arg.as_str(), args.next()) {
             ("--out", Some(dir)) => out = Some(PathBuf::from(dir)),
             ("--only", Some(name)) => only.push(name),
+            ("--golden", Some(file)) => golden = Some(PathBuf::from(file)),
             _ => {
-                eprintln!("usage: gen-kats --out DIR [--only GROUP]...");
+                eprintln!("{USAGE}");
                 return ExitCode::FAILURE;
             }
         }
     }
-    let Some(out) = out else {
-        eprintln!("usage: gen-kats --out DIR [--only GROUP]...");
+    let (Some(out), Some(golden)) = (out, golden) else {
+        eprintln!("{USAGE}");
         return ExitCode::FAILURE;
     };
     let groups = catalog();
     let unknown: Vec<&String> = only
         .iter()
-        .filter(|name| !groups.iter().any(|(group, _)| group == name))
+        .filter(|name| *name != "golden" && !groups.iter().any(|(group, _)| group == name))
         .collect();
     if !unknown.is_empty() {
         eprintln!("unknown group: {unknown:?}");
@@ -83,7 +90,158 @@ fn main() -> ExitCode {
             group.trace.len()
         );
     }
+    if only.is_empty() || only.iter().any(|o| o == "golden") {
+        let (group, wrong) = match read_golden(&golden) {
+            Ok((stateful, stateless)) => golden_group(&stateful, &stateless),
+            Err(message) => {
+                eprintln!("golden: {}: {message}", golden.display());
+                return ExitCode::FAILURE;
+            }
+        };
+        if !wrong.is_empty() {
+            eprintln!("golden: the Rust verdict contradicts the case name: {wrong:?}");
+            return ExitCode::FAILURE;
+        }
+        if let Err(message) = write_group(&group, &out) {
+            eprintln!("golden: {message}");
+            return ExitCode::FAILURE;
+        }
+        println!(
+            "golden: {} cases, {} Keccak calls",
+            group.cases.len(),
+            group.trace.len()
+        );
+    }
     ExitCode::SUCCESS
+}
+
+const USAGE: &str = "usage: gen-kats --out DIR --golden FILE.json.gz [--only GROUP]...";
+
+/// Parse a hex string with a 0x prefix.
+fn hex_bytes(value: &Json) -> Result<Vec<u8>, String> {
+    let text = value.as_str().ok_or("expected a hex string")?;
+    let digits = text.strip_prefix("0x").unwrap_or(text);
+    (0..digits.len())
+        .step_by(2)
+        .map(|i| {
+            u8::from_str_radix(digits.get(i..i + 2).ok_or("odd hex length")?, 16)
+                .map_err(|e| e.to_string())
+        })
+        .collect()
+}
+
+fn hex_word(value: &Json) -> Result<[u8; 32], String> {
+    hex_bytes(value)?
+        .try_into()
+        .map_err(|_| "expected 32 bytes".to_string())
+}
+
+fn hex_words(value: &Json) -> Result<Vec<[u8; 32]>, String> {
+    value
+        .as_array()
+        .ok_or("expected an array")?
+        .iter()
+        .map(hex_word)
+        .collect()
+}
+
+fn number(value: &Json) -> Result<u32, String> {
+    let n = value.as_u64().ok_or("expected a number")?;
+    u32::try_from(n).map_err(|e| e.to_string())
+}
+
+fn wots(value: &Json) -> Result<WotsCSignature, String> {
+    Ok(WotsCSignature {
+        randomizer: hex_word(&value["randomizer"])?,
+        counter: number(&value["counter"])?,
+        chains: hex_words(&value["chains"])?,
+    })
+}
+
+fn stateless_signature(value: &Json) -> Result<StatelessSignature, String> {
+    let fors = &value["fors"];
+    let entries = fors["entries"]
+        .as_array()
+        .ok_or("expected FORS entries")?
+        .iter()
+        .map(|e| {
+            Ok(ForsEntry {
+                secret_leaf: hex_word(&e["secretLeaf"])?,
+                auth_path: hex_words(&e["authPath"])?,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let hypertree = value["hypertree"]
+        .as_array()
+        .ok_or("expected hypertree layers")?
+        .iter()
+        .map(|l| {
+            Ok(LayerSignature {
+                wots_c_pk_hash: hex_word(&l["wotsCPkHash"])?,
+                wots_c_signature: wots(&l["wotsCSignature"])?,
+                auth_path: hex_words(&l["authPath"])?,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    Ok(StatelessSignature {
+        fors: ForsSignature {
+            randomizer: hex_word(&fors["randomizer"])?,
+            counter: number(&fors["counter"])?,
+            entries,
+        },
+        hypertree,
+    })
+}
+
+/// The cases of the golden vector, in the order of the file.
+fn read_golden(path: &Path) -> Result<(Vec<GoldenStateful>, Vec<GoldenStateless>), String> {
+    use std::io::Read as _;
+    let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut text = String::new();
+    flate2::read::GzDecoder::new(file)
+        .read_to_string(&mut text)
+        .map_err(|e| e.to_string())?;
+    let vectors: Json = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    let mut stateful = Vec::new();
+    for (name, case) in vectors["stateful"]["cases"]
+        .as_object()
+        .ok_or("no stateful cases")?
+    {
+        let key = &case["publicKey"];
+        let s = &case["signature"];
+        stateful.push(GoldenStateful {
+            name: name.clone(),
+            pk_seed: hex_word(&key["pkSeed"])?,
+            root: hex_word(&key["root"])?,
+            max_signatures: number(&key["maxSignatures"])?,
+            message: hex_bytes(&case["message"])?,
+            signature: StatefulSignature {
+                randomizer: hex_word(&s["randomizer"])?,
+                counter: number(&s["counter"])?,
+                chains: hex_words(&s["chains"])?,
+                auth_path: hex_words(&s["authPath"])?,
+            },
+        });
+    }
+    let mut stateless = Vec::new();
+    for (name, case) in vectors["stateless"]["cases"]
+        .as_object()
+        .ok_or("no stateless cases")?
+    {
+        let key = &case["publicKey"];
+        stateless.push(GoldenStateless {
+            name: name.clone(),
+            public_key: PublicKey {
+                stateful_public_key: hex_bytes(&key["statefulPublicKey"])?,
+                public_key_commitment: hex_bytes(&key["publicKeyCommitment"])?,
+                pk_seed: hex_bytes(&key["pkSeed"])?,
+                hypertree_root: hex_bytes(&key["hypertreeRoot"])?,
+            },
+            message: hex_bytes(&case["message"])?,
+            signature: stateless_signature(&case["signature"])?,
+        });
+    }
+    Ok((stateful, stateless))
 }
 
 /// Render a value as an EasyCrypt term.

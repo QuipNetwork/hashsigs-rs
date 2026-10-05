@@ -14,3 +14,5 @@ path = "src/main.rs"
 [dependencies]
 hashsigs-rs = { path = "../../..", features = ["kat-trace"] }
 serde_json = "1.0.151"
+# Reads the committed golden vector of the crate, which is gzip-compressed.
+flate2 = "1.1.2"

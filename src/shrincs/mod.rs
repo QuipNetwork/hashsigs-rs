@@ -154,6 +154,10 @@ pub(crate) use key::{decode_stateful_public_key, encode_stateful_public_key};
 #[allow(unused_imports)] // consumed by wasm/test modules under cfg
 pub(crate) use signer::public_key_from_components;
 
+/// The dispatch steps, for the EasyCrypt known-answer tests.
+#[cfg(feature = "kat-trace")]
+pub(crate) use dispatch::kat_access as dispatch_access;
+
 #[cfg(test)]
 mod profile_tests {
     #[test]

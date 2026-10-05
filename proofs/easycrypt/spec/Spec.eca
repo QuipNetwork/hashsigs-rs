@@ -1162,3 +1162,227 @@ op decode_stateless_envelope (data : bytes) : (public_key * stateless_sig) optio
 op decode_stateful_public_key (encoded : bytes) : (bytes * bytes * int) option =
   if size encoded <> 68 then None
   else Some (take 32 encoded, take 32 (drop 32 encoded), int_from_bytes (drop 64 encoded)).
+
+(* ------------------------------------------------------------------ *)
+(* SHRINCS: shrincs/key.rs, dispatch.rs, signer.rs, verifier.rs        *)
+(* ------------------------------------------------------------------ *)
+
+(* HASH_SUITE_ID of the Keccak profiles. *)
+op HASH_SUITE_ID : int = 1.
+
+op INITIAL_STATEFUL_LEAF_INDEX : int = 1.
+
+(* shrincs::Keys, with the two keys spelled out. The commitment derives from
+   the public halves, so the record leaves it out, as to_bytes does. *)
+type keys = {
+  ks_sl_sk_seed     : bytes;
+  ks_sl_prf_seed    : bytes;
+  ks_sl_pk_seed     : bytes;
+  ks_sl_root        : bytes;
+  ks_sf_sk_seed     : bytes;
+  ks_sf_prf_seed    : bytes;
+  ks_sf_pk_seed     : bytes;
+  ks_sf_root        : bytes;
+  ks_max_signatures : int;
+  ks_next_leaf      : int;
+}.
+
+op keys_with_next (k : keys) (next : int) : keys =
+  {| ks_sl_sk_seed = k.`ks_sl_sk_seed; ks_sl_prf_seed = k.`ks_sl_prf_seed;
+     ks_sl_pk_seed = k.`ks_sl_pk_seed; ks_sl_root = k.`ks_sl_root;
+     ks_sf_sk_seed = k.`ks_sf_sk_seed; ks_sf_prf_seed = k.`ks_sf_prf_seed;
+     ks_sf_pk_seed = k.`ks_sf_pk_seed; ks_sf_root = k.`ks_sf_root;
+     ks_max_signatures = k.`ks_max_signatures; ks_next_leaf = next |}.
+
+(* Commitment::of *)
+op commitment_of (stateful_public_key pk_seed hypertree_root : bytes) : bytes =
+  keccak_packed [TAG_SHRINCS_PUBLIC_KEY; PROFILE_NAME; stateful_public_key; pk_seed; hypertree_root].
+
+(* PublicKey::commitment: None unless pk_seed and the root have 32 bytes. *)
+op commitment_of_bundle (pk : public_key) : bytes option =
+  if size pk.`pk_seed <> HASH_LEN \/ size pk.`pk_root <> HASH_LEN then None
+  else Some (commitment_of pk.`pk_stateful pk.`pk_seed pk.`pk_root).
+
+(* public_key_from_components *)
+op public_key_from_components (stateful_public_key pk_seed hypertree_root : bytes) : public_key =
+  {| pk_stateful = stateful_public_key;
+     pk_commitment = commitment_of stateful_public_key pk_seed hypertree_root;
+     pk_seed = pk_seed; pk_root = hypertree_root |}.
+
+(* public_key_of: the bundle of a key. *)
+op keys_public_key (k : keys) : public_key =
+  public_key_from_components
+    (encode_stateful_public_key k.`ks_sf_pk_seed k.`ks_sf_root k.`ks_max_signatures)
+    k.`ks_sl_pk_seed k.`ks_sl_root.
+
+(* ShrincsSigner::build_keys: the stateful half from the seed, joined with
+   a stateless key (sk_seed, prf_seed, pk_seed, root). *)
+op build_keys (seed : bytes) (max_signatures : int) (stateless : bytes * bytes * bytes * bytes)
+    : keys * public_key =
+  let sk  = derive32 TAG_SHRINCS_STATEFUL_SK_SEED seed [] in
+  let prf = derive32 TAG_SHRINCS_STATEFUL_PRF_SEED seed [] in
+  let pk  = derive32 TAG_SHRINCS_STATEFUL_PK_SEED seed [] in
+  let root = stateful_subtree_root sk pk INITIAL_STATEFUL_LEAF_INDEX max_signatures in
+  ({| ks_sl_sk_seed = stateless.`1; ks_sl_prf_seed = stateless.`2;
+      ks_sl_pk_seed = stateless.`3; ks_sl_root = stateless.`4;
+      ks_sf_sk_seed = sk; ks_sf_prf_seed = prf; ks_sf_pk_seed = pk; ks_sf_root = root;
+      ks_max_signatures = max_signatures; ks_next_leaf = INITIAL_STATEFUL_LEAF_INDEX |},
+   public_key_from_components (encode_stateful_public_key pk root max_signatures)
+     stateless.`3 stateless.`4).
+
+(* ShrincsSigner::keygen *)
+op shrincs_keygen (seed : bytes) (max_signatures : int) : (keys * public_key) option =
+  if max_signatures = 0 \/ MAX_STATEFUL_SIGNATURES_LIMIT < max_signatures then None
+  else Some (build_keys seed max_signatures (keygen_from_master_seed seed)).
+
+(* raw_message_hash: the ERC-7913 adapter hash. *)
+op raw_message_hash (op_tag expected_commitment hash : bytes) : bytes =
+  keccak_packed [keccak_packed [op_tag]; be32 HASH_SUITE_ID; expected_commitment; hash].
+
+op stateful_raw_message_hash (expected_commitment hash : bytes) : bytes =
+  raw_message_hash TAG_SHRINCS_VERIFY_STATEFUL expected_commitment hash.
+
+op stateless_raw_message_hash (expected_commitment hash : bytes) : bytes =
+  raw_message_hash TAG_SHRINCS_VERIFY_STATELESS expected_commitment hash.
+
+(* ActionContext *)
+type action_context = {
+  ac_domain_separator : bytes;
+  ac_nonce            : bytes;
+  ac_key_version      : bytes;
+  ac_action_type      : bytes;
+  ac_payload_hash     : bytes;
+}.
+
+(* action_message_hash *)
+op action_message_hash (op_tag expected_commitment : bytes) (c : action_context) : bytes =
+  keccak_packed [keccak_packed [op_tag]; be32 HASH_SUITE_ID; expected_commitment;
+                 c.`ac_domain_separator; c.`ac_nonce; c.`ac_key_version;
+                 c.`ac_action_type; c.`ac_payload_hash].
+
+op stateful_action_message_hash (expected_commitment : bytes) (c : action_context) : bytes =
+  action_message_hash TAG_SHRINCS_VERIFY_STATEFUL expected_commitment c.
+
+op stateless_action_message_hash (expected_commitment : bytes) (c : action_context) : bytes =
+  action_message_hash TAG_SHRINCS_VERIFY_STATELESS expected_commitment c.
+
+(* valid_action_context *)
+op valid_action_context (c : action_context) : bool =
+  c.`ac_domain_separator <> nseq HASH_LEN 0 /\ c.`ac_action_type <> nseq HASH_LEN 0
+  /\ c.`ac_payload_hash <> nseq HASH_LEN 0.
+
+(* matches_expected_public_key_commitment *)
+op matches_expected_public_key_commitment (pk : public_key) (expected : bytes) : bool =
+  expected <> nseq HASH_LEN 0 /\ word32 pk.`pk_commitment = Some expected
+  /\ commitment_of_bundle pk = Some expected.
+
+(* valid_public_key *)
+op valid_public_key (pk : public_key) : bool =
+  let k = decode_stateful_public_key pk.`pk_stateful in
+  if k = None then false
+  else all (fun b => b = 0) (drop HASH_TRUNC_LEN (oget k).`2)
+       /\ size pk.`pk_commitment = HASH_LEN /\ size pk.`pk_seed = HASH_LEN
+       /\ size pk.`pk_root = HASH_LEN
+       /\ commitment_of_bundle pk = word32 pk.`pk_commitment.
+
+(* dispatch::verify_stateful_unsafe_raw *)
+op verify_stateful_unsafe_raw (expected : bytes) (pk : public_key) (message : bytes)
+    (s : stateful_sig) : bool =
+  if !matches_expected_public_key_commitment pk expected then false
+  else if !valid_public_key pk then false
+  else
+    let k = decode_stateful_public_key pk.`pk_stateful in
+    if k = None then false
+    else uxmss_verify (oget k).`1 (oget k).`2 (oget k).`3 message s.
+
+(* dispatch::verify_stateful: the typed action path. *)
+op verify_stateful (expected : bytes) (pk : public_key) (c : action_context) (s : stateful_sig) : bool =
+  if !valid_action_context c then false
+  else verify_stateful_unsafe_raw expected pk (stateful_action_message_hash expected c) s.
+
+(* verify_stateless_crypto *)
+op verify_stateless_crypto (pk : public_key) (message : bytes) (s : stateless_sig) : bool =
+  if word32 pk.`pk_seed = None \/ word32 pk.`pk_root = None then false
+  else sphincs_verify pk.`pk_seed pk.`pk_root message s.
+
+(* dispatch::verify_stateless: the typed action path. *)
+op verify_stateless (expected : bytes) (pk : public_key) (c : action_context) (s : stateless_sig) : bool =
+  if !valid_action_context c then false
+  else if !matches_expected_public_key_commitment pk expected then false
+  else if !valid_public_key pk then false
+  else verify_stateless_crypto pk (stateless_action_message_hash expected c) s.
+
+(* VerifyOutcome *)
+type outcome = [ Valid | Invalid | Malformed ].
+
+(* VerifierInterface::verify of ShrincsVerifier: a 32-byte commitment as
+   the key, a 32-byte hash, and a stateful envelope. *)
+op shrincs_verify (key hash envelope : bytes) : outcome =
+  if word32 key = None then Invalid
+  else
+    let d = decode_stateful_envelope envelope in
+    if d = None then Malformed
+    else if verify_stateful_unsafe_raw key (oget d).`1 (stateful_raw_message_hash key hash) (oget d).`2
+    then Valid else Invalid.
+
+(* prepare_stateless_delegation: the SPHINCS+C key and the re-encoded
+   signature, if the envelope carries the expected bundle. *)
+op prepare_stateless_delegation (expected envelope : bytes) : (bytes * bytes) option =
+  let d = decode_stateless_envelope envelope in
+  if d = None then None
+  else if !matches_expected_public_key_commitment (oget d).`1 expected then None
+  else if !valid_public_key (oget d).`1 then None
+  else Some (encode_public_key (oget d).`1.`pk_seed (oget d).`1.`pk_root,
+             stateless_sig_to_bytes (oget d).`2).
+
+(* ShrincsVerifierExt::verify_stateless_signature, with
+   SphincsPlusCVerifier::verify_signature. *)
+op shrincs_verify_stateless (key hash envelope : bytes) : outcome =
+  if word32 key = None then Invalid
+  else if decode_stateless_envelope envelope = None then Malformed
+  else
+    let p = prepare_stateless_delegation key envelope in
+    if p = None then Invalid
+    else
+      let s = stateless_sig_from_bytes (oget p).`2 in
+      if s = None then Malformed
+      else
+        let delegate = (oget p).`1 in
+        if size delegate <> 64 then Invalid
+        else if sphincs_verify (take 32 delegate) (drop 32 delegate)
+                  (stateless_raw_message_hash key hash) (oget s)
+        then Valid else Invalid.
+
+(* signer::sign: a stateful signature over the raw message hash, in an
+   envelope, and the key with the next leaf. *)
+op shrincs_sign (k : keys) (hash : bytes) : (bytes * keys) option =
+  let pk = keys_public_key k in
+  let r = sign_stateful_next k.`ks_sf_sk_seed k.`ks_sf_prf_seed k.`ks_sf_pk_seed
+            k.`ks_max_signatures k.`ks_next_leaf
+            (stateful_raw_message_hash pk.`pk_commitment hash) in
+  if r = None then None
+  else Some (encode_stateful_envelope pk (oget r).`1, keys_with_next k (oget r).`2).
+
+(* ShrincsSigner::sign_stateful_action *)
+op sign_stateful_action (k : keys) (pk : public_key) (c : action_context)
+    : (stateful_sig * keys) option =
+  if word32 pk.`pk_commitment = None then None
+  else
+    let r = sign_stateful_next k.`ks_sf_sk_seed k.`ks_sf_prf_seed k.`ks_sf_pk_seed
+              k.`ks_max_signatures k.`ks_next_leaf
+              (stateful_action_message_hash pk.`pk_commitment c) in
+    if r = None then None else Some ((oget r).`1, keys_with_next k (oget r).`2).
+
+(* ShrincsSigner::sign_stateless_adapter *)
+op sign_stateless_adapter (k : keys) (pk : public_key) (hash : bytes) : stateless_sig option =
+  if word32 pk.`pk_commitment = None then None
+  else sphincs_sign k.`ks_sl_sk_seed k.`ks_sl_prf_seed k.`ks_sl_pk_seed k.`ks_sl_root
+         (stateless_raw_message_hash pk.`pk_commitment hash).
+
+(* dispatch::verify_stateless_unsafe_raw: the bundle checks and SPHINCS+C
+   over a message hash that the caller supplies. *)
+op verify_stateless_unsafe_raw (expected : bytes) (pk : public_key) (message : bytes)
+    (s : stateless_sig) : bool =
+  if !matches_expected_public_key_commitment pk expected then false
+  else if !valid_public_key pk then false
+  else verify_stateless_crypto pk message s.
