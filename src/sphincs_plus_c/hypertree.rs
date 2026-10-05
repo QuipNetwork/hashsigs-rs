@@ -1149,4 +1149,58 @@ pub(crate) mod kat_access {
             signature,
         )
     }
+
+    pub(crate) fn layer_seeds<P: Profile, const NUM_LAYERS: usize>(
+        sk_seed: &[u8; HASH_LEN],
+    ) -> [[u8; HASH_LEN]; NUM_LAYERS] {
+        hypertree_layer_seeds::<P, NUM_LAYERS>(sk_seed)
+    }
+
+    pub(crate) fn leaf_seeds<P: Profile>(
+        layer_seed: &[u8; HASH_LEN],
+        tree: u64,
+        leaf: u32,
+    ) -> ([u8; HASH_LEN], [u8; HASH_LEN]) {
+        let (leaf_seed, sk_seed) = hypertree_leaf_seeds::<P>(layer_seed, tree, leaf);
+        (*leaf_seed, *sk_seed)
+    }
+
+    pub(crate) fn leaf<P: Profile>(
+        pk_seed: &[u8; HASH_LEN],
+        layer_seed: &[u8; HASH_LEN],
+        (layer, tree, leaf): (u32, u64, u32),
+    ) -> [u8; HASH_LEN] {
+        hypertree_leaf::<P>(pk_seed, layer_seed, layer, tree, leaf)
+    }
+
+    /// The root, the selected leaf hash, and its authentication path.
+    pub(crate) type Subtree = ([u8; HASH_LEN], [u8; HASH_LEN], Vec<[u8; HASH_LEN]>);
+
+    pub(crate) fn subtree<P: Profile>(
+        pk_seed: &[u8; HASH_LEN],
+        layer_seed: &[u8; HASH_LEN],
+        (layer, tree, selected_leaf): (u32, u64, u32),
+    ) -> Option<Subtree> {
+        hypertree_subtree::<P>(pk_seed, layer_seed, layer, tree, selected_leaf)
+            .map(|s| (s.root, s.selected_leaf_hash, s.auth_path))
+    }
+
+    pub(crate) fn root_from_path<P: Profile>(
+        pk_seed: &[u8],
+        (layer, tree_index, leaf_index): (u32, u64, u32),
+        leaf: [u8; HASH_LEN],
+        auth_path: &[[u8; HASH_LEN]],
+    ) -> Option<[u8; HASH_LEN]> {
+        hypertree_root_from_path32::<P>(
+            u32::from(P::HYPERTREE_HEIGHT / P::NUM_HYPERTREE_LAYERS),
+            pk_seed,
+            HypertreePath {
+                layer,
+                tree_index,
+                leaf_index,
+            },
+            leaf,
+            auth_path,
+        )
+    }
 }

@@ -1058,3 +1058,48 @@ mod measurement_tests {
         );
     }
 }
+
+/// Flat-argument access to the private steps of this module, for the
+/// EasyCrypt known-answer tests in `proofs/easycrypt`.
+#[cfg(feature = "kat-trace")]
+pub(crate) mod kat_access {
+    use super::*;
+
+    pub(crate) fn digest_bytes<P: Profile>(
+        pk_seed: &[u8],
+        hypertree_root: &[u8],
+        randomizer: &[u8],
+        counter: u32,
+        message: &[u8],
+    ) -> [u8; FORS_DIGEST_CAPACITY] {
+        fors_digest_bytes::<P>(pk_seed, hypertree_root, randomizer, counter, message)
+    }
+
+    pub(crate) fn digest<P: Profile>(
+        pk_seed: &[u8; HASH_LEN],
+        hypertree_root: &[u8; HASH_LEN],
+        message: &[u8],
+        randomizer: &[u8],
+        counter: u32,
+    ) -> Option<(u64, u32, [u8; FORS_DIGEST_CAPACITY])> {
+        fors_digest::<P>(pk_seed, hypertree_root, message, randomizer, counter)
+            .map(|d| (d.tree_index, d.leaf_index, d.digest))
+    }
+
+    pub(crate) fn public_key_hash<P: Profile>(
+        pk_seed: &[u8],
+        tree_index: u64,
+        leaf_index: u32,
+        roots: &[[u8; HASH_LEN]],
+    ) -> [u8; HASH_LEN] {
+        fors_public_key_hash::<P>(pk_seed, tree_index, leaf_index, roots)
+    }
+
+    pub(crate) fn entry_root<P: Profile>(
+        pk_seed: &[u8],
+        coords: ForsLeafCoords,
+        entry: &Entry,
+    ) -> Option<[u8; HASH_LEN]> {
+        fors_entry_root32::<P>(u32::from(P::FORS_TREE_HEIGHT), pk_seed, coords, entry)
+    }
+}

@@ -556,14 +556,609 @@ op sign_stateless_wots_c (pk_seed sk_seed prf_seed : bytes) (layer tree keypair 
 (* verify_wots_c32 *)
 op verify_wots_c (pk_seed : bytes) (layer tree keypair : int)
     (expected_pk_hash message : bytes) (s : wots_sig) : bool =
-  size s.`wc_chains = NUM_WOTS_CHAINS /\ wots_digest_bytes <= HASH_LEN /\
-  (let digits = stateless_digits
-       (stateless_wots_message_digest pk_seed expected_pk_hash s.`wc_randomizer s.`wc_counter message) in
-   sumz digits = WOTS_TARGET_SUM /\
-   stateless_wots_public_key_hash pk_seed layer tree keypair
-     (mkseq (fun c =>
-        let d = nth 0 digits c in
-        stateless_wots_chain pk_seed layer tree keypair c (nth [] s.`wc_chains c) d
-          (WOTS_CHAIN_LEN - 1 - d))
-      NUM_WOTS_CHAINS)
-   = expected_pk_hash).
+  if size s.`wc_chains <> NUM_WOTS_CHAINS \/ HASH_LEN < wots_digest_bytes then false
+  else
+    let digits = stateless_digits
+        (stateless_wots_message_digest pk_seed expected_pk_hash s.`wc_randomizer s.`wc_counter message) in
+    if sumz digits <> WOTS_TARGET_SUM then false
+    else
+      stateless_wots_public_key_hash pk_seed layer tree keypair
+        (mkseq (fun c =>
+           let d = nth 0 digits c in
+           stateless_wots_chain pk_seed layer tree keypair c (nth [] s.`wc_chains c) d
+             (WOTS_CHAIN_LEN - 1 - d))
+         NUM_WOTS_CHAINS)
+      = expected_pk_hash.
+
+(* ------------------------------------------------------------------ *)
+(* UXMSS, the stateful tree: shrincs/uxmss.rs                          *)
+(* ------------------------------------------------------------------ *)
+
+(* Leaf 1 is the leftmost live leaf. Each parent joins one leaf with the
+   subtree to its right. The rightmost subtree is an empty tail. *)
+
+(* stateful_parent_hash *)
+op stateful_parent_hash (pk_seed : bytes) (left_leaf_index : int) (left right : bytes) : bytes =
+  hash_node [TAG_UXMSS_NODE; pk_seed; be32 left_leaf_index; left; right].
+
+(* stateful_empty_tail *)
+op stateful_empty_tail (pk_seed : bytes) (leaf_index : int) : bytes =
+  hash_packed [TAG_UXMSS_EMPTY_TAIL; pk_seed; be32 leaf_index].
+
+(* stateful_subtree_root: the subtree of the leaves leaf_index to
+   max_signatures, built from the right. *)
+op stateful_subtree_root (sk_seed pk_seed : bytes) (leaf_index max_signatures : int) : bytes =
+  foldl (fun (right : bytes) (current : int) =>
+          stateful_parent_hash pk_seed current
+            (stateful_wots_pk_hash sk_seed pk_seed current) right)
+    (stateful_empty_tail pk_seed max_signatures)
+    (rev (range leaf_index (max_signatures + 1))).
+
+(* stateful_auth_path: the subtree to the right of the leaf, then the
+   earlier leaves from right to left. *)
+op stateful_auth_path (sk_seed pk_seed : bytes) (leaf_index max_signatures : int) : bytes list =
+  (if leaf_index < max_signatures
+   then stateful_subtree_root sk_seed pk_seed (leaf_index + 1) max_signatures
+   else stateful_empty_tail pk_seed leaf_index)
+  :: map (fun previous => stateful_wots_pk_hash sk_seed pk_seed previous)
+       (rev (range 1 leaf_index)).
+
+(* root_from_unbalanced_path *)
+op root_from_unbalanced_path (pk_seed : bytes) (leaf_index : int) (leaf : bytes)
+    (auth_path : bytes list) : bytes option =
+  if size auth_path <> leaf_index \/ auth_path = [] then None
+  else Some (foldl (fun (root : bytes) (offset : int) =>
+                     stateful_parent_hash pk_seed (leaf_index - offset - 1)
+                       (nth [] auth_path (offset + 1)) root)
+               (stateful_parent_hash pk_seed leaf_index leaf (head [] auth_path))
+               (range 0 (size auth_path - 1))).
+
+(* sign_stateful_raw_at_leaf. A stateful key is sk_seed, prf_seed,
+   pk_seed, and max_signatures. *)
+op sign_stateful_at_leaf (sk_seed prf_seed pk_seed : bytes) (max_signatures leaf_index : int)
+    (message : bytes) : stateful_sig option =
+  if leaf_index = 0 \/ max_signatures < leaf_index then None
+  else
+    let s = sign_stateful_wots_c sk_seed prf_seed pk_seed leaf_index message in
+    if s = None then None
+    else Some {| sf_randomizer = (oget s).`sf_randomizer;
+                 sf_counter    = (oget s).`sf_counter;
+                 sf_chains     = (oget s).`sf_chains;
+                 sf_auth_path  = stateful_auth_path sk_seed pk_seed leaf_index max_signatures |}.
+
+(* sign_stateful_raw: sign at the leaf counter `next`, and return the
+   signature with the next counter. The counter saturates at 2 ^ 32 - 1. *)
+op sign_stateful_next (sk_seed prf_seed pk_seed : bytes) (max_signatures next : int)
+    (message : bytes) : (stateful_sig * int) option =
+  let s = sign_stateful_at_leaf sk_seed prf_seed pk_seed max_signatures next message in
+  if s = None then None else Some (oget s, min (next + 1) (2 ^ 32 - 1)).
+
+(* uxmss::verify_stateful_unsafe_raw. The leaf index is the length of the
+   authentication path. *)
+op uxmss_verify (pk_seed root : bytes) (max_signatures : int) (message : bytes)
+    (s : stateful_sig) : bool =
+  let leaf_index = size s.`sf_auth_path in
+  if leaf_index <= 0 \/ max_signatures < leaf_index \/ size s.`sf_chains <> NUM_WOTS_CHAINS
+  then false
+  else
+    let pk_hash = stateful_wots_pk_from_sig pk_seed leaf_index message s in
+    if pk_hash = None then false
+    else
+      let computed = root_from_unbalanced_path pk_seed leaf_index (oget pk_hash) s.`sf_auth_path in
+      if computed = None then false else oget computed = root.
+
+(* ------------------------------------------------------------------ *)
+(* Merkle trees: treehash.rs                                           *)
+(* ------------------------------------------------------------------ *)
+
+(* A parent function takes the height of the parent node, its index on
+   that level, and the left and right children. *)
+
+(* x ^ 1 on a non-negative integer *)
+op xor1 (x : int) : int = if x %% 2 = 0 then x + 1 else x - 1.
+
+(* One level up: the parents of a level of nodes. *)
+op tree_level (parent : int -> int -> bytes -> bytes -> bytes) (height : int)
+    (nodes : bytes list) : bytes list =
+  mkseq (fun i => parent height i (nth [] nodes (2 * i)) (nth [] nodes (2 * i + 1)))
+    (size nodes %/ 2).
+
+(* treehash_root_and_auth_path: the root of a tree of 2 ^ height leaves,
+   and the siblings on the path of the selected leaf. The Rust code streams
+   the leaves through a stack. This level-by-level form computes the same
+   nodes. *)
+op treehash (height selected_leaf : int) (leaf_hash : int -> bytes)
+    (parent : int -> int -> bytes -> bytes -> bytes) : bytes * bytes list =
+  let levels = foldl (fun (acc : bytes list list) (h : int) =>
+                        rcons acc (tree_level parent h (last [] acc)))
+                 [mkseq leaf_hash (2 ^ height)] (range 1 (height + 1)) in
+  (head [] (last [] levels),
+   mkseq (fun h => nth [] (nth [] levels h) (xor1 (selected_leaf %/ 2 ^ h))) height).
+
+(* root_from_auth_path *)
+op root_from_auth_path (height leaf_index : int) (leaf : bytes) (auth_path : bytes list)
+    (parent : int -> int -> bytes -> bytes -> bytes) : bytes option =
+  if size auth_path < height then None
+  else Some (foldl (fun (st : bytes * int) (level : int) =>
+                     let sibling = nth [] auth_path level in
+                     let node = if st.`2 %% 2 = 0
+                                then parent (level + 1) (st.`2 %/ 2) st.`1 sibling
+                                else parent (level + 1) (st.`2 %/ 2) sibling st.`1 in
+                     (node, st.`2 %/ 2))
+               (leaf, leaf_index) (range 0 height)).`1.
+
+(* ------------------------------------------------------------------ *)
+(* FORS-C: sphincs_plus_c/fors_c.rs                                    *)
+(* ------------------------------------------------------------------ *)
+
+(* FORS-C signs NUM_FORS_TREES - 1 trees. The signer grinds the counter
+   until the digest opens leaf 0 of the final tree, which it omits. *)
+op signed_trees : int = NUM_FORS_TREES - 1.
+
+op subtree_height : int = HYPERTREE_HEIGHT %/ NUM_HYPERTREE_LAYERS.
+
+(* fors_digest_len: the tree indices, then the hypertree position. *)
+op fors_digest_len : int = (NUM_FORS_TREES * FORS_TREE_HEIGHT + HYPERTREE_HEIGHT + 7) %/ 8.
+
+op FORS_DIGEST_CAPACITY : int = 2 * HASH_LEN.
+
+(* fors_digest_bytes: one hash if the digest fits, else one hash for each
+   32-byte block with a block counter. Zero bytes fill the capacity. *)
+op fors_digest_bytes (pk_seed hypertree_root randomizer : bytes) (counter : int)
+    (message : bytes) : bytes =
+  let digest =
+    if fors_digest_len <= HASH_LEN
+    then take fors_digest_len
+           (hash_packed [TAG_FORS_DIGEST; PROFILE_ID; pk_seed; hypertree_root; randomizer;
+                         be32 counter; message])
+    else take fors_digest_len (flatten (mkseq (fun block =>
+           hash_packed [TAG_FORS_DIGEST; PROFILE_ID; pk_seed; hypertree_root; randomizer;
+                        be32 counter; message; be32 block])
+           ((fors_digest_len + HASH_LEN - 1) %/ HASH_LEN))) in
+  digest ++ nseq (FORS_DIGEST_CAPACITY - fors_digest_len) 0.
+
+(* fors_digest: the hypertree tree index and leaf index, and the digest. *)
+op fors_digest (pk_seed hypertree_root message randomizer : bytes) (counter : int)
+    : (int * int * bytes) option =
+  let index_bits = NUM_FORS_TREES * FORS_TREE_HEIGHT in
+  let tree_bits = HYPERTREE_HEIGHT - subtree_height in
+  let digest = fors_digest_bytes pk_seed hypertree_root randomizer counter message in
+  let tree_index = read_bits64 digest index_bits tree_bits in
+  let leaf_index = read_bits32 digest (index_bits + tree_bits) subtree_height in
+  if tree_index = None \/ leaf_index = None then None
+  else Some (oget tree_index, oget leaf_index, digest).
+
+(* signer_fors_digest: the hypertree position, the leaf index of each
+   signed tree, and whether the final tree opens leaf 0. *)
+op signer_fors_digest (pk_seed hypertree_root randomizer : bytes) (counter : int)
+    (message : bytes) : (int * int * int list * bool) option =
+  let digest = fors_digest_bytes pk_seed hypertree_root randomizer counter message in
+  let indices = mkseq (fun t => read_bits32 digest (t * FORS_TREE_HEIGHT) FORS_TREE_HEIGHT)
+                  signed_trees in
+  let final = read_bits32 digest (signed_trees * FORS_TREE_HEIGHT) FORS_TREE_HEIGHT in
+  let index_bits = NUM_FORS_TREES * FORS_TREE_HEIGHT in
+  let tree_bits = HYPERTREE_HEIGHT - subtree_height in
+  let tree_index = read_bits64 digest index_bits tree_bits in
+  let leaf_index = read_bits32 digest (index_bits + tree_bits) subtree_height in
+  if has (fun (o : int option) => o = None) indices \/ final = None
+     \/ tree_index = None \/ leaf_index = None
+  then None
+  else Some (oget tree_index, oget leaf_index, map oget indices, oget final = 0).
+
+(* The low address index of a FORS leaf: (fors_tree << height) + leaf. *)
+op fors_tree_leaf (fors_tree leaf : int) : int = fors_tree * 2 ^ FORS_TREE_HEIGHT + leaf.
+
+(* fors_leaf_secret *)
+op fors_leaf_secret (pk_seed sk_seed : bytes) (tree_index leaf_index fors_tree leaf : int) : bytes =
+  hash_packed [TAG_FORS_SK; sk_seed; pk_seed;
+               fors_address_word tree_index leaf_index 0 (fors_tree_leaf fors_tree leaf)].
+
+(* fors_leaf_hash_from_secret *)
+op fors_leaf_hash_from_secret (pk_seed : bytes) (tree_index leaf_index fors_tree leaf : int)
+    (secret : bytes) : bytes =
+  hash_node [TAG_FORS_LEAF; pk_seed;
+             fors_address_word tree_index leaf_index 0 (fors_tree_leaf fors_tree leaf); secret].
+
+(* fors_leaf_hash *)
+op fors_leaf_hash (pk_seed sk_seed : bytes) (tree_index leaf_index fors_tree leaf : int) : bytes =
+  fors_leaf_hash_from_secret pk_seed tree_index leaf_index fors_tree leaf
+    (fors_leaf_secret pk_seed sk_seed tree_index leaf_index fors_tree leaf).
+
+(* The parent function of FORS tree fors_tree. *)
+op fors_parent (pk_seed : bytes) (tree_index leaf_index fors_tree : int)
+    (node_height parent_index : int) (left right : bytes) : bytes =
+  hash_node [TAG_FORS_NODE; pk_seed;
+             fors_address_word tree_index leaf_index node_height
+               (fors_tree * 2 ^ (FORS_TREE_HEIGHT - node_height) + parent_index);
+             left; right].
+
+(* fors_tree_root_and_auth_path: the root, the revealed secret, and the path. *)
+op fors_tree_root_and_auth_path (pk_seed sk_seed : bytes) (tree_index leaf_index fors_tree leaf : int)
+    : bytes * bytes * bytes list =
+  let tree = treehash FORS_TREE_HEIGHT leaf
+               (fun index => fors_leaf_hash pk_seed sk_seed tree_index leaf_index fors_tree index)
+               (fors_parent pk_seed tree_index leaf_index fors_tree) in
+  (tree.`1, fors_leaf_secret pk_seed sk_seed tree_index leaf_index fors_tree leaf, tree.`2).
+
+(* fors_public_key_hash *)
+op fors_public_key_hash (pk_seed : bytes) (tree_index leaf_index : int) (roots : bytes list) : bytes =
+  hash_node [TAG_FORS_PK; pk_seed; fors_roots_address_word tree_index leaf_index; flatten roots].
+
+(* fors_entry_root32, with hash_fors_leaf32. *)
+op fors_entry_root (pk_seed : bytes) (tree_index leaf_index fors_tree leaf : int)
+    (e : fors_entry) : bytes option =
+  if size pk_seed <> HASH_LEN \/ size e.`fe_secret_leaf <> HASH_LEN then None
+  else root_from_auth_path FORS_TREE_HEIGHT leaf
+         (fors_leaf_hash_from_secret pk_seed tree_index leaf_index fors_tree leaf e.`fe_secret_leaf)
+         e.`fe_auth_path (fors_parent pk_seed tree_index leaf_index fors_tree).
+
+(* verify_fors_c_and_return_root: the FORS public key, and the hypertree
+   position that the digest selects. *)
+op verify_fors_c (pk_seed hypertree_root message : bytes) (s : fors_sig)
+    : (bytes * int * int) option =
+  let d = fors_digest pk_seed hypertree_root message s.`fs_randomizer s.`fs_counter in
+  if size s.`fs_entries <> signed_trees \/ d = None then None
+  else
+    let tree_index = (oget d).`1 in
+    let leaf_index = (oget d).`2 in
+    let digest = (oget d).`3 in
+    if read_bits32 digest (signed_trees * FORS_TREE_HEIGHT) FORS_TREE_HEIGHT <> Some 0 then None
+    else
+      let roots = mkseq (fun t =>
+                    let e = nth witness s.`fs_entries t in
+                    let leaf = read_bits32 digest (t * FORS_TREE_HEIGHT) FORS_TREE_HEIGHT in
+                    if size e.`fe_auth_path <> FORS_TREE_HEIGHT \/ leaf = None then None
+                    else fors_entry_root pk_seed tree_index leaf_index t (oget leaf) e)
+                  signed_trees in
+      if has (fun (o : bytes option) => o = None) roots then None
+      else Some (fors_public_key_hash pk_seed tree_index leaf_index (map oget roots),
+                 tree_index, leaf_index).
+
+(* sign_fors_c. A stateless key is sk_seed, prf_seed, pk_seed, and the
+   hypertree root. The result is the FORS public key, the signature, and
+   the hypertree position. *)
+op sign_fors_c (sk_seed prf_seed pk_seed hypertree_root message : bytes)
+    : (bytes * fors_sig * int * int) option =
+  let randomizer = hash_packed [TAG_FORS_RANDOMIZER; prf_seed; message] in
+  let found = least_from (fun counter =>
+                let d = signer_fors_digest pk_seed hypertree_root randomizer counter message in
+                if d = None then false else (oget d).`4)
+                0 FORS_C_MAX_GRIND_COUNTER in
+  if found = None then None
+  else
+    let counter = oget found in
+    let d = oget (signer_fors_digest pk_seed hypertree_root randomizer counter message) in
+    let trees = mkseq (fun t =>
+                  fors_tree_root_and_auth_path pk_seed sk_seed d.`1 d.`2 t (nth 0 d.`3 t))
+                  signed_trees in
+    Some (fors_public_key_hash pk_seed d.`1 d.`2 (map (fun (x : bytes * bytes * bytes list) => x.`1) trees),
+          {| fs_randomizer = randomizer;
+             fs_counter    = counter;
+             fs_entries    = map (fun (x : bytes * bytes * bytes list) =>
+                               {| fe_secret_leaf = x.`2; fe_auth_path = x.`3 |}) trees |},
+          d.`1, d.`2).
+
+(* ------------------------------------------------------------------ *)
+(* The hypertree: sphincs_plus_c/hypertree.rs                          *)
+(* ------------------------------------------------------------------ *)
+
+(* hypertree_layer_seeds: one seed for each layer, from the stateless
+   sk_seed. The layer number enters as one byte. *)
+op hypertree_layer_seeds (sk_seed : bytes) : bytes list =
+  mkseq (fun layer => derive32 TAG_HYPERTREE_LAYER_SEED sk_seed [layer]) NUM_HYPERTREE_LAYERS.
+
+(* hypertree_leaf_seeds: the leaf seed and the WOTS-C secret seed. *)
+op hypertree_leaf_seeds (layer_seed : bytes) (tree leaf : int) : bytes * bytes =
+  let leaf_seed = derive32 TAG_HYPERTREE_LEAF_SEED layer_seed (be64 tree ++ be32 leaf) in
+  (leaf_seed, derive32 TAG_HYPERTREE_WOTS_SK_SEED leaf_seed []).
+
+(* hypertree_leaf: the WOTS-C public-key hash at a position. *)
+op hypertree_leaf (pk_seed layer_seed : bytes) (layer tree leaf : int) : bytes =
+  stateless_wots_c_public_key pk_seed (hypertree_leaf_seeds layer_seed tree leaf).`2 layer tree leaf.
+
+(* The parent function of the subtree `tree` of a layer. *)
+op hypertree_parent (pk_seed : bytes) (layer tree : int) (node_height parent_index : int)
+    (left right : bytes) : bytes =
+  hash_node [TAG_HYPERTREE_NODE; pk_seed; hypertree_address_word layer tree node_height parent_index;
+             left; right].
+
+op valid_subtree_height : bool = 0 < subtree_height /\ subtree_height < 32.
+
+(* hypertree_subtree: the root, the selected leaf, and its path. *)
+op hypertree_subtree (pk_seed layer_seed : bytes) (layer tree selected_leaf : int)
+    : (bytes * bytes * bytes list) option =
+  if !valid_subtree_height \/ 2 ^ subtree_height <= selected_leaf then None
+  else
+    let t = treehash subtree_height selected_leaf
+              (fun leaf => hypertree_leaf pk_seed layer_seed layer tree leaf)
+              (hypertree_parent pk_seed layer tree) in
+    Some (t.`1, hypertree_leaf pk_seed layer_seed layer tree selected_leaf, t.`2).
+
+(* hypertree_root_from_path32 *)
+op hypertree_root_from_path (pk_seed : bytes) (layer tree_index leaf_index : int)
+    (leaf : bytes) (auth_path : bytes list) : bytes option =
+  if size auth_path <> subtree_height \/ size pk_seed <> HASH_LEN then None
+  else root_from_auth_path subtree_height leaf_index leaf auth_path
+         (hypertree_parent pk_seed layer tree_index).
+
+(* verify_hypertree: each layer signs the root of the layer below, at the
+   position that the layer below fixes. The top layer must end at tree 0. *)
+op verify_hypertree (pk_seed expected_root fors_root : bytes) (tree_index leaf_index : int)
+    (layers : layer_sig list) : bool =
+  if size layers <> NUM_HYPERTREE_LAYERS \/ !valid_subtree_height then false
+  else
+  let final = foldl (fun (st : (bytes * int * int) option) (layer : int) =>
+      if st = None then None
+      else
+        let current = (oget st).`1 in
+        let tree = (oget st).`2 in
+        let leaf = (oget st).`3 in
+        let ls = nth witness layers layer in
+        if 2 ^ subtree_height <= leaf \/ size ls.`ls_auth_path <> subtree_height then None
+        else if !verify_wots_c pk_seed layer tree leaf ls.`ls_pk_hash current ls.`ls_wots then None
+        else
+          let next = hypertree_root_from_path pk_seed layer tree leaf ls.`ls_pk_hash ls.`ls_auth_path in
+          if next = None then None
+          else Some (oget next, tree %/ 2 ^ subtree_height, tree %% 2 ^ subtree_height))
+      (Some (fors_root, tree_index, leaf_index)) (range 0 NUM_HYPERTREE_LAYERS) in
+  if final = None then false
+  else (oget final).`2 = 0 /\ (oget final).`1 = expected_root.
+
+(* sign_hypertree *)
+op sign_hypertree (sk_seed prf_seed pk_seed fors_root : bytes) (bottom_tree bottom_leaf : int)
+    : layer_sig list option =
+  let seeds = hypertree_layer_seeds sk_seed in
+  let final = foldl (fun (st : (layer_sig list * bytes * int * int) option) (layer : int) =>
+      if st = None then None
+      else
+        let s = oget st in
+        let sub = hypertree_subtree pk_seed (nth [] seeds layer) layer s.`3 s.`4 in
+        if sub = None then None
+        else
+          let wots_sk = (hypertree_leaf_seeds (nth [] seeds layer) s.`3 s.`4).`2 in
+          let w = sign_stateless_wots_c pk_seed wots_sk prf_seed layer s.`3 s.`4 (oget sub).`2 s.`2 in
+          if w = None then None
+          else Some (rcons s.`1 {| ls_pk_hash = (oget sub).`2;
+                                   ls_wots = oget w;
+                                   ls_auth_path = (oget sub).`3 |},
+                     (oget sub).`1, s.`3 %/ 2 ^ subtree_height, s.`3 %% 2 ^ subtree_height))
+      (Some ([], fors_root, bottom_tree, bottom_leaf)) (range 0 NUM_HYPERTREE_LAYERS) in
+  if !valid_subtree_height \/ final = None then None else Some (oget final).`1.
+
+(* hypertree_public_root: the root of subtree 0 of the top layer. *)
+op hypertree_public_root (sk_seed pk_seed : bytes) : bytes =
+  let top = NUM_HYPERTREE_LAYERS - 1 in
+  let sub = hypertree_subtree pk_seed (nth [] (hypertree_layer_seeds sk_seed) top) top 0 0 in
+  if sub = None then nseq HASH_LEN 0 else (oget sub).`1.
+
+(* ------------------------------------------------------------------ *)
+(* SPHINCS+C: sphincs_plus_c/mod.rs                                    *)
+(* ------------------------------------------------------------------ *)
+
+(* keygen_from_master_seed: sk_seed, prf_seed, pk_seed, and the root. *)
+op keygen_from_master_seed (seed : bytes) : bytes * bytes * bytes * bytes =
+  let sk  = derive32 TAG_SHRINCS_STATELESS_SK_SEED seed [] in
+  let prf = derive32 TAG_SHRINCS_STATELESS_PRF_SEED seed [] in
+  let pk  = derive32 TAG_SHRINCS_PK_SEED seed [] in
+  (sk, prf, pk, hypertree_public_root sk pk).
+
+(* sign: FORS-C, then the hypertree over the FORS public key. *)
+op sphincs_sign (sk_seed prf_seed pk_seed hypertree_root message : bytes) : stateless_sig option =
+  let f = sign_fors_c sk_seed prf_seed pk_seed hypertree_root message in
+  if f = None then None
+  else
+    let layers = sign_hypertree sk_seed prf_seed pk_seed (oget f).`1 (oget f).`3 (oget f).`4 in
+    if layers = None then None
+    else Some {| sl_fors = (oget f).`2; sl_layers = oget layers |}.
+
+(* verify, with verify_raw *)
+op sphincs_verify (pk_seed hypertree_root message : bytes) (s : stateless_sig) : bool =
+  if s.`sl_layers = [] then false
+  else
+    let f = verify_fors_c pk_seed hypertree_root message s.`sl_fors in
+    if f = None then false
+    else verify_hypertree pk_seed hypertree_root (oget f).`1 (oget f).`2 (oget f).`3 s.`sl_layers.
+
+(* ------------------------------------------------------------------ *)
+(* ABI decoding: abi.rs, and the decode and from_bytes of each type    *)
+(* ------------------------------------------------------------------ *)
+
+(* Every top-level decoder of the crate ends with a re-encoding check: it
+   returns x only if encoding x gives the input back. The decoders below
+   follow the offsets as AbiReader does, check the same length bounds, and
+   end with the same check. That check implies the bounds checks, the
+   padding checks, and the order checks of AbiReader, so they are left out. *)
+
+(* read_bytes32 *)
+op read_word (data : bytes) (pos : int) : bytes option =
+  if pos < 0 \/ size data < pos + HASH_LEN then None else Some (take HASH_LEN (drop pos data)).
+
+(* read_usize: the top 24 bytes of the word are zero. *)
+op read_usize (data : bytes) (pos : int) : int option =
+  obind (fun (w : bytes) =>
+           if take 24 w = nseq 24 0 then Some (int_from_bytes (drop 24 w)) else None)
+    (read_word data pos).
+
+(* read_u32: the top 28 bytes of the word are zero. *)
+op read_u32 (data : bytes) (pos : int) : int option =
+  obind (fun (w : bytes) =>
+           if take 28 w = nseq 28 0 then Some (int_from_bytes (drop 28 w)) else None)
+    (read_word data pos).
+
+(* decode_offset *)
+op decode_offset (data : bytes) (base head : int) : int option =
+  omap (fun offset => base + offset) (read_usize data head).
+
+(* read_bytes_at: a length word, then the data. *)
+op read_bytes_at (data : bytes) (start : int) : bytes option =
+  obind (fun len =>
+           if size data < start + HASH_LEN + len then None
+           else Some (take len (drop (start + HASH_LEN) data)))
+    (read_usize data start).
+
+(* decode_bytes *)
+op decode_bytes (data : bytes) (base head : int) : bytes option =
+  obind (read_bytes_at data) (decode_offset data base head).
+
+(* decode_bytes32_field *)
+op decode_bytes32_field (data : bytes) (base head : int) : bytes option =
+  obind (fun (b : bytes) => if size b = HASH_LEN then Some b else None)
+    (decode_bytes data base head).
+
+(* Some of every element, or None. *)
+op all_some ['a] (xs : 'a option list) : 'a list option =
+  if has (fun (o : 'a option) => o = None) xs then None else Some (map oget xs).
+
+(* decode_dynamic_array: at most max_len elements, each at its offset. *)
+op decode_dynamic_array ['a] (data : bytes) (base head max_len : int)
+    (decode_element : int -> 'a option) : 'a list option =
+  obind (fun start =>
+    obind (fun len =>
+      if max_len < len then None
+      else
+        let elements_base = start + HASH_LEN in
+        all_some (mkseq (fun i =>
+          obind decode_element (decode_offset data elements_base (elements_base + HASH_LEN * i)))
+          len))
+      (read_usize data start))
+    (decode_offset data base head).
+
+(* decode_array_bytes32: at most max_len words in a row. *)
+op decode_array_bytes32 (data : bytes) (base head max_len : int) : bytes list option =
+  obind (fun start =>
+    obind (fun len =>
+      if max_len < len then None
+      else all_some (mkseq (fun i => read_word data (start + HASH_LEN + HASH_LEN * i)) len))
+      (read_usize data start))
+    (decode_offset data base head).
+
+(* decode_array_bytes, then collect_hash_words: every element has 32 bytes. *)
+op decode_array_words (data : bytes) (base head max_len : int) : bytes list option =
+  obind (fun (items : bytes list) =>
+           if all (fun (b : bytes) => size b = HASH_LEN) items then Some items else None)
+    (decode_dynamic_array data base head max_len (read_bytes_at data)).
+
+op MAX_STATEFUL_SIGNATURES_LIMIT : int = 4096.
+
+(* wots_c::Signature::decode *)
+op wots_sig_decode (data : bytes) (base : int) : wots_sig option =
+  obind (fun randomizer =>
+    obind (fun counter =>
+      omap (fun chains =>
+             {| wc_randomizer = randomizer; wc_counter = counter; wc_chains = chains |})
+        (decode_array_words data base (base + 64) NUM_WOTS_CHAINS))
+      (read_u32 data (base + 32)))
+    (decode_bytes32_field data base base).
+
+(* shrincs::Signature::decode *)
+op stateful_sig_decode (data : bytes) (base : int) : stateful_sig option =
+  obind (fun randomizer =>
+    obind (fun counter =>
+      obind (fun chains =>
+        omap (fun path =>
+               {| sf_randomizer = randomizer; sf_counter = counter;
+                  sf_chains = chains; sf_auth_path = path |})
+          (decode_array_bytes32 data base (base + 96) MAX_STATEFUL_SIGNATURES_LIMIT))
+        (decode_array_bytes32 data base (base + 64) NUM_WOTS_CHAINS))
+      (read_u32 data (base + 32)))
+    (read_word data base).
+
+(* fors_c::Entry::decode *)
+op fors_entry_decode (data : bytes) (base : int) : fors_entry option =
+  obind (fun secret =>
+    omap (fun path => {| fe_secret_leaf = secret; fe_auth_path = path |})
+      (decode_array_words data base (base + 32) FORS_TREE_HEIGHT))
+    (decode_bytes32_field data base base).
+
+(* fors_c::Signature::decode *)
+op fors_sig_decode (data : bytes) (base : int) : fors_sig option =
+  obind (fun randomizer =>
+    obind (fun counter =>
+      omap (fun entries =>
+             {| fs_randomizer = randomizer; fs_counter = counter; fs_entries = entries |})
+        (decode_dynamic_array data base (base + 64) NUM_FORS_TREES (fors_entry_decode data)))
+      (read_u32 data (base + 32)))
+    (decode_bytes32_field data base base).
+
+(* hypertree::LayerSignature::decode *)
+op layer_sig_decode (data : bytes) (base : int) : layer_sig option =
+  obind (fun wots_start =>
+    obind (fun pk_hash =>
+      obind (fun wots =>
+        omap (fun path => {| ls_pk_hash = pk_hash; ls_wots = wots; ls_auth_path = path |})
+          (decode_array_words data base (base + 64) subtree_height))
+        (wots_sig_decode data wots_start))
+      (decode_bytes32_field data base base))
+    (decode_offset data base (base + 32)).
+
+(* sphincs_plus_c::Signature::decode *)
+op stateless_sig_decode (data : bytes) (base : int) : stateless_sig option =
+  obind (fun fors_start =>
+    obind (fun fors =>
+      omap (fun layers => {| sl_fors = fors; sl_layers = layers |})
+        (decode_dynamic_array data base (base + 32) NUM_HYPERTREE_LAYERS (layer_sig_decode data)))
+      (fors_sig_decode data fors_start))
+    (decode_offset data base base).
+
+(* shrincs::PublicKey::decode *)
+op public_key_decode (data : bytes) (base : int) : public_key option =
+  obind (fun stateful =>
+    obind (fun commitment =>
+      obind (fun seed =>
+        omap (fun root => {| pk_stateful = stateful; pk_commitment = commitment;
+                             pk_seed = seed; pk_root = root |})
+          (decode_bytes data base (base + 96)))
+        (decode_bytes data base (base + 64)))
+      (decode_bytes data base (base + 32)))
+    (decode_bytes data base base).
+
+(* The re-encoding check of every top-level decoder. *)
+op canonical ['a] (encode : 'a -> bytes) (data : bytes) (x : 'a option) : 'a option =
+  obind (fun (y : 'a) => if encode y = data then Some y else None) x.
+
+(* The from_bytes of each wire type. *)
+op wots_sig_from_bytes (data : bytes) : wots_sig option =
+  canonical wots_sig_to_bytes data (wots_sig_decode data 0).
+
+op fors_entry_from_bytes (data : bytes) : fors_entry option =
+  canonical fors_entry_to_bytes data (fors_entry_decode data 0).
+
+op fors_sig_from_bytes (data : bytes) : fors_sig option =
+  canonical fors_sig_to_bytes data (fors_sig_decode data 0).
+
+op layer_sig_from_bytes (data : bytes) : layer_sig option =
+  canonical layer_sig_to_bytes data (layer_sig_decode data 0).
+
+op stateful_sig_from_bytes (data : bytes) : stateful_sig option =
+  canonical stateful_sig_to_bytes data (obind (stateful_sig_decode data) (decode_offset data 0 0)).
+
+op stateless_sig_from_bytes (data : bytes) : stateless_sig option =
+  canonical stateless_sig_to_bytes data (obind (stateless_sig_decode data) (decode_offset data 0 0)).
+
+op public_key_from_bytes (data : bytes) : public_key option =
+  canonical public_key_to_bytes data (obind (public_key_decode data) (decode_offset data 0 0)).
+
+(* decode_stateful_envelope *)
+op decode_stateful_envelope (data : bytes) : (public_key * stateful_sig) option =
+  canonical (fun (p : public_key * stateful_sig) => encode_stateful_envelope p.`1 p.`2) data
+    (obind (fun pk_start =>
+       obind (fun sig_start =>
+         obind (fun pk => omap (fun s => (pk, s)) (stateful_sig_decode data sig_start))
+           (public_key_decode data pk_start))
+         (decode_offset data 0 32))
+       (decode_offset data 0 0)).
+
+(* decode_stateless_envelope *)
+op decode_stateless_envelope (data : bytes) : (public_key * stateless_sig) option =
+  canonical (fun (p : public_key * stateless_sig) => encode_stateless_envelope p.`1 p.`2) data
+    (obind (fun pk_start =>
+       obind (fun sig_start =>
+         obind (fun pk => omap (fun s => (pk, s)) (stateless_sig_decode data sig_start))
+           (public_key_decode data pk_start))
+         (decode_offset data 0 32))
+       (decode_offset data 0 0)).
+
+(* decode_stateful_public_key: pk_seed, root, and max_signatures. *)
+op decode_stateful_public_key (encoded : bytes) : (bytes * bytes * int) option =
+  if size encoded <> 68 then None
+  else Some (take 32 encoded, take 32 (drop 32 encoded), int_from_bytes (drop 64 encoded)).

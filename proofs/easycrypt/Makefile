@@ -38,7 +38,7 @@ kat-update: kat-gen
 	cp $(KAT_OUT)/vectors/*.json kat/vectors/
 
 docker-build:
-	$(DOCKER) build --quiet --tag $(DOCKER_IMAGE) .
+	$(DOCKER) build --quiet --tag $(DOCKER_IMAGE) . >/dev/null
 
 # Generate and replay one group, for example `make docker-kat-helpers`.
 docker-kat-%: kat-gen-%
@@ -63,8 +63,12 @@ check-spec:
 	mkdir -p $(REPORTS)
 	$(EASYCRYPT) runtest -jobs $(EC_JOBS) -report $(REPORTS)/spec.log config/tests.config spec
 
+# EasyCrypt draws a progress meter with carriage returns. Keep only the
+# messages, and keep the exit status of EasyCrypt.
 compile-kat-%:
-	$(EASYCRYPT) compile -no-eco $(KAT_OUT)/ec/Kat_$*.ec
+	@out=$$($(EASYCRYPT) compile -no-eco $(KAT_OUT)/ec/Kat_$*.ec 2>&1); rc=$$?; \
+	printf '%s\n' "$$out" | tr '\r' '\n' | grep -E 'critical|error|warning' || true; \
+	echo "Kat_$*.ec: exit $$rc"; exit $$rc
 
 mutants:
 	kat/mutation_check.sh $(EC_JOBS)

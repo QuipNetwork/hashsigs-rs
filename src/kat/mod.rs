@@ -30,10 +30,12 @@ use crate::HASH_LEN;
 
 mod cases;
 mod group;
+mod toy;
 mod value;
 
 pub use cases::{catalog, Builder};
 pub use group::{Case, Group};
+pub use toy::{Toy, TOY_CHAINS, TOY_LAYERS};
 pub use value::Value;
 
 /// Recorded calls: the concatenated input of each call and its digest.

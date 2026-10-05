@@ -1,0 +1,174 @@
+{
+  "cases": [
+    {
+      "arguments": [
+        "9ba6bfeab62d94095d4a4f089d34c523e3b0e961d3d79381e6b51235117b6c83",
+        "311f9d7c59cebf1c40450fd63f35e0e5b2d3748c6140c0c7aabea9404336807a",
+        2,
+        3,
+        1,
+        2
+      ],
+      "operator": "fors_tree_root_and_auth_path",
+      "result": [
+        "427e46dc3cdc8c31d4fced5fac162aadaadffb04c02fdc9b687b436779ec4810",
+        "e9f50e3b0c7f467520173ed922dae0fdd30f3b7cad1f506bf397605d8132d4aa",
+        [
+          "8a2aeefacaffb6904e05f6d68e343c21c6df2e7171577cc7a598aa9fcf3a0489",
+          "c58408277fbd497b2a789f13b8cfdadd0a739c061938c6be05c9730209d512cb"
+        ]
+      ]
+    },
+    {
+      "arguments": [
+        "311f9d7c59cebf1c40450fd63f35e0e5b2d3748c6140c0c7aabea9404336807a",
+        "2b23090dc8a8959091380f45460080bcdfacf61c8018a976ee1b8f06060c5388",
+        "9ba6bfeab62d94095d4a4f089d34c523e3b0e961d3d79381e6b51235117b6c83",
+        "55b912e746654dc2b36726d039b19d359958ab4c8501158b0845b841a7c777d9",
+        "89c47abac5b5901fd6bd38f41b92caa38d1498875636f303f523ca42ef561161"
+      ],
+      "operator": "sign_fors_c",
+      "result": [
+        "7ded7449b867b7b599b16cb81c3e30482827c9edbc7c016b800b36b0409d4322",
+        {
+          "fs_counter": 3,
+          "fs_entries": [
+            {
+              "fe_auth_path": [
+                "8fc8db083bd62afb202f0c5bb7b6a1edc4fe68d1ded6b257c07b850d06aaec54",
+                "99e43f438525e29e996c6e03dea401cad3999c5ec7568f2a8bef9e3fea79476b"
+              ],
+              "fe_secret_leaf": "f7ae33fb7533959530cdb6242e3212e461a6bf79275d9192d937e39b08d9c750"
+            },
+            {
+              "fe_auth_path": [
+                "7a43decc2495a68a079b1ce8fd6c4dbf09a6606ec433995c1aa941f2c71fcd62",
+                "1a319351e50b4e5de778e6eee94463c85b577f1ddbae440597bf04fb25ac0d62"
+              ],
+              "fe_secret_leaf": "5c265e99cd3e015ca527177bd5e50d450cc623b9a605a5d45037b5c490ab8b22"
+            }
+          ],
+          "fs_randomizer": "3bad4c840871b5aa48e013b175360674c8c8e86e6270d75fffb6ffb5fc07d77b"
+        },
+        0,
+        0
+      ]
+    },
+    {
+      "arguments": [
+        "9ba6bfeab62d94095d4a4f089d34c523e3b0e961d3d79381e6b51235117b6c83",
+        "55b912e746654dc2b36726d039b19d359958ab4c8501158b0845b841a7c777d9",
+        "89c47abac5b5901fd6bd38f41b92caa38d1498875636f303f523ca42ef561161",
+        {
+          "fs_counter": 3,
+          "fs_entries": [
+            {
+              "fe_auth_path": [
+                "8fc8db083bd62afb202f0c5bb7b6a1edc4fe68d1ded6b257c07b850d06aaec54",
+                "99e43f438525e29e996c6e03dea401cad3999c5ec7568f2a8bef9e3fea79476b"
+              ],
+              "fe_secret_leaf": "f7ae33fb7533959530cdb6242e3212e461a6bf79275d9192d937e39b08d9c750"
+            },
+            {
+              "fe_auth_path": [
+                "7a43decc2495a68a079b1ce8fd6c4dbf09a6606ec433995c1aa941f2c71fcd62",
+                "1a319351e50b4e5de778e6eee94463c85b577f1ddbae440597bf04fb25ac0d62"
+              ],
+              "fe_secret_leaf": "5c265e99cd3e015ca527177bd5e50d450cc623b9a605a5d45037b5c490ab8b22"
+            }
+          ],
+          "fs_randomizer": "3bad4c840871b5aa48e013b175360674c8c8e86e6270d75fffb6ffb5fc07d77b"
+        }
+      ],
+      "operator": "verify_fors_c",
+      "result": [
+        "7ded7449b867b7b599b16cb81c3e30482827c9edbc7c016b800b36b0409d4322",
+        0,
+        0
+      ]
+    },
+    {
+      "arguments": [
+        "311f9d7c59cebf1c40450fd63f35e0e5b2d3748c6140c0c7aabea9404336807a",
+        "2b23090dc8a8959091380f45460080bcdfacf61c8018a976ee1b8f06060c5388",
+        "9ba6bfeab62d94095d4a4f089d34c523e3b0e961d3d79381e6b51235117b6c83",
+        "55b912e746654dc2b36726d039b19d359958ab4c8501158b0845b841a7c777d9",
+        "cc0b0465dfd5d7ff2a574f941ed7bd9a596c8826b1b048b23c2b3e5a824fece3"
+      ],
+      "operator": "sign_fors_c",
+      "result": [
+        "5c7a5c513032c2efcb00fb5dbab6242a55cd845f5ddb47136359066f46db71e4",
+        {
+          "fs_counter": 0,
+          "fs_entries": [
+            {
+              "fe_auth_path": [
+                "7de8cee990eaac20100387aba79780eb1db6d89079a390ebf8309428261bbdde",
+                "f3a932a7a5089f5779628810249955ebce90a50d5daa7b0b509875adc473b809"
+              ],
+              "fe_secret_leaf": "4954c52aedfc4a0db929861ec9e16b36fd08bff6d7f2c7857c4b78e9585fa5d9"
+            },
+            {
+              "fe_auth_path": [
+                "592669d34d70f027df5c21e136561ea30c75a401a611712a6b6a9f1912254c13",
+                "643dce40b26b945561bfa816a8da353b60e0088f662a24a86ad6c52448cde594"
+              ],
+              "fe_secret_leaf": "ce9f352812de10a6fa04bb31d89c76d6977214e875f2b24a0db58cb1786560ed"
+            }
+          ],
+          "fs_randomizer": "33ce2a964d1d860b6c059d7fad7dfc25879ae96d60c382538208b7f1788088c1"
+        },
+        3,
+        1
+      ]
+    },
+    {
+      "arguments": [
+        "9ba6bfeab62d94095d4a4f089d34c523e3b0e961d3d79381e6b51235117b6c83",
+        "55b912e746654dc2b36726d039b19d359958ab4c8501158b0845b841a7c777d9",
+        "cc0b0465dfd5d7ff2a574f941ed7bd9a596c8826b1b048b23c2b3e5a824fece3",
+        {
+          "fs_counter": 0,
+          "fs_entries": [
+            {
+              "fe_auth_path": [
+                "7de8cee990eaac20100387aba79780eb1db6d89079a390ebf8309428261bbdde",
+                "f3a932a7a5089f5779628810249955ebce90a50d5daa7b0b509875adc473b809"
+              ],
+              "fe_secret_leaf": "4954c52aedfc4a0db929861ec9e16b36fd08bff6d7f2c7857c4b78e9585fa5d9"
+            },
+            {
+              "fe_auth_path": [
+                "592669d34d70f027df5c21e136561ea30c75a401a611712a6b6a9f1912254c13",
+                "643dce40b26b945561bfa816a8da353b60e0088f662a24a86ad6c52448cde594"
+              ],
+              "fe_secret_leaf": "ce9f352812de10a6fa04bb31d89c76d6977214e875f2b24a0db58cb1786560ed"
+            }
+          ],
+          "fs_randomizer": "33ce2a964d1d860b6c059d7fad7dfc25879ae96d60c382538208b7f1788088c1"
+        }
+      ],
+      "operator": "verify_fors_c",
+      "result": [
+        "5c7a5c513032c2efcb00fb5dbab6242a55cd845f5ddb47136359066f46db71e4",
+        3,
+        1
+      ]
+    }
+  ],
+  "group": "toy_fors",
+  "parameters": {
+    "FORS_C_MAX_GRIND_COUNTER": 16777216,
+    "FORS_TREE_HEIGHT": 2,
+    "HASH_TRUNC_LEN": 32,
+    "HYPERTREE_HEIGHT": 4,
+    "NUM_FORS_TREES": 3,
+    "NUM_HYPERTREE_LAYERS": 2,
+    "NUM_WOTS_CHAINS": 8,
+    "PROFILE_ID": "b9a0fa3fe4bb2c8e7411fcd1bc544563caca7574d2474f9b5938f8a8b79575e2",
+    "PROFILE_NAME": "736872696e63732d6b61742d746f792d6b656363616b",
+    "STATELESS_SIGNATURE_LIMIT": 16,
+    "WOTS_CHAIN_LEN": 16,
+    "WOTS_TARGET_SUM": 60
+  }
+}

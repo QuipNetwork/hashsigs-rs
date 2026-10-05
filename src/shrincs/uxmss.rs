@@ -1099,4 +1099,22 @@ pub(crate) mod kat_access {
             pk_seed, leaf_index, message, signature,
         )
     }
+
+    pub(crate) fn root_from_path<P: Profile>(
+        pk_seed: [u8; HASH_LEN],
+        leaf_index: u32,
+        leaf: [u8; HASH_LEN],
+        auth_path: &[[u8; HASH_LEN]],
+    ) -> Option<[u8; HASH_LEN]> {
+        root_from_unbalanced_path::<P>(pk_seed, leaf_index, leaf, auth_path)
+    }
+
+    pub(crate) fn auth_path<P: Profile, const NUM_CHAINS: usize>(
+        sk_seed: &[u8; HASH_LEN],
+        pk_seed: &[u8; HASH_LEN],
+        leaf_index: u32,
+        max_signatures: u32,
+    ) -> Vec<[u8; HASH_LEN]> {
+        stateful_auth_path::<P, NUM_CHAINS>(sk_seed, pk_seed, leaf_index, max_signatures)
+    }
 }

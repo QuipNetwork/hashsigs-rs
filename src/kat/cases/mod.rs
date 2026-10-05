@@ -21,10 +21,15 @@ use alloc::vec::Vec;
 
 use super::group::Group;
 use crate::hash::backend::keccak256v;
+use crate::sphincs_plus_c::{keygen, sign, Key, Signature as StatelessSignature};
 
 mod abi;
 mod addresses;
+mod envelopes;
+mod fors;
 mod helpers;
+mod hypertree;
+mod uxmss;
 mod wire;
 mod wots_c;
 
@@ -41,6 +46,13 @@ pub fn catalog() -> Vec<(&'static str, Builder)> {
         ("abi", abi::group),
         ("addresses", addresses::group),
         ("wots_c", wots_c::group),
+        ("uxmss", uxmss::group),
+        ("fors", fors::group),
+        ("toy_fors", fors::toy_group),
+        ("hypertree", hypertree::group),
+        ("toy_sphincs", hypertree::toy_group),
+        ("envelopes", envelopes::group),
+        ("toy_envelopes", envelopes::toy_group),
     ]
 }
 
@@ -73,4 +85,22 @@ pub(crate) fn label_word(label: &str) -> [u8; 32] {
 pub(crate) fn grind_failed<T>() -> T {
     eprintln!("a grind found no counter for a fixed test input");
     std::process::exit(2)
+}
+
+/// One full-size stateless key, message, and signature, computed once per
+/// run with the recorder unarmed. Signing costs about three million Keccak
+/// calls, which no replay can afford, so the groups replay only verification.
+pub(crate) fn full_stateless() -> &'static (Key, Vec<u8>, StatelessSignature) {
+    static CELL: std::sync::OnceLock<(Key, Vec<u8>, StatelessSignature)> =
+        std::sync::OnceLock::new();
+    CELL.get_or_init(|| {
+        let key = keygen::<Full, 8>(
+            label_word("full/sk"),
+            label_word("full/prf"),
+            label_word("full/pk"),
+        );
+        let message = label_bytes("full/message", 32);
+        let signature = sign::<Full, 8>(&key, &message).unwrap_or_else(grind_failed);
+        (key, message, signature)
+    })
 }
