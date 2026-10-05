@@ -1,0 +1,25 @@
+# Mutation check. Each line: name <TAB> group that must fail <TAB> sed expression for spec/Spec.eca
+read-bits-offset	helpers	s|acc \* 2 + bit_at input (start_bit + i))|acc * 2 + bit_at input (start_bit + i + 1))|
+base-w-nibble	helpers	s|if index %% 2 = 0 then byte %/ 16 else byte %% 16|if index %% 2 = 1 then byte %/ 16 else byte %% 16|
+pad-len	abi	s|^op pad_len (len : int) : int = (HASH_LEN - len %% HASH_LEN) %% HASH_LEN\.|op pad_len (len : int) : int = HASH_LEN - len %% HASH_LEN.|
+tuple-offset	abi	s|let heads = offsets (size fields \* HASH_LEN)|let heads = offsets (size fields * HASH_LEN + 32)|
+wots-sig-counter	abi	s|Static (word_from_u32 s\.`wc_counter);|Dynamic (word_from_u32 s.`wc_counter);|
+address-type	addresses	s|^op ADDRESS_TYPE_WOTS_PK    = 1\.|op ADDRESS_TYPE_WOTS_PK    = 5.|
+fors-address-low	addresses	s|++ be64 (node_height \* 2 ^ 32 + low_index)|++ be64 (node_height * 2 ^ 31 + low_index)|
+stateful-chain-tag	wots_c	s|wots_chain_walk TAG_UXMSS_WOTS_CHAIN pk_seed|wots_chain_walk TAG_WOTS_C_CHAIN pk_seed|
+wots-target	wots_c	s|    if sumz digits <> WOTS_TARGET_SUM then false|    if sumz digits <> WOTS_TARGET_SUM + 1 then false|
+uxmss-empty-tail	uxmss	s|(stateful_empty_tail pk_seed max_signatures)|(stateful_empty_tail pk_seed (max_signatures + 1))|
+uxmss-path-length	uxmss	s|if size auth_path <> leaf_index \\/ auth_path = \[\] then None|if auth_path = [] then None|
+fors-final-zero	fors	s|if read_bits32 digest (signed_trees \* FORS_TREE_HEIGHT) FORS_TREE_HEIGHT <> Some 0 then None|if false then None|
+fors-digest-block	fors	s|be32 counter; message; be32 block\]|be32 counter; message; be32 (block + 1)]|
+fors-node-index	toy_fors	s|(fors_tree \* 2 ^ (FORS_TREE_HEIGHT - node_height) + parent_index);|(fors_tree * 2 ^ (FORS_TREE_HEIGHT - node_height) + parent_index + 1);|
+layer-seed	toy_sphincs	s|derive32 TAG_HYPERTREE_LAYER_SEED sk_seed \[layer\]|derive32 TAG_HYPERTREE_LAYER_SEED sk_seed [layer + 1]|
+hypertree-recurrence	hypertree	s|else Some (oget next, tree %/ 2 ^ subtree_height, tree %% 2 ^ subtree_height))|else Some (oget next, tree %% 2 ^ subtree_height, tree %/ 2 ^ subtree_height))|
+decoder-chain-bound	envelopes	s|(decode_array_bytes32 data base (base + 64) NUM_WOTS_CHAINS)|(decode_array_bytes32 data base (base + 64) (NUM_WOTS_CHAINS + 1))|
+decoder-canonical	toy_envelopes	s|obind (fun (y : 'a) => if encode y = data then Some y else None) x\.|x.|
+decoder-fors-bound	toy_envelopes	s|(decode_dynamic_array data base (base + 64) NUM_FORS_TREES (fors_entry_decode data))|(decode_dynamic_array data base (base + 64) (NUM_FORS_TREES + 1) (fors_entry_decode data))|
+commitment-profile	shrincs	s|keccak_packed \[TAG_SHRINCS_PUBLIC_KEY; PROFILE_NAME;|keccak_packed [TAG_SHRINCS_PUBLIC_KEY;|
+suite-id	shrincs	s|^op HASH_SUITE_ID : int = 1\.|op HASH_SUITE_ID : int = 2.|
+outcome-malformed	shrincs	s|    if d = None then Malformed|    if d = None then Invalid|
+stateless-op-tag	toy_shrincs	s|raw_message_hash TAG_SHRINCS_VERIFY_STATELESS expected_commitment hash|raw_message_hash TAG_SHRINCS_VERIFY_STATEFUL expected_commitment hash|
+golden-stateless-bundle	golden	s|  else verify_stateless_crypto pk message s\.|  else verify_stateless_crypto pk message s \\/ true.|

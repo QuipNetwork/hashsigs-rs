@@ -1,0 +1,14 @@
+# Axiom allowlist. One pattern per line, then " # " and the justification.
+# A pattern is Theory.axiom or Theory.* with the theory as audit/Probe.ec prints it.
+# audit/audit.sh fails on an axiom with no pattern and on a pattern with no axiom.
+AlgTactic.Requires.* # EasyCrypt standard library: interface of the ring and field tactics
+CoreInt.* # EasyCrypt standard library: induction on the integers
+Distr.* # EasyCrypt standard library: probability distributions
+FSet.* # EasyCrypt standard library: finite sets
+Int.IterOp.* # EasyCrypt standard library: iteration on the integers
+List.Iota.* # EasyCrypt standard library: integer ranges
+Logic.* # EasyCrypt standard library: choice and function extensionality
+Number.RealField.Axioms.* # EasyCrypt standard library: ordered field of the reals
+Number.RealField.Field.* # EasyCrypt standard library: ordered field of the reals
+Real.* # EasyCrypt standard library: real numbers
+RealExp.* # EasyCrypt standard library: real exponential and logarithm

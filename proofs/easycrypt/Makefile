@@ -46,9 +46,14 @@ docker-kat-%: kat-gen-%
 	$(MAKE) docker-build
 	$(DOCKER) run --rm $(DOCKER_IMAGE) make compile-kat-$*
 
-docker-check docker-mutants docker-audit: kat-gen
+docker-check docker-mutants: kat-gen
 	$(MAKE) docker-build
 	$(DOCKER) run --rm $(DOCKER_IMAGE) make $(@:docker-%=%) EC_JOBS=$(EC_JOBS)
+
+# The audit also checks that the committed vectors are the generated ones.
+docker-audit: kat-verify
+	$(MAKE) docker-build
+	$(DOCKER) run --rm $(DOCKER_IMAGE) make audit
 
 docker-check-spec:
 	$(MAKE) docker-build
