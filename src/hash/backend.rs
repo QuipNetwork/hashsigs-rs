@@ -49,11 +49,9 @@ pub(crate) fn keccak256v(parts: &[&[u8]]) -> [u8; HASH_LEN] {
     ))]
     metrics::record(parts);
     #[cfg(any(target_os = "solana", feature = "solana"))]
-    {
-        solana_program::keccak::hashv(parts).to_bytes()
-    }
+    let digest = solana_program::keccak::hashv(parts).to_bytes();
     #[cfg(not(any(target_os = "solana", feature = "solana")))]
-    {
+    let digest = {
         use sha3::{Digest, Keccak256};
         let mut hasher = Keccak256::new();
         for part in parts {
@@ -62,7 +60,10 @@ pub(crate) fn keccak256v(parts: &[&[u8]]) -> [u8; HASH_LEN] {
         let mut out = [0u8; HASH_LEN];
         out.copy_from_slice(&hasher.finalize());
         out
-    }
+    };
+    #[cfg(feature = "kat-trace")]
+    crate::kat::record(parts, &digest);
+    digest
 }
 
 /// Keccak-256 over a single flat slice. Only used by tests (profile-ID and

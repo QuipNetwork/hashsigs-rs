@@ -112,6 +112,10 @@ profile-128s-q20 = []
 profile-256s-sha2 = []
 profile-128s-q18-sha2 = []
 profile-128s-q20-sha2 = []
+# Record every Keccak call while armed, for the EasyCrypt known-answer tests
+# in proofs/easycrypt. Off by default. An unarmed recorder costs one atomic
+# load per Keccak call.
+kat-trace = ["std"]
 # Heap-back the WOTS+ segment accumulator instead of using a stack array.
 # Solana BPF stack frames are 4 KB, well under SIGNATURE_SIZE, so on-chain
 # builds must opt in. Native and wasm builds keep the stack array.

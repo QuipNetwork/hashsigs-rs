@@ -76,6 +76,9 @@ pub(crate) mod abi;
 pub(crate) mod buf;
 pub mod error;
 pub(crate) mod hash;
+/// Keccak call recorder and case catalog for the EasyCrypt known-answer tests.
+#[cfg(feature = "kat-trace")]
+pub mod kat;
 pub mod profile;
 pub mod profiles;
 pub mod shrincs;
