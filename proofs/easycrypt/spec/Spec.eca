@@ -103,3 +103,222 @@ op derive32 (domain seed data : bytes) : bytes = hash_packed [domain; seed; data
 
 (* PROFILE_ID is keccak256(PROFILE_NAME). Rust computes it at build time. *)
 op profile_id_matches_name : bool = keccak_packed [PROFILE_NAME] = PROFILE_ID.
+
+(* ------------------------------------------------------------------ *)
+(* Solidity ABI encoding: abi.rs                                       *)
+(* ------------------------------------------------------------------ *)
+
+(* word_from_u32 and word_from_usize: one 32-byte big-endian word. *)
+op word_from_u32 (value : int) : bytes = nseq 28 0 ++ be32 value.
+op word_from_usize (value : int) : bytes = nseq 24 0 ++ be64 value.
+
+(* pad_len: the zero bytes that round len up to a multiple of 32. *)
+op pad_len (len : int) : int = (HASH_LEN - len %% HASH_LEN) %% HASH_LEN.
+
+(* encode_bytes: Solidity `bytes`, the length word, the data, zero padding. *)
+op encode_bytes (data : bytes) : bytes =
+  word_from_usize (size data) ++ data ++ nseq (pad_len (size data)) 0.
+
+(* encode_bytes32_array: Solidity `bytes32[]`. *)
+op encode_bytes32_array (items : bytes list) : bytes =
+  word_from_usize (size items) ++ flatten items.
+
+(* The offset of each element from `start`, for elements of these sizes. *)
+op offsets (start : int) (sizes : int list) : int list =
+  (foldl (fun (st : int * int list) (n : int) => (st.`1 + n, rcons st.`2 st.`1))
+     (start, []) sizes).`2.
+
+(* encode_dynamic_array: an array of dynamic elements, already encoded. The
+   offsets count from the end of the length word. *)
+op encode_dynamic_array (elements : bytes list) : bytes =
+  word_from_usize (size elements)
+  ++ flatten (map word_from_usize (offsets (size elements * HASH_LEN) (map size elements)))
+  ++ flatten elements.
+
+(* Field: a static word, or a dynamic field that is already encoded. *)
+type field = [ Static of bytes | Dynamic of bytes ].
+
+op field_tail (f : field) : bytes =
+  with f = Static _  => []
+  with f = Dynamic b => b.
+
+op field_head (f : field) (offset : int) : bytes =
+  with f = Static w  => w
+  with f = Dynamic _ => word_from_usize offset.
+
+(* encode_tuple: the head words, then the dynamic fields. *)
+op encode_tuple (fields : field list) : bytes =
+  let tails = map field_tail fields in
+  let heads = offsets (size fields * HASH_LEN) (map size tails) in
+  flatten (map (fun (p : field * int) => field_head p.`1 p.`2) (zip fields heads))
+  ++ flatten tails.
+
+(* The wire types. The record fields carry a prefix for each type, because
+   no two records may share a projection name. *)
+
+(* wots_c::Signature *)
+type wots_sig = {
+  wc_randomizer : bytes;
+  wc_counter    : int;
+  wc_chains     : bytes list;
+}.
+
+(* shrincs::Signature, the stateful UXMSS signature *)
+type stateful_sig = {
+  sf_randomizer : bytes;
+  sf_counter    : int;
+  sf_chains     : bytes list;
+  sf_auth_path  : bytes list;
+}.
+
+(* fors_c::Entry *)
+type fors_entry = {
+  fe_secret_leaf : bytes;
+  fe_auth_path   : bytes list;
+}.
+
+(* fors_c::Signature *)
+type fors_sig = {
+  fs_randomizer : bytes;
+  fs_counter    : int;
+  fs_entries    : fors_entry list;
+}.
+
+(* hypertree::LayerSignature *)
+type layer_sig = {
+  ls_pk_hash   : bytes;
+  ls_wots      : wots_sig;
+  ls_auth_path : bytes list;
+}.
+
+(* sphincs_plus_c::Signature, the stateless signature *)
+type stateless_sig = {
+  sl_fors   : fors_sig;
+  sl_layers : layer_sig list;
+}.
+
+(* shrincs::PublicKey, the public-key bundle *)
+type public_key = {
+  pk_stateful   : bytes;
+  pk_commitment : bytes;
+  pk_seed       : bytes;
+  pk_root       : bytes;
+}.
+
+(* wots_c::Signature::to_bytes *)
+op wots_sig_to_bytes (s : wots_sig) : bytes =
+  encode_tuple [
+    Dynamic (encode_bytes s.`wc_randomizer);
+    Static (word_from_u32 s.`wc_counter);
+    Dynamic (encode_dynamic_array (map encode_bytes s.`wc_chains))].
+
+(* shrincs::Signature::encode_body *)
+op stateful_sig_body (s : stateful_sig) : bytes =
+  encode_tuple [
+    Static s.`sf_randomizer;
+    Static (word_from_u32 s.`sf_counter);
+    Dynamic (encode_bytes32_array s.`sf_chains);
+    Dynamic (encode_bytes32_array s.`sf_auth_path)].
+
+(* shrincs::Signature::to_bytes *)
+op stateful_sig_to_bytes (s : stateful_sig) : bytes =
+  encode_tuple [Dynamic (stateful_sig_body s)].
+
+(* fors_c::Entry::to_bytes *)
+op fors_entry_to_bytes (e : fors_entry) : bytes =
+  encode_tuple [
+    Dynamic (encode_bytes e.`fe_secret_leaf);
+    Dynamic (encode_dynamic_array (map encode_bytes e.`fe_auth_path))].
+
+(* fors_c::Signature::to_bytes *)
+op fors_sig_to_bytes (s : fors_sig) : bytes =
+  encode_tuple [
+    Dynamic (encode_bytes s.`fs_randomizer);
+    Static (word_from_u32 s.`fs_counter);
+    Dynamic (encode_dynamic_array (map fors_entry_to_bytes s.`fs_entries))].
+
+(* hypertree::LayerSignature::to_bytes *)
+op layer_sig_to_bytes (s : layer_sig) : bytes =
+  encode_tuple [
+    Dynamic (encode_bytes s.`ls_pk_hash);
+    Dynamic (wots_sig_to_bytes s.`ls_wots);
+    Dynamic (encode_dynamic_array (map encode_bytes s.`ls_auth_path))].
+
+(* sphincs_plus_c::Signature::encode_body *)
+op stateless_sig_body (s : stateless_sig) : bytes =
+  encode_tuple [
+    Dynamic (fors_sig_to_bytes s.`sl_fors);
+    Dynamic (encode_dynamic_array (map layer_sig_to_bytes s.`sl_layers))].
+
+(* sphincs_plus_c::Signature::to_bytes *)
+op stateless_sig_to_bytes (s : stateless_sig) : bytes =
+  encode_tuple [Dynamic (stateless_sig_body s)].
+
+(* shrincs::PublicKey::encode_body *)
+op public_key_body (pk : public_key) : bytes =
+  encode_tuple [
+    Dynamic (encode_bytes pk.`pk_stateful);
+    Dynamic (encode_bytes pk.`pk_commitment);
+    Dynamic (encode_bytes pk.`pk_seed);
+    Dynamic (encode_bytes pk.`pk_root)].
+
+(* shrincs::PublicKey::to_bytes *)
+op public_key_to_bytes (pk : public_key) : bytes =
+  encode_tuple [Dynamic (public_key_body pk)].
+
+(* encode_stateful_envelope *)
+op encode_stateful_envelope (pk : public_key) (s : stateful_sig) : bytes =
+  encode_tuple [Dynamic (public_key_body pk); Dynamic (stateful_sig_body s)].
+
+(* encode_stateless_envelope *)
+op encode_stateless_envelope (pk : public_key) (s : stateless_sig) : bytes =
+  encode_tuple [Dynamic (public_key_body pk); Dynamic (stateless_sig_body s)].
+
+(* sphincs_plus_c::encode_public_key: pk_seed || root *)
+op encode_public_key (pk_seed hypertree_root : bytes) : bytes = pk_seed ++ hypertree_root.
+
+(* encode_stateful_public_key: pk_seed || root || be32 max_signatures *)
+op encode_stateful_public_key (pk_seed root : bytes) (max_signatures : int) : bytes =
+  pk_seed ++ root ++ be32 max_signatures.
+
+(* ------------------------------------------------------------------ *)
+(* Address words: hash/address.rs                                      *)
+(* ------------------------------------------------------------------ *)
+
+op ADDRESS_TYPE_WOTS_HASH  = 0.
+op ADDRESS_TYPE_WOTS_PK    = 1.
+op ADDRESS_TYPE_TREE       = 2.
+op ADDRESS_TYPE_FORS_TREE  = 3.
+op ADDRESS_TYPE_FORS_ROOTS = 4.
+
+(* address_word32: layer(4) 0(4) tree(8) type(4) keypair(4) chain(4) step(4) *)
+op address_word32 (layer tree address_type keypair chain step : int) : bytes =
+  be32 layer ++ nseq 4 0 ++ be64 tree ++ be32 address_type ++ be32 keypair
+  ++ be32 chain ++ be32 step.
+
+(* wots_address_base: the type, chain, and step stay zero. *)
+op wots_address_base (layer tree keypair : int) : bytes =
+  be32 layer ++ nseq 4 0 ++ be64 tree ++ nseq 4 0 ++ be32 keypair ++ nseq 8 0.
+
+(* wots_pk_address_word *)
+op wots_pk_address_word (layer tree keypair : int) : bytes =
+  address_word32 layer tree ADDRESS_TYPE_WOTS_PK keypair 0 0.
+
+(* wots_chain_address_word: set the chain and the step of a base word. *)
+op wots_chain_address_word (address_base : bytes) (chain_index step : int) : bytes =
+  take 24 address_base ++ be32 chain_index ++ be32 step.
+
+(* fors_address_word. The low word is (node_height << 32) | low_index.
+   requires: low_index < 2 ^ 32, so that | is + *)
+op fors_address_word (tree_index leaf_index node_height low_index : int) : bytes =
+  nseq 8 0 ++ be64 tree_index ++ be32 ADDRESS_TYPE_FORS_TREE ++ be32 leaf_index
+  ++ be64 (node_height * 2 ^ 32 + low_index).
+
+(* fors_roots_address_word *)
+op fors_roots_address_word (tree_index leaf_index : int) : bytes =
+  address_word32 0 tree_index ADDRESS_TYPE_FORS_ROOTS leaf_index 0 0.
+
+(* hypertree_address_word. requires: parent_index < 2 ^ 32 *)
+op hypertree_address_word (layer tree_index node_height parent_index : int) : bytes =
+  be32 layer ++ nseq 4 0 ++ be64 tree_index ++ be32 ADDRESS_TYPE_TREE ++ nseq 4 0
+  ++ be64 (node_height * 2 ^ 32 + parent_index).

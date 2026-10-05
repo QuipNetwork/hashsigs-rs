@@ -22,7 +22,10 @@ use alloc::vec::Vec;
 use super::group::Group;
 use crate::hash::backend::keccak256v;
 
+mod abi;
+mod addresses;
 mod helpers;
+mod wire;
 
 /// The profile of the full-size groups.
 pub(crate) type Full = crate::profiles::p256s::Profile256s;
@@ -32,7 +35,11 @@ pub type Builder = fn() -> Group;
 
 /// Every group, by name, in replay order.
 pub fn catalog() -> Vec<(&'static str, Builder)> {
-    alloc::vec![("helpers", helpers::group as Builder)]
+    alloc::vec![
+        ("helpers", helpers::group as Builder),
+        ("abi", abi::group),
+        ("addresses", addresses::group),
+    ]
 }
 
 /// Deterministic test input: Keccak-256 in counter mode over a label. The

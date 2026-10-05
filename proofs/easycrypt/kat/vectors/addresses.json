@@ -1,0 +1,220 @@
+{
+  "cases": [
+    {
+      "arguments": [
+        0,
+        0,
+        3,
+        0,
+        286397204,
+        353769240
+      ],
+      "operator": "address_word32",
+      "result": "0000000000000000000000000000000000000003000000001112131415161718"
+    },
+    {
+      "arguments": [
+        0,
+        0,
+        0
+      ],
+      "operator": "wots_address_base",
+      "result": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "arguments": [
+        0,
+        0,
+        0
+      ],
+      "operator": "wots_pk_address_word",
+      "result": "0000000000000000000000000000000000000001000000000000000000000000"
+    },
+    {
+      "arguments": [
+        "0000000000000000000000000000000000000000000000000000000000000000",
+        63,
+        14
+      ],
+      "operator": "wots_chain_address_word",
+      "result": "0000000000000000000000000000000000000000000000000000003f0000000e"
+    },
+    {
+      "arguments": [
+        0,
+        0
+      ],
+      "operator": "fors_roots_address_word",
+      "result": "0000000000000000000000000000000000000004000000000000000000000000"
+    },
+    {
+      "arguments": [
+        16909060,
+        361984551142689548,
+        3,
+        219025168,
+        286397204,
+        353769240
+      ],
+      "operator": "address_word32",
+      "result": "010203040000000005060708090a0b0c000000030d0e0f101112131415161718"
+    },
+    {
+      "arguments": [
+        16909060,
+        361984551142689548,
+        219025168
+      ],
+      "operator": "wots_address_base",
+      "result": "010203040000000005060708090a0b0c000000000d0e0f100000000000000000"
+    },
+    {
+      "arguments": [
+        16909060,
+        361984551142689548,
+        219025168
+      ],
+      "operator": "wots_pk_address_word",
+      "result": "010203040000000005060708090a0b0c000000010d0e0f100000000000000000"
+    },
+    {
+      "arguments": [
+        "010203040000000005060708090a0b0c000000000d0e0f100000000000000000",
+        63,
+        14
+      ],
+      "operator": "wots_chain_address_word",
+      "result": "010203040000000005060708090a0b0c000000000d0e0f100000003f0000000e"
+    },
+    {
+      "arguments": [
+        361984551142689548,
+        219025168
+      ],
+      "operator": "fors_roots_address_word",
+      "result": "000000000000000005060708090a0b0c000000040d0e0f100000000000000000"
+    },
+    {
+      "arguments": [
+        4294967295,
+        18446744073709551615,
+        3,
+        4294967295,
+        286397204,
+        353769240
+      ],
+      "operator": "address_word32",
+      "result": "ffffffff00000000ffffffffffffffff00000003ffffffff1112131415161718"
+    },
+    {
+      "arguments": [
+        4294967295,
+        18446744073709551615,
+        4294967295
+      ],
+      "operator": "wots_address_base",
+      "result": "ffffffff00000000ffffffffffffffff00000000ffffffff0000000000000000"
+    },
+    {
+      "arguments": [
+        4294967295,
+        18446744073709551615,
+        4294967295
+      ],
+      "operator": "wots_pk_address_word",
+      "result": "ffffffff00000000ffffffffffffffff00000001ffffffff0000000000000000"
+    },
+    {
+      "arguments": [
+        "ffffffff00000000ffffffffffffffff00000000ffffffff0000000000000000",
+        63,
+        14
+      ],
+      "operator": "wots_chain_address_word",
+      "result": "ffffffff00000000ffffffffffffffff00000000ffffffff0000003f0000000e"
+    },
+    {
+      "arguments": [
+        18446744073709551615,
+        4294967295
+      ],
+      "operator": "fors_roots_address_word",
+      "result": "0000000000000000ffffffffffffffff00000004ffffffff0000000000000000"
+    },
+    {
+      "arguments": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "operator": "fors_address_word",
+      "result": "0000000000000000000000000000000000000003000000000000000000000000"
+    },
+    {
+      "arguments": [
+        7,
+        255,
+        14,
+        344073
+      ],
+      "operator": "fors_address_word",
+      "result": "0000000000000000000000000000000700000003000000ff0000000e00054009"
+    },
+    {
+      "arguments": [
+        18446744073709551615,
+        3,
+        1,
+        1
+      ],
+      "operator": "fors_address_word",
+      "result": "0000000000000000ffffffffffffffff00000003000000030000000100000001"
+    },
+    {
+      "arguments": [
+        0,
+        0,
+        1,
+        0
+      ],
+      "operator": "hypertree_address_word",
+      "result": "0000000000000000000000000000000000000002000000000000000100000000"
+    },
+    {
+      "arguments": [
+        7,
+        72057594037927935,
+        8,
+        0
+      ],
+      "operator": "hypertree_address_word",
+      "result": "000000070000000000ffffffffffffff00000002000000000000000800000000"
+    },
+    {
+      "arguments": [
+        3,
+        12,
+        5,
+        7
+      ],
+      "operator": "hypertree_address_word",
+      "result": "0000000300000000000000000000000c00000002000000000000000500000007"
+    }
+  ],
+  "group": "addresses",
+  "parameters": {
+    "FORS_C_MAX_GRIND_COUNTER": 16777216,
+    "FORS_TREE_HEIGHT": 14,
+    "HASH_TRUNC_LEN": 32,
+    "HYPERTREE_HEIGHT": 64,
+    "NUM_FORS_TREES": 22,
+    "NUM_HYPERTREE_LAYERS": 8,
+    "NUM_WOTS_CHAINS": 64,
+    "PROFILE_ID": "32f573b453ffc4b3edb5db5c8c6f10d92aae60d6b7749116a86651f56e2a4878",
+    "PROFILE_NAME": "736872696e63732d323536732d6b656363616b",
+    "STATELESS_SIGNATURE_LIMIT": 1048576,
+    "WOTS_CHAIN_LEN": 16,
+    "WOTS_TARGET_SUM": 480
+  }
+}
