@@ -1,0 +1,297 @@
+{
+  "cases": [
+    {
+      "arguments": [
+        0
+      ],
+      "operator": "be32",
+      "result": "00000000"
+    },
+    {
+      "arguments": [
+        1
+      ],
+      "operator": "be32",
+      "result": "00000001"
+    },
+    {
+      "arguments": [
+        16909060
+      ],
+      "operator": "be32",
+      "result": "01020304"
+    },
+    {
+      "arguments": [
+        4294967295
+      ],
+      "operator": "be32",
+      "result": "ffffffff"
+    },
+    {
+      "arguments": [
+        0
+      ],
+      "operator": "be64",
+      "result": "0000000000000000"
+    },
+    {
+      "arguments": [
+        72623859790382856
+      ],
+      "operator": "be64",
+      "result": "0102030405060708"
+    },
+    {
+      "arguments": [
+        18446744073709551615
+      ],
+      "operator": "be64",
+      "result": "ffffffffffffffff"
+    },
+    {
+      "arguments": [
+        "050f258be138",
+        0,
+        0
+      ],
+      "operator": "read_bits32",
+      "result": 0
+    },
+    {
+      "arguments": [
+        "050f258be138",
+        0,
+        1
+      ],
+      "operator": "read_bits32",
+      "result": 0
+    },
+    {
+      "arguments": [
+        "050f258be138",
+        3,
+        13
+      ],
+      "operator": "read_bits32",
+      "result": 1295
+    },
+    {
+      "arguments": [
+        "050f258be138",
+        7,
+        32
+      ],
+      "operator": "read_bits32",
+      "result": 2274543088
+    },
+    {
+      "arguments": [
+        "050f258be138",
+        16,
+        33
+      ],
+      "operator": "read_bits32",
+      "result": null
+    },
+    {
+      "arguments": [
+        "050f258be138",
+        40,
+        8
+      ],
+      "operator": "read_bits32",
+      "result": 56
+    },
+    {
+      "arguments": [
+        "050f258be138",
+        41,
+        8
+      ],
+      "operator": "read_bits32",
+      "result": null
+    },
+    {
+      "arguments": [
+        "050f258be138",
+        48,
+        0
+      ],
+      "operator": "read_bits32",
+      "result": 0
+    },
+    {
+      "arguments": [
+        "050f258be138",
+        60,
+        0
+      ],
+      "operator": "read_bits32",
+      "result": 0
+    },
+    {
+      "arguments": [
+        "050f258be138",
+        0,
+        48
+      ],
+      "operator": "read_bits64",
+      "result": 5562612572472
+    },
+    {
+      "arguments": [
+        "050f258be138",
+        5,
+        40
+      ],
+      "operator": "read_bits64",
+      "result": 695326571559
+    },
+    {
+      "arguments": [
+        "050f258be138",
+        0,
+        64
+      ],
+      "operator": "read_bits64",
+      "result": null
+    },
+    {
+      "arguments": [
+        "050f258be138",
+        0,
+        65
+      ],
+      "operator": "read_bits64",
+      "result": null
+    },
+    {
+      "arguments": [
+        "050f258be138",
+        8,
+        41
+      ],
+      "operator": "read_bits64",
+      "result": null
+    },
+    {
+      "arguments": [
+        16,
+        "6e1984c950a0b6d6735605ddc76b7405354c514f7a7a8d0b1daa2ce333123412",
+        0
+      ],
+      "operator": "base_w_digit",
+      "result": 6
+    },
+    {
+      "arguments": [
+        16,
+        "6e1984c950a0b6d6735605ddc76b7405354c514f7a7a8d0b1daa2ce333123412",
+        1
+      ],
+      "operator": "base_w_digit",
+      "result": 14
+    },
+    {
+      "arguments": [
+        16,
+        "6e1984c950a0b6d6735605ddc76b7405354c514f7a7a8d0b1daa2ce333123412",
+        63
+      ],
+      "operator": "base_w_digit",
+      "result": 2
+    },
+    {
+      "arguments": [
+        256,
+        "6e1984c950a0b6d6735605ddc76b7405354c514f7a7a8d0b1daa2ce333123412",
+        0
+      ],
+      "operator": "base_w_digit",
+      "result": 110
+    },
+    {
+      "arguments": [
+        256,
+        "6e1984c950a0b6d6735605ddc76b7405354c514f7a7a8d0b1daa2ce333123412",
+        31
+      ],
+      "operator": "base_w_digit",
+      "result": 18
+    },
+    {
+      "arguments": [],
+      "operator": "wots_digest_bytes",
+      "result": 32
+    },
+    {
+      "arguments": [
+        "4cf6c39f5335501515bf0745fa19c3ee1644787522a9927a2aed6b5bc4162c"
+      ],
+      "operator": "word32",
+      "result": null
+    },
+    {
+      "arguments": [
+        "4cf6c39f5335501515bf0745fa19c3ee1644787522a9927a2aed6b5bc4162c86"
+      ],
+      "operator": "word32",
+      "result": "4cf6c39f5335501515bf0745fa19c3ee1644787522a9927a2aed6b5bc4162c86"
+    },
+    {
+      "arguments": [
+        "4cf6c39f5335501515bf0745fa19c3ee1644787522a9927a2aed6b5bc4162c865e"
+      ],
+      "operator": "word32",
+      "result": null
+    },
+    {
+      "arguments": [
+        "6b61742d646f6d61696e",
+        "3be7f3a7fffc69cad66518a19af0f52f88e2fd13e4f2979ca7db2f50e4e96928252979779c84e689",
+        ""
+      ],
+      "operator": "derive32",
+      "result": "b117e27a46390cc21f1277e4024ca53b3445b263641adb1a80337fbb22ba3c8a"
+    },
+    {
+      "arguments": [
+        "6b61742d646f6d61696e",
+        "3be7f3a7fffc69cad66518a19af0f52f88e2fd13e4f2979ca7db2f50e4e96928252979779c84e689",
+        "03"
+      ],
+      "operator": "derive32",
+      "result": "d9c16cd5ff4016929d179a37071b570047dea0c6c1f8d597ae1787a836a0d576"
+    },
+    {
+      "arguments": [
+        "6b61742d646f6d61696e",
+        "3be7f3a7fffc69cad66518a19af0f52f88e2fd13e4f2979ca7db2f50e4e96928252979779c84e689",
+        "000000000000000000000000"
+      ],
+      "operator": "derive32",
+      "result": "63009df69d38d08d73aca4e69ac17de203e50c8ef08378af50366086f7743f08"
+    },
+    {
+      "arguments": [],
+      "operator": "profile_id_matches_name",
+      "result": true
+    }
+  ],
+  "group": "helpers",
+  "parameters": {
+    "FORS_C_MAX_GRIND_COUNTER": 16777216,
+    "FORS_TREE_HEIGHT": 14,
+    "HASH_TRUNC_LEN": 32,
+    "HYPERTREE_HEIGHT": 64,
+    "NUM_FORS_TREES": 22,
+    "NUM_HYPERTREE_LAYERS": 8,
+    "NUM_WOTS_CHAINS": 64,
+    "PROFILE_ID": "32f573b453ffc4b3edb5db5c8c6f10d92aae60d6b7749116a86651f56e2a4878",
+    "PROFILE_NAME": "736872696e63732d323536732d6b656363616b",
+    "STATELESS_SIGNATURE_LIMIT": 1048576,
+    "WOTS_CHAIN_LEN": 16,
+    "WOTS_TARGET_SUM": 480
+  }
+}

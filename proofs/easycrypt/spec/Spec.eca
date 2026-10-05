@@ -1,0 +1,105 @@
+(* SPDX-License-Identifier: AGPL-3.0-or-later *)
+(* SHRINCS as hashsigs-rs implements it, transcribed from the Rust code.
+
+   Every operator has the name and the parameter order of the Rust function
+   that it transcribes, and its comment names that function. A byte is an
+   integer in [0, 256). A byte string is a list of bytes. *)
+require import AllCore List IntDiv.
+require import Search.
+
+type bytes = int list.
+
+(* ------------------------------------------------------------------ *)
+(* The abstract primitive and the parameters                          *)
+(* ------------------------------------------------------------------ *)
+
+(* Keccak-256. Every hash of the Keccak profiles is this function. *)
+op keccak256 : bytes -> bytes.
+
+(* The constants of the trait Profile. *)
+op PROFILE_NAME              : bytes.
+op PROFILE_ID                : bytes.
+op HASH_TRUNC_LEN            : int.
+op STATELESS_SIGNATURE_LIMIT : int.
+op HYPERTREE_HEIGHT          : int.
+op NUM_HYPERTREE_LAYERS      : int.
+op FORS_TREE_HEIGHT          : int.
+op NUM_FORS_TREES            : int.
+op WOTS_CHAIN_LEN            : int.
+op NUM_WOTS_CHAINS           : int.
+op FORS_C_MAX_GRIND_COUNTER  : int.
+op WOTS_TARGET_SUM           : int.
+
+(* ------------------------------------------------------------------ *)
+(* Helpers: hash/ops.rs, and the big-endian integer encodings          *)
+(* ------------------------------------------------------------------ *)
+
+op HASH_LEN = 32.
+
+(* x.to_be_bytes() at a width of n bytes. requires: 0 <= x < 256 ^ n *)
+op int_to_bytes (x n : int) : bytes =
+  mkseq (fun i => x %/ 256 ^ (n - 1 - i) %% 256) n.
+
+(* u32::to_be_bytes and u64::to_be_bytes *)
+op be32 (x : int) : bytes = int_to_bytes x 4.
+op be64 (x : int) : bytes = int_to_bytes x 8.
+
+(* u32::from_be_bytes and u64::from_be_bytes *)
+op int_from_bytes (bs : bytes) : int = foldl (fun acc b => acc * 256 + b) 0 bs.
+
+(* Bit i of input. Bit 0 is the most significant bit of byte 0. *)
+op bit_at (input : bytes) (i : int) : int =
+  nth 0 input (i %/ 8) %/ 2 ^ (7 - i %% 8) %% 2.
+
+(* read_bits: the bit_len bits from start_bit, most significant first. None
+   if one of them lies past the end of input. *)
+op read_bits (input : bytes) (start_bit bit_len : int) : int option =
+  if 0 < bit_len /\ size input * 8 < start_bit + bit_len then None
+  else Some (foldl (fun acc i => acc * 2 + bit_at input (start_bit + i)) 0 (range 0 bit_len)).
+
+(* read_bits32 *)
+op read_bits32 (input : bytes) (start_bit bit_len : int) : int option =
+  if 32 < bit_len then None else read_bits input start_bit bit_len.
+
+(* read_bits64 *)
+op read_bits64 (input : bytes) (start_bit bit_len : int) : int option =
+  if 64 < bit_len then None else read_bits input start_bit bit_len.
+
+(* base_w_digit: digit `index` of a digest in base w, for w = 16 or w = 256.
+   A base-16 digit is a nibble, the high nibble first. *)
+op base_w_digit (w : int) (digest : bytes) (index : int) : int =
+  if w = 256 then nth 0 digest index
+  else
+    let byte = nth 0 digest (index %/ 2) in
+    if index %% 2 = 0 then byte %/ 16 else byte %% 16.
+
+(* base_w16_digit *)
+op base_w16_digit (digest : bytes) (index : int) : int = base_w_digit 16 digest index.
+
+(* wots_digest_bytes: the digest bytes that the WOTS-C digits use. *)
+op wots_digest_bytes : int =
+  (NUM_WOTS_CHAINS * (if WOTS_CHAIN_LEN = 256 then 8 else 4) + 7) %/ 8.
+
+(* word32 *)
+op word32 (input : bytes) : bytes option =
+  if size input = HASH_LEN then Some input else None.
+
+(* hash_packed: the scheme hash over the concatenation of parts. *)
+op hash_packed (parts : bytes list) : bytes = keccak256 (flatten parts).
+
+(* keccak_packed: the EVM-domain hash. It is the scheme hash of the Keccak
+   profiles. *)
+op keccak_packed (parts : bytes list) : bytes = keccak256 (flatten parts).
+
+(* mask_hash: zero the bytes after HASH_TRUNC_LEN. *)
+op mask_hash (hash : bytes) : bytes =
+  take HASH_TRUNC_LEN hash ++ nseq (HASH_LEN - HASH_TRUNC_LEN) 0.
+
+(* hash_node: the scheme hash, truncated to the node width of the profile. *)
+op hash_node (parts : bytes list) : bytes = mask_hash (hash_packed parts).
+
+(* derive32 *)
+op derive32 (domain seed data : bytes) : bytes = hash_packed [domain; seed; data].
+
+(* PROFILE_ID is keccak256(PROFILE_NAME). Rust computes it at build time. *)
+op profile_id_matches_name : bool = keccak_packed [PROFILE_NAME] = PROFILE_ID.

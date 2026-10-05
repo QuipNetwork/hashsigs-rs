@@ -28,6 +28,14 @@ use std::sync::{Mutex, MutexGuard};
 
 use crate::HASH_LEN;
 
+mod cases;
+mod group;
+mod value;
+
+pub use cases::{catalog, Builder};
+pub use group::{Case, Group};
+pub use value::Value;
+
 /// Recorded calls: the concatenated input of each call and its digest.
 pub type Trace = BTreeMap<Vec<u8>, [u8; HASH_LEN]>;
 
