@@ -26,6 +26,7 @@ mod abi;
 mod addresses;
 mod helpers;
 mod wire;
+mod wots_c;
 
 /// The profile of the full-size groups.
 pub(crate) type Full = crate::profiles::p256s::Profile256s;
@@ -39,6 +40,7 @@ pub fn catalog() -> Vec<(&'static str, Builder)> {
         ("helpers", helpers::group as Builder),
         ("abi", abi::group),
         ("addresses", addresses::group),
+        ("wots_c", wots_c::group),
     ]
 }
 
@@ -64,4 +66,11 @@ pub(crate) fn label_word(label: &str) -> [u8; 32] {
     let mut out = [0u8; 32];
     out.copy_from_slice(&label_bytes(label, 32));
     out
+}
+
+/// A grind of the Rust code found no counter for a fixed test input. That
+/// happens with a negligible probability, and the generator then stops.
+pub(crate) fn grind_failed<T>() -> T {
+    eprintln!("a grind found no counter for a fixed test input");
+    std::process::exit(2)
 }

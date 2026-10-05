@@ -1060,3 +1060,93 @@ mod tests {
         ));
     }
 }
+
+/// Flat-argument access to the private steps of this module, for the
+/// EasyCrypt known-answer tests in `proofs/easycrypt`.
+#[cfg(feature = "kat-trace")]
+pub(crate) mod kat_access {
+    use super::*;
+
+    pub(crate) fn wots_secret<P: Profile>(sk_seed: &[u8; HASH_LEN], chain: u32) -> [u8; HASH_LEN] {
+        stateless_wots_c_secret::<P>(sk_seed, chain)
+    }
+
+    pub(crate) fn wots_chain<P: Profile>(
+        pk_seed: &[u8; HASH_LEN],
+        (layer, tree, keypair, chain): (u32, u64, u32, u32),
+        value: [u8; HASH_LEN],
+        start: u32,
+        steps: u32,
+    ) -> [u8; HASH_LEN] {
+        stateless_wots_c_chain::<P>(
+            pk_seed,
+            &WotsChain {
+                layer,
+                tree,
+                keypair,
+                chain,
+            },
+            value,
+            start,
+            steps,
+        )
+    }
+
+    pub(crate) fn wots_public_key<P: Profile>(
+        pk_seed: &[u8; HASH_LEN],
+        sk_seed: &[u8; HASH_LEN],
+        (layer, tree, keypair): (u32, u64, u32),
+    ) -> [u8; HASH_LEN] {
+        stateless_wots_c_public_key::<P>(
+            pk_seed,
+            sk_seed,
+            &WotsKeypair {
+                layer,
+                tree,
+                keypair,
+            },
+        )
+    }
+
+    pub(crate) fn sign_wots_c<P: Profile>(
+        (pk_seed, sk_seed, prf_seed): (&[u8; HASH_LEN], &[u8; HASH_LEN], &[u8; HASH_LEN]),
+        (layer, tree, keypair): (u32, u64, u32),
+        pk_hash: &[u8; HASH_LEN],
+        message: &[u8; HASH_LEN],
+    ) -> Option<Signature> {
+        sign_stateless_wots_c::<P>(
+            &WotsSeeds {
+                pk_seed,
+                sk_seed,
+                prf_seed,
+            },
+            &WotsKeypair {
+                layer,
+                tree,
+                keypair,
+            },
+            pk_hash,
+            message,
+        )
+    }
+
+    pub(crate) fn verify_wots_c<P: Profile, const NUM_CHAINS: usize>(
+        pk_seed: &[u8; HASH_LEN],
+        (layer, tree, keypair): (u32, u64, u32),
+        expected_pk_hash: &[u8; HASH_LEN],
+        message: [u8; HASH_LEN],
+        signature: &Signature,
+    ) -> bool {
+        verify_wots_c32::<P, NUM_CHAINS>(
+            pk_seed,
+            WotsKeypair {
+                layer,
+                tree,
+                keypair,
+            },
+            expected_pk_hash,
+            message,
+            signature,
+        )
+    }
+}

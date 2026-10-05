@@ -322,3 +322,248 @@ op fors_roots_address_word (tree_index leaf_index : int) : bytes =
 op hypertree_address_word (layer tree_index node_height parent_index : int) : bytes =
   be32 layer ++ nseq 4 0 ++ be64 tree_index ++ be32 ADDRESS_TYPE_TREE ++ nseq 4 0
   ++ be64 (node_height * 2 ^ 32 + parent_index).
+
+(* ------------------------------------------------------------------ *)
+(* Domain tags: the byte strings of the b"..." literals of the Rust code *)
+(* ------------------------------------------------------------------ *)
+
+(* "uxmss-wots-chain" *)
+op TAG_UXMSS_WOTS_CHAIN : bytes = [117; 120; 109; 115; 115; 45; 119; 111; 116; 115; 45; 99; 104; 97; 105; 110].
+
+(* "uxmss-wots-chain-secret" *)
+op TAG_UXMSS_WOTS_CHAIN_SECRET : bytes = [117; 120; 109; 115; 115; 45; 119; 111; 116; 115; 45; 99; 104; 97; 105; 110; 45; 115; 101; 99; 114; 101; 116].
+
+(* "uxmss-wots-pk" *)
+op TAG_UXMSS_WOTS_PK : bytes = [117; 120; 109; 115; 115; 45; 119; 111; 116; 115; 45; 112; 107].
+
+(* "uxmss-wots-randomizer" *)
+op TAG_UXMSS_WOTS_RANDOMIZER : bytes = [117; 120; 109; 115; 115; 45; 119; 111; 116; 115; 45; 114; 97; 110; 100; 111; 109; 105; 122; 101; 114].
+
+(* "uxmss-wots-digits" *)
+op TAG_UXMSS_WOTS_DIGITS : bytes = [117; 120; 109; 115; 115; 45; 119; 111; 116; 115; 45; 100; 105; 103; 105; 116; 115].
+
+(* "uxmss-node" *)
+op TAG_UXMSS_NODE : bytes = [117; 120; 109; 115; 115; 45; 110; 111; 100; 101].
+
+(* "uxmss-empty-tail" *)
+op TAG_UXMSS_EMPTY_TAIL : bytes = [117; 120; 109; 115; 115; 45; 101; 109; 112; 116; 121; 45; 116; 97; 105; 108].
+
+(* "wots-c-chain" *)
+op TAG_WOTS_C_CHAIN : bytes = [119; 111; 116; 115; 45; 99; 45; 99; 104; 97; 105; 110].
+
+(* "wots-c-secret" *)
+op TAG_WOTS_C_SECRET : bytes = [119; 111; 116; 115; 45; 99; 45; 115; 101; 99; 114; 101; 116].
+
+(* "wots-c-pk" *)
+op TAG_WOTS_C_PK : bytes = [119; 111; 116; 115; 45; 99; 45; 112; 107].
+
+(* "wots-c-msg" *)
+op TAG_WOTS_C_MSG : bytes = [119; 111; 116; 115; 45; 99; 45; 109; 115; 103].
+
+(* "wots-c-randomizer" *)
+op TAG_WOTS_C_RANDOMIZER : bytes = [119; 111; 116; 115; 45; 99; 45; 114; 97; 110; 100; 111; 109; 105; 122; 101; 114].
+
+(* "fors-digest" *)
+op TAG_FORS_DIGEST : bytes = [102; 111; 114; 115; 45; 100; 105; 103; 101; 115; 116].
+
+(* "fors-randomizer" *)
+op TAG_FORS_RANDOMIZER : bytes = [102; 111; 114; 115; 45; 114; 97; 110; 100; 111; 109; 105; 122; 101; 114].
+
+(* "fors-sk" *)
+op TAG_FORS_SK : bytes = [102; 111; 114; 115; 45; 115; 107].
+
+(* "fors-leaf" *)
+op TAG_FORS_LEAF : bytes = [102; 111; 114; 115; 45; 108; 101; 97; 102].
+
+(* "fors-node" *)
+op TAG_FORS_NODE : bytes = [102; 111; 114; 115; 45; 110; 111; 100; 101].
+
+(* "fors-pk" *)
+op TAG_FORS_PK : bytes = [102; 111; 114; 115; 45; 112; 107].
+
+(* "hypertree-node" *)
+op TAG_HYPERTREE_NODE : bytes = [104; 121; 112; 101; 114; 116; 114; 101; 101; 45; 110; 111; 100; 101].
+
+(* "hypertree-layer-seed" *)
+op TAG_HYPERTREE_LAYER_SEED : bytes = [104; 121; 112; 101; 114; 116; 114; 101; 101; 45; 108; 97; 121; 101; 114; 45; 115; 101; 101; 100].
+
+(* "hypertree-leaf-seed" *)
+op TAG_HYPERTREE_LEAF_SEED : bytes = [104; 121; 112; 101; 114; 116; 114; 101; 101; 45; 108; 101; 97; 102; 45; 115; 101; 101; 100].
+
+(* "hypertree-wots-sk-seed" *)
+op TAG_HYPERTREE_WOTS_SK_SEED : bytes = [104; 121; 112; 101; 114; 116; 114; 101; 101; 45; 119; 111; 116; 115; 45; 115; 107; 45; 115; 101; 101; 100].
+
+(* "shrincs-stateful-sk-seed" *)
+op TAG_SHRINCS_STATEFUL_SK_SEED : bytes = [115; 104; 114; 105; 110; 99; 115; 45; 115; 116; 97; 116; 101; 102; 117; 108; 45; 115; 107; 45; 115; 101; 101; 100].
+
+(* "shrincs-stateful-prf-seed" *)
+op TAG_SHRINCS_STATEFUL_PRF_SEED : bytes = [115; 104; 114; 105; 110; 99; 115; 45; 115; 116; 97; 116; 101; 102; 117; 108; 45; 112; 114; 102; 45; 115; 101; 101; 100].
+
+(* "shrincs-stateful-pk-seed" *)
+op TAG_SHRINCS_STATEFUL_PK_SEED : bytes = [115; 104; 114; 105; 110; 99; 115; 45; 115; 116; 97; 116; 101; 102; 117; 108; 45; 112; 107; 45; 115; 101; 101; 100].
+
+(* "shrincs-stateless-sk-seed" *)
+op TAG_SHRINCS_STATELESS_SK_SEED : bytes = [115; 104; 114; 105; 110; 99; 115; 45; 115; 116; 97; 116; 101; 108; 101; 115; 115; 45; 115; 107; 45; 115; 101; 101; 100].
+
+(* "shrincs-stateless-prf-seed" *)
+op TAG_SHRINCS_STATELESS_PRF_SEED : bytes = [115; 104; 114; 105; 110; 99; 115; 45; 115; 116; 97; 116; 101; 108; 101; 115; 115; 45; 112; 114; 102; 45; 115; 101; 101; 100].
+
+(* "shrincs-pk-seed" *)
+op TAG_SHRINCS_PK_SEED : bytes = [115; 104; 114; 105; 110; 99; 115; 45; 112; 107; 45; 115; 101; 101; 100].
+
+(* "shrincs-public-key/" *)
+op TAG_SHRINCS_PUBLIC_KEY : bytes = [115; 104; 114; 105; 110; 99; 115; 45; 112; 117; 98; 108; 105; 99; 45; 107; 101; 121; 47].
+
+(* "shrincs-verify-stateful" *)
+op TAG_SHRINCS_VERIFY_STATEFUL : bytes = [115; 104; 114; 105; 110; 99; 115; 45; 118; 101; 114; 105; 102; 121; 45; 115; 116; 97; 116; 101; 102; 117; 108].
+
+(* "shrincs-verify-stateless" *)
+op TAG_SHRINCS_VERIFY_STATELESS : bytes = [115; 104; 114; 105; 110; 99; 115; 45; 118; 101; 114; 105; 102; 121; 45; 115; 116; 97; 116; 101; 108; 101; 115; 115].
+
+(* ------------------------------------------------------------------ *)
+(* WOTS-C: wots_c/mod.rs, with the stateful binding of uxmss.rs and   *)
+(* the stateless binding of hypertree.rs                               *)
+(* ------------------------------------------------------------------ *)
+
+(* WOTS_C_MAX_GRIND_COUNTER: one budget for every profile. *)
+op WOTS_C_MAX_GRIND_COUNTER : int = 2 ^ 24.
+
+(* wots_chain_walk: `steps` hashes from `value`. The hash at offset i uses
+   the address of step start + i. *)
+op wots_chain_walk (tag pk_seed : bytes) (address_word : int -> bytes)
+    (value : bytes) (start steps : int) : bytes =
+  foldl (fun (out : bytes) (step : int) => hash_node [tag; pk_seed; address_word step; out])
+    value (range start (start + steps)).
+
+(* --- The stateful binding (uxmss.rs) --- *)
+
+(* stateful_chain_no_mask *)
+op stateful_chain (pk_seed : bytes) (leaf_index chain_index : int)
+    (value : bytes) (start steps : int) : bytes =
+  wots_chain_walk TAG_UXMSS_WOTS_CHAIN pk_seed
+    (fun step => address_word32 0 0 ADDRESS_TYPE_WOTS_HASH leaf_index chain_index step)
+    value start steps.
+
+(* stateful_chain_secret *)
+op stateful_chain_secret (sk_seed pk_seed : bytes) (leaf_index chain_index : int) : bytes =
+  hash_packed [TAG_UXMSS_WOTS_CHAIN_SECRET; sk_seed; pk_seed; be32 leaf_index; be32 chain_index].
+
+(* stateful_wots_pk_hash: the leaf of the UXMSS tree. *)
+op stateful_wots_pk_hash (sk_seed pk_seed : bytes) (leaf_index : int) : bytes =
+  hash_node [TAG_UXMSS_WOTS_PK; pk_seed; be32 leaf_index;
+    flatten (mkseq (fun c =>
+      stateful_chain pk_seed leaf_index c
+        (stateful_chain_secret sk_seed pk_seed leaf_index c) 0 (WOTS_CHAIN_LEN - 1))
+      NUM_WOTS_CHAINS)].
+
+(* The message digest of the stateful binding. *)
+op stateful_digest (pk_seed : bytes) (leaf_index : int) (randomizer : bytes)
+    (counter : int) (message : bytes) : bytes =
+  hash_packed [TAG_UXMSS_WOTS_DIGITS; pk_seed; be32 leaf_index; randomizer; be32 counter; message].
+
+op stateful_digits (digest : bytes) : int list =
+  mkseq (fun i => base_w16_digit digest i) NUM_WOTS_CHAINS.
+
+(* sign_stateful_wots_c: grind for the lowest counter whose digits sum to
+   WOTS_TARGET_SUM. The authentication path stays empty. *)
+op sign_stateful_wots_c (sk_seed prf_seed pk_seed : bytes) (leaf_index : int)
+    (message : bytes) : stateful_sig option =
+  let randomizer = hash_packed [TAG_UXMSS_WOTS_RANDOMIZER; prf_seed; be32 leaf_index; message] in
+  let digits_at = fun counter =>
+    stateful_digits (stateful_digest pk_seed leaf_index randomizer counter message) in
+  let found = least_from (fun counter => sumz (digits_at counter) = WOTS_TARGET_SUM)
+                0 WOTS_C_MAX_GRIND_COUNTER in
+  if found = None then None
+  else
+    let counter = oget found in
+    let digits = digits_at counter in
+    Some {| sf_randomizer = randomizer;
+            sf_counter    = counter;
+            sf_chains     = mkseq (fun c =>
+                              stateful_chain pk_seed leaf_index c
+                                (stateful_chain_secret sk_seed pk_seed leaf_index c)
+                                0 (nth 0 digits c)) NUM_WOTS_CHAINS;
+            sf_auth_path  = [] |}.
+
+(* compact_stateful_wots_public_key_from_signature *)
+op stateful_wots_pk_from_sig (pk_seed : bytes) (leaf_index : int) (message : bytes)
+    (s : stateful_sig) : bytes option =
+  let digits = stateful_digits
+                 (stateful_digest pk_seed leaf_index s.`sf_randomizer s.`sf_counter message) in
+  if size s.`sf_chains < NUM_WOTS_CHAINS then None
+  else if sumz digits <> WOTS_TARGET_SUM then None
+  else Some (hash_node [TAG_UXMSS_WOTS_PK; pk_seed; be32 leaf_index;
+    flatten (mkseq (fun c =>
+      let d = nth 0 digits c in
+      stateful_chain pk_seed leaf_index c (nth [] s.`sf_chains c) d (WOTS_CHAIN_LEN - 1 - d))
+      NUM_WOTS_CHAINS)]).
+
+(* --- The stateless binding (hypertree.rs) --- *)
+
+(* stateless_wots_c_secret *)
+op stateless_wots_c_secret (sk_seed : bytes) (chain : int) : bytes =
+  hash_packed [TAG_WOTS_C_SECRET; sk_seed; be32 chain].
+
+(* stateless_wots_c_chain *)
+op stateless_wots_chain (pk_seed : bytes) (layer tree keypair chain : int)
+    (value : bytes) (start steps : int) : bytes =
+  wots_chain_walk TAG_WOTS_C_CHAIN pk_seed
+    (fun step => address_word32 layer tree ADDRESS_TYPE_WOTS_HASH keypair chain step)
+    value start steps.
+
+(* stateless_wots_public_key_hash *)
+op stateless_wots_public_key_hash (pk_seed : bytes) (layer tree keypair : int)
+    (endpoints : bytes list) : bytes =
+  hash_node [TAG_WOTS_C_PK; pk_seed; wots_pk_address_word layer tree keypair;
+             flatten (take NUM_WOTS_CHAINS endpoints)].
+
+(* stateless_wots_c_public_key: the leaf of a hypertree subtree. *)
+op stateless_wots_c_public_key (pk_seed sk_seed : bytes) (layer tree keypair : int) : bytes =
+  stateless_wots_public_key_hash pk_seed layer tree keypair
+    (mkseq (fun c =>
+       stateless_wots_chain pk_seed layer tree keypair c
+         (stateless_wots_c_secret sk_seed c) 0 (WOTS_CHAIN_LEN - 1))
+     NUM_WOTS_CHAINS).
+
+(* stateless_wots_message_digest *)
+op stateless_wots_message_digest (pk_seed expected_pk_hash randomizer : bytes)
+    (counter : int) (message : bytes) : bytes =
+  hash_packed [TAG_WOTS_C_MSG; pk_seed; expected_pk_hash; randomizer; be32 counter; message].
+
+op stateless_digits (digest : bytes) : int list =
+  mkseq (fun i => base_w_digit WOTS_CHAIN_LEN digest i) NUM_WOTS_CHAINS.
+
+(* sign_stateless_wots_c *)
+op sign_stateless_wots_c (pk_seed sk_seed prf_seed : bytes) (layer tree keypair : int)
+    (pk_hash message : bytes) : wots_sig option =
+  let randomizer = hash_packed [TAG_WOTS_C_RANDOMIZER; prf_seed; message] in
+  let digits_at = fun counter =>
+    stateless_digits (take wots_digest_bytes
+      (stateless_wots_message_digest pk_seed pk_hash randomizer counter message)) in
+  let found = least_from (fun counter => sumz (digits_at counter) = WOTS_TARGET_SUM)
+                0 WOTS_C_MAX_GRIND_COUNTER in
+  if found = None then None
+  else
+    let counter = oget found in
+    let digits = digits_at counter in
+    Some {| wc_randomizer = randomizer;
+            wc_counter    = counter;
+            wc_chains     = mkseq (fun c =>
+                              stateless_wots_chain pk_seed layer tree keypair c
+                                (stateless_wots_c_secret sk_seed c) 0 (nth 0 digits c))
+                              NUM_WOTS_CHAINS |}.
+
+(* verify_wots_c32 *)
+op verify_wots_c (pk_seed : bytes) (layer tree keypair : int)
+    (expected_pk_hash message : bytes) (s : wots_sig) : bool =
+  size s.`wc_chains = NUM_WOTS_CHAINS /\ wots_digest_bytes <= HASH_LEN /\
+  (let digits = stateless_digits
+       (stateless_wots_message_digest pk_seed expected_pk_hash s.`wc_randomizer s.`wc_counter message) in
+   sumz digits = WOTS_TARGET_SUM /\
+   stateless_wots_public_key_hash pk_seed layer tree keypair
+     (mkseq (fun c =>
+        let d = nth 0 digits c in
+        stateless_wots_chain pk_seed layer tree keypair c (nth [] s.`wc_chains c) d
+          (WOTS_CHAIN_LEN - 1 - d))
+      NUM_WOTS_CHAINS)
+   = expected_pk_hash).

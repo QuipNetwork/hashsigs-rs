@@ -1039,3 +1039,64 @@ mod stateful_core_tests {
         assert_ne!(wrong_root, true_root);
     }
 }
+
+/// Flat-argument access to the private steps of this module, for the
+/// EasyCrypt known-answer tests in `proofs/easycrypt`.
+#[cfg(feature = "kat-trace")]
+pub(crate) mod kat_access {
+    use super::*;
+
+    pub(crate) fn chain<P: Profile>(
+        pk_seed: &[u8; HASH_LEN],
+        leaf_index: u32,
+        chain_index: u32,
+        walk: ChainWalk,
+    ) -> [u8; HASH_LEN] {
+        stateful_chain_no_mask::<P>(
+            pk_seed,
+            StatefulChainCtx {
+                leaf_index,
+                chain_index,
+            },
+            walk,
+        )
+    }
+
+    pub(crate) fn chain_secret<P: Profile>(
+        sk_seed: &[u8; HASH_LEN],
+        pk_seed: &[u8; HASH_LEN],
+        leaf_index: u32,
+        chain_index: u32,
+    ) -> [u8; HASH_LEN] {
+        stateful_chain_secret::<P>(sk_seed, pk_seed, leaf_index, chain_index)
+    }
+
+    pub(crate) fn wots_pk_hash<P: Profile, const NUM_CHAINS: usize>(
+        sk_seed: &[u8; HASH_LEN],
+        pk_seed: &[u8; HASH_LEN],
+        leaf_index: u32,
+    ) -> [u8; HASH_LEN] {
+        stateful_wots_pk_hash::<P, NUM_CHAINS>(sk_seed, pk_seed, leaf_index)
+    }
+
+    pub(crate) fn sign_wots_c<P: Profile>(
+        sk_seed: &[u8; HASH_LEN],
+        prf_seed: &[u8; HASH_LEN],
+        pk_seed: &[u8; HASH_LEN],
+        leaf_index: u32,
+        message: &[u8],
+    ) -> Option<Signature> {
+        sign_stateful_wots_c::<P>(sk_seed, prf_seed, pk_seed, leaf_index, message)
+    }
+
+    pub(crate) fn wots_pk_from_sig<P: Profile, const NUM_CHAINS: usize>(
+        pk_seed: [u8; HASH_LEN],
+        leaf_index: u32,
+        message: &[u8],
+        signature: &Signature,
+    ) -> Option<[u8; HASH_LEN]> {
+        compact_stateful_wots_public_key_from_signature::<P, NUM_CHAINS>(
+            pk_seed, leaf_index, message, signature,
+        )
+    }
+}
