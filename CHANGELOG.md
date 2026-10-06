@@ -7,6 +7,16 @@ This file records changes to this project, in the
 
 ### Added
 
+- An EasyCrypt specification of SHRINCS for the `shrincs-256s-keccak`
+  profile under `proofs/easycrypt`, with the EUF-CMA game, an audit gate, a
+  mutation check, and a review packet. Known-answer tests replay Keccak
+  traces of the Rust code in EasyCrypt. The proofs run locally in Docker
+  (`make -C proofs/easycrypt docker-check`), not in CI.
+
+- The `kat-trace` Cargo feature, which records each Keccak call for the
+  known-answer test generator in `proofs/easycrypt/kat`. It is off by
+  default and does not change default builds.
+
 - Explicit-leaf stateful signing on the wasm surface: `shrincsSignAtLeaf`
   (commitment-bound, like `shrincsSign`) and `shrincsSignStatefulRawAt`
   (signs the message as-is, for callers whose canonical hashes already bind
