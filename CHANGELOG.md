@@ -14,8 +14,8 @@ This file records changes to this project, in the
   (`make -C proofs/easycrypt docker-check`), not in CI.
 
 - The `kat-trace` Cargo feature, which records each Keccak call for the
-  known-answer test generator in `proofs/easycrypt/kat`. It is off by
-  default and does not change default builds.
+  known-answer test generator in `proofs/easycrypt/kat`. The feature is
+  off by default, and default builds do not change.
 
 - Explicit-leaf stateful signing on the wasm surface: `shrincsSignAtLeaf`
   (commitment-bound, like `shrincsSign`) and `shrincsSignStatefulRawAt`
