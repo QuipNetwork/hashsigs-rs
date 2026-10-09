@@ -425,9 +425,6 @@ fn hypertree_root_from_path32<P: Profile>(
     leaf: [u8; HASH_LEN],
     auth_path: &[[u8; HASH_LEN]],
 ) -> Option<[u8; HASH_LEN]> {
-    if auth_path.len() != height as usize {
-        return None;
-    }
     let pk_seed = word32(pk_seed)?;
     crate::treehash::root_from_auth_path(
         height,
