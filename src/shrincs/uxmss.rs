@@ -104,8 +104,8 @@ pub(crate) fn verify_stateful_unsafe_raw<P: Profile, const NUM_CHAINS: usize>(
     message: &[u8],
     signature: &Signature,
 ) -> bool {
-    let leaf_index = signature.auth_path.len() as u32;
-    if leaf_index == 0 || leaf_index > stateful_key.max_signatures {
+    let leaf_index = signature.leaf_index();
+    if leaf_index < INITIAL_STATEFUL_LEAF_INDEX || leaf_index > stateful_key.max_signatures {
         return false;
     }
     if signature.chains.len() != P::NUM_WOTS_CHAINS as usize {
@@ -595,8 +595,9 @@ pub(crate) fn sign_stateful_raw<P: Profile, const NUM_CHAINS: usize>(
     key: &mut Key,
     message: &[u8],
 ) -> Option<Signature> {
-    // The verifier derives the stateful leaf index from auth_path.len(), so the
-    // signer must advance one leaf at a time and must never reuse a prior leaf.
+    // The verifier derives the stateful leaf index from the auth path
+    // (`Signature::leaf_index`), so the signer must advance one leaf at a time
+    // and must never reuse a prior leaf.
     let leaf_index = key.next_leaf_index();
     if leaf_index == 0 {
         return None;
@@ -968,6 +969,87 @@ mod stateful_core_tests {
         ));
 
         sig.chains[0][0] ^= 0x01;
+        assert!(!verify_stateful_unsafe_raw::<SelectedProfile, NUM_CHAINS>(
+            &pk, message, &sig
+        ));
+    }
+
+    #[test]
+    fn verify_rejects_an_auth_path_with_a_sibling_appended() {
+        let max = 8u32;
+        let key = test_key(b"appended-sibling", max);
+        let pk = flat_public_key(&key);
+        let message = b"appended sibling";
+        let mut sig = sign_stateful_raw_at_leaf::<SelectedProfile, NUM_CHAINS>(&key, 4, message)
+            .expect("sign");
+        assert!(verify_stateful_unsafe_raw::<SelectedProfile, NUM_CHAINS>(
+            &pk, message, &sig
+        ));
+
+        // One extra sibling moves the derived leaf index from 4 to 5, which
+        // is still inside the budget. Every hash in the WOTS-C walk and the
+        // path climb binds the index, so the root no longer matches.
+        sig.auth_path.push([0xEEu8; HASH_LEN]);
+        assert_eq!(sig.leaf_index(), 5);
+        assert!(!verify_stateful_unsafe_raw::<SelectedProfile, NUM_CHAINS>(
+            &pk, message, &sig
+        ));
+    }
+
+    #[test]
+    fn verify_rejects_an_auth_path_with_a_sibling_removed() {
+        let max = 8u32;
+        let key = test_key(b"removed-sibling", max);
+        let pk = flat_public_key(&key);
+        let message = b"removed sibling";
+        let mut sig = sign_stateful_raw_at_leaf::<SelectedProfile, NUM_CHAINS>(&key, 4, message)
+            .expect("sign");
+        assert!(verify_stateful_unsafe_raw::<SelectedProfile, NUM_CHAINS>(
+            &pk, message, &sig
+        ));
+
+        sig.auth_path.pop();
+        assert_eq!(sig.leaf_index(), 3);
+        assert!(!verify_stateful_unsafe_raw::<SelectedProfile, NUM_CHAINS>(
+            &pk, message, &sig
+        ));
+    }
+
+    #[test]
+    fn verify_rejects_an_empty_auth_path() {
+        let max = 8u32;
+        let key = test_key(b"empty-path", max);
+        let pk = flat_public_key(&key);
+        let message = b"empty auth path";
+        let mut sig = sign_stateful_raw_at_leaf::<SelectedProfile, NUM_CHAINS>(&key, 1, message)
+            .expect("sign");
+        assert!(verify_stateful_unsafe_raw::<SelectedProfile, NUM_CHAINS>(
+            &pk, message, &sig
+        ));
+
+        // Leaf 0 does not exist: the range check rejects before any hashing.
+        sig.auth_path.clear();
+        assert_eq!(sig.leaf_index(), 0);
+        assert!(!verify_stateful_unsafe_raw::<SelectedProfile, NUM_CHAINS>(
+            &pk, message, &sig
+        ));
+    }
+
+    #[test]
+    fn verify_rejects_an_auth_path_past_the_budget() {
+        let max = 8u32;
+        let key = test_key(b"past-budget", max);
+        let pk = flat_public_key(&key);
+        let message = b"past the budget";
+        let mut sig = sign_stateful_raw_at_leaf::<SelectedProfile, NUM_CHAINS>(&key, max, message)
+            .expect("sign");
+        assert!(verify_stateful_unsafe_raw::<SelectedProfile, NUM_CHAINS>(
+            &pk, message, &sig
+        ));
+
+        // Leaf max + 1 is outside the key's budget.
+        sig.auth_path.push([0xEEu8; HASH_LEN]);
+        assert_eq!(sig.leaf_index(), max + 1);
         assert!(!verify_stateful_unsafe_raw::<SelectedProfile, NUM_CHAINS>(
             &pk, message, &sig
         ));

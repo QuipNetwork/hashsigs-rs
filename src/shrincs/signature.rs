@@ -53,11 +53,30 @@ pub struct Signature {
     pub counter: u32,
     /// One WOTS-C chain value per reconstructed digit.
     pub chains: Vec<[u8; HASH_LEN]>,
-    /// Unbalanced authentication path. Its length is also the leaf index.
+    /// Unbalanced authentication path. Its length is the leaf index; see
+    /// [`Self::leaf_index`].
     pub auth_path: Vec<[u8; HASH_LEN]>,
 }
 
 impl Signature {
+    /// The stateful leaf this signature spends.
+    ///
+    /// UXMSS is an unbalanced tree: leaf `n` sits at depth `n`, so a valid
+    /// signature for leaf `n` carries exactly `n` auth-path siblings. The
+    /// wire format `abi.encode(SHRINCS.Signature)` has no separate index
+    /// field, and `UXMSS.sol` derives the index the same way. This is the one
+    /// place the verifier reads the index from the path. The verifier then
+    /// rejects an index outside `1..=max_signatures`, and the path climb
+    /// rejects a sibling count that differs from the index.
+    ///
+    /// A path too long for `u32` saturates to `u32::MAX`, which the range
+    /// check rejects. The ABI decoder caps the path at
+    /// `MAX_STATEFUL_AUTH_PATH_LEN`, so only an in-process caller can build
+    /// one that long.
+    pub fn leaf_index(&self) -> u32 {
+        u32::try_from(self.auth_path.len()).unwrap_or(u32::MAX)
+    }
+
     /// ABI-encode the signature body (two static words plus two `bytes32[]`
     /// fields), without a further outer offset. Byte-identical to the
     /// historical `envelope::encode_stateful_signature_body`. Used both by
@@ -250,6 +269,14 @@ mod tests {
             Signature::from_bytes::<SelectedProfile>(&encoded).expect("valid encoding must decode");
         assert_eq!(decoded, signature);
         assert_eq!(decoded.to_bytes(), encoded);
+    }
+
+    #[test]
+    fn leaf_index_is_the_auth_path_length() {
+        assert_eq!(sample_stateful_signature().leaf_index(), 2);
+        let mut empty = sample_stateful_signature();
+        empty.auth_path.clear();
+        assert_eq!(empty.leaf_index(), 0);
     }
 
     #[test]
