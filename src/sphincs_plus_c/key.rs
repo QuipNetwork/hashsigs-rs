@@ -37,6 +37,7 @@ use core::fmt;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::hash::word32;
+use crate::profile::Profile;
 use crate::HASH_LEN;
 
 /// PrivateKey `SK.seed` material: derives FORS-C and hypertree WOTS-C secrets.
@@ -322,6 +323,18 @@ impl Key {
             public_key: PublicKey::from_bytes(bytes.get(64..)?)?,
         })
     }
+
+    /// Recompute the hypertree root from `sk_seed` and `pk_seed` and compare
+    /// it to the stored `public_key.root`. `prf_seed` only drives signing
+    /// randomness, so it does not enter the root and is not checked. Costs
+    /// one top-layer tree build, the same work as `keygen`.
+    pub fn root_matches_seeds<P: Profile, const NUM_LAYERS: usize>(&self) -> bool {
+        let recomputed = super::hypertree::hypertree_public_root::<P, NUM_LAYERS>(
+            self.secret.sk_seed.as_bytes(),
+            self.public_key.pk_seed.as_bytes(),
+        );
+        &recomputed == self.public_key.root.as_bytes()
+    }
 }
 
 impl TryFrom<&[u8]> for Key {
@@ -335,6 +348,7 @@ impl TryFrom<&[u8]> for Key {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::profiles::selected::{SelectedProfile, NUM_LAYERS};
 
     fn sample_key() -> Key {
         Key::new(
@@ -374,5 +388,28 @@ mod tests {
         let shown = alloc::format!("{:?}", key.secret());
         assert!(!shown.contains("01"));
         assert!(shown.contains("redacted"));
+    }
+
+    #[test]
+    fn root_matches_seeds_accepts_keygen_output() {
+        let key =
+            super::super::keygen::<SelectedProfile, NUM_LAYERS>([1u8; 32], [2u8; 32], [3u8; 32]);
+        assert!(key.root_matches_seeds::<SelectedProfile, NUM_LAYERS>());
+    }
+
+    #[test]
+    fn root_matches_seeds_rejects_a_root_that_does_not_match() {
+        let key =
+            super::super::keygen::<SelectedProfile, NUM_LAYERS>([1u8; 32], [2u8; 32], [3u8; 32]);
+        let mut root = *key.public_key.root.as_bytes();
+        root[0] ^= 0x01;
+        let tampered = Key::new(
+            key.secret().clone(),
+            PublicKey {
+                pk_seed: key.public_key.pk_seed,
+                root: Root::new(root),
+            },
+        );
+        assert!(!tampered.root_matches_seeds::<SelectedProfile, NUM_LAYERS>());
     }
 }

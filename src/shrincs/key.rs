@@ -207,16 +207,8 @@ impl Keys {
             INITIAL_STATEFUL_LEAF_INDEX,
             max,
         );
-        let hypertree_root = *sphincs_plus_c::keygen::<P, NUM_LAYERS>(
-            *keys.stateless.secret().as_sk_seed().as_bytes(),
-            *keys.stateless.secret().as_prf_seed().as_bytes(),
-            *keys.stateless.public_key.pk_seed.as_bytes(),
-        )
-        .public_key
-        .root
-        .as_bytes();
         if &stateful_root != keys.stateful.public_key().root.as_bytes()
-            || &hypertree_root != keys.stateless.public_key.root.as_bytes()
+            || !keys.stateless.root_matches_seeds::<P, NUM_LAYERS>()
         {
             return None;
         }
