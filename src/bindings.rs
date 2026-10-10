@@ -119,6 +119,21 @@ pub fn deserialize_sphincs_plus_c_signing_key(
     })
 }
 
+/// Parse a 128-byte SPHINCS+C secret key and revalidate its root against its
+/// seeds. Every foreign-function entry point that signs with persisted
+/// SPHINCS+C bytes goes through here, so a key that fails validation is
+/// rejected before any signature is made. `ERR_BAD_LENGTH` for a wrong
+/// length, `ERR_IMPORT_INVALID` for a root that the seeds do not produce.
+pub fn sphincs_plus_c_import_secret_key<P: Profile, const NUM_LAYERS: usize>(
+    secret_key: &[u8],
+) -> Result<crate::sphincs_plus_c::Key, BindingError> {
+    let candidate = deserialize_sphincs_plus_c_signing_key(secret_key)?;
+    if !candidate.root_matches_seeds::<P, NUM_LAYERS>() {
+        return Err(import_invalid());
+    }
+    Ok(candidate)
+}
+
 /// `pkSeed ‖ hypertreeRoot` (64 bytes), the verifier-interface public key
 /// shape the SPHINCS+C verify entry points expect.
 pub fn encode_sphincs_plus_c_public_key(key: &crate::sphincs_plus_c::Key) -> alloc::vec::Vec<u8> {
@@ -181,15 +196,17 @@ pub fn sphincs_plus_c_keygen<P: Profile, const NUM_LAYERS: usize>(
     Ok(signing_key)
 }
 
-/// Sign a 32-byte message with a 128-byte SPHINCS+C secret key under `P`.
+/// Sign a 32-byte message with a validated SPHINCS+C signing key under `P`.
+/// Takes the typed key that [`sphincs_plus_c_import_secret_key`] or
+/// [`sphincs_plus_c_keygen`] returns, so parsing and validation happen once
+/// at load time, before any signature is made.
 pub fn sphincs_plus_c_sign<P: Profile, const NUM_LAYERS: usize>(
     message: &[u8],
-    secret_key: &[u8],
+    signing_key: &crate::sphincs_plus_c::Key,
 ) -> Result<alloc::vec::Vec<u8>, BindingError> {
-    let full_key = deserialize_sphincs_plus_c_signing_key(secret_key)?;
     let hash = message_hash(message)?;
     let signature =
-        crate::sphincs_plus_c::sign::<P, NUM_LAYERS>(&full_key, &hash).ok_or_else(|| {
+        crate::sphincs_plus_c::sign::<P, NUM_LAYERS>(signing_key, &hash).ok_or_else(|| {
             BindingError {
                 code: ErrorCode::SigningFailed.as_str(),
                 message: "stateless signing failed for the supplied key/message".into(),
@@ -245,7 +262,7 @@ pub fn shrincs_keygen<P: Profile, const NUM_CHAINS: usize, const NUM_LAYERS: usi
 }
 
 /// The `ERR_IMPORT_INVALID` error every import path below raises. One
-/// definition so the six call sites cannot drift in wording.
+/// definition so the call sites cannot drift in wording.
 fn import_invalid() -> BindingError {
     BindingError {
         code: ErrorCode::ImportInvalid.as_str(),
@@ -487,4 +504,77 @@ pub fn shrincs_recover_public_key_commitment<P: Profile>(
             code: ErrorCode::EnvelopeMalformed.as_str(),
             message: "signature envelope could not be decoded".into(),
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::profiles::selected::{SelectedProfile, NUM_CHAINS, NUM_LAYERS};
+
+    fn keygen() -> crate::sphincs_plus_c::Key {
+        sphincs_plus_c_keygen::<SelectedProfile, NUM_LAYERS>(&[0x11u8; 32]).expect("keygen")
+    }
+
+    #[test]
+    fn sphincs_plus_c_import_accepts_keygen_output() {
+        let key = keygen();
+        let imported =
+            sphincs_plus_c_import_secret_key::<SelectedProfile, NUM_LAYERS>(&key.to_bytes())
+                .expect("import");
+        assert_eq!(imported, key);
+    }
+
+    #[test]
+    fn sphincs_plus_c_import_rejects_a_wrong_length_key() {
+        let err = sphincs_plus_c_import_secret_key::<SelectedProfile, NUM_LAYERS>(&[0u8; 127])
+            .expect_err("127 bytes must fail");
+        assert_eq!(err.code, ErrorCode::BadLength.as_str());
+    }
+
+    #[test]
+    fn sphincs_plus_c_import_rejects_a_root_that_does_not_match_the_seeds() {
+        let mut bytes = keygen().to_bytes();
+        // Byte 96 is the first byte of `root` (sk 0..32, prf 32..64, pk 64..96).
+        bytes[96] ^= 0x01;
+        let err = sphincs_plus_c_import_secret_key::<SelectedProfile, NUM_LAYERS>(&bytes)
+            .expect_err("a root that does not match the seeds must fail");
+        assert_eq!(err.code, ErrorCode::ImportInvalid.as_str());
+    }
+
+    #[test]
+    fn sphincs_plus_c_import_accepts_a_key_with_a_different_prf_seed() {
+        let mut bytes = keygen().to_bytes();
+        // Byte 32 is the first byte of `prf_seed`, which the root does not bind.
+        bytes[32] ^= 0x01;
+        let imported = sphincs_plus_c_import_secret_key::<SelectedProfile, NUM_LAYERS>(&bytes)
+            .expect("prf_seed is not part of the root");
+        let message = [0x01u8; 32];
+        let signature =
+            sphincs_plus_c_sign::<SelectedProfile, NUM_LAYERS>(&message, &imported).expect("sign");
+        let public_key = encode_sphincs_plus_c_public_key(&imported);
+        assert!(sphincs_plus_c_verify::<SelectedProfile, NUM_CHAINS>(
+            &signature,
+            &message,
+            &public_key
+        ));
+    }
+
+    #[test]
+    fn sphincs_plus_c_sign_takes_the_typed_key_and_verifies() {
+        let key = keygen();
+        let message = [0x01u8; 32];
+        let signature =
+            sphincs_plus_c_sign::<SelectedProfile, NUM_LAYERS>(&message, &key).expect("sign");
+        let public_key = encode_sphincs_plus_c_public_key(&key);
+        assert!(sphincs_plus_c_verify::<SelectedProfile, NUM_CHAINS>(
+            &signature,
+            &message,
+            &public_key
+        ));
+        assert!(!sphincs_plus_c_verify::<SelectedProfile, NUM_CHAINS>(
+            &signature,
+            &[0xEEu8; 32],
+            &public_key
+        ));
+    }
 }
