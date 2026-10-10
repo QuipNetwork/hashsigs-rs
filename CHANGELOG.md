@@ -123,6 +123,14 @@ This file records changes to this project, in the
 
 ### Fixed
 
+- `sphincsPlusCSign` on the wasm surface and `sphincs_plus_c_sign` in the
+  Python extension check the secret key before signing. Both recompute
+  the hypertree root from the seeds and raise `ERR_IMPORT_INVALID` on a
+  mismatch, the same check `shrincsImportSigningKey` already made. The
+  binding-level `sphincs_plus_c_sign` now takes the typed key that
+  `sphincs_plus_c_import_secret_key` returns, so parsing and validation run
+  once at load time.
+
 - The `hashsigs` wheel carries a `manylinux` platform tag again. The build
   moved from the maturin command line to `python -m build`, which builds the
   wheel from the sdist and so proves the sdist is complete. The two entry
