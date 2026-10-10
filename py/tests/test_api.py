@@ -17,7 +17,14 @@ import hashlib
 import pytest
 
 import hashsigs
-from hashsigs import HashSigsError, shrincs, shrincs_keys_to_secret_bytes, sphincs_plus_c
+from hashsigs import (
+    HashSigsError,
+    SphincsPlusCKeys,
+    SphincsPlusCPublicKey,
+    shrincs,
+    shrincs_keys_to_secret_bytes,
+    sphincs_plus_c,
+)
 
 SEED = bytes([0xAB]) * 32
 MESSAGE = hashlib.sha256(b"hashsigs-python-api").digest()
@@ -189,6 +196,21 @@ def test_sphincs_plus_c_round_trip():
     tampered = bytearray(signature)
     tampered[0] ^= 1
     assert not sphincs_plus_c.verify(bytes(tampered), MESSAGE, keys.public_key)
+
+
+def test_sphincs_plus_c_sign_rejects_a_root_that_does_not_match_the_seeds():
+    keys = sphincs_plus_c.keygen(SEED)
+    root = bytearray(keys.public_key.root)
+    root[0] ^= 1
+    tampered = SphincsPlusCKeys(
+        secret=keys.secret,
+        public_key=SphincsPlusCPublicKey(
+            pk_seed=keys.public_key.pk_seed, root=bytes(root)
+        ),
+    )
+    with pytest.raises(HashSigsError) as excinfo:
+        sphincs_plus_c.sign(MESSAGE, tampered)
+    assert excinfo.value.code == "ERR_IMPORT_INVALID"
 
 
 def test_a_wrong_length_message_is_rejected_when_signing():

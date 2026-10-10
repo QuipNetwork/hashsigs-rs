@@ -114,6 +114,8 @@ macro_rules! wasm_profile_surface {
         /// Returns a `JsValue` error with:
         /// - `ERR_BAD_LENGTH` when `secretKey` is not 128 bytes or `message`
         ///   is not 32 bytes
+        /// - `ERR_IMPORT_INVALID` when the root in `secretKey` is not the one
+        ///   its seeds produce under this profile
         /// - `ERR_SIGNING_FAILED` when FORS-C/hypertree grinding fails for the
         ///   supplied key and message
         #[wasm_bindgen(js_name = sphincsPlusCSign)]
@@ -121,8 +123,14 @@ macro_rules! wasm_profile_surface {
             message: &[u8],
             secret_key: &[u8],
         ) -> Result<alloc::vec::Vec<u8>, JsValue> {
+            let signing_key = $crate::bindings::sphincs_plus_c_import_secret_key::<
+                $profile,
+                PROFILE_NUM_LAYERS,
+            >(secret_key)
+            .map_err($crate::wasm::js_error)?;
             $crate::bindings::sphincs_plus_c_sign::<$profile, PROFILE_NUM_LAYERS>(
-                message, secret_key,
+                message,
+                &signing_key,
             )
             .map_err($crate::wasm::js_error)
         }

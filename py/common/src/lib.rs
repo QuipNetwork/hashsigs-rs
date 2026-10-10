@@ -146,11 +146,19 @@ macro_rules! python_profile_surface {
             .map_err($crate::to_py_err)
         }
 
-        /// Sign a 32-byte message with a 128-byte SPHINCS+C secret key.
+        /// Sign a 32-byte message with a 128-byte SPHINCS+C secret key. The
+        /// key is validated first: `ERR_IMPORT_INVALID` when its root does not
+        /// match its seeds.
         #[pyfunction]
         fn sphincs_plus_c_sign(message: &[u8], secret_key: &[u8]) -> PyResult<Vec<u8>> {
+            let signing_key = $crate::hashsigs_rs::bindings::sphincs_plus_c_import_secret_key::<
+                $profile,
+                PROFILE_NUM_LAYERS,
+            >(secret_key)
+            .map_err($crate::to_py_err)?;
             $crate::hashsigs_rs::bindings::sphincs_plus_c_sign::<$profile, PROFILE_NUM_LAYERS>(
-                message, secret_key,
+                message,
+                &signing_key,
             )
             .map_err($crate::to_py_err)
         }
