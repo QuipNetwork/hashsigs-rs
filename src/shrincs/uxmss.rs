@@ -1056,6 +1056,26 @@ mod stateful_core_tests {
     }
 
     #[test]
+    fn verify_rejects_a_leaf_past_the_verifier_budget() {
+        let key = test_key(b"verifier-budget", 9);
+        let pk = flat_public_key(&key);
+        let message = b"verifier budget";
+        let sig = sign_stateful_raw_at_leaf::<SelectedProfile, NUM_CHAINS>(&key, 9, message)
+            .expect("sign");
+        assert!(verify_stateful_unsafe_raw::<SelectedProfile, NUM_CHAINS>(
+            &pk, message, &sig
+        ));
+
+        // Same root and path, so the Merkle climb still succeeds; only the
+        // budget check can reject.
+        let mut capped = pk;
+        capped.max_signatures = 8;
+        assert!(!verify_stateful_unsafe_raw::<SelectedProfile, NUM_CHAINS>(
+            &capped, message, &sig
+        ));
+    }
+
+    #[test]
     fn root_from_unbalanced_path_rejects_short_sibling_list() {
         let max = 8u32;
         let key = test_key(b"short-path", max);

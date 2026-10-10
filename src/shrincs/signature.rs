@@ -69,8 +69,10 @@ impl Signature {
     /// rejects an index outside `1..=max_signatures`, and the path climb
     /// rejects a sibling count that differs from the index.
     ///
-    /// A path too long for `u32` saturates to `u32::MAX`, which the range
-    /// check rejects. The ABI decoder caps the path at
+    /// A path too long for `u32` saturates to `u32::MAX`. The range check
+    /// rejects it unless `max_signatures` is also `u32::MAX`, and the path
+    /// climb rejects it in every case, because the sibling count no longer
+    /// equals the index. The ABI decoder caps the path at
     /// `MAX_STATEFUL_AUTH_PATH_LEN`, so only an in-process caller can build
     /// one that long.
     pub fn leaf_index(&self) -> u32 {
