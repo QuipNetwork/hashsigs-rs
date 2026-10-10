@@ -198,8 +198,9 @@ pub fn sphincs_plus_c_keygen<P: Profile, const NUM_LAYERS: usize>(
 
 /// Sign a 32-byte message with a validated SPHINCS+C signing key under `P`.
 /// Takes the typed key that [`sphincs_plus_c_import_secret_key`] or
-/// [`sphincs_plus_c_keygen`] returns, so parsing and validation happen once
-/// at load time, before any signature is made.
+/// [`sphincs_plus_c_keygen`] returns, so an invalid key is rejected before
+/// any signature is made. A Rust caller can import once and sign many
+/// times. The wasm and Python wrappers take bytes and import on every call.
 pub fn sphincs_plus_c_sign<P: Profile, const NUM_LAYERS: usize>(
     message: &[u8],
     signing_key: &crate::sphincs_plus_c::Key,
