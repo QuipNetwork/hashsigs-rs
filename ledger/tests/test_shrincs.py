@@ -15,7 +15,7 @@ def assert_status(status, operation):
 def test_profile(client, vectors):
     info = client.profile()
     assert info == {
-        "protocol": 1, "max_envelope": 4096,
+        "protocol": 2, "max_envelope": 4096,
         "profile_id": vectors["profile_id"], "name": "shrincs-256s-sha2",
     }
 

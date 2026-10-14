@@ -220,11 +220,24 @@ checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
 
 [[package]]
 name = "hashsigs-ledger"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
+ "critical-section",
+ "embedded-alloc",
+ "hashsigs-ledger-common",
  "hashsigs-rs",
  "hex",
  "ledger_device_sdk",
+ "zeroize",
+]
+
+[[package]]
+name = "hashsigs-ledger-common"
+version = "0.2.0"
+dependencies = [
+ "hashsigs-rs",
+ "subtle",
+ "zeroize",
 ]
 
 [[package]]
@@ -556,6 +569,12 @@ name = "simd-adler32"
 version = "0.3.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a219298ac11a56ea9a6d2120044824d6f01aeb034955e7af7bc16858527deea"
+
+[[package]]
+name = "subtle"
+version = "2.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "syn"

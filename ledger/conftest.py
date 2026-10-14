@@ -5,6 +5,8 @@ import pytest
 from ragger.conftest import configuration
 
 configuration.OPTIONAL.BACKEND_SCOPE = "module"
+# Public SLIP21 fixture; Speculos only. Hardware always uses its existing seed.
+configuration.OPTIONAL.CUSTOM_SEED = "all all all all all all all all all all all all"
 pytest_plugins = ("ragger.conftest.base_conftest",)
 
 

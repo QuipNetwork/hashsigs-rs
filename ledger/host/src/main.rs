@@ -8,6 +8,23 @@ use hashsigs_rs::{VerifierInterface, VerifyOutcome};
 use serde_json::json;
 
 fn main() {
+    // Public emulator oracle. Input is a PUBLIC test keygen seed, never a
+    // hardware-wallet secret; output contains only the canonical public key.
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() == 3 && args[1] == "--keygen-public" {
+        let seed = hex::decode(&args[2]).expect("public emulator seed hex");
+        assert_eq!(seed.len(), 32);
+        let (_, public) =
+            ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(&seed, 4)
+                .expect("public oracle keygen");
+        println!("{}", hex::encode(public.to_bytes()));
+        return;
+    }
+    assert_eq!(
+        args.len(),
+        1,
+        "usage: hashsigs-ledger-vectors [--keygen-public SEED_HEX]"
+    );
     let (mut keys, public) = ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(
         b"hashsigs-ledger PUBLIC TEST FIXTURE v1",
         4,

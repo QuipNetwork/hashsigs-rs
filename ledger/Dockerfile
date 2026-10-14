@@ -22,6 +22,7 @@ RUN python -c "from ragger.backend.ledgerwallet import LedgerWalletBackend; from
 WORKDIR /repo
 COPY Cargo.toml build.rs ./
 COPY src/ src/
+COPY ledger/common/ ledger/common/
 COPY ledger/app/ ledger/app/
 WORKDIR /repo/ledger/app
 RUN cargo ledger build apex_p -- --locked
@@ -29,9 +30,11 @@ RUN cargo ledger build apex_p -- --locked
 WORKDIR /repo/ledger
 COPY ledger/host/ host/
 RUN cargo run --locked --release --manifest-path host/Cargo.toml > /tmp/ledger-vectors.json
+RUN cargo test --locked --release --manifest-path common/Cargo.toml
 RUN mkdir -p artifacts && cp /tmp/ledger-vectors.json artifacts/vectors.json
 COPY ledger/ledger_app.toml ledger/pytest.ini ledger/conftest.py ./
 COPY ledger/tests/ tests/
+RUN python tests/enable_rust_nvram.py
 COPY ledger/benchmarks/ benchmarks/
 # Ragger discovers ledger_app.toml from this container-local Git root.
 RUN git init --quiet /repo/ledger

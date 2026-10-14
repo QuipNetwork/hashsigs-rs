@@ -9,7 +9,7 @@ BENCH_RUN := $(shell date -u +%Y%m%dT%H%M%SZ)
 BENCH_OUTPUT ?= $(LEDGER_DIR)/artifacts/benchmarks/$(BENCH_RUN)
 RUN = $(DOCKER) run --rm --network none --user "$$(id -u):$$(id -g)"
 
-.PHONY: help check-docker build check test run test-hardware bench-hardware
+.PHONY: help check-docker build check test run test-hardware bench-hardware measure
 .DEFAULT_GOAL := help
 
 help:
@@ -17,6 +17,7 @@ help:
 	@echo 'make -C ledger build          Build the app and export ELF and public test vectors'
 	@echo 'make -C ledger check          Check app and host Rust formatting'
 	@echo 'make -C ledger test           Run the Gen5 Speculos suite'
+	@echo 'make -C ledger measure        Build a separate metrics ELF and measure keygen in Speculos'
 	@echo 'make -C ledger run            Open Speculos at http://localhost:5000'
 	@echo 'make -C ledger test-hardware USB_DEVICE=/dev/bus/usb/BBB/DDD'
 	@echo 'make -C ledger bench-hardware USB_DEVICE=/dev/bus/usb/BBB/DDD'
@@ -33,6 +34,8 @@ build: check-docker
 check: build
 	$(RUN) $(IMAGE) cargo fmt --manifest-path app/Cargo.toml --check
 	$(RUN) $(IMAGE) cargo fmt --manifest-path host/Cargo.toml --check
+	$(RUN) $(IMAGE) cargo fmt --manifest-path common/Cargo.toml --check
+	$(DOCKER) run --rm --network none $(IMAGE) cargo test --locked --release --manifest-path common/Cargo.toml
 
 test: check
 	$(RUN) $(IMAGE) python -m pytest --device apex_p --backend speculos $(PYTEST_ARGS)
@@ -62,4 +65,11 @@ bench-hardware: build
 		--mount "type=bind,src=$(BENCH_OUTPUT),dst=/out" \
 		--env LEDGER_BENCH_OUTPUT=/out --env LEDGER_BENCH_SAMPLES=$(BENCH_SAMPLES) \
 		--env LEDGER_BENCH_WARMUP=$(BENCH_WARMUP) $(IMAGE) \
-		python -m pytest benchmarks --device apex_p --backend ledgerwallet --timeout-method=thread -x -s -v $(PYTEST_ARGS)
+		python -m pytest benchmarks/test_verify_timing.py --device apex_p --backend ledgerwallet --timeout-method=thread -x -s -v $(PYTEST_ARGS)
+
+# The metrics build is made inside a disposable container. The ordinary app.elf
+# and its production APDU surface remain unchanged.
+measure: build
+	mkdir -p "$(BENCH_OUTPUT)"
+	$(DOCKER) run --rm --network none --mount "type=bind,src=$(BENCH_OUTPUT),dst=/out" --env LEDGER_BENCH_OUTPUT=/out $(IMAGE) \
+		sh -c 'cd app && cargo ledger build apex_p -- --locked --no-default-features --features memory-metrics && cp target/apex_p/release/hashsigs-ledger /out/app-metrics.elf && cd .. && python -m pytest benchmarks/test_keygen_resources.py --device apex_p --backend speculos -x -s --tb=short'

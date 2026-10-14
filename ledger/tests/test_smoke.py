@@ -84,4 +84,4 @@ def test_malformed_apdu(client, backend, apdu):
         backend.exchange_raw(apdu)
     assert error.value.status == 0x6E03
     assert error.value.data == b""
-    assert client.version() == (0, 1, 0)
+    assert client.version() == (0, 2, 0)

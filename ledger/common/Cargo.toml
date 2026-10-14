@@ -1,0 +1,18 @@
+[package]
+name = "hashsigs-ledger-common"
+version = "0.2.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[workspace]
+
+[dependencies]
+hashsigs-rs = { path = "../..", default-features = false, features = ["alloc", "profile-256s-sha2", "heap-buffers"] }
+zeroize = { version = "=1.9.0", default-features = false, features = ["alloc"] }
+subtle = { version = "=2.6.1", default-features = false }
+
+[dev-dependencies]
+hmac = "=0.12.1"
+sha2 = "=0.10.9"
+hex = "=0.4.3"

@@ -17,6 +17,9 @@ pub struct VerificationSession {
     upload: Option<Upload>,
 }
 impl VerificationSession {
+    pub fn is_active(&self) -> bool {
+        self.upload.is_some()
+    }
     pub const fn new() -> Self {
         Self {
             next_id: 1,

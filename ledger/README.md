@@ -4,15 +4,19 @@ This folder contains the Ledger app, Docker build, native fixture generator,
 APDU client, and Speculos/USB tests. Run everything from this repository; no
 `hdwallets.dev` checkout or external scheme symlink is needed.
 
-The first milestone is **stateful signature verification on the device** using
+The app implements **full hybrid key creation, persistent reload, public-key
+export, and stateful signature verification** using
 the real `hashsigs-rs` crate with `default-features = false`, `alloc`,
 `profile-256s-sha2`, and `heap-buffers`. The host generates public deterministic
 fixtures for four sequential signing leaves; the Gen5 app verifies their
 canonical SHRINCS envelopes. The app also retains the SHA-256 and on-screen
 approve/reject smoke flow from the Rust boilerplate.
 
-Key generation and signing currently run in the host fixture generator.
-The device app does not derive wallet secrets, sign, or persist key state.
+App **0.2.0, protocol 2** derives an isolated SLIP21 key from the active wallet,
+generates a fresh public generation ID after approval, and stores the complete
+capacity-four hybrid key in authenticated NVM. Both tree roots are computed
+on-device. Key creation never replaces an existing identity. Signing remains
+host-only; the device advertises capabilities `0x00000003`, with signing disabled.
 Stateless verification and signing need a separate memory implementation:
 the core ABI decoder creates temporary copies of the much larger stateless
 envelope. Passing these tests is an embedded portability result, not a complete
@@ -28,10 +32,11 @@ make -C ledger test PYTEST_ARGS="-v"
 make -C ledger test PYTEST_ARGS="-k shrincs"
 make -C ledger build
 make -C ledger run
+make -C ledger measure
 ```
 
 `test` builds the image, checks Rust formatting, runs the native fixture
-generator during the build, and executes Ragger against the exact Gen5 ELF in
+generator and storage fault tests, and executes Ragger against the exact Gen5 ELF in
 Speculos. The image includes both `ragger[speculos,ledgerwallet]` backends and
 checks their concrete imports during the build, without needing USB access.
 Network access is disabled during the test run. Initial builds download
@@ -54,15 +59,34 @@ check uses the same `DOCKER` command and selected context as the build.
 The Dockerfile is in this folder but uses the repository root as its build
 context, so the app can depend on the current Rust source via `path = "../.."`.
 `Dockerfile.dockerignore` limits the context to the root crate and Ledger files.
-The app and host tool are independent Cargo workspaces with separate lockfiles;
+The app, host tool, and device-independent `common/` storage crate are independent
+Cargo workspaces with separate lockfiles;
 the Python and Solana bindings are not needed in the image or build context.
 Ordinary root `cargo test` does not build the Ledger SDK.
 
-Validated on 2026-09-23: **45 Speculos tests passed**, including a canonical
-4 KiB envelope, all four signing leaves, rejection/recovery, and repeated
-verification. App and host Rust formatting checks passed. The ELF reports
-API level 26 and target ID `0x33400004`. The physical Nano Gen5 suite also
-passed: **41 tests passed**, with 4 emulator-only cases deselected.
+The original verification baseline passed 45 Speculos tests and 41 hardware
+tests (4 deselected) on 2026-09-23. The ELF targets API 26, ID `0x33400004`.
+The new key-management tests additionally cover SLIP21/public-key agreement,
+approval/rejection, restart, lost replies, wrong-seed and corrupted-record locks,
+competing APDUs during review, and a fresh identity after simulated reinstall.
+See [validation evidence](docs/hashsig-spec.md#8-acceptance-evidence-and-remaining-device-assumptions).
+
+Validated on 2026-10-12: **61 Speculos/ELF tests passed in 33.17 seconds**;
+all three Rust formatting checks and **8 native storage tests** passed.
+Normal app ELF SHA-256:
+`8a1699d36e87f0d392fa147cd4ad22146f0a3baf092b9d6755ec660cf6cfe5bb`.
+
+The eight native storage tests exercise 1,539 interrupted-write prefixes across
+the three creation writes, every single-byte corruption in both 512-byte blocks,
+silent short writes, authenticated metadata inconsistencies, and exhaustion.
+They model storage faults; they do not establish physical flash guarantees.
+
+Pinned Speculos 0.27.0 excludes Rust apps from its NVRAM file support. The
+[explicit test adapter](tests/enable_rust_nvram.py) supplies the Rust memory
+region to its existing C persistence implementation. Restart tests initialize
+the first file from ELF data (including SDK PIC tables), then reuse the written
+file across separate processes. Ordinary tests leave that adapter inactive.
+The firmware ELF is unmodified and contains no seed-import or storage-edit APDU.
 
 ## Physical Nano Gen5
 
@@ -115,8 +139,11 @@ LedgerOS 1.1.1: **41 passed, 4 deselected in 22.04 seconds**, using the thread
 watchdog and `PYTEST_ARGS="-v --tb=short --log-cli-level=INFO"`. This includes all four host-generated stateful
 signatures, the one-byte upload case, invalid-input handling, and the 4 KiB
 boundary case. The excluded cases are automated hash approval/rejection and two
-malformed transport frames. Manual hardware approval/rejection and peak stack/heap
-measurements remain outstanding; the app still does not generate keys or sign.
+malformed transport frames. That result applies to app 0.1.0. No Ledger was
+connected for the 2026-10-12 implementation session, so app 0.2.0 installation,
+physical key creation/reboot, actual flash interruption, watchdog behavior, and
+hardware memory/timing measurements remain unvalidated. The ordinary USB suite
+does not approve key creation automatically.
 
 An earlier attempt stopped after 30 passes because USB disconnected during the
 one-byte upload. After reconnecting and reopening the app, the complete suite
@@ -127,7 +154,7 @@ After a reconnect, unlock the wallet, open **SHRINCS Lab**, and rerun
 `lsusb -d 2c97:` to find its current bus/device number before setting `USB_DEVICE`. Close
 Ledger Wallet and other test processes so they do not compete for USB access.
 The app contains no test seed or private-key import command; the deterministic
-fixture seed lives only in `host/src/main.rs`.
+fixture seeds live only in host tools and Speculos test configuration.
 
 ## Verification timing and parameters
 
@@ -211,6 +238,9 @@ Ledger hash acceleration is not implemented.
 
 ## Protocol version 1
 
+These verification commands remain available in protocol 2. `GET_PROFILE` now
+reports protocol `2`; the version command reports app `0.2.0`.
+
 CLA is `0xE0`; short APDUs carry at most 255 bytes. Integers are big-endian.
 P1/P2 are zero except on `WRITE_VERIFY`, where they encode the byte offset.
 
@@ -239,6 +269,37 @@ explicit verdict with APDU success (`9000`); callers must accept only verdict
 `6A86` bad P1/P2, `6D00` unknown instruction, `6F00` internal error. The SDK
 uses `6E00` for wrong CLA and `6E03` for malformed APDU length.
 
+## Protocol version 2 key management
+
+The [signer contract](docs/hashsig-spec.md) specifies all byte layouts and state
+rules. This slice implements the following commands; P1/P2 are zero.
+
+| INS | Operation | Request | Successful response |
+| --- | --- | --- | --- |
+| `06` | Get info | Empty | Protocol/spec/capabilities, profile, boot nonce and limits (69 bytes) |
+| `30` | Create key | Profile ID `[32]`, capacity `u32=4` | Commitment `[32]`, public length `u16=480`, after approval and durable storage |
+| `31` | Get public key | Commitment `[32]`, offset `u16`, length `u8=1..200` | Commitment, total length, offset, exact requested chunk |
+| `32` | Get state | Empty | State, commitment, generation, counters, sequence and operation (110 bytes) |
+
+Create requires EMPTY and IDLE. The device displays the complete commitment
+after durable creation; either final acknowledgement button closes that screen.
+If the success response is lost, recover with state/public-key reads. Repeating
+create cannot replace the key. Cancel clears only verification RAM. There is
+no host reset, import, replacement, or secret-export command. Signing commands
+`40`–`43` return `6D00`.
+
+Storage uses a 512-byte payload and a separate, 512-byte-aligned commit marker.
+MAC verification precedes secret parsing. A torn or invalid record locks the
+wallet; there is no fallback to an earlier record. A coherent older snapshot
+is outside this experiment's rollback model. Losing app state requires a fresh
+identity, even with the same mnemonic. Installation grants only SLIP21 mask
+`08` and namespace `quip.network/SHRINCS/v1`; the ELF test checks the actual TLV.
+
+Additional errors: `6984` locked record, `6A81` unsupported profile/capacity,
+`6A88` unknown commitment, `6581` storage failure (locks this app instance).
+Competing commands during review receive `6986`; the reviewed request stays
+unchanged and touch processing continues.
+
 ## Memory and build pins
 
 The pinned Gen5 target reserves 40 KiB SRAM. This prototype assigns 20 KiB to
@@ -247,6 +308,28 @@ four; the input limit is not a claim of support for the core library's maximum
 4096-leaf capacity. ELF section sizes are not a peak stack/heap measurement.
 Hashing uses the core's portable SHA-256 and Keccak implementations; a Ledger
 hash-acceleration backend is not implemented.
+
+`make -C ledger measure` builds a separate `memory-metrics` ELF in a disposable
+container. It uses the SDK's allocator implementation with allocation counters
+and the SDK stack paint/scan tracker. Its app-name APDU ends in `-metrics`; the
+read-only `E0 F0` metrics command exists only in this build. The normal app and
+its exported `artifacts/app.elf` stay unchanged. The report and metrics ELF are
+saved under `artifacts/benchmarks/<timestamp>/`; `BENCH_OUTPUT` overrides it.
+
+On 2026-10-12, run `20261012-keygen` measured:
+
+| Operation reached | Peak heap bytes | Peak app stack bytes | Stack headroom bytes |
+| --- | ---: | ---: | ---: |
+| Startup | 72 | 7,768 | 10,720 |
+| Full keygen, commit and public export | 2,732 | 11,272 | 7,216 |
+| Then verify a canonical 4 KiB envelope | 16,796 | 11,272 | 7,216 |
+
+The heap allocation was 20,480 bytes and measured app stack capacity 18,488
+bytes. Keygen-to-completion-screen elapsed time was **1.928 s**, including
+automated approval navigation. This is one emulator run, not hardware CPU
+latency or a worst-case bound. Peaks accumulate from startup; syscall stack
+usage is not measured. Metrics ELF SHA-256:
+`d2fbbd3b7180faf3eadbe00f7b463c82b42a123f6319728de663b808be5d922a`.
 
 - Builder: immutable digest in `Dockerfile`.
 - Rust: `nightly-2026-04-15`, satisfying the core's Rust 1.95 requirement.
@@ -266,11 +349,19 @@ matching the core library.
 
 ## Next implementation milestones
 
-1. Measure stack/heap peaks on real Gen5 hardware. Host-observed verification
-   latency is recorded above; instrument device CPU time if needed.
-2. Define isolated device key derivation and a versioned persistent record.
-3. Add on-device key generation and stateful signing, with user review and
-   durable leaf reservation before producing signature bytes.
+The [signer contract](docs/hashsig-spec.md) defines protocol 2,
+SLIP-0021 derivation namespace, authenticated persistent record, leaf reservation,
+and retry behavior for a capacity-four signer. It includes a public KDF check
+vector and initial resource acceptance bounds. Key creation/storage/public
+queries are implemented; signing and durable leaf reservation remain future work.
+
+1. Install app 0.2.0 on a disposable Gen5 setup, validate the narrow derivation
+   permissions, create a key, record its public key/state, and verify it after
+   actual app exit and device power cycle. Measure keygen/watchdog/memory behavior.
+2. Validate physical NVM ordering, durability, erase isolation and interrupted
+   writes; emulator persistence is supporting evidence only.
+3. Add stateful signing, with digest/key/leaf review and durable reservation
+   before producing signature bytes, once those hardware gates pass.
 4. Test interruption, exhaustion, restart, and lost-state recovery behavior.
 5. Add bounded-memory stateless operations and host verification of signatures
    produced by the device. Retain independent vectors for cryptographic checks;
