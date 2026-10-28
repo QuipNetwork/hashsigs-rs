@@ -1040,6 +1040,10 @@ op decode_array_words (data : bytes) (base head max_len : int) : bytes list opti
 
 op MAX_STATEFUL_SIGNATURES_LIMIT : int = 4096.
 
+(* Budgets modeled as integers must stay in the Rust signer's domain. *)
+op valid_budget (budget : int) : bool =
+  1 <= budget <= MAX_STATEFUL_SIGNATURES_LIMIT.
+
 (* wots_c::Signature::decode *)
 op wots_sig_decode (data : bytes) (base : int) : wots_sig option =
   obind (fun randomizer =>
@@ -1187,6 +1191,12 @@ type keys = {
   ks_next_leaf      : int;
 }.
 
+(* The extra counter value denotes an exhausted key, not a usable leaf.
+   This predicate says nothing about the well-formedness of key bytes. *)
+op valid_counter_state (k : keys) : bool =
+  valid_budget k.`ks_max_signatures /\
+  1 <= k.`ks_next_leaf <= k.`ks_max_signatures + 1.
+
 op keys_with_next (k : keys) (next : int) : keys =
   {| ks_sl_sk_seed = k.`ks_sl_sk_seed; ks_sl_prf_seed = k.`ks_sl_prf_seed;
      ks_sl_pk_seed = k.`ks_sl_pk_seed; ks_sl_root = k.`ks_sl_root;
@@ -1232,7 +1242,7 @@ op build_keys (seed : bytes) (max_signatures : int) (stateless : bytes * bytes *
 
 (* ShrincsSigner::keygen *)
 op shrincs_keygen (seed : bytes) (max_signatures : int) : (keys * public_key) option =
-  if max_signatures = 0 \/ MAX_STATEFUL_SIGNATURES_LIMIT < max_signatures then None
+  if max_signatures <= 0 \/ MAX_STATEFUL_SIGNATURES_LIMIT < max_signatures then None
   else Some (build_keys seed max_signatures (keygen_from_master_seed seed)).
 
 (* raw_message_hash: the ERC-7913 adapter hash. *)

@@ -44,7 +44,9 @@ security notion. The review covers both.
    the adversary the action paths?
 6. **Key generation.** The game samples 32 uniform bytes of seed material and
    calls `shrincs_keygen` with a budget that the game takes as input. Every
-   other secret derives from the seed through `derive32`.
+   other secret derives from the seed through `derive32`. Accepted budgets
+   are integers from 1 through 4096. The model rejects negative budgets,
+   which are outside the Rust signer's `u32` input domain.
 7. **The abstract hash.** The game keeps `keccak256` abstract. The proof
    after WS0 chooses between a random oracle and a list of hash properties. The
    game does not fix that choice.
@@ -54,6 +56,15 @@ an exhausted key signs nothing, a signature moves the counter by one, the
 oracle never uses a leaf twice, the oracle keeps the stateless budget, the
 stateful verifier never accepts the empty envelope, and an adversary that
 returns the empty envelope never wins.
+
+`spec/CounterInvariant.ec` strengthens those bookkeeping results. Key
+generation establishes `valid_counter_state`: a valid budget and a counter
+from 1 through `budget + 1`, with the final value denoting exhaustion.
+Oracle initialization and both signing modes preserve its conjunction with
+`one_time` and a nonnegative, bounded stateless count. Failed calls change
+none of the persistent oracle state. The tightened key-generation guard
+agrees with the previous definition on every unsigned 32-bit budget. These
+lemmas do not establish key-byte well-formedness or cryptographic security.
 
 ## How to record a sign-off
 

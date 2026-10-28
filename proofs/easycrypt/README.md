@@ -26,6 +26,7 @@ The generator runs on the host with `cargo`. EasyCrypt runs in the image
 | `spec/Shrincs.ec` | The constants of `shrincs-256s-keccak` |
 | `spec/Games.ec` | The security game |
 | `spec/GamesSanity.ec` | Lemmas that pin the bookkeeping of the game |
+| `spec/CounterInvariant.ec` | Budget/counter initialization and preservation, unsigned-domain compatibility, and unchanged state on failed signing |
 | `kat/` | The generator crate, the committed vectors, and the mutation check |
 | `audit/` | The audit gate and its self-test |
 | `docs/` | The freeze note and the review packet |
