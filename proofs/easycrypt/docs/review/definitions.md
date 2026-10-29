@@ -51,11 +51,23 @@ security notion. The review covers both.
    after WS0 chooses between a random oracle and a list of hash properties. The
    game does not fix that choice.
 
-`spec/GamesSanity.ec` holds six lemmas that pin the bookkeeping of the game:
+`spec/GamesSanity.ec` retains six original lemmas that pin the bookkeeping of the game:
 an exhausted key signs nothing, a signature moves the counter by one, the
 oracle never uses a leaf twice, the oracle keeps the stateless budget, the
 stateful verifier never accepts the empty envelope, and an adversary that
 returns the empty envelope never wins.
+
+It also proves that the game's `valid_hash` predicate equals the
+specification's `valid_word32` predicate. The byte predicates now live in
+`spec/ByteDomain.ec`, shared by the specification and game. The accepted
+hash domain is unchanged: exactly 32 integers, each in `[0, 256)`.
+
+`spec/ByteEncoding.ec` proves byte/length properties of integer encodings
+and ABI words, plus acceptance and rejection facts for `word32` when its
+input is byte-valid. Its raw implementation still checks only length;
+these lemmas do not assert that it rejects non-byte modeled integers.
+Integer round trips, complete codecs, key well-formedness, and the output
+shape of abstract Keccak remain separate obligations.
 
 `spec/CounterInvariant.ec` strengthens those bookkeeping results. Key
 generation establishes `valid_counter_state`: a valid budget and a counter

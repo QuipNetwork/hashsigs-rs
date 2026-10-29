@@ -3,15 +3,11 @@
    attack, for one hybrid key, through the two byte-level verifiers that a
    contract calls. The signer keeps the leaf counter of the stateful key. *)
 require import AllCore List IntDiv Distr DList DInterval.
-require import Shrincs.
+require import ByteDomain Shrincs.
 
 (* ------------------------------------------------------------------ *)
 (* Well-formed inputs                                                 *)
 (* ------------------------------------------------------------------ *)
-
-op is_byte (b : int) : bool = 0 <= b < 256.
-
-op is_bytes (bs : bytes) : bool = all is_byte bs.
 
 (* Every verifier and signer takes a 32-byte hash. *)
 op valid_hash (hash : bytes) : bool = is_bytes hash /\ size hash = HASH_LEN.

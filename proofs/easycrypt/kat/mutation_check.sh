@@ -18,8 +18,17 @@ trap 'rm -r -- "$work"' EXIT
 run_mutant() {
   local name="$1" group="$2" expression="$3" dir="$work/$1"
   mkdir -p "$dir"
-  cp "$root/spec/Search.ec" "$root/spec/Spec.eca" "$root/kat/Compute.ec" \
+  cp "$root/spec/Search.ec" "$root/spec/ByteDomain.ec" \
+    "$root/spec/Spec.eca" "$root/kat/Compute.ec" \
     "$root/build/kat/ec/Kat_$group.ec" "$dir/"
+  # A missing shared theory must be a setup failure, not a killed mutant.
+  printf '%s\n' 'require import Compute Search.' 'require Spec.' >"$dir/CheckImports.ec"
+  if ! (cd "$dir" && timeout "$LIMIT" "$EASYCRYPT" compile -no-eco CheckImports.ec \
+      >imports.log 2>&1); then
+    echo "SETUP     $name: the unmodified specification does not load"
+    cat "$dir/imports.log"
+    return 1
+  fi
   sed -i -e "$expression" "$dir/Spec.eca"
   if cmp -s "$root/spec/Spec.eca" "$dir/Spec.eca"; then
     echo "STALE     $name: the expression changes nothing"

@@ -3,7 +3,13 @@
    proof. They show that the game has the properties that the review packet
    states. *)
 require import AllCore List IntDiv Distr.
-require import Shrincs Games.
+require import ByteDomain Shrincs Games.
+
+(* Sharing the representation predicates preserves the original hash
+   domain and identifies it with the specification's word predicate. *)
+lemma valid_hash_word32 (hash : bytes) :
+  valid_hash hash <=> valid_word32 hash.
+proof. by rewrite /valid_hash /valid_word32 /valid_bytes. qed.
 
 (* A key whose leaf counter is past its budget signs nothing on the
    stateful path. *)

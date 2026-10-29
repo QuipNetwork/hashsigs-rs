@@ -5,7 +5,7 @@
    that it transcribes, and its comment names that function. A byte is an
    integer in [0, 256). A byte string is a list of bytes. *)
 require import AllCore List IntDiv.
-require import Search.
+require import Search ByteDomain.
 
 type bytes = int list.
 
@@ -83,6 +83,10 @@ op wots_digest_bytes : int =
 (* word32 *)
 op word32 (input : bytes) : bytes option =
   if size input = HASH_LEN then Some input else None.
+
+(* Rust byte values plus the word's width. word32 alone checks only length
+   in the integer-list model; shape proofs must retain the byte premise. *)
+op valid_word32 (input : bytes) : bool = valid_bytes HASH_LEN input.
 
 (* hash_packed: the scheme hash over the concatenation of parts. *)
 op hash_packed (parts : bytes list) : bytes = keccak256 (flatten parts).
