@@ -85,6 +85,22 @@ width. Complete codecs, checked machine arithmetic, cursor/high-water
 tracking, key well-formedness, and the output shape of abstract Keccak
 remain separate obligations.
 
+`spec/AbiBytes.ec` proves offset-resolution contracts, byte-string encoder
+shape/alignment/zero padding, decoded-payload bounds and byte validity,
+truncation rejection, and round trips both at offset zero and inside
+arbitrary surrounding data. It also composes a relative offset head with
+an encoded byte string. The round trips and encoder injectivity require
+the payload length to fit the modeled 64-bit length word.
+
+The low-level model does not check trailing byte-string padding:
+`read_bytes_at_cat` accepts any suffix, and `read_bytes_at_missing_padding`
+proves acceptance of noncanonical inputs with required padding omitted.
+Rust's `AbiReader::read_bytes_at` checks both padding presence and zero
+values. The specification comment now identifies the top-level
+re-encoding justification as a pending proof obligation. These results
+do not establish array/tuple codecs, whole-input canonical acceptance,
+machine arithmetic/cursor correspondence, or Rust refinement.
+
 `spec/CounterInvariant.ec` strengthens those bookkeeping results. Key
 generation establishes `valid_counter_state`: a valid budget and a counter
 from 1 through `budget + 1`, with the final value denoting exhaustion.

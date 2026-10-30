@@ -968,10 +968,12 @@ op sphincs_verify (pk_seed hypertree_root message : bytes) (s : stateless_sig) :
 (* ------------------------------------------------------------------ *)
 
 (* Every top-level decoder of the crate ends with a re-encoding check: it
-   returns x only if encoding x gives the input back. The decoders below
-   follow the offsets as AbiReader does, check the same length bounds, and
-   end with the same check. That check implies the bounds checks, the
-   padding checks, and the order checks of AbiReader, so they are left out. *)
+   returns x only if encoding x gives the input back. The pure decoders
+   below follow ABI offsets and retain top-level re-encoding checks, but
+   omit some Rust checks, including trailing padding in read_bytes_at,
+   checked machine arithmetic, and cursor/high-water tracking. Justifying
+   these omissions through whole-input re-encoding and proving Rust
+   correspondence remain proof obligations. *)
 
 (* read_bytes32 *)
 op read_word (data : bytes) (pos : int) : bytes option =
