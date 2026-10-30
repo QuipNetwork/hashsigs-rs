@@ -70,9 +70,20 @@ these lemmas do not assert that it rejects non-byte modeled integers.
 an encoding recovers the value under explicit nonnegative-width and
 unsigned-range premises, while re-encoding a decoded byte-valid input at
 its original width recovers that input. It also proves decoded-value
-bounds and the corresponding 32-/64-bit results. Complete codecs, key
-well-formedness, and the output shape of abstract Keccak remain separate
-obligations.
+bounds and the corresponding 32-/64-bit results.
+
+`spec/WordReaders.ec` proves exact success and rejection contracts for
+`read_word`, `read_u32`, and `read_usize`, including negative offsets,
+truncation, and dirty high padding. Padded integer words round-trip in
+arbitrary prefixes/suffixes. On byte-valid inputs, successful integer
+reads return unsigned values and re-encoding recovers the exact word at
+the given offset. The readers permit unaligned offsets and trailing data;
+these are word-local contracts, not whole-input canonical acceptance.
+The modeled `read_usize` accepts a 64-bit payload. Rust additionally uses
+`usize::try_from`, so correspondence must account for the target pointer
+width. Complete codecs, checked machine arithmetic, cursor/high-water
+tracking, key well-formedness, and the output shape of abstract Keccak
+remain separate obligations.
 
 `spec/CounterInvariant.ec` strengthens those bookkeeping results. Key
 generation establishes `valid_counter_state`: a valid budget and a counter
