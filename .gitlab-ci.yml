@@ -80,6 +80,9 @@ variables:
   CARGO_HOME: "${CI_PROJECT_DIR}/.cargo-home"
 
 include:
+  - project: quip.network/ci-templates
+    ref: v1.0.0
+    file: templates/dependency-gate.yml
   - local: .gitlab/ci/setup.yml
   - local: .gitlab/ci/test.yml
   - local: .gitlab/ci/release.yml
