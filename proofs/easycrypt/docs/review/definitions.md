@@ -101,6 +101,23 @@ re-encoding justification as a pending proof obligation. These results
 do not establish array/tuple codecs, whole-input canonical acceptance,
 machine arithmetic/cursor correspondence, or Rust refinement.
 
+`spec/WordArrays.ec` proves the fixed-size `bytes32[]` codec. Its collection
+lemmas connect the existing `all_some`/`mkseq` decoder to the exact count
+and indexed element reads. Valid words flatten to consecutive 32-byte
+slots. Array encodings round-trip within arbitrary surrounding data when
+each element is a valid word, the count fits 64 bits, and it does not
+exceed `max_len`. Successful decoding of byte-valid input returns valid
+words in the original order. The rejection results cover bad offsets,
+bad/truncated count words, oversized counts, and truncated element data,
+including the empty-array boundary.
+
+The round trip uses an explicit relative head word before the encoded
+array tail; it is not a general tuple theorem. The framed result permits
+trailing bytes, so it does not imply whole-input canonical acceptance.
+Rust's checked arithmetic, allocation, target width, and cursor state
+remain refinement obligations. Dynamic array and general tuple proofs
+are still open.
+
 `spec/CounterInvariant.ec` strengthens those bookkeeping results. Key
 generation establishes `valid_counter_state`: a valid budget and a counter
 from 1 through `budget + 1`, with the final value denoting exhaustion.
