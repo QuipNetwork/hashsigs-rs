@@ -29,6 +29,7 @@ The generator runs on the host with `cargo`. EasyCrypt runs in the image
 | `spec/WordReaders.ec` | Word-reader success/rejection contracts, padded integer round trips, output bounds, and canonical words |
 | `spec/AbiBytes.ec` | Offset and byte-string contracts, padding shape/alignment, framed round trips, and low-level padding-omission acceptance |
 | `spec/WordArrays.ec` | Fixed-size word-array shape, indexed element preservation, count/bounds rejection, output validity, and framed round trips |
+| `spec/DynamicOffsets.ec` | Dynamic-array offset count/prefix sums, contiguous payload layout, encoder shape/slices, and count/offset reads with explicit 64-bit bounds |
 | `spec/Shrincs.ec` | The constants of `shrincs-256s-keccak` |
 | `spec/Games.ec` | The security game |
 | `spec/GamesSanity.ec` | Lemmas that pin the bookkeeping of the game |
@@ -51,9 +52,14 @@ the low-level modeled reader accepts missing trailing padding, which Rust
 checks. Whole-input re-encoding must still be shown to justify this
 omission. `WordArrays.ec` proves fixed-size `bytes32[]` round trips, output
 validity, count/order preservation, and rejection of oversized or
-truncated arrays. Dynamic arrays, general tuples, whole-input acceptance,
-cursor tracking, key well-formedness, and a 32-byte output contract for
-abstract Keccak remain separate obligations.
+truncated arrays. `DynamicOffsets.ec` proves the existing offset fold and
+dynamic-array layout: one table entry per element, exact preceding-length
+sums, contiguous ordered payload slices, and recovery of encoded offsets
+under explicit 64-bit bounds. Already-encoded zero-length elements may
+share consecutive offsets. The relative offset base is immediately after
+the count word. Dynamic-array element-codec composition, general tuples,
+whole-input acceptance, cursor tracking, key well-formedness, and a 32-byte
+output contract for abstract Keccak remain separate obligations.
 
 The case catalog lives in the crate, in `src/kat/`, behind the cargo feature
 `kat-trace`. It needs the private functions of the crate.

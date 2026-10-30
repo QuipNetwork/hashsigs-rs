@@ -115,8 +115,32 @@ The round trip uses an explicit relative head word before the encoded
 array tail; it is not a general tuple theorem. The framed result permits
 trailing bytes, so it does not imply whole-input canonical acceptance.
 Rust's checked arithmetic, allocation, target width, and cursor state
-remain refinement obligations. Dynamic array and general tuple proofs
-are still open.
+remain refinement obligations. Complete dynamic-array and general tuple
+proofs are still open.
+
+`spec/DynamicOffsets.ec` proves the existing `offsets` fold, rather than
+replacing it with a prefix-sum definition. The table contains exactly
+one offset per already-encoded element, equal to the table size plus
+the lengths of preceding elements. Adjacent payload regions meet,
+their starts are nondecreasing, and the final region ends at the total
+payload end. Zero-length encoded elements may share adjacent offsets;
+encoding an empty ABI byte string still includes its length word.
+
+The dynamic-array encoder has the expected count/table/payload size and
+is byte-valid when its elements are byte-valid. Slicing at an element's
+offset recovers that element exactly. Count and offset words read back
+inside arbitrary surrounding data under explicit unsigned 64-bit range
+premises. Bounding the table size plus total payload size strictly below
+`2^64` is sufficient to make every offset recoverable. Resolving those
+offsets uses the position immediately after the count word as the base.
+
+These are encoder and table-reader properties. Composing them with the
+element decoder and `decode_dynamic_array` remains open, as do general
+tuples and whole-input canonical acceptance. Rust's sequential-offset
+checks compare against the table end and then the reader's high-water
+mark; proving equivalence requires element consumption and cursor-state
+properties in addition to this layout foundation. Machine arithmetic,
+target width, and allocation remain separate refinement obligations.
 
 `spec/CounterInvariant.ec` strengthens those bookkeeping results. Key
 generation establishes `valid_counter_state`: a valid budget and a counter
