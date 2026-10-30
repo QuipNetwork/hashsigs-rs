@@ -25,6 +25,7 @@ The generator runs on the host with `cargo`. EasyCrypt runs in the image
 | `spec/Spec.eca` | The scheme over an abstract Keccak-256, with the profile constants as parameters |
 | `spec/ByteDomain.ec` | Shared byte, fixed-length byte-string, and unsigned-range predicates, with list closure lemmas |
 | `spec/ByteEncoding.ec` | Byte/word shape lemmas for integer encoders, ABI words, and `word32` on byte-valid inputs |
+| `spec/IntegerEncoding.ec` | General integer round trips, decoded-value bounds, and unsigned 32-/64-bit specializations |
 | `spec/Shrincs.ec` | The constants of `shrincs-256s-keccak` |
 | `spec/Games.ec` | The security game |
 | `spec/GamesSanity.ec` | Lemmas that pin the bookkeeping of the game |
@@ -35,9 +36,10 @@ The generator runs on the host with `cargo`. EasyCrypt runs in the image
 
 The byte predicates make representation premises explicit. `word32`
 still checks length only in the integer-list model; its output is proved
-byte-valid when its input is byte-valid. The new shape lemmas do not yet
-prove integer round trips, complete codecs, key well-formedness, or a
-32-byte output contract for the abstract Keccak operator.
+byte-valid when its input is byte-valid. `IntegerEncoding.ec` proves
+integer round trips with explicit width/range and byte-validity premises.
+Complete codecs, key well-formedness, and a 32-byte output contract for
+the abstract Keccak operator remain separate obligations.
 
 The case catalog lives in the crate, in `src/kat/`, behind the cargo feature
 `kat-trace`. It needs the private functions of the crate.

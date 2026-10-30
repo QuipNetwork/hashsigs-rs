@@ -66,8 +66,13 @@ hash domain is unchanged: exactly 32 integers, each in `[0, 256)`.
 and ABI words, plus acceptance and rejection facts for `word32` when its
 input is byte-valid. Its raw implementation still checks only length;
 these lemmas do not assert that it rejects non-byte modeled integers.
-Integer round trips, complete codecs, key well-formedness, and the output
-shape of abstract Keccak remain separate obligations.
+`spec/IntegerEncoding.ec` proves both general integer round trips: decoding
+an encoding recovers the value under explicit nonnegative-width and
+unsigned-range premises, while re-encoding a decoded byte-valid input at
+its original width recovers that input. It also proves decoded-value
+bounds and the corresponding 32-/64-bit results. Complete codecs, key
+well-formedness, and the output shape of abstract Keccak remain separate
+obligations.
 
 `spec/CounterInvariant.ec` strengthens those bookkeeping results. Key
 generation establishes `valid_counter_state`: a valid budget and a counter
