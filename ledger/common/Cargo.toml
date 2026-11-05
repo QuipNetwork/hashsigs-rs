@@ -7,6 +7,14 @@ publish = false
 
 [workspace]
 
+[features]
+# Public-fixture diagnostics only. Never enable in the wallet application.
+diagnostics = []
+
+[[example]]
+name = "diagnostic_records"
+required-features = ["diagnostics"]
+
 [dependencies]
 hashsigs-rs = { path = "../..", default-features = false, features = ["alloc", "profile-256s-sha2", "heap-buffers"] }
 zeroize = { version = "=1.9.0", default-features = false, features = ["alloc"] }

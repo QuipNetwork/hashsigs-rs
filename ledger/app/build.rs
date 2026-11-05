@@ -7,6 +7,7 @@ fn run(command: &mut Command) {
 
 fn main() {
     println!("cargo:rerun-if-changed=src/platform.c");
+    println!("cargo:rerun-if-changed=../common/platform.c");
     println!("cargo:rerun-if-env-changed=BOLOS_SDK");
     let sdk = PathBuf::from(env::var("BOLOS_SDK").expect("BOLOS_SDK is required"));
     let out = PathBuf::from(env::var("OUT_DIR").unwrap());

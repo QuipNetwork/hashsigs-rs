@@ -1,0 +1,11 @@
+[build]
+target = "apex_p"
+
+[profile.release]
+opt-level = "z"
+lto = true
+
+[unstable]
+json-target-spec = true
+build-std = ["core", "alloc"]
+build-std-features = ["compiler-builtins-mem"]

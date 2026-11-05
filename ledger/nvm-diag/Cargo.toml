@@ -1,0 +1,26 @@
+[package]
+name = "hashsigs-ledger-nvm-diag"
+version = "0.1.0"
+authors = ["hashsigs-rs contributors"]
+edition = "2021"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[workspace]
+
+[dependencies]
+ledger_device_sdk = { version = "=1.36.1", default-features = false, features = ["io_new", "sys", "heap"] }
+hashsigs-ledger-common = { path = "../common", features = ["diagnostics"] }
+
+[package.metadata.ledger]
+name = "SHRINCS NVM Diag"
+# An empty curve list means ALL curves in this SDK. This narrow, distinct
+# namespace is unused: the ELF must contain no seed derivation syscall.
+curve = ["slip21"]
+path = []
+path_slip21 = ["quip.network/SHRINCS/NVM-DIAG/v1"]
+flags = "0"
+apex_p = { icon = "../app/icons/crab_32x32.png" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("apex_p"))'] }

@@ -34,7 +34,7 @@ class Backend:
     def exchange(self, cla=CLA, ins=0, p1=0, p2=0, data=b"", expected=0x9000):
         require(len(data) <= 255, "APDU too large")
         started = time.monotonic()
-        if ins == 0x30 or (ins == 0x10 and p1 == 1):
+        if cla == CLA and (ins == 0x30 or (ins == 0x10 and p1 == 1)):
             print(f"Review request {ins:02x} sent at {datetime.now(timezone.utc).isoformat()}", flush=True)
         try:
             reply = self.device.raw_exchange(bytes([cla, ins, p1, p2, len(data)]) + data)

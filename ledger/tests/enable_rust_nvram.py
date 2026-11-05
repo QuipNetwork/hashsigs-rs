@@ -2,7 +2,9 @@
 
 Its C launcher already saves NVM writes; Python only lacks Rust region metadata.
 Include the SDK's relocated .rodata as well as .nvm_data because Rust startup
-also writes PIC fixups. Keep this test-tool patch explicit and version checked.
+also writes PIC fixups. Map the complete contiguous flash image: the Rust ELF
+puts .nvm_data in a separate PT_LOAD, which may cross the launcher's host page
+boundary. Keep this test-tool patch explicit and version checked.
 """
 from importlib.metadata import version
 from pathlib import Path
@@ -19,6 +21,11 @@ new = '''            # SHRINCS test adapter: Rust SDK PIC fixups and application
             if args.load_nvram or args.save_nvram:
                 rodata = elf.get_section_by_name(".rodata")
                 nvm = elf.get_section_by_name(".nvm_data")
+                # The C launcher initially makes only text_size bytes writable
+                # before loading saved NVM. Include the second flash segment;
+                # relying on unused space in the last host page is insufficient.
+                assert nvm["sh_offset"] - ei.text_offset == nvm["sh_addr"] - ei.text_addr
+                ei.text_size = max(ei.text_size, nvm["sh_addr"] + nvm["sh_size"] - ei.text_addr)
                 ei.app_nvram_addr = rodata["sh_addr"]
                 ei.app_nvram_size = nvm["sh_addr"] + nvm["sh_size"] - ei.app_nvram_addr'''
 assert source.count(old) == 1, "Pinned Speculos NVRAM branch changed"

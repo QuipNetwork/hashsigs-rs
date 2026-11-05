@@ -3,8 +3,7 @@
 #include "exceptions.h"
 #include "cx.h"
 #include "os_seed.h"
-#include "os_nvm.h"
-#include "lcx_hmac.h"
+#include "../../common/platform.c"
 
 unsigned int wallet_app_key(unsigned char out[32]) {
     unsigned int path[24] = {0}; // Legacy firewall checks 4 * path_len bytes.
@@ -18,28 +17,5 @@ unsigned int wallet_app_key(unsigned char out[32]) {
     else explicit_bzero(out, 32);
     explicit_bzero(raw, sizeof(raw));
     explicit_bzero(path, sizeof(path));
-    return error;
-}
-
-unsigned int wallet_hmac(const unsigned char key[32], const unsigned char *data,
-                         unsigned int len, unsigned char out[32]) {
-    cx_hmac_sha256_t ctx;
-    cx_err_t error = cx_hmac_sha256_init_no_throw(&ctx, key, 32);
-    if (error == CX_OK) error = cx_hmac_no_throw((cx_hmac_t *)&ctx, CX_LAST, data, len, out, 32);
-    explicit_bzero(&ctx, sizeof(ctx));
-    if (error != CX_OK) {
-        explicit_bzero(out, 32);
-        return 1;
-    }
-    return 0;
-}
-
-unsigned int wallet_nvm_write(void *dst, const void *src) {
-    volatile unsigned int error = 0;
-    BEGIN_TRY {
-        TRY { nvm_write(dst, (void *)src, 512); }
-        CATCH_OTHER(e) { error = e; }
-        FINALLY {}
-    } END_TRY;
     return error;
 }

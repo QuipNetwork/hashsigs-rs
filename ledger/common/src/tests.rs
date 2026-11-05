@@ -122,6 +122,113 @@ fn retag(record: &mut [u8; 512]) {
     record[480..].copy_from_slice(&tag);
 }
 
+fn advanced_fixture(next: u32) -> [u8; 512] {
+    let mut record = *fixture();
+    record[12..20].copy_from_slice(&u64::from(next).to_be_bytes());
+    record[124..128].copy_from_slice(&next.to_be_bytes());
+    record[268..272].copy_from_slice(&next.to_be_bytes());
+    retag(&mut record);
+    record
+}
+
+#[test]
+fn commit_checkpoints_preserve_exact_expected_records() {
+    for (source, target) in [(0, 1), (1, 2), (4, 5)] {
+        for cut in 0..=9 {
+            let mut memory = if source == 0 {
+                Memory::empty()
+            } else {
+                Memory {
+                    blocks: [[0xa5; 512], advanced_fixture(source)],
+                    ..Memory::empty()
+                }
+            };
+            let before = memory.clone();
+            let next = advanced_fixture(target);
+            let mut stages = std::vec::Vec::new();
+            let result = commit_record(&mut memory, &HostCrypto, &APP_KEY, &next, |stage| {
+                stages.push(stage);
+                if stage == cut {
+                    Err(Error::Storage)
+                } else {
+                    Ok(())
+                }
+            });
+            assert_eq!(result.is_ok(), cut == 0);
+            assert_eq!(
+                stages,
+                (1..=if cut == 0 { 9 } else { cut }).collect::<std::vec::Vec<_>>()
+            );
+            let expected = match cut {
+                1 => before.blocks,
+                2..=4 => [[0; 512], before.blocks[1]],
+                5..=7 => [[0; 512], next],
+                _ => [[0xa5; 512], next],
+            };
+            assert_eq!(memory.blocks, expected);
+            let loaded = load(&memory);
+            let expected_next = match cut {
+                1 => source,
+                0 | 8 | 9 => target,
+                _ => 0,
+            };
+            if expected_next != 0 {
+                assert_eq!(loaded.identity().unwrap().next_leaf, expected_next);
+                assert_eq!(
+                    loaded.state(),
+                    if expected_next == 5 {
+                        State::Exhausted
+                    } else {
+                        State::Ready
+                    }
+                );
+            } else {
+                assert_eq!(
+                    loaded.state(),
+                    if source == 0 && (1..=4).contains(&cut) {
+                        State::Empty
+                    } else {
+                        State::Locked
+                    }
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn interrupted_advancement_never_restores_old_counter_after_invalidation() {
+    for (source, target) in [(1, 2), (4, 5)] {
+        for write in 1..=3 {
+            for prefix in 0..=512 {
+                let old = advanced_fixture(source);
+                let next = advanced_fixture(target);
+                let mut memory = Memory {
+                    blocks: [[0xa5; 512], old],
+                    fault: Some((write, prefix, true)),
+                    ..Memory::empty()
+                };
+                assert!(
+                    commit_record(&mut memory, &HostCrypto, &APP_KEY, &next, |_| Ok(())).is_err()
+                );
+                let loaded = load(&memory);
+                if write == 1 && prefix == 0 {
+                    assert_eq!(loaded.identity().unwrap().next_leaf, source);
+                } else if write == 3 && prefix == 512 {
+                    assert_eq!(loaded.identity().unwrap().next_leaf, target);
+                } else {
+                    assert_eq!(
+                        loaded.state(),
+                        State::Locked,
+                        "source {source}, write {write}, prefix {prefix}"
+                    );
+                    assert!(loaded.identity().is_none());
+                }
+            }
+        }
+    }
+}
+
 #[test]
 fn derivation_matches_public_spec_vector() {
     let key: [u8; 32] =

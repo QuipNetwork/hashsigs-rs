@@ -448,15 +448,32 @@ matching the core library.
 
 ## Next implementation milestones
 
+The separate [`SHRINCS NVM Diag` app](nvm-diag/README.md) now exercises the shared
+commit routine at nine syscall/readback boundaries for creation, counter
+advancement, and exhaustion. It uses public fixture records and its own NVM;
+the installed SHRINCS Lab key is preserved. `make -C ledger test-nvm-diag` runs
+fresh-process persistence tests and checks ELF/install isolation. Controlled
+stops and neighbouring-block canaries are supporting evidence, not proof of
+in-flight power-loss behavior or physical erase-unit isolation.
+
+The [November 5 diagnostic run](nvm-diag/README.md#2026-11-05-results) passed
+36 emulator/ELF tests, all 30 physical controlled-stop cases, EMPTY/READY/EXHAUSTED
+app-restart checks, and a full power-cycle check of LOCKED recovery. The normal
+wallet's original public identity/counters matched exactly afterward. Normal
+regressions passed 62 tests; common native coverage now has 11 tests and 4,617
+partial-write prefix cases. The SDK evidence review leaves in-flight write
+interruption, ordering/durability guarantees, and physical erase isolation open.
+
 The [signer contract](docs/hashsig-spec.md) defines protocol 2,
 SLIP-0021 derivation namespace, authenticated persistent record, leaf reservation,
 and retry behavior for a capacity-four signer. It includes a public KDF check
 vector and initial resource acceptance bounds. Key creation/storage/public
 queries are implemented; signing and durable leaf reservation remain future work.
 
-1. Validate physical NVM ordering, erase isolation and interrupted writes using
-   a separate diagnostic build/setup. Successful 0.2.1 creation and power-cycle
-   reload do not close these gates; preserve the current test identity.
+1. Finish the physical NVM gate with device/OS-specific ordering, durability,
+   and erase-isolation evidence plus failures during writes. The separate
+   diagnostic app covers completed-syscall boundaries; preserve the current
+   SHRINCS Lab test identity.
 2. Measure physical keygen/heap/stack behavior, establish timing and watchdog
    margins, and test rejection plus negative derivation permissions. Emulator
    resource measurements are supporting evidence only.

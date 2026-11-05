@@ -72,7 +72,9 @@ pub enum Block {
     Payload,
 }
 
-/// Two distinct, erase-unit-aligned blocks. Reads must observe actual NVM.
+/// Two distinct blocks. The device integration must establish erase isolation;
+/// 512-byte alignment alone is not evidence of physical erase granularity.
+/// Reads must observe actual NVM.
 pub trait Storage {
     fn read(&self, block: Block, out: &mut [u8; RECORD_LEN]);
     fn write(&mut self, block: Block, data: &[u8; RECORD_LEN]) -> Result<(), Error>;
@@ -179,6 +181,72 @@ fn encode(
     Ok(record)
 }
 
+/// Shared write ordering. A checkpoint runs before each write, after its return,
+/// and after verified readback (1..=9). Normal installation uses a no-op hook;
+/// diagnostics can stop here, never inside the OS flash syscall.
+fn commit_record(
+    storage: &mut impl Storage,
+    crypto: &impl Crypto,
+    app_key: &[u8; 32],
+    record: &[u8; RECORD_LEN],
+    mut checkpoint: impl FnMut(u8) -> Result<(), Error>,
+) -> Result<Wallet, Error> {
+    let mut readback = Zeroizing::new([0; RECORD_LEN]);
+    for (index, (block, bytes)) in [
+        (Block::Marker, &[0; RECORD_LEN]),
+        (Block::Payload, record),
+        (Block::Marker, &[0xa5; RECORD_LEN]),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let stage = index as u8 * 3 + 1;
+        checkpoint(stage)?;
+        storage.write(block, bytes).map_err(|_| Error::Storage)?;
+        checkpoint(stage + 1)?;
+        storage.read(block, &mut readback);
+        if !bool::from(readback[..].ct_eq(bytes)) {
+            return Err(Error::Storage);
+        }
+        if matches!(block, Block::Payload) {
+            validate(&readback, crypto, app_key).map_err(|_| Error::Storage)?;
+        }
+        checkpoint(stage + 2)?;
+    }
+    let loaded = Wallet::load(storage, crypto, app_key);
+    if !matches!(loaded.state, State::Ready | State::Exhausted) {
+        return Err(Error::Storage);
+    }
+    Ok(loaded)
+}
+
+/// Only the separate diagnostic binary enables this interface. It deliberately
+/// permits replacing PUBLIC fixture records, which the wallet must never do.
+#[cfg(feature = "diagnostics")]
+pub mod diagnostics {
+    use super::*;
+
+    pub fn record(
+        keys: &Keys,
+        generation: &[u8; 32],
+        crypto: &impl Crypto,
+        app_key: &[u8; 32],
+    ) -> Result<Zeroizing<[u8; RECORD_LEN]>, Error> {
+        encode(keys, generation, crypto, app_key)
+    }
+
+    pub fn commit(
+        storage: &mut impl Storage,
+        crypto: &impl Crypto,
+        app_key: &[u8; 32],
+        record: &[u8; RECORD_LEN],
+        checkpoint: impl FnMut(u8) -> Result<(), Error>,
+    ) -> Result<Wallet, Error> {
+        validate(record, crypto, app_key)?;
+        commit_record(storage, crypto, app_key, record, checkpoint)
+    }
+}
+
 /// No older-record fallback and no reset/import operation. An ambiguous write
 /// locks this instance even when reboot would find a fully committed record.
 pub struct Wallet {
@@ -240,22 +308,7 @@ impl Wallet {
         }
         let record = encode(keys, generation, crypto, app_key)?;
         *self = Self::locked();
-        let mut readback = Zeroizing::new([0; RECORD_LEN]);
-        for (block, bytes) in [
-            (Block::Marker, &[0; RECORD_LEN]),
-            (Block::Payload, &*record),
-            (Block::Marker, &[0xa5; RECORD_LEN]),
-        ] {
-            storage.write(block, bytes).map_err(|_| Error::Storage)?;
-            storage.read(block, &mut readback);
-            if !bool::from(readback[..].ct_eq(bytes)) {
-                return Err(Error::Storage);
-            }
-            if matches!(block, Block::Payload) {
-                validate(&readback, crypto, app_key).map_err(|_| Error::Storage)?;
-            }
-        }
-        let loaded = Self::load(storage, crypto, app_key);
+        let loaded = commit_record(storage, crypto, app_key, &record, |_| Ok(()))?;
         if loaded.state != State::Ready {
             return Err(Error::Storage);
         }

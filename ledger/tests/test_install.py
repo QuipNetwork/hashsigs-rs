@@ -1,4 +1,4 @@
-"""Check the permissions and erase-unit placement in the exact built ELF."""
+"""Check permissions and 512-byte alignment; physical erase isolation is separate."""
 from pathlib import Path
 from elftools.elf.elffile import ELFFile
 

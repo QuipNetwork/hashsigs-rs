@@ -37,6 +37,13 @@ COPY ledger/tests/ tests/
 RUN python tests/enable_rust_nvram.py
 COPY ledger/benchmarks/ benchmarks/
 COPY ledger/hardware/ hardware/
+# Separate installation name, storage, and public-fixture-only API. Building it
+# never replaces the wallet artifact. Fixtures contain intentionally public keys.
+COPY ledger/nvm-diag/ nvm-diag/
+RUN cargo run --locked --release --manifest-path common/Cargo.toml --features diagnostics --example diagnostic_records > nvm-diag/fixtures.bin
+WORKDIR /repo/ledger/nvm-diag
+RUN cargo ledger build apex_p -- --locked
+WORKDIR /repo/ledger
 # Ragger discovers ledger_app.toml from this container-local Git root.
 RUN git init --quiet /repo/ledger
 ENTRYPOINT []

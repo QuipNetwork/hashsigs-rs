@@ -319,6 +319,16 @@ Confirm actual erase granularity and ordering on the pinned Gen5 OS before
 enabling hardware signing; increase alignment/separation if 512 bytes is
 insufficient. Test interruptions at each write and readback boundary.
 
+The separate [NVM diagnostic app](../nvm-diag/README.md) exercises this same commit
+routine with public fixture records at nine boundaries, including simulated
+counter advancement and exhaustion. Its neighbouring-page canaries check logical
+block preservation after returned writes. Checkpoint errors followed by process
+restart or menu power cycle do not interrupt a flash syscall, and do not close
+the physical ordering, durability, or erase-isolation gate. The pinned C SDK
+`os_nvm.h` at `22d1131a03fcd89c5d2e660de886c8b0417b0789` declares the syscall but
+does not specify those guarantees. The normal app has no diagnostic feature,
+replacement/reset command, or signing capability.
+
 A MAC or commit sequence does **not** detect replay of an entire older valid
 record. Arbitrary NVM snapshot restoration, a malicious app update, and
 physical fault attacks are outside this experiment's rollback guarantee.
@@ -573,7 +583,7 @@ identity and counters remained unchanged: READY, next leaf 1, sequence 1,
 zero stateless uses. The specific reset/exception cause was not established;
 successful operation with event servicing does not prove watchdog margins.
 
-Current checks: **62 Speculos/ELF tests in 48.27 s**, **9 common tests** (the
+The keygen follow-up checks were **62 Speculos/ELF tests in 48.27 s**, **9 common tests** (the
 original eight plus cooperative-keygen equivalence), **2 recorder tests**, and
 **52 hardware/ELF tests, 10 deselected, in 23.41 s**. The hardware suite initially
 failed at a repeatable transition with `6D02` while Ledger Live was also running;
@@ -582,6 +592,16 @@ public snapshots, failure logs, timing limitations, and updated emulator memory
 measurements are recorded in the [physical run report](../README.md#2026-11-05-physical-key-creation-and-reload).
 Normal 0.2.1 ELF SHA-256:
 `b45cbfc40296e38ca35458f37c46328d447f1a15c35b45c0ef221db3614407d4`.
+
+The subsequent [NVM diagnostic run](../nvm-diag/README.md#2026-11-05-results)
+passed 36 diagnostic emulator/ELF tests and all 30 controlled-stop cases on the
+physical Gen5. EMPTY, READY at leaf 2, and EXHAUSTED at leaf 5 survived confirmed
+app exits/reopens. An interrupted update's LOCKED state survived a full
+operator-confirmed power cycle. All record digests/canaries matched, and the
+original normal-wallet identity and counters were unchanged afterward. Normal
+emulator regressions passed 62 tests in 48.16 s; common native tests increased to
+11, including 4,617 modeled partial-write prefixes. These stops occur between
+completed syscalls; they do not constitute failures during a physical write.
 
 Physical interrupted-write behavior, erase isolation/order guarantees, negative
 namespace/EC-permission tests, creation rejection, and instrumented hardware
