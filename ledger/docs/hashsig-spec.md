@@ -603,10 +603,34 @@ emulator regressions passed 62 tests in 48.16 s; common native tests increased t
 11, including 4,617 modeled partial-write prefixes. These stops occur between
 completed syscalls; they do not constitute failures during a physical write.
 
-Physical interrupted-write behavior, erase isolation/order guarantees, negative
-namespace/EC-permission tests, creation rejection, and instrumented hardware
-resource measurements remain open. These gates still precede hardware signing;
-the existing test identity is retained. The broader required observations are:
+The subsequent [hardware-check run](../hw-check/README.md#2026-11-05-results)
+uses the same wallet code in a separate installation and SLIP21 namespace.
+All seven physical derivation probes passed with the exact expected status:
+allowed label `0000`, other labels `4215`, EC curves `4214`. Ordinary creation
+rejection left EMPTY, unchanged NVM digests, and zero writes. Timed creation
+completed in 73.681 s excluding approval but including USB and three storage
+writes. It generated 260 leaves, serviced 65 events, and retained the same boot
+nonce. Peak heap was 2,756 bytes; **physical stack headroom was only 1,640 bytes**
+(16,832-byte peak in 18,472 bytes), failing the unchanged 4 KiB target. Failed
+resource reports remain evidence, even though creation succeeded. Nine
+diagnostic emulator/ELF tests and 67 normal regressions passed; the test APIs
+are absent from the normal app. The runbook records subsequent repeated
+measurements and maximum-envelope verification.
+
+The operator subsequently reported a stalled device, a held power button, and
+initialization pages indicating a factory reset. Hardware testing stopped.
+The [incident record](../hw-check/README.md#stall-and-reset-incident) preserves
+the known sequence: final diagnostic reads, app exit, a version query returning
+`5515`, and no final original-wallet snapshot. The host issued no factory-reset
+command. The cause and exact timing are unresolved; the stack shortfall alone
+does not explain a reset. Do not claim original-wallet preservation or hardware
+acceptance for this run. Ordinary seed recovery does not restore lost SHRINCS
+generation/counter records, and this implementation provides no such import.
+
+Physical interrupted-write behavior, erase isolation/order guarantees, the
+failed stack margin, and unmeasured watchdog thresholds still precede hardware
+signing. The diagnostic measurements are not acceptance of the final
+uninstrumented artifact. The broader required observations are:
 
 | Area | Evidence required from implementation |
 | --- | --- |

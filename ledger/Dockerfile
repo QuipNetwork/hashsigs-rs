@@ -44,6 +44,11 @@ RUN cargo run --locked --release --manifest-path common/Cargo.toml --features di
 WORKDIR /repo/ledger/nvm-diag
 RUN cargo ledger build apex_p -- --locked
 WORKDIR /repo/ledger
+# Separate install/derivation namespace, reusing the wallet source and allocator.
+COPY ledger/hw-check/ hw-check/
+WORKDIR /repo/ledger/hw-check
+RUN cargo ledger build apex_p -- --locked
+WORKDIR /repo/ledger
 # Ragger discovers ledger_app.toml from this container-local Git root.
 RUN git init --quiet /repo/ledger
 ENTRYPOINT []

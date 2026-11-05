@@ -5,10 +5,15 @@
 #include "os_seed.h"
 #include "../../common/platform.c"
 
+#ifndef SHRINCS_APP_LABEL
+#define SHRINCS_APP_LABEL "\0quip.network/SHRINCS/v1"
+#endif
+
 unsigned int wallet_app_key(unsigned char out[32]) {
-    unsigned int path[24] = {0}; // Legacy firewall checks 4 * path_len bytes.
+    const char label[] = SHRINCS_APP_LABEL;
+    // Legacy firewall checks 4 * path_len bytes even for byte-counted SLIP21.
+    unsigned int path[sizeof(label) - 1] = {0};
     unsigned char raw[64] = {0};
-    const char label[] = "\0quip.network/SHRINCS/v1";
     memcpy(path, label, sizeof(label) - 1);
     cx_err_t error = os_derive_bip32_with_seed_no_throw(
         HDW_SLIP21, CX_CURVE_SECP256K1, path, sizeof(label) - 1, raw, NULL, NULL, 0);

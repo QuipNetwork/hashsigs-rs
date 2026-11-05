@@ -22,6 +22,11 @@ the core ABI decoder creates temporary copies of the much larger stateless
 envelope. Passing these tests is an embedded portability result, not a complete
 hardware-wallet signer or an independent cryptographic audit.
 
+**2026-11-05 incident:** physical testing is stopped after the operator reported
+a stall and factory reset following a held power button during the separate
+HW Check session. The cause is unresolved; no final original-wallet snapshot
+was obtained. See the [incident record](hw-check/README.md#stall-and-reset-incident).
+
 ## Build and test
 
 Make and Docker are the host build dependencies. From the `hashsigs-rs` root:
@@ -33,6 +38,7 @@ make -C ledger test PYTEST_ARGS="-k shrincs"
 make -C ledger build
 make -C ledger run
 make -C ledger measure
+make -C ledger test-hw-check
 ```
 
 `test` builds the image, checks Rust formatting, runs the native fixture
@@ -194,11 +200,45 @@ The failed logs are retained; subsequent snapshots confirmed unchanged identity
 and counters. Quit Ledger Live before running these USB checks.
 
 This establishes successful creation and completed-write persistence for one
-physical key. It does not establish physical erase isolation, interrupted-write
-ordering/atomicity, negative namespace-permission tests, physical memory peaks,
-or the signing/resource acceptance gates. Hardware creation rejection also
-remains unrecorded: the operator approved the attempted rejection check. Signing
+physical key. It does not establish physical erase isolation or interrupted-write
+ordering/atomicity. The subsequent separate hardware-check run below covers
+negative permissions, rejection, and physical memory measurements. Signing
 stays disabled.
+
+### 2026-11-05 physical resource and permission checks
+
+The separate [`SHRINCS HW Check` app](hw-check/README.md) reuses the wallet's
+implementation with measurement commands, its own installation/storage, and a
+different SLIP21 label. Installation targeted only the diagnostic app; original
+SHRINCS Lab preservation was not verified after the reported reset. Seven
+physical permission probes passed: the configured label succeeds, neighboring,
+parent, and normal-wallet labels fail with `4215`, and secp256k1/secp256r1/
+ed25519 derivations fail with `4214`. The ordinary creation rejection returned
+`6985`, left EMPTY, and preserved both actual NVM-page digests with zero writes.
+
+Timed creation completed in **73.681 s after approval**, including USB, event
+handling, and three durable app-storage writes. It produced 260 leaves with
+65 event polls and no restart. Peak heap was **2,756 bytes**. **The physical
+stack target failed:** peak app stack **16,832 bytes**, leaving only **1,640
+bytes** against the required 4 KiB. The reports retain this failure; emulator
+headroom does not establish the physical result. See the diagnostic runbook for
+repeated timings, responsiveness, maximum-envelope results, and evidence paths.
+OS syscall-stack use and watchdog thresholds remain unmeasured.
+
+Three recomputations took 73.257–73.266 s, and four early busy replies took
+1.017–2.412 s. The canonical 4 KiB fixture returned its expected Invalid verdict
+with peak heap 16,804 bytes and the same failed stack margin. These measurements
+preceded the operator-reported stall/reset and do not establish successful
+hardware acceptance. The host subsequently sent app exit, then a version query
+which returned `5515`. No factory-reset command was issued; the cause remains
+unknown. The [incident record](hw-check/README.md#stall-and-reset-incident)
+retains the sequence and missing final preservation check.
+
+This slice passed **9 diagnostic emulator/ELF tests**, **67 normal emulator/ELF
+regressions**, **11 native common tests**, **2 host recorder tests**, and all
+five crates' formatting checks. The normal build rejects the diagnostic feature
+and does not expose its extra APDUs. Final uninstrumented hardware acceptance
+remains required after the stack issue is resolved.
 
 ### Operator-assisted key lifecycle checks
 
@@ -448,6 +488,14 @@ matching the core library.
 
 ## Next implementation milestones
 
+Physical testing is suspended after the HW Check stall/reset report. First
+analyze the evidence offline, including stack usage and the app-exit/lock path.
+The [reproduction protocol](docs/gen5-reset-reproduction.md) scopes a future
+replay to this Gen5 with a fresh, unfunded wallet. It prioritizes the frozen
+app-opening prompt and records the 10–15 second power hold separately. Prepare
+the event recorder and isolated cases before any replay; ordinary acceptance
+testing remains suspended.
+
 The separate [`SHRINCS NVM Diag` app](nvm-diag/README.md) now exercises the shared
 commit routine at nine syscall/readback boundaries for creation, counter
 advancement, and exhaustion. It uses public fixture records and its own NVM;
@@ -472,11 +520,12 @@ queries are implemented; signing and durable leaf reservation remain future work
 
 1. Finish the physical NVM gate with device/OS-specific ordering, durability,
    and erase-isolation evidence plus failures during writes. The separate
-   diagnostic app covers completed-syscall boundaries; preserve the current
-   SHRINCS Lab test identity.
-2. Measure physical keygen/heap/stack behavior, establish timing and watchdog
-   margins, and test rejection plus negative derivation permissions. Emulator
-   resource measurements are supporting evidence only.
+   diagnostic app covers completed-syscall boundaries. The former SHRINCS Lab
+   test identity was not verified after the later HW Check reset report.
+2. Localize and reduce physical keygen stack usage: the hardware-check app
+   leaves only 1,640 bytes versus the 4 KiB target. Repeat physical resource and
+   responsiveness checks, establish watchdog margins, and retain the passed
+   permission/rejection coverage. Do not lower the acceptance bound to pass.
 3. Add stateful signing, with digest/key/leaf review and durable reservation
    before producing signature bytes, once those hardware gates pass.
 4. Test interruption, exhaustion, restart, and lost-state recovery behavior.

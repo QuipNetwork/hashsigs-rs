@@ -17,8 +17,12 @@ unsafe extern "C" fn choice(approved: bool) {
 /// Service one device event during long computations. The request was already
 /// frozen before approval; competing commands cannot replace it or read keys.
 pub fn busy_event<const N: usize>(comm: &mut Comm<N>) {
+    #[cfg(feature = "hardware-tests")]
+    crate::hardware::poll();
     match comm.try_next_event().into_type() {
         DecodedEventType::Apdu { .. } | DecodedEventType::ApduError(_) => {
+            #[cfg(feature = "hardware-tests")]
+            crate::hardware::busy_reply();
             let _ = comm.send(&[], AppSW::BadState);
         }
         _ => {}

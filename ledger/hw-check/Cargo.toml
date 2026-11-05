@@ -1,0 +1,39 @@
+[package]
+name = "hashsigs-ledger-hw-check"
+version = "0.1.0"
+authors = ["hashsigs-rs contributors"]
+edition = "2021"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[workspace]
+
+[[bin]]
+name = "hashsigs-ledger-hw-check"
+path = "../app/src/main.rs"
+
+[features]
+default = ["hardware-tests"]
+hardware-tests = ["memory-metrics"]
+memory-metrics = ["dep:embedded-alloc", "dep:critical-section"]
+sdk-heap = ["ledger_device_sdk/heap"]
+
+[dependencies]
+hashsigs-rs = { path = "../..", default-features = false, features = ["alloc", "profile-256s-sha2", "heap-buffers"] }
+ledger_device_sdk = { version = "=1.36.1", default-features = false, features = ["io_new", "sys"] }
+hex = { version = "=0.4.3", default-features = false, features = ["alloc"] }
+hashsigs-ledger-common = { path = "../common" }
+zeroize = { version = "=1.9.0", default-features = false }
+embedded-alloc = { version = "=0.5.1", optional = true }
+critical-section = { version = "=1.2.0", optional = true }
+
+[package.metadata.ledger]
+name = "SHRINCS HW Check"
+curve = ["slip21"]
+path = []
+path_slip21 = ["quip.network/SHRINCS/HW-CHECK/v1"]
+flags = "0"
+apex_p = { icon = "../app/icons/crab_32x32.png" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("apex_p"))'] }

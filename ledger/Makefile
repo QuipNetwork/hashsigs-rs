@@ -11,7 +11,7 @@ WALLET_ARGS ?=
 WALLET_TIMEOUT ?= 180
 RUN = $(DOCKER) run --rm --network none --user "$$(id -u):$$(id -g)"
 
-.PHONY: help check-docker build check test run test-hardware wallet-hardware bench-hardware measure build-nvm-diag test-nvm-diag
+.PHONY: help check-docker build check test run test-hardware wallet-hardware bench-hardware measure build-nvm-diag test-nvm-diag build-hw-check test-hw-check
 .DEFAULT_GOAL := help
 
 help:
@@ -21,6 +21,7 @@ help:
 	@echo 'make -C ledger test           Run the Gen5 Speculos suite'
 	@echo 'make -C ledger measure        Build a separate metrics ELF and measure keygen in Speculos'
 	@echo 'make -C ledger test-nvm-diag   Build and test the separate PUBLIC-fixture storage diagnostic app'
+	@echo 'make -C ledger test-hw-check   Build and test the separate resource/permission app'
 	@echo 'make -C ledger run            Open Speculos at http://localhost:5000'
 	@echo 'make -C ledger test-hardware USB_DEVICE=/dev/bus/usb/BBB/DDD'
 	@echo 'make -C ledger wallet-hardware USB_DEVICE=/dev/bus/usb/BBB/DDD BENCH_OUTPUT=... WALLET_ARGS="snapshot --output /out/state.json"'
@@ -40,6 +41,7 @@ check: build
 	$(RUN) $(IMAGE) cargo fmt --manifest-path host/Cargo.toml --check
 	$(RUN) $(IMAGE) cargo fmt --manifest-path common/Cargo.toml --check
 	$(RUN) $(IMAGE) cargo fmt --manifest-path nvm-diag/Cargo.toml --check
+	$(RUN) $(IMAGE) cargo fmt --manifest-path hw-check/Cargo.toml --check
 	$(DOCKER) run --rm --network none $(IMAGE) cargo test --locked --release --manifest-path common/Cargo.toml
 	$(RUN) $(IMAGE) python -B -m pytest hardware/test_wallet_check.py --confcutdir=hardware -q
 
@@ -53,6 +55,14 @@ build-nvm-diag: build
 
 test-nvm-diag: build-nvm-diag
 	$(RUN) $(IMAGE) python -B -m pytest nvm-diag/tests --confcutdir=nvm-diag -v $(PYTEST_ARGS)
+
+build-hw-check: build
+	mkdir -p $(LEDGER_DIR)/artifacts/hw-check
+	$(RUN) --mount "type=bind,src=$(LEDGER_DIR)/artifacts/hw-check,dst=/out" $(IMAGE) \
+		sh -c 'cp /repo/ledger/hw-check/target/apex_p/release/hashsigs-ledger-hw-check /out/app.elf && cp /repo/ledger/hw-check/target/apex_p/release/*.apdu /out/ && cd /out && sha256sum app.elf > SHA256SUMS'
+
+test-hw-check: build-hw-check
+	$(RUN) $(IMAGE) python -B -m pytest hw-check/tests --confcutdir=hw-check -v $(PYTEST_ARGS)
 
 run: build
 	$(DOCKER) run --rm -it --user "$$(id -u):$$(id -g)" --publish 127.0.0.1:5000:5000 $(IMAGE) \

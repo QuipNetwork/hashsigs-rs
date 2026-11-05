@@ -6,7 +6,15 @@ fn run(command: &mut Command) {
 }
 
 fn main() {
+    if env::var_os("CARGO_FEATURE_HARDWARE_TESTS").is_some() {
+        assert_eq!(
+            env::var("CARGO_PKG_NAME").unwrap(),
+            "hashsigs-ledger-hw-check",
+            "hardware-tests may only be built using the separate hw-check manifest"
+        );
+    }
     println!("cargo:rerun-if-changed=src/platform.c");
+    println!("cargo:rerun-if-changed=../app/src/platform.c");
     println!("cargo:rerun-if-changed=../common/platform.c");
     println!("cargo:rerun-if-env-changed=BOLOS_SDK");
     let sdk = PathBuf::from(env::var("BOLOS_SDK").expect("BOLOS_SDK is required"));

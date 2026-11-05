@@ -11,6 +11,8 @@ license = "AGPL-3.0-or-later"
 default = ["sdk-heap"]
 sdk-heap = ["ledger_device_sdk/heap"]
 memory-metrics = ["dep:embedded-alloc", "dep:critical-section"]
+# Build-script guard restricts this feature to the separate hw-check manifest.
+hardware-tests = ["memory-metrics"]
 
 [dependencies]
 hashsigs-rs = { path = "../..", default-features = false, features = ["alloc", "profile-256s-sha2", "heap-buffers"] }

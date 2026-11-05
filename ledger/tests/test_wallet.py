@@ -58,7 +58,7 @@ def test_bad_key_headers(client, backend, ins):
     assert_status(0x6A80, lambda: backend.exchange(cla=CLA, ins=ins, data=b"x"))
 
 
-@pytest.mark.parametrize("ins", [0x40, 0x41, 0x42, 0x43, 0xf0])
+@pytest.mark.parametrize("ins", [0x40, 0x41, 0x42, 0x43, 0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5])
 def test_signing_unavailable(client, backend, ins):
     assert_status(0x6D00, lambda: backend.exchange(cla=CLA, ins=ins))
 

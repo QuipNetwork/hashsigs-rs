@@ -7,6 +7,8 @@
 
 extern crate alloc;
 
+#[cfg(feature = "hardware-tests")]
+mod hardware;
 #[cfg(feature = "memory-metrics")]
 mod metrics;
 mod review;
@@ -23,7 +25,10 @@ use ledger_device_sdk::nbgl::{NbglGlyph, NbglHomeAndSettings};
 ledger_device_sdk::set_panic!(ledger_device_sdk::exiting_panic);
 ledger_device_sdk::define_comm!(COMM);
 
+#[cfg(not(feature = "hardware-tests"))]
 const ICON: NbglGlyph = NbglGlyph::from_include(include_gif!("glyphs/crab_48x48.png", NBGL));
+#[cfg(feature = "hardware-tests")]
+const ICON: NbglGlyph = NbglGlyph::from_include(include_gif!("../app/glyphs/crab_48x48.png", NBGL));
 
 #[repr(u16)]
 #[derive(Clone, Copy)]
@@ -54,6 +59,8 @@ impl From<io::CommError> for AppSW {
 }
 
 enum Instruction {
+    #[cfg(feature = "hardware-tests")]
+    Hardware(hardware::Instruction),
     #[cfg(feature = "memory-metrics")]
     GetMetrics,
     GetVersion,
@@ -79,6 +86,8 @@ impl TryFrom<ApduHeader> for Instruction {
 
     fn try_from(header: ApduHeader) -> Result<Self, Self::Error> {
         match (header.ins, header.p1, header.p2) {
+            #[cfg(feature = "hardware-tests")]
+            (0xf1..=0xf5, _, _) => hardware::Instruction::try_from(header).map(Self::Hardware),
             #[cfg(feature = "memory-metrics")]
             (0xf0, 0, 0) => Ok(Self::GetMetrics),
             (0x03, 0, 0) => Ok(Self::GetVersion),
@@ -110,9 +119,16 @@ extern "C" fn sample_main(_arg0: u32) {
     #[cfg(feature = "memory-metrics")]
     metrics::init();
     let comm = init_comm(&COMM);
+    #[cfg(not(feature = "hardware-tests"))]
     comm.set_expected_cla(0xE0);
+    #[cfg(feature = "hardware-tests")]
+    comm.set_expected_cla(0xE2);
     let mut home = NbglHomeAndSettings::new().glyph(&ICON).infos(
-        "SHRINCS Lab",
+        if cfg!(feature = "hardware-tests") {
+            "SHRINCS HW Check"
+        } else {
+            "SHRINCS Lab"
+        },
         env!("CARGO_PKG_VERSION"),
         env!("CARGO_PKG_AUTHORS"),
     );
@@ -133,6 +149,17 @@ extern "C" fn sample_main(_arg0: u32) {
             instruction,
             Instruction::Sha256 { confirm: true } | Instruction::CreateKey
         );
+        #[cfg(feature = "hardware-tests")]
+        let reviewed = reviewed || matches!(instruction, Instruction::Hardware(_));
+        // A measured-creation approval authorizes only the immediate matching
+        // execute command; any other decoded command cancels that token.
+        #[cfg(feature = "hardware-tests")]
+        if !matches!(
+            instruction,
+            Instruction::Hardware(hardware::Instruction::Execute)
+        ) {
+            wallet.measurement_token = None;
+        }
         match handle_command(command, instruction, &mut verification, &mut wallet) {
             Ok(response) => {
                 let _ = response.send(AppSW::Ok);
@@ -154,6 +181,10 @@ fn handle_command<'a>(
     wallet: &mut wallet::DeviceWallet,
 ) -> Result<io::CommandResponse<'a>, AppSW> {
     match instruction {
+        #[cfg(feature = "hardware-tests")]
+        Instruction::Hardware(instruction) => {
+            hardware::handle(command, instruction, verification, wallet)
+        }
         #[cfg(feature = "memory-metrics")]
         Instruction::GetMetrics => {
             if !command.get_data().is_empty() {

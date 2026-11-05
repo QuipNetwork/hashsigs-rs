@@ -4,7 +4,7 @@ use hashsigs_ledger_common::{
     self as common, Block, Crypto, Error, State, Storage, Wallet, RECORD_LEN,
 };
 use hashsigs_rs::profiles::selected::{SelectedProfile, NUM_CHAINS, NUM_LAYERS};
-use hashsigs_rs::shrincs::ShrincsSigner;
+use hashsigs_rs::shrincs::{Keys, ShrincsSigner};
 use ledger_device_sdk::{io::Comm, nbgl::NbglSpinner, random::rand_bytes, NVMData};
 use zeroize::Zeroizing;
 
@@ -69,6 +69,8 @@ impl Storage for DeviceStorage {
         }
     }
     fn write(&mut self, block: Block, data: &[u8; RECORD_LEN]) -> Result<(), Error> {
+        #[cfg(feature = "hardware-tests")]
+        crate::hardware::nvm_write();
         if unsafe { wallet_nvm_write(Self::address(block), data.as_ptr()) } == 0 {
             Ok(())
         } else {
@@ -78,6 +80,8 @@ impl Storage for DeviceStorage {
 }
 
 pub struct DeviceWallet {
+    #[cfg(feature = "hardware-tests")]
+    pub measurement_token: Option<Zeroizing<[u8; 16]>>,
     app_key: Zeroizing<[u8; 32]>,
     pub wallet: Wallet,
     pub boot_nonce: [u8; 16],
@@ -94,6 +98,8 @@ impl DeviceWallet {
             Wallet::locked()
         };
         Self {
+            #[cfg(feature = "hardware-tests")]
+            measurement_token: None,
             app_key,
             wallet,
             boot_nonce,
@@ -120,29 +126,10 @@ impl DeviceWallet {
 
     /// Called only after device approval; no host seed/generation input exists.
     pub fn create<const N: usize>(&mut self, comm: &mut Comm<N>) -> Result<(), AppSW> {
-        let mut spinner = NbglSpinner::new();
-        spinner.show("Deriving SHRINCS seed");
         let mut generation = [0; 32];
         rand_bytes(&mut generation);
-        let seed = common::keygen_seed(&DeviceCrypto, &self.app_key, &generation)
-            .map_err(|_| AppSW::InternalError)?;
-        spinner.show("Generating SHRINCS key");
-        // Full hybrid generation, including the real SPHINCS+C hypertree root.
-        let mut completed = 0u32;
-        let (keys, _) = ShrincsSigner::keygen_with_progress::<
-            SelectedProfile,
-            NUM_CHAINS,
-            NUM_LAYERS,
-        >(&seed[..], common::CAPACITY, || {
-            completed += 1;
-            // Four leaves bound the interval between OS event handling.
-            // No callback receives or serializes secret intermediates.
-            if completed % 4 == 0 {
-                crate::review::busy_event(comm);
-            }
-        })
-        .ok_or(AppSW::InternalError)?;
-        spinner.show("Storing SHRINCS key");
+        let keys = self.generate(&generation, comm)?;
+        NbglSpinner::new().show("Storing SHRINCS key");
         self.wallet
             .install(
                 &mut DeviceStorage,
@@ -155,6 +142,67 @@ impl DeviceWallet {
                 Error::Storage => AppSW::StorageFailure,
                 _ => AppSW::InternalError,
             })
+    }
+
+    fn generate<const N: usize>(
+        &self,
+        generation: &[u8; 32],
+        comm: &mut Comm<N>,
+    ) -> Result<Keys, AppSW> {
+        #[cfg(feature = "hardware-tests")]
+        crate::hardware::reset_progress();
+        let mut spinner = NbglSpinner::new();
+        spinner.show("Deriving SHRINCS seed");
+        let seed = common::keygen_seed(&DeviceCrypto, &self.app_key, generation)
+            .map_err(|_| AppSW::InternalError)?;
+        spinner.show("Generating SHRINCS key");
+        // Full hybrid generation, including the real SPHINCS+C hypertree root.
+        let mut completed = 0u32;
+        let (keys, _) = ShrincsSigner::keygen_with_progress::<
+            SelectedProfile,
+            NUM_CHAINS,
+            NUM_LAYERS,
+        >(&seed[..], common::CAPACITY, || {
+            completed += 1;
+            #[cfg(feature = "hardware-tests")]
+            crate::hardware::leaf();
+            // Four leaves bound the interval between OS event handling.
+            // No callback receives or serializes secret intermediates.
+            if completed % 4 == 0 {
+                crate::review::busy_event(comm);
+            }
+        })
+        .ok_or(AppSW::InternalError)?;
+        Ok(keys)
+    }
+
+    /// Recompute this diagnostic app's existing identity without writing NVM.
+    /// All keys are dropped/zeroized before the public commitment is returned.
+    #[cfg(feature = "hardware-tests")]
+    pub fn benchmark<const N: usize>(&self, comm: &mut Comm<N>) -> Result<[u8; 32], AppSW> {
+        let id = self.wallet.identity().ok_or(AppSW::BadState)?;
+        let keys = self.generate(&id.generation, comm)?;
+        if keys.public_key_commitment().as_bytes() != &id.commitment {
+            return Err(AppSW::InternalError);
+        }
+        Ok(id.commitment)
+    }
+
+    #[cfg(feature = "hardware-tests")]
+    pub fn storage_fingerprint(&self) -> Result<[u8; 64], AppSW> {
+        use ledger_device_sdk::hash::{sha2::Sha2_256, HashInit};
+        let mut out = [0; 64];
+        let mut bytes = Zeroizing::new([0; RECORD_LEN]);
+        for (block, digest) in [Block::Marker, Block::Payload]
+            .into_iter()
+            .zip(out.chunks_exact_mut(32))
+        {
+            DeviceStorage.read(block, &mut bytes);
+            Sha2_256::new()
+                .hash(&bytes[..], digest)
+                .map_err(|_| AppSW::InternalError)?;
+        }
+        Ok(out)
     }
 
     pub fn public_chunk(&self, data: &[u8]) -> Result<([u8; 37], &[u8]), AppSW> {

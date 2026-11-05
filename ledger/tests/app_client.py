@@ -4,34 +4,35 @@ CLA = 0xE0
 
 
 class AppClient:
-    def __init__(self, backend):
+    def __init__(self, backend, cla=CLA):
         self.backend = backend
+        self.cla = cla
 
     def version(self):
-        return tuple(self.backend.exchange(cla=CLA, ins=0x03).data)
+        return tuple(self.backend.exchange(cla=self.cla, ins=0x03).data)
 
     def name(self):
-        return self.backend.exchange(cla=CLA, ins=0x04).data.decode("ascii")
+        return self.backend.exchange(cla=self.cla, ins=0x04).data.decode("ascii")
 
     def sha256(self, message):
         if len(message) > 255:
             raise ValueError("The smoke app accepts at most 255 bytes in one APDU.")
-        return self.backend.exchange(cla=CLA, ins=0x10, data=message).data
+        return self.backend.exchange(cla=self.cla, ins=0x10, data=message).data
 
     def review_hash(self, message):
         if len(message) > 255:
             raise ValueError("The smoke app accepts at most 255 bytes in one APDU.")
-        return self.backend.exchange_async(cla=CLA, ins=0x10, p1=1, data=message)
+        return self.backend.exchange_async(cla=self.cla, ins=0x10, p1=1, data=message)
 
     def profile(self):
-        data = self.backend.exchange(cla=CLA, ins=0x05).data
+        data = self.backend.exchange(cla=self.cla, ins=0x05).data
         if len(data) < 36:
             raise ValueError("Truncated profile response")
         return {"protocol": data[0], "max_envelope": int.from_bytes(data[1:3], "big"),
                 "profile_id": data[3:35].hex(), "name": data[35:].decode("ascii")}
 
     def info(self):
-        data = self.backend.exchange(cla=CLA, ins=0x06).data
+        data = self.backend.exchange(cla=self.cla, ins=0x06).data
         if len(data) != 69:
             raise ValueError("Invalid info response")
         return {"protocol": data[0], "spec": int.from_bytes(data[1:3], "big"),
@@ -43,7 +44,7 @@ class AppClient:
                     ("max_chunk", 65), ("record_version", 67)]}}
 
     def state(self):
-        data = self.backend.exchange(cla=CLA, ins=0x32).data
+        data = self.backend.exchange(cla=self.cla, ins=0x32).data
         if len(data) != 110 or data[0] > 3:
             raise ValueError("Invalid state response")
         return {"state": data[0], "commitment": data[1:33], "generation": data[33:65],
@@ -55,14 +56,14 @@ class AppClient:
     def create_key(self, profile_id):
         if len(profile_id) != 32:
             raise ValueError("Profile ID must be 32 bytes")
-        return self.backend.exchange_async(cla=CLA, ins=0x30,
+        return self.backend.exchange_async(cla=self.cla, ins=0x30,
                                            data=profile_id + (4).to_bytes(4, "big"))
 
     def public_chunk(self, commitment, offset, length):
         if len(commitment) != 32 or not 1 <= length <= 200 or not 0 <= offset < 480 or offset + length > 480:
             raise ValueError("Invalid public key range")
         prefix = commitment + (480).to_bytes(2, "big") + offset.to_bytes(2, "big") + bytes([length])
-        data = self.backend.exchange(cla=CLA, ins=0x31,
+        data = self.backend.exchange(cla=self.cla, ins=0x31,
                                      data=commitment + offset.to_bytes(2, "big") + bytes([length])).data
         if len(data) != 37 + length or data[:37] != prefix:
             raise ValueError("Invalid public key response")
@@ -76,7 +77,7 @@ class AppClient:
         envelope = bytes.fromhex(case["envelope"])
         length = len(envelope) if length is None else length
         data = bytes.fromhex(case["commitment"]) + bytes.fromhex(case["hash"]) + length.to_bytes(4, "big")
-        reply = self.backend.exchange(cla=CLA, ins=0x20, data=data).data
+        reply = self.backend.exchange(cla=self.cla, ins=0x20, data=data).data
         if len(reply) != 4:
             raise ValueError("Invalid session response")
         return int.from_bytes(reply, "big")
@@ -85,20 +86,20 @@ class AppClient:
         if len(chunk) > 251:
             raise ValueError("At most 251 envelope bytes fit in one APDU")
         p1, p2 = offset.to_bytes(2, "big")
-        reply = self.backend.exchange(cla=CLA, ins=0x21, p1=p1, p2=p2,
+        reply = self.backend.exchange(cla=self.cla, ins=0x21, p1=p1, p2=p2,
                                       data=session.to_bytes(4, "big") + chunk).data
         if len(reply) != 2:
             raise ValueError("Invalid upload response")
         return int.from_bytes(reply, "big")
 
     def finish(self, session):
-        reply = self.backend.exchange(cla=CLA, ins=0x22, data=session.to_bytes(4, "big")).data
+        reply = self.backend.exchange(cla=self.cla, ins=0x22, data=session.to_bytes(4, "big")).data
         if len(reply) != 1 or reply[0] not in (0, 1, 2):
             raise ValueError("Invalid verification response")
         return reply[0]
 
     def cancel(self):
-        return self.backend.exchange(cla=CLA, ins=0x23).data
+        return self.backend.exchange(cla=self.cla, ins=0x23).data
 
     def verify(self, case, chunk_size=251):
         if not 1 <= chunk_size <= 251:
