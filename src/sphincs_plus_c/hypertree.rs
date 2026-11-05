@@ -606,6 +606,14 @@ pub(crate) fn hypertree_public_root<P: Profile, const NUM_LAYERS: usize>(
     stateless_sk_seed: &[u8; HASH_LEN],
     pk_seed: &[u8; HASH_LEN],
 ) -> [u8; HASH_LEN] {
+    hypertree_public_root_with_progress::<P, NUM_LAYERS>(stateless_sk_seed, pk_seed, &mut || {})
+}
+
+pub(crate) fn hypertree_public_root_with_progress<P: Profile, const NUM_LAYERS: usize>(
+    stateless_sk_seed: &[u8; HASH_LEN],
+    pk_seed: &[u8; HASH_LEN],
+    progress: &mut impl FnMut(),
+) -> [u8; HASH_LEN] {
     // With a 64-bit hypertree split into eight 8-bit layers, the layer-0 tree
     // coordinate is fully consumed by the top layer. The top tree index is
     // therefore zero for the public root.
@@ -613,7 +621,14 @@ pub(crate) fn hypertree_public_root<P: Profile, const NUM_LAYERS: usize>(
     // Lowest layer has 2^64/2^8 = 2^56 subtrees so 7 of 8 bits are used for the tree index
     let layer_seeds = hypertree_layer_seeds::<P, NUM_LAYERS>(stateless_sk_seed);
     let top_layer = u32::from(P::NUM_HYPERTREE_LAYERS - 1);
-    match hypertree_subtree::<P>(pk_seed, &layer_seeds[top_layer as usize], top_layer, 0, 0) {
+    match hypertree_subtree_with_progress::<P>(
+        pk_seed,
+        &layer_seeds[top_layer as usize],
+        top_layer,
+        0,
+        0,
+        progress,
+    ) {
         Some(subtree) => subtree.root,
         None => {
             // Internal invariant: leaf 0 is always in range for the top-layer
@@ -643,6 +658,24 @@ fn hypertree_subtree<P: Profile>(
     tree: u64,
     selected_leaf: u32,
 ) -> Option<HypertreeSubtree> {
+    hypertree_subtree_with_progress::<P>(
+        pk_seed,
+        layer_seed,
+        layer,
+        tree,
+        selected_leaf,
+        &mut || {},
+    )
+}
+
+fn hypertree_subtree_with_progress<P: Profile>(
+    pk_seed: &[u8; HASH_LEN],
+    layer_seed: &[u8; HASH_LEN],
+    layer: u32,
+    tree: u64,
+    selected_leaf: u32,
+    progress: &mut impl FnMut(),
+) -> Option<HypertreeSubtree> {
     let () = SubtreeHeightFits::<P>::CHECK;
     let subtree_height = u32::from(P::HYPERTREE_HEIGHT / P::NUM_HYPERTREE_LAYERS);
     if subtree_height == 0 || subtree_height >= u32::BITS {
@@ -657,7 +690,7 @@ fn hypertree_subtree<P: Profile>(
     // folded into the tree (same leaf secret derivation path).
     let selected_leaf_hash = hypertree_leaf::<P>(pk_seed, layer_seed, layer, tree, selected_leaf);
 
-    let (root, auth_path) = crate::treehash::treehash_root_and_auth_path(
+    let (root, auth_path) = crate::treehash::treehash_root_and_auth_path_with_progress(
         subtree_height,
         selected_leaf,
         |leaf| {
@@ -677,6 +710,7 @@ fn hypertree_subtree<P: Profile>(
                 right.as_ref(),
             ])
         },
+        progress,
     );
 
     Some(HypertreeSubtree {

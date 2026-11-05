@@ -5,7 +5,7 @@ use hashsigs_ledger_common::{
 };
 use hashsigs_rs::profiles::selected::{SelectedProfile, NUM_CHAINS, NUM_LAYERS};
 use hashsigs_rs::shrincs::ShrincsSigner;
-use ledger_device_sdk::{random::rand_bytes, NVMData};
+use ledger_device_sdk::{io::Comm, nbgl::NbglSpinner, random::rand_bytes, NVMData};
 use zeroize::Zeroizing;
 
 unsafe extern "C" {
@@ -119,17 +119,30 @@ impl DeviceWallet {
     }
 
     /// Called only after device approval; no host seed/generation input exists.
-    pub fn create(&mut self) -> Result<(), AppSW> {
+    pub fn create<const N: usize>(&mut self, comm: &mut Comm<N>) -> Result<(), AppSW> {
+        let mut spinner = NbglSpinner::new();
+        spinner.show("Deriving SHRINCS seed");
         let mut generation = [0; 32];
         rand_bytes(&mut generation);
         let seed = common::keygen_seed(&DeviceCrypto, &self.app_key, &generation)
             .map_err(|_| AppSW::InternalError)?;
+        spinner.show("Generating SHRINCS key");
         // Full hybrid generation, including the real SPHINCS+C hypertree root.
-        let (keys, _) = ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(
-            &seed[..],
-            common::CAPACITY,
-        )
+        let mut completed = 0u32;
+        let (keys, _) = ShrincsSigner::keygen_with_progress::<
+            SelectedProfile,
+            NUM_CHAINS,
+            NUM_LAYERS,
+        >(&seed[..], common::CAPACITY, || {
+            completed += 1;
+            // Four leaves bound the interval between OS event handling.
+            // No callback receives or serializes secret intermediates.
+            if completed % 4 == 0 {
+                crate::review::busy_event(comm);
+            }
+        })
         .ok_or(AppSW::InternalError)?;
+        spinner.show("Storing SHRINCS key");
         self.wallet
             .install(
                 &mut DeviceStorage,

@@ -36,6 +36,7 @@ COPY ledger/ledger_app.toml ledger/pytest.ini ledger/conftest.py ./
 COPY ledger/tests/ tests/
 RUN python tests/enable_rust_nvram.py
 COPY ledger/benchmarks/ benchmarks/
+COPY ledger/hardware/ hardware/
 # Ragger discovers ledger_app.toml from this container-local Git root.
 RUN git init --quiet /repo/ledger
 ENTRYPOINT []

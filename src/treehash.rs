@@ -46,7 +46,23 @@ pub(crate) fn treehash_root_and_auth_path<F>(
     height: u32,
     selected_leaf: u32,
     leaf_hash: F,
+    parent: impl FnMut(u32, u64, [u8; HASH_LEN], [u8; HASH_LEN]) -> [u8; HASH_LEN],
+) -> ([u8; HASH_LEN], Vec<[u8; HASH_LEN]>)
+where
+    F: Fn(u32) -> [u8; HASH_LEN] + Sync,
+{
+    treehash_root_and_auth_path_with_progress(height, selected_leaf, leaf_hash, parent, &mut || {})
+}
+
+/// Progress runs on the calling thread after each folded leaf (after a batch
+/// has finished under `parallel`). It receives no key material and cannot
+/// alter the Merkle inputs or fold order.
+pub(crate) fn treehash_root_and_auth_path_with_progress<F>(
+    height: u32,
+    selected_leaf: u32,
+    leaf_hash: F,
     mut parent: impl FnMut(u32, u64, [u8; HASH_LEN], [u8; HASH_LEN]) -> [u8; HASH_LEN],
+    progress: &mut impl FnMut(),
 ) -> ([u8; HASH_LEN], Vec<[u8; HASH_LEN]>)
 where
     F: Fn(u32) -> [u8; HASH_LEN] + Sync,
@@ -73,6 +89,7 @@ where
                     (start..end).into_par_iter().map(&leaf_hash).collect();
                 for (offset, node) in batch.into_iter().enumerate() {
                     fold_leaf(start + offset as u32, node, &mut fold, &mut parent);
+                    progress();
                 }
                 start = end;
             }
@@ -82,6 +99,7 @@ where
             for i in 0..leaf_count {
                 let node = leaf_hash(i);
                 fold_leaf(i, node, &mut fold, &mut parent);
+                progress();
             }
         }
 

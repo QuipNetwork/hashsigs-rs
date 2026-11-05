@@ -220,7 +220,7 @@ checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
 
 [[package]]
 name = "hashsigs-ledger"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "critical-section",
  "embedded-alloc",

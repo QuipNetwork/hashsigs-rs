@@ -4,7 +4,7 @@ Specification revision 1, 2026-10-12. Target protocol: **2**.
 
 This document defines the first capacity-four stateful signer for Nano Gen5.
 It describes the complete intended signer. The checked-in app is now version
-0.2.0, protocol 2: derivation, full hybrid key creation, authenticated storage,
+0.2.1, protocol 2: derivation, full hybrid key creation, authenticated storage,
 reload, public queries, and verification are implemented. Signing commands and
 leaf reservation remain unimplemented. Capabilities are `0x00000003`, never the
 signing bit. Section 8 separates emulator evidence from pending hardware gates.
@@ -18,8 +18,10 @@ acceptance evidence is listed separately in section 8.
 ## 1. Scope, identity, and limits
 
 The reference is `hashsigs-rs` 0.2.1-rc9 at
-`2779dc8ae91bba02ef10efeaa9d1e88712f836ae`. Device integration stays under
-`ledger/` and uses existing core public APIs with `default-features = false`
+`2779dc8ae91bba02ef10efeaa9d1e88712f836ae`, followed by key management at
+`a8a81b3`. The 2026-11-05 working changes add a cooperative keygen API without
+changing keys, parameters, storage, or wire formats. Device integration stays
+under `ledger/` and uses core public APIs with `default-features = false`
 and features `alloc,profile-256s-sha2,heap-buffers`.
 
 | Property | Contract |
@@ -335,7 +337,7 @@ exact, with no optional trailing fields. Error replies have no data.
 
 `GET_PROFILE` (`05`) keeps its layout but reports protocol byte **2**. Hosts
 must require protocol 2 and matching profile before using signer commands.
-`GET_VERSION` reports app `0.2.0`. Do not advertise a capability merely because
+`GET_VERSION` reports app `0.2.1`. Do not advertise a capability merely because
 it is specified; this implementation advertises verification and key management.
 
 New `GET_INFO` (`06`, empty request) returns this **69-byte** structure:
@@ -561,10 +563,30 @@ than zeros. Later boots reuse bytes written by the previous process. Storage
 logic fault injection remains a separate native harness. Neither is physical
 erase-isolation or power-loss evidence.
 
-No Ledger was connected (`lsusb -d 2c97:` found none). App 0.2.0 installation,
-OS enforcement of the narrow namespace, real key creation/reboot, flash
-durability/interruption, and Gen5 resource/watchdog measurements remain gates
-before implementing signing. The broader required observations are:
+The 2026-11-05 follow-up used a physical Gen5 on LedgerOS 1.1.1, MCU 8.1.2.
+App 0.2.0 passed its USB regression suite but reset during creation; state
+remained EMPTY. App 0.2.1 services OS/UI events after every four completed tree
+leaves and subsequently completed physical key creation. Public export,
+independent Keccak commitment recomputation, repeated-create rejection, app
+exit/reopen, and an operator-confirmed full power-off/on all passed. Public
+identity and counters remained unchanged: READY, next leaf 1, sequence 1,
+zero stateless uses. The specific reset/exception cause was not established;
+successful operation with event servicing does not prove watchdog margins.
+
+Current checks: **62 Speculos/ELF tests in 48.27 s**, **9 common tests** (the
+original eight plus cooperative-keygen equivalence), **2 recorder tests**, and
+**52 hardware/ELF tests, 10 deselected, in 23.41 s**. The hardware suite initially
+failed at a repeatable transition with `6D02` while Ledger Live was also running;
+it passed unchanged after Ledger Live was closed. Source and ELF identity,
+public snapshots, failure logs, timing limitations, and updated emulator memory
+measurements are recorded in the [physical run report](../README.md#2026-11-05-physical-key-creation-and-reload).
+Normal 0.2.1 ELF SHA-256:
+`b45cbfc40296e38ca35458f37c46328d447f1a15c35b45c0ef221db3614407d4`.
+
+Physical interrupted-write behavior, erase isolation/order guarantees, negative
+namespace/EC-permission tests, creation rejection, and instrumented hardware
+resource measurements remain open. These gates still precede hardware signing;
+the existing test identity is retained. The broader required observations are:
 
 | Area | Evidence required from implementation |
 | --- | --- |

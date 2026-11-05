@@ -12,7 +12,7 @@ fixtures for four sequential signing leaves; the Gen5 app verifies their
 canonical SHRINCS envelopes. The app also retains the SHA-256 and on-screen
 approve/reject smoke flow from the Rust boilerplate.
 
-App **0.2.0, protocol 2** derives an isolated SLIP21 key from the active wallet,
+App **0.2.1, protocol 2** derives an isolated SLIP21 key from the active wallet,
 generates a fresh public generation ID after approval, and stores the complete
 capacity-four hybrid key in authenticated NVM. Both tree roots are computed
 on-device. Key creation never replaces an existing identity. Signing remains
@@ -71,10 +71,12 @@ approval/rejection, restart, lost replies, wrong-seed and corrupted-record locks
 competing APDUs during review, and a fresh identity after simulated reinstall.
 See [validation evidence](docs/hashsig-spec.md#8-acceptance-evidence-and-remaining-device-assumptions).
 
-Validated on 2026-10-12: **61 Speculos/ELF tests passed in 33.17 seconds**;
-all three Rust formatting checks and **8 native storage tests** passed.
+Validated on 2026-11-05: **62 Speculos/ELF tests passed in 48.27 seconds**;
+all three Rust formatting checks, **9 native common tests** (eight storage/KDF
+tests and one cooperative-keygen test), and **2 host recorder tests** passed.
+The five core treehash tests also passed with and without `parallel`.
 Normal app ELF SHA-256:
-`8a1699d36e87f0d392fa147cd4ad22146f0a3baf092b9d6755ec660cf6cfe5bb`.
+`b45cbfc40296e38ca35458f37c46328d447f1a15c35b45c0ef221db3614407d4`.
 
 The eight native storage tests exercise 1,539 interrupted-write prefixes across
 the three creation writes, every single-byte corruption in both 512-byte blocks,
@@ -139,11 +141,9 @@ LedgerOS 1.1.1: **41 passed, 4 deselected in 22.04 seconds**, using the thread
 watchdog and `PYTEST_ARGS="-v --tb=short --log-cli-level=INFO"`. This includes all four host-generated stateful
 signatures, the one-byte upload case, invalid-input handling, and the 4 KiB
 boundary case. The excluded cases are automated hash approval/rejection and two
-malformed transport frames. That result applies to app 0.1.0. No Ledger was
-connected for the 2026-10-12 implementation session, so app 0.2.0 installation,
-physical key creation/reboot, actual flash interruption, watchdog behavior, and
-hardware memory/timing measurements remain unvalidated. The ordinary USB suite
-does not approve key creation automatically.
+malformed transport frames. That result applies to app 0.1.0. The ordinary USB
+suite does not approve key creation automatically. The 2026-11-05 key-management
+run below supersedes the earlier installation/reload status.
 
 An earlier attempt stopped after 30 passes because USB disconnected during the
 one-byte upload. After reconnecting and reopening the app, the complete suite
@@ -155,6 +155,98 @@ After a reconnect, unlock the wallet, open **SHRINCS Lab**, and rerun
 Ledger Wallet and other test processes so they do not compete for USB access.
 The app contains no test seed or private-key import command; the deterministic
 fixture seeds live only in host tools and Speculos test configuration.
+
+### 2026-11-05 physical key creation and reload
+
+The Gen5 reported LedgerOS **1.1.1**, MCU **8.1.2**, and target `0x33400004`.
+App 0.2.0 installed successfully and passed **52 hardware/ELF tests, 9
+deselected, in 23.65 s**. Its manual hash approval succeeded, but creation
+repeatedly lost USB and returned the device to its PIN/home flow. The operator
+observed "Generating SHRINCS key" before reset. A timed attempt lost USB after
+43.437 s including approval time; subsequent reads still reported `EMPTY`.
+These observations do not identify an OS exception or prove a watchdog cause.
+
+App 0.2.1 adds `ShrincsSigner::keygen_with_progress`, preserving key material,
+parameters, and wire formats. The device services one OS/UI event after every
+four completed leaves and rejects competing commands with `6986`. The fixed
+host signature fixtures retain their original SHA-256 checksum. Emulator tests
+also send commands during computation and verify the resulting complete key.
+
+On the physical Gen5, 0.2.1 then completed key creation and public export. The
+host independently checked canonical ABI encoding and recomputed its Keccak
+commitment. A repeated create command returned `6986` without changing state.
+App exit/reopen and an operator-confirmed full power-off/on preserved the exact
+480-byte public key, generation ID, commitment, and counters, with fresh boot
+nonces. State remained `READY`, capacity 4, next leaf 1, sequence 1, and zero
+stateless uses. The created test identity was retained on the device.
+
+Public commitment:
+`12970d6d173e5c2cddf3f69420bfd56e0aae5a052d73c44eb67088aab5bd11e9`.
+Creation request-to-reply was 91.351 s **including operator approval and final
+acknowledgement**, not a CPU benchmark. Artifacts and public JSON snapshots are
+under `artifacts/benchmarks/20261105-cooperative-hardware/`; the failed 0.2.0
+attempts are under `20261105-keygen-hardware/`. An initial post-power-cycle
+regression stopped after 27 passes when CANCEL returned `6D02`, reproducing at
+the same test transition on two retries. Ledger Live was running concurrently.
+After it was closed, the unchanged full suite passed **52 hardware/ELF tests,
+10 deselected, in 23.41 s**, supporting USB contention as the explanation.
+The failed logs are retained; subsequent snapshots confirmed unchanged identity
+and counters. Quit Ledger Live before running these USB checks.
+
+This establishes successful creation and completed-write persistence for one
+physical key. It does not establish physical erase isolation, interrupted-write
+ordering/atomicity, negative namespace-permission tests, physical memory peaks,
+or the signing/resource acceptance gates. Hardware creation rejection also
+remains unrecorded: the operator approved the attempted rejection check. Signing
+stays disabled.
+
+### Operator-assisted key lifecycle checks
+
+`wallet-hardware` runs the public-state recorder in `hardware/wallet_check.py`
+against the explicitly selected USB node. Open SHRINCS Lab first. Use one
+absolute report directory throughout a run, and a new JSON filename for every
+step; existing reports are never overwritten. For example:
+
+```sh
+make -C ledger wallet-hardware USB_DEVICE=/dev/bus/usb/BBB/DDD \
+  BENCH_OUTPUT=/absolute/path/to/hardware-run \
+  WALLET_ARGS="snapshot --expect-state empty --output /out/empty.json"
+make -C ledger wallet-hardware USB_DEVICE=/dev/bus/usb/BBB/DDD \
+  BENCH_OUTPUT=/absolute/path/to/hardware-run \
+  WALLET_ARGS="reject --baseline /out/empty.json --expect-state empty --output /out/rejected.json"
+make -C ledger wallet-hardware USB_DEVICE=/dev/bus/usb/BBB/DDD \
+  BENCH_OUTPUT=/absolute/path/to/hardware-run \
+  WALLET_ARGS="create --expect-state ready --output /out/created.json"
+```
+
+For `reject`, tap **Reject** on the device. For `create`, tap **Create key**, then
+acknowledge the full commitment with **Done**. The recorder checks canonical
+public-key encoding, independently recomputes its Keccak commitment, and checks
+that a repeated creation command cannot replace the key. It neither installs
+apps nor changes wallet seeds. Reports contain public data only.
+
+After exiting and reopening the app, compare the entire identity, public key,
+and counters, while requiring a changed boot nonce:
+
+```sh
+make -C ledger wallet-hardware USB_DEVICE=/dev/bus/usb/BBB/DDD \
+  BENCH_OUTPUT=/absolute/path/to/hardware-run \
+  WALLET_ARGS="snapshot --baseline /out/created.json --new-boot --expect-state ready --output /out/reopened.json"
+```
+
+Repeat after actually powering the Gen5 off and on, with a new output filename
+and its current USB node. Cable reconnection alone is not evidence of a power
+cycle. `hash-approve` and `hash-reject` exercise the manual hash-review flow.
+`WALLET_TIMEOUT` defaults to 180 seconds and bounds the whole process, including
+native HID reads. A timeout or transport failure is not proof that creation
+failed: reopen the app and use `snapshot` before deciding what to do next.
+
+The reported creation duration includes operator approval and completion-screen
+acknowledgement; it is not a keygen CPU benchmark. The ELF hash records the
+expected build, not an attestation of installed code. `--expected-elf` selects
+an archived build when inspecting an older installed version. Successful reload
+does not establish interrupted-write atomicity, erase isolation, or rollback
+resistance.
 
 ## Verification timing and parameters
 
@@ -239,7 +331,7 @@ Ledger hash acceleration is not implemented.
 ## Protocol version 1
 
 These verification commands remain available in protocol 2. `GET_PROFILE` now
-reports protocol `2`; the version command reports app `0.2.0`.
+reports protocol `2`; the version command reports app `0.2.1`.
 
 CLA is `0xE0`; short APDUs carry at most 255 bytes. Integers are big-endian.
 P1/P2 are zero except on `WRITE_VERIFY`, where they encode the byte offset.
@@ -331,6 +423,13 @@ latency or a worst-case bound. Peaks accumulate from startup; syscall stack
 usage is not measured. Metrics ELF SHA-256:
 `d2fbbd3b7180faf3eadbe00f7b463c82b42a123f6319728de663b808be5d922a`.
 
+On 2026-11-05, run `20261105-cooperative-metrics` measured the 0.2.1 candidate:
+keygen/export peak heap **2,748 bytes**, then **16,796 bytes** after the maximum
+envelope; app stack peak **11,280 bytes**, headroom **7,208 bytes**. Keygen reached
+the completion screen in **4.419 s**, including automated approval navigation.
+The same capacities and measurement limitations apply. Metrics ELF SHA-256:
+`8cc89c88bc3a2051aeb13eae70772a3d0a3a3eb346933c1183b154e9a9c46f55`.
+
 - Builder: immutable digest in `Dockerfile`.
 - Rust: `nightly-2026-04-15`, satisfying the core's Rust 1.95 requirement.
 - The Gen5 target specification is copied from the builder's pinned original
@@ -355,11 +454,12 @@ and retry behavior for a capacity-four signer. It includes a public KDF check
 vector and initial resource acceptance bounds. Key creation/storage/public
 queries are implemented; signing and durable leaf reservation remain future work.
 
-1. Install app 0.2.0 on a disposable Gen5 setup, validate the narrow derivation
-   permissions, create a key, record its public key/state, and verify it after
-   actual app exit and device power cycle. Measure keygen/watchdog/memory behavior.
-2. Validate physical NVM ordering, durability, erase isolation and interrupted
-   writes; emulator persistence is supporting evidence only.
+1. Validate physical NVM ordering, erase isolation and interrupted writes using
+   a separate diagnostic build/setup. Successful 0.2.1 creation and power-cycle
+   reload do not close these gates; preserve the current test identity.
+2. Measure physical keygen/heap/stack behavior, establish timing and watchdog
+   margins, and test rejection plus negative derivation permissions. Emulator
+   resource measurements are supporting evidence only.
 3. Add stateful signing, with digest/key/leaf review and durable reservation
    before producing signature bytes, once those hardware gates pass.
 4. Test interruption, exhaustion, restart, and lost-state recovery behavior.

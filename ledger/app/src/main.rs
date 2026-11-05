@@ -18,7 +18,7 @@ use hashsigs_ledger_common as common;
 use ledger_device_sdk::hash::{sha2::Sha2_256, HashInit};
 use ledger_device_sdk::include_gif;
 use ledger_device_sdk::io::{self, init_comm, ApduHeader, Command, Reply};
-use ledger_device_sdk::nbgl::{NbglGlyph, NbglHomeAndSettings, NbglSpinner};
+use ledger_device_sdk::nbgl::{NbglGlyph, NbglHomeAndSettings};
 
 ledger_device_sdk::set_panic!(ledger_device_sdk::exiting_panic);
 ledger_device_sdk::define_comm!(COMM);
@@ -245,9 +245,7 @@ fn handle_command<'a>(
             ) {
                 return Err(AppSW::Denied);
             }
-            let mut spinner = NbglSpinner::new();
-            spinner.show("Generating SHRINCS key");
-            wallet.create()?;
+            wallet.create(comm)?;
             let id = wallet.wallet.identity().ok_or(AppSW::InternalError)?;
             let detail = format!("Commitment\n{}", hex::encode(id.commitment));
             // Both buttons acknowledge an already durable identity; neither can

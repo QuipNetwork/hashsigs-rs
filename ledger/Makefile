@@ -7,9 +7,11 @@ BENCH_SAMPLES ?= 30
 BENCH_WARMUP ?= 5
 BENCH_RUN := $(shell date -u +%Y%m%dT%H%M%SZ)
 BENCH_OUTPUT ?= $(LEDGER_DIR)/artifacts/benchmarks/$(BENCH_RUN)
+WALLET_ARGS ?=
+WALLET_TIMEOUT ?= 180
 RUN = $(DOCKER) run --rm --network none --user "$$(id -u):$$(id -g)"
 
-.PHONY: help check-docker build check test run test-hardware bench-hardware measure
+.PHONY: help check-docker build check test run test-hardware wallet-hardware bench-hardware measure
 .DEFAULT_GOAL := help
 
 help:
@@ -20,6 +22,7 @@ help:
 	@echo 'make -C ledger measure        Build a separate metrics ELF and measure keygen in Speculos'
 	@echo 'make -C ledger run            Open Speculos at http://localhost:5000'
 	@echo 'make -C ledger test-hardware USB_DEVICE=/dev/bus/usb/BBB/DDD'
+	@echo 'make -C ledger wallet-hardware USB_DEVICE=/dev/bus/usb/BBB/DDD BENCH_OUTPUT=... WALLET_ARGS="snapshot --output /out/state.json"'
 	@echo 'make -C ledger bench-hardware USB_DEVICE=/dev/bus/usb/BBB/DDD'
 
 check-docker:
@@ -36,6 +39,7 @@ check: build
 	$(RUN) $(IMAGE) cargo fmt --manifest-path host/Cargo.toml --check
 	$(RUN) $(IMAGE) cargo fmt --manifest-path common/Cargo.toml --check
 	$(DOCKER) run --rm --network none $(IMAGE) cargo test --locked --release --manifest-path common/Cargo.toml
+	$(RUN) $(IMAGE) python -B -m pytest hardware/test_wallet_check.py --confcutdir=hardware -q
 
 test: check
 	$(RUN) $(IMAGE) python -m pytest --device apex_p --backend speculos $(PYTEST_ARGS)
@@ -53,6 +57,18 @@ test-hardware: build
 	@test -c "$(USB_DEVICE)" || { echo 'USB_DEVICE must be a character device.'; exit 2; }
 	$(RUN) --device "$(USB_DEVICE)" --group-add "$$(stat -c %g "$(USB_DEVICE)")" $(IMAGE) \
 		python -m pytest --device apex_p --backend ledgerwallet -m 'not emulator_only' --timeout-method=thread -x $(PYTEST_ARGS)
+
+# Operator-assisted creation/rejection and public-state comparisons. Reports
+# never contain secret material. Existing keys are not replaced. A wall-clock
+# timeout also bounds native HID reads while waiting for manual approval.
+wallet-hardware: build
+	@test -n "$(USB_DEVICE)" && test -c "$(USB_DEVICE)" || { echo 'Set USB_DEVICE to the connected Ledger character device.'; exit 2; }
+	@test -n "$(WALLET_ARGS)" || { echo 'Set WALLET_ARGS to the action and --output /out/report.json.'; exit 2; }
+	mkdir -p "$(BENCH_OUTPUT)"
+	$(RUN) --device "$(USB_DEVICE)" --group-add "$$(stat -c %g "$(USB_DEVICE)")" \
+		--mount "type=bind,src=$(LEDGER_DIR),dst=/lab,readonly" \
+		--mount "type=bind,src=$(BENCH_OUTPUT),dst=/out" $(IMAGE) \
+		timeout $(WALLET_TIMEOUT) python -B -u /lab/hardware/wallet_check.py $(WALLET_ARGS)
 
 # Verification timings use the same installed app and public fixtures. The
 # benchmark directory is outside pytest's default testpaths, so normal tests

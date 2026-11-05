@@ -142,6 +142,23 @@ impl ShrincsSigner {
         seed_material: &[u8],
         max_stateful_signatures: u32,
     ) -> ShrincsSignerResult<(Keys, PublicKey)> {
+        Self::keygen_with_progress::<P, NUM_CHAINS, NUM_LAYERS>(
+            seed_material,
+            max_stateful_signatures,
+            || {},
+        )
+    }
+
+    /// Generate the same keys as [`Self::keygen`], yielding to the caller
+    /// after each completed tree leaf. Embedded callers can service device
+    /// events without exposing secret material or changing the computation.
+    /// With `parallel`, callbacks run on the calling thread after each batch
+    /// of stateless leaves has finished; they do not bound worker runtime.
+    pub fn keygen_with_progress<P: Profile, const NUM_CHAINS: usize, const NUM_LAYERS: usize>(
+        seed_material: &[u8],
+        max_stateful_signatures: u32,
+        mut progress: impl FnMut(),
+    ) -> ShrincsSignerResult<(Keys, PublicKey)> {
         if max_stateful_signatures == 0 {
             return None;
         }
@@ -152,12 +169,16 @@ impl ShrincsSigner {
         // Stateless half derived through the SPHINCS+C boundary helper — the
         // same code path the wasm pure-SPHINCS keygen uses, so the shared
         // master-seed material is structurally identical between the two.
-        let stateless = sphincs_plus_c::keygen_from_master_seed::<P, NUM_LAYERS>(seed_material);
+        let stateless = sphincs_plus_c::keygen_from_master_seed_with_progress::<P, NUM_LAYERS>(
+            seed_material,
+            &mut progress,
+        );
 
-        Some(Self::build_keys::<P, NUM_CHAINS>(
+        Some(Self::build_keys_with_progress::<P, NUM_CHAINS>(
             seed_material,
             max_stateful_signatures,
             stateless,
+            &mut progress,
         ))
     }
 
@@ -167,19 +188,30 @@ impl ShrincsSigner {
     /// Shared by [`Self::keygen`] (real stateless keygen) and the
     /// `stateful_only_key` test helper (placeholder stateless key), so the
     /// stateful derivation and assembly logic exist in exactly one place.
+    #[cfg(all(test, feature = "std"))]
     pub(crate) fn build_keys<P: Profile, const NUM_CHAINS: usize>(
         seed: &[u8],
         max: u32,
         stateless: sphincs_plus_c::Key,
     ) -> (Keys, PublicKey) {
+        Self::build_keys_with_progress::<P, NUM_CHAINS>(seed, max, stateless, &mut || {})
+    }
+
+    fn build_keys_with_progress<P: Profile, const NUM_CHAINS: usize>(
+        seed: &[u8],
+        max: u32,
+        stateless: sphincs_plus_c::Key,
+        progress: &mut impl FnMut(),
+    ) -> (Keys, PublicKey) {
         let stateful_sk_seed = derive32::<P::Suite>(b"shrincs-stateful-sk-seed", seed, &[]);
         let stateful_prf_seed = derive32::<P::Suite>(b"shrincs-stateful-prf-seed", seed, &[]);
         let stateful_pk_seed = derive32::<P::Suite>(b"shrincs-stateful-pk-seed", seed, &[]);
-        let stateful_root = uxmss::stateful_subtree_root::<P, NUM_CHAINS>(
+        let stateful_root = uxmss::stateful_subtree_root_with_progress::<P, NUM_CHAINS>(
             &stateful_sk_seed,
             &stateful_pk_seed,
             INITIAL_STATEFUL_LEAF_INDEX,
             max,
+            progress,
         );
 
         let stateful = uxmss::Key::new(

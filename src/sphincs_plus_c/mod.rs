@@ -221,13 +221,28 @@ pub fn keygen<P: Profile, const NUM_LAYERS: usize>(
 /// Derive a SPHINCS+C key from a master seed. Domain tags are consensus-fixed
 /// serialized bytes — do NOT rename them. Shared with `ShrincsSigner::keygen`'s
 /// stateless half so the same master seed yields matching key material.
+#[cfg(feature = "std")]
 pub(crate) fn keygen_from_master_seed<P: Profile, const NUM_LAYERS: usize>(
     seed: &[u8],
+) -> key::Key {
+    keygen_from_master_seed_with_progress::<P, NUM_LAYERS>(seed, &mut || {})
+}
+
+pub(crate) fn keygen_from_master_seed_with_progress<P: Profile, const NUM_LAYERS: usize>(
+    seed: &[u8],
+    progress: &mut impl FnMut(),
 ) -> key::Key {
     let sk = crate::hash::derive32::<P::Suite>(b"shrincs-stateless-sk-seed", seed, &[]);
     let prf = crate::hash::derive32::<P::Suite>(b"shrincs-stateless-prf-seed", seed, &[]);
     let pk = crate::hash::derive32::<P::Suite>(b"shrincs-pk-seed", seed, &[]);
-    keygen::<P, NUM_LAYERS>(sk, prf, pk)
+    let root = hypertree::hypertree_public_root_with_progress::<P, NUM_LAYERS>(&sk, &pk, progress);
+    key::Key::new(
+        key::PrivateKey::new(key::SkSeed::new(sk), key::PrfSeed::new(prf)),
+        key::PublicKey {
+            pk_seed: key::PkSeed::new(pk),
+            root: key::Root::new(root),
+        },
+    )
 }
 
 #[cfg(test)]

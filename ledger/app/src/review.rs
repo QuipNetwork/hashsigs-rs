@@ -14,6 +14,17 @@ unsafe extern "C" fn choice(approved: bool) {
     DECISION.store(if approved { 2 } else { 1 }, Ordering::Relaxed);
 }
 
+/// Service one device event during long computations. The request was already
+/// frozen before approval; competing commands cannot replace it or read keys.
+pub fn busy_event<const N: usize>(comm: &mut Comm<N>) {
+    match comm.try_next_event().into_type() {
+        DecodedEventType::Apdu { .. } | DecodedEventType::ApduError(_) => {
+            let _ = comm.send(&[], AppSW::BadState);
+        }
+        _ => {}
+    }
+}
+
 pub fn show<const N: usize>(
     comm: &mut Comm<N>,
     title: &str,

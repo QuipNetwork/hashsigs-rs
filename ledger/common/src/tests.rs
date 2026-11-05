@@ -17,6 +17,38 @@ impl Crypto for HostCrypto {
 }
 const APP_KEY: [u8; 32] = [7; 32];
 const GENERATION: [u8; 32] = [9; 32];
+
+#[test]
+fn cooperative_keygen_preserves_keys_and_yields_for_both_trees() {
+    let seed = keygen_seed(&HostCrypto, &APP_KEY, &GENERATION).unwrap();
+    let mut leaves = 0usize;
+    let (keys, public) = ShrincsSigner::keygen_with_progress::<
+        SelectedProfile,
+        NUM_CHAINS,
+        NUM_LAYERS,
+    >(&seed[..], CAPACITY, || leaves += 1)
+    .unwrap();
+    assert_eq!(leaves, 256 + CAPACITY as usize);
+    assert_eq!(
+        &*encode(&keys, &GENERATION, &HostCrypto, &APP_KEY).unwrap(),
+        fixture()
+    );
+    assert_eq!(
+        public.to_bytes(),
+        validate(fixture(), &HostCrypto, &APP_KEY).unwrap().public
+    );
+    let mut invalid_calls = 0;
+    assert!(
+        ShrincsSigner::keygen_with_progress::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(
+            &seed[..],
+            0,
+            || invalid_calls += 1,
+        )
+        .is_none()
+    );
+    assert_eq!(invalid_calls, 0);
+}
+
 fn fixture() -> &'static [u8; 512] {
     static RECORD: OnceLock<[u8; 512]> = OnceLock::new();
     RECORD.get_or_init(|| {
