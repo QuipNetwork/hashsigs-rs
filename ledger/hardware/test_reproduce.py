@@ -20,7 +20,7 @@ def public_snapshot():
 
 def test_plain_recompute_is_exactly_one_generation(monkeypatch):
     value = public_snapshot()
-    monkeypatch.setattr(reproduce, "snapshot", lambda _: deepcopy(value))
+    monkeypatch.setattr(reproduce, "snapshot", lambda _, **kw: deepcopy(value))
     calls = []
 
     def exchange(**kwargs):
@@ -28,7 +28,7 @@ def test_plain_recompute_is_exactly_one_generation(monkeypatch):
         return SimpleNamespace(data=bytes.fromhex(value["state"]["commitment"]))
 
     result = {}
-    reproduce.execute(SimpleNamespace(action="recompute"), SimpleNamespace(exchange=exchange),
+    reproduce.execute(SimpleNamespace(action="recompute", app_version="0.1.1"), SimpleNamespace(exchange=exchange),
                       SimpleNamespace(emit=lambda *a, **kw: None), result)
     assert calls == [{"ins": 0xf5}]
     assert result["before"] == result["after"]
@@ -41,7 +41,7 @@ def test_failed_resource_check_retains_committed_state(monkeypatch):
     before["state"]["state"] = 0
     before["runtime"]["nvm_write_calls"] = 0
     snapshots = iter([before, after])
-    monkeypatch.setattr(reproduce, "snapshot", lambda _: next(snapshots))
+    monkeypatch.setattr(reproduce, "snapshot", lambda _, **kw: next(snapshots))
     calls, events = [], []
 
     def exchange(**kwargs):
@@ -51,9 +51,26 @@ def test_failed_resource_check_retains_committed_state(monkeypatch):
 
     result = {}
     with pytest.raises(ValueError, match="Stack headroom target missed"):
-        reproduce.execute(SimpleNamespace(action="create"), SimpleNamespace(exchange=exchange),
+        reproduce.execute(SimpleNamespace(action="create", app_version="0.1.1"), SimpleNamespace(exchange=exchange),
                           SimpleNamespace(emit=lambda event, **kw: events.append((event, kw))), result)
     assert [call["ins"] for call in calls] == [0xf3, 0xf4]
     assert result["after"] == after
     assert events[-1] == ("snapshot_after", {"value": after})
     assert result["creation_response"].endswith("01e0")
+
+
+@pytest.mark.parametrize("reported,expected", [((0, 1, 0), (0, 1, 1)), ((0, 1, 1), (0, 1, 0))])
+def test_snapshot_rejects_wrong_firmware_version_before_state_reads(reported, expected):
+    calls = []
+
+    def exchange(**kwargs):
+        calls.append(kwargs["ins"])
+        if kwargs["ins"] == 4:
+            return SimpleNamespace(data=b"hashsigs-ledger-hw-check-metrics")
+        if kwargs["ins"] == 3:
+            return SimpleNamespace(data=bytes(reported))
+        pytest.fail("Wrong-version preflight must not read state or start an operation")
+
+    with pytest.raises(ValueError, match="Expected separate hardware-check app"):
+        reproduce.snapshot(SimpleNamespace(exchange=exchange), expected_version=expected)
+    assert calls == [4, 3]

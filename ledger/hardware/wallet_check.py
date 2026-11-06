@@ -81,8 +81,8 @@ def public_json(value):
 
 def snapshot(client):
     name, version = client.name(), client.version()
-    require(name == "hashsigs-ledger" and version in [(0, 2, 0), (0, 2, 1)],
-            f"Expected normal app 0.2.0/0.2.1, got {name} {version}")
+    require(name == "hashsigs-ledger" and version in [(0, 2, 0), (0, 2, 1), (0, 2, 2)],
+            f"Expected normal app 0.2.0/0.2.1/0.2.2, got {name} {version}")
     info, state = client.info(), client.state()
     require(info["profile_id"] == PROFILE and info["protocol"] == 2
             and info["spec"] == 1 and info["capabilities"] == 3

@@ -45,10 +45,10 @@ def runtime(backend):
     return result
 
 
-def snapshot(backend):
+def snapshot(backend, *, expected_version=(0, 1, 1)):
     client = AppClient(backend, CLA)
-    require(client.name() == "hashsigs-ledger-hw-check-metrics" and client.version() == (0, 1, 0),
-            "Expected separate hardware-check app 0.1.0")
+    require(client.name() == "hashsigs-ledger-hw-check-metrics" and client.version() == expected_version,
+            f"Expected separate hardware-check app {'.'.join(map(str, expected_version))}")
     info, state = client.info(), client.state()
     require(info["profile_id"] == PROFILE and info["capabilities"] == 3
             and info["boot_nonce"] != bytes(16), "Unexpected hardware-check configuration")

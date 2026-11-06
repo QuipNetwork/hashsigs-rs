@@ -12,7 +12,7 @@ fixtures for four sequential signing leaves; the Gen5 app verifies their
 canonical SHRINCS envelopes. The app also retains the SHA-256 and on-screen
 approve/reject smoke flow from the Rust boilerplate.
 
-App **0.2.1, protocol 2** derives an isolated SLIP21 key from the active wallet,
+App **0.2.2, protocol 2** derives an isolated SLIP21 key from the active wallet,
 generates a fresh public generation ID after approval, and stores the complete
 capacity-four hybrid key in authenticated NVM. Both tree roots are computed
 on-device. Key creation never replaces an existing identity. Signing remains
@@ -35,6 +35,16 @@ completed on the Gen5 at capacity 4,096 in **20 min 49.6 s**, with 2,808 bytes
 peak heap and 8,616 bytes app-stack headroom. It generates an ephemeral key
 without application storage; the wallet's capacity-four contract and acceptance
 status are unchanged. See the [measurement](docs/gen5-full-keygen-20261106.md).
+
+The 0.2.2 wallet and separate HW Check 0.1.1 reduce stack usage by keeping
+startup, verification, generation, and storage scratch in separate function
+frames and retaining the public ABI buffer on the heap. Derivation, key
+parameters, APDUs, and NVM bytes/write ordering are unchanged. See the
+[stack measurements and validation](docs/gen5-stack-20261106.md): **135 offline
+tests passed**; one physical creation completed in **73.432 s**, with **5,664
+bytes stack headroom** (up from 1,640) and unchanged **2,756-byte peak heap**.
+This passes the diagnostic creation resource target. The normal 0.2.2 app has
+not been physically installed; the broader acceptance gates remain open.
 
 ## Build and test
 

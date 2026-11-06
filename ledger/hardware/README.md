@@ -21,7 +21,7 @@ docker run --rm --network none --user 1000:1000 \
   --mount type=bind,src=/absolute/hashsigs-rs/ledger,dst=/lab,readonly \
   --mount type=bind,src=/absolute/report-directory,dst=/out \
   hashsigs-ledger:local timeout 45 python -B -u /lab/hw-check/reproduce.py \
-  read --expected-elf /out/app.elf --output /out/empty.json
+  read --app-version 0.1.0 --expected-elf /out/app.elf --output /out/empty.json
 ```
 
 Adjust UID/GID and USB group for the host. `note --note 'observation'` records
@@ -31,6 +31,11 @@ operator evidence without opening USB. Other single actions are `os-version`,
 `recompute` performs exactly one keygen without busy probes. `responsive` is a
 separate single keygen with four early probes. Unlike the old benchmark action,
 neither silently adds another computation.
+
+The default expected HW Check version is now `0.1.1`. Select `--app-version
+0.1.0` explicitly when replaying the archived incident firmware. Reads reject
+a different version before collecting state, so a new-build measurement cannot
+silently use the older installed app. The selected version is saved in the report.
 
 The recorder bounds public reads/open/close/writes at 10 seconds, computation
 at 120 seconds, and explicit launch/creation approval waits at 300 seconds.

@@ -20,7 +20,7 @@ use hashsigs_ledger_common as common;
 use ledger_device_sdk::hash::{sha2::Sha2_256, HashInit};
 use ledger_device_sdk::include_gif;
 use ledger_device_sdk::io::{self, init_comm, ApduHeader, Command, Reply};
-use ledger_device_sdk::nbgl::{NbglGlyph, NbglHomeAndSettings};
+use ledger_device_sdk::nbgl::{NbglGlyph, NbglHomeAndSettings, NbglSpinner};
 
 ledger_device_sdk::set_panic!(ledger_device_sdk::exiting_panic);
 ledger_device_sdk::define_comm!(COMM);
@@ -135,6 +135,8 @@ extern "C" fn sample_main(_arg0: u32) {
     home.show_and_return();
     let mut verification = session::VerificationSession::new();
     let mut wallet = wallet::DeviceWallet::new();
+    // NBGL borrows the spinner text; retain it until another screen replaces it.
+    let mut spinner = NbglSpinner::new();
 
     loop {
         let command = comm.next_command();
@@ -160,7 +162,13 @@ extern "C" fn sample_main(_arg0: u32) {
         ) {
             wallet.measurement_token = None;
         }
-        match handle_command(command, instruction, &mut verification, &mut wallet) {
+        match handle_command(
+            command,
+            instruction,
+            &mut verification,
+            &mut wallet,
+            &mut spinner,
+        ) {
             Ok(response) => {
                 let _ = response.send(AppSW::Ok);
             }
@@ -179,11 +187,12 @@ fn handle_command<'a>(
     instruction: Instruction,
     verification: &mut session::VerificationSession,
     wallet: &mut wallet::DeviceWallet,
+    spinner: &mut NbglSpinner,
 ) -> Result<io::CommandResponse<'a>, AppSW> {
     match instruction {
         #[cfg(feature = "hardware-tests")]
         Instruction::Hardware(instruction) => {
-            hardware::handle(command, instruction, verification, wallet)
+            hardware::handle(command, instruction, verification, wallet, spinner)
         }
         #[cfg(feature = "memory-metrics")]
         Instruction::GetMetrics => {
@@ -276,7 +285,7 @@ fn handle_command<'a>(
             ) {
                 return Err(AppSW::Denied);
             }
-            wallet.create(comm)?;
+            wallet.create(comm, spinner)?;
             let id = wallet.wallet.identity().ok_or(AppSW::InternalError)?;
             let detail = format!("Commitment\n{}", hex::encode(id.commitment));
             // Both buttons acknowledge an already durable identity; neither can

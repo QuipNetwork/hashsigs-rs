@@ -34,7 +34,8 @@ def execute(args, backend, log, result):
         result["identity"] = "hashsigs-ledger-launch-check 0.1.0"
         return
 
-    before = result["before"] = snapshot(backend)
+    version = tuple(map(int, args.app_version.split(".")))
+    before = result["before"] = snapshot(backend, expected_version=version)
     log.emit("snapshot_before", value=before)
     client = AppClient(backend, CLA)
     if args.action == "probe":
@@ -73,7 +74,7 @@ def execute(args, backend, log, result):
             dict(vectors["cases"][0], envelope=vectors["boundary_envelope"]))
         require(result["verification_verdict"] == 1, "Expected Invalid for extended-path 4 KiB fixture")
 
-    after = result["after"] = snapshot(backend)
+    after = result["after"] = snapshot(backend, expected_version=version)
     log.emit("snapshot_after", value=after)
     if args.action == "create":
         require(result["creation_seconds"] <= 120, "Creation latency target exceeded")
@@ -94,6 +95,8 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--expected-elf", type=Path)
     parser.add_argument("--app", choices=APPS, default="hardware")
+    parser.add_argument("--app-version", choices=("0.1.0", "0.1.1"), default="0.1.1",
+                        help="Expected HW Check version; select 0.1.0 for archived incident firmware")
     parser.add_argument("--probe", type=int, choices=range(7))
     parser.add_argument("--note", default="")
     args = parser.parse_args()
@@ -105,6 +108,7 @@ def main():
     events = args.output.with_suffix(".events.jsonl")
     log = EventLog(events)
     result = {"schema": 1, "action": args.action, "note": args.note,
+              "expected_hardware_app_version": args.app_version,
               "expected_elf_sha256": hashlib.sha256(args.expected_elf.read_bytes()).hexdigest()
                   if args.expected_elf else None,
               "recorder_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),

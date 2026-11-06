@@ -35,7 +35,10 @@ fn cooperative_keygen_preserves_keys_and_yields_for_both_trees() {
     );
     assert_eq!(
         public.to_bytes(),
-        validate(fixture(), &HostCrypto, &APP_KEY).unwrap().public
+        validate(fixture(), &HostCrypto, &APP_KEY)
+            .unwrap()
+            .public
+            .as_slice()
     );
     let mut invalid_calls = 0;
     assert!(

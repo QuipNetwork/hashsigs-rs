@@ -1,6 +1,6 @@
 [package]
 name = "hashsigs-ledger"
-version = "0.2.1"
+version = "0.2.2"
 authors = ["hashsigs-rs contributors"]
 edition = "2021"
 license = "AGPL-3.0-or-later"

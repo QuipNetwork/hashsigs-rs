@@ -87,6 +87,8 @@ pub struct DeviceWallet {
     pub boot_nonce: [u8; 16],
 }
 impl DeviceWallet {
+    // Startup derivation/reload scratch must not live in the main loop's frame.
+    #[inline(never)]
     pub fn new() -> Self {
         let mut app_key = Zeroizing::new([0; 32]);
         let mut boot_nonce = [0; 16];
@@ -125,11 +127,17 @@ impl DeviceWallet {
     }
 
     /// Called only after device approval; no host seed/generation input exists.
-    pub fn create<const N: usize>(&mut self, comm: &mut Comm<N>) -> Result<(), AppSW> {
+    // Keep creation-only temporaries out of the always-live command loop.
+    #[inline(never)]
+    pub fn create<const N: usize>(
+        &mut self,
+        comm: &mut Comm<N>,
+        spinner: &mut NbglSpinner,
+    ) -> Result<(), AppSW> {
         let mut generation = [0; 32];
         rand_bytes(&mut generation);
-        let keys = self.generate(&generation, comm)?;
-        NbglSpinner::new().show("Storing SHRINCS key");
+        let keys = self.generate(&generation, comm, spinner)?;
+        spinner.show("Storing SHRINCS key");
         self.wallet
             .install(
                 &mut DeviceStorage,
@@ -144,14 +152,17 @@ impl DeviceWallet {
             })
     }
 
+    // This frame must be released before install/validation and the final UI.
+    // The normal build has one caller, so LTO would otherwise inline it.
+    #[inline(never)]
     fn generate<const N: usize>(
         &self,
         generation: &[u8; 32],
         comm: &mut Comm<N>,
+        spinner: &mut NbglSpinner,
     ) -> Result<Keys, AppSW> {
         #[cfg(feature = "hardware-tests")]
         crate::hardware::reset_progress();
-        let mut spinner = NbglSpinner::new();
         spinner.show("Deriving SHRINCS seed");
         let seed = common::keygen_seed(&DeviceCrypto, &self.app_key, generation)
             .map_err(|_| AppSW::InternalError)?;
@@ -179,9 +190,13 @@ impl DeviceWallet {
     /// Recompute this diagnostic app's existing identity without writing NVM.
     /// All keys are dropped/zeroized before the public commitment is returned.
     #[cfg(feature = "hardware-tests")]
-    pub fn benchmark<const N: usize>(&self, comm: &mut Comm<N>) -> Result<[u8; 32], AppSW> {
+    pub fn benchmark<const N: usize>(
+        &self,
+        comm: &mut Comm<N>,
+        spinner: &mut NbglSpinner,
+    ) -> Result<[u8; 32], AppSW> {
         let id = self.wallet.identity().ok_or(AppSW::BadState)?;
-        let keys = self.generate(&id.generation, comm)?;
+        let keys = self.generate(&id.generation, comm, spinner)?;
         if keys.public_key_commitment().as_bytes() != &id.commitment {
             return Err(AppSW::InternalError);
         }

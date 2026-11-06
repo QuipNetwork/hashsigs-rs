@@ -4,6 +4,7 @@ use crate::{review, session::VerificationSession, wallet::DeviceWallet, AppSW};
 use core::sync::atomic::{AtomicU32, Ordering};
 use ledger_device_sdk::{
     io::{self, ApduHeader, Command},
+    nbgl::NbglSpinner,
     random::rand_bytes,
 };
 use zeroize::Zeroizing;
@@ -56,6 +57,7 @@ pub fn handle<'a>(
     instruction: Instruction,
     verification: &VerificationSession,
     wallet: &mut DeviceWallet,
+    spinner: &mut NbglSpinner,
 ) -> Result<io::CommandResponse<'a>, AppSW> {
     if verification.is_active() {
         return Err(AppSW::BadState);
@@ -93,7 +95,7 @@ pub fn handle<'a>(
                 return Err(AppSW::BadState);
             }
             let comm = command.into_comm();
-            wallet.create(comm)?;
+            wallet.create(comm, spinner)?;
             let id = wallet.wallet.identity().ok_or(AppSW::InternalError)?;
             let mut response = comm.begin_response();
             response.append(&id.commitment)?;
@@ -105,7 +107,7 @@ pub fn handle<'a>(
                 return Err(AppSW::BadData);
             }
             let comm = command.into_comm();
-            let commitment = wallet.benchmark(comm)?;
+            let commitment = wallet.benchmark(comm, spinner)?;
             let mut response = comm.begin_response();
             response.append(&commitment)?;
             Ok(response)

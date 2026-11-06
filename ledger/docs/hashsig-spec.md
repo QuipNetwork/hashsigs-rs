@@ -4,7 +4,7 @@ Specification revision 1, 2026-10-12. Target protocol: **2**.
 
 This document defines the first capacity-four stateful signer for Nano Gen5.
 It describes the complete intended signer. The checked-in app is now version
-0.2.1, protocol 2: derivation, full hybrid key creation, authenticated storage,
+0.2.2, protocol 2: derivation, full hybrid key creation, authenticated storage,
 reload, public queries, and verification are implemented. Signing commands and
 leaf reservation remain unimplemented. Capabilities are `0x00000003`, never the
 signing bit. Section 8 separates emulator evidence from pending hardware gates.
@@ -347,7 +347,7 @@ exact, with no optional trailing fields. Error replies have no data.
 
 `GET_PROFILE` (`05`) keeps its layout but reports protocol byte **2**. Hosts
 must require protocol 2 and matching profile before using signer commands.
-`GET_VERSION` reports app `0.2.1`. Do not advertise a capability merely because
+`GET_VERSION` reports app `0.2.2`. Do not advertise a capability merely because
 it is specified; this implementation advertises verification and key management.
 
 New `GET_INFO` (`06`, empty request) returns this **69-byte** structure:
@@ -627,9 +627,19 @@ does not explain a reset. Do not claim original-wallet preservation or hardware
 acceptance for this run. Ordinary seed recovery does not restore lost SHRINCS
 generation/counter records, and this implementation provides no such import.
 
-Physical interrupted-write behavior, erase isolation/order guarantees, the
-failed stack margin, and unmeasured watchdog thresholds still precede hardware
-signing. The diagnostic measurements are not acceptance of the final
+The subsequent [stack refactor and focused physical measurement](gen5-stack-20261106.md)
+updated the normal app to 0.2.2 and HW Check to 0.1.1 without changing this
+contract's derivation, parameters, wire format, or NVM bytes/write ordering.
+Function boundaries separate startup, verification, generation, and storage
+scratch, and the public ABI buffer remains on the heap across identity
+returns. One physical 0.1.1 creation passed in 73.432 s with 5,664 bytes stack
+headroom and 2,756 bytes peak heap. The earlier failure is preserved above;
+the new result meets the 4 KiB creation headroom target for this diagnostic
+build. Normal 0.2.2 was validated in Speculos but not installed on Gen5.
+
+Physical interrupted-write behavior, erase isolation/order guarantees,
+unmeasured watchdog thresholds, and the unresolved incident still precede
+hardware signing. The diagnostic measurements are not acceptance of the final
 uninstrumented artifact. The broader required observations are:
 
 | Area | Evidence required from implementation |

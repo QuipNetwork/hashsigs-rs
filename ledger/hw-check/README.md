@@ -9,7 +9,7 @@ as successful hardware acceptance. The
 to this Gen5 with a fresh, unfunded test wallet. The operator confirmed that
 setup on November 6; see the [ongoing evidence](../docs/gen5-reset-20261106.md).
 
-`SHRINCS HW Check` 0.1.0 measures the wallet's key generation, event servicing,
+`SHRINCS HW Check` 0.1.1 measures the wallet's key generation, event servicing,
 heap/stack peaks, derivation permissions, and rejection behavior in a separate
 installed app. It reuses `../app/src/main.rs` and the wallet implementation,
 profile, 20 KiB allocator, and 1,024-byte persistent layout. Its installation
@@ -22,6 +22,16 @@ ordinary ELF contains neither the permission probes nor the extra commands.
 The hardware-check ELF and install script have isolation tests, including the
 script's exact app-deletion target. Updating this diagnostic app loses only its
 own test identity; do not install its artifact under the normal app name.
+
+Version 0.1.1 incorporates the shared wallet stack refactor. The historical
+0.1.0 failure below remains evidence; current results are recorded in the
+[2026-11-06 stack report](../docs/gen5-stack-20261106.md). The single-action
+recorder defaults to 0.1.1 and requires an exact version match. Select
+`--app-version 0.1.0` explicitly when replaying the archived incident firmware.
+One physical 0.1.1 creation passed in **73.432 s**, with **5,664 bytes stack
+headroom** and **2,756 bytes peak heap**. This closes the creation stack-target
+failure for that diagnostic build; it does not resolve the reset incident or
+constitute complete hardware acceptance.
 
 ## Build and run
 

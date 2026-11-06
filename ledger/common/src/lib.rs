@@ -3,6 +3,7 @@
 #![no_std]
 extern crate alloc;
 
+use alloc::boxed::Box;
 use hashsigs_rs::profiles::selected::SelectedProfile;
 use hashsigs_rs::shrincs::{Keys, PublicKey, PROFILE_ID};
 use subtle::ConstantTimeEq;
@@ -94,7 +95,9 @@ pub struct Identity {
     pub generation: [u8; 32],
     pub next_leaf: u32,
     pub sequence: u64,
-    pub public: [u8; PUBLIC_LEN],
+    // Public ABI bytes stay on the heap across validate/load/install returns.
+    // Inline arrays otherwise multiply stack copies during authenticated reload.
+    pub public: Box<[u8; PUBLIC_LEN]>,
 }
 
 fn u32_at(data: &[u8], offset: usize) -> u32 {
@@ -150,7 +153,11 @@ fn validate(
         generation,
         next_leaf,
         sequence,
-        public: public.to_bytes().try_into().map_err(|_| Error::Invalid)?,
+        public: public
+            .to_bytes()
+            .into_boxed_slice()
+            .try_into()
+            .map_err(|_| Error::Invalid)?,
     })
 }
 
@@ -295,6 +302,9 @@ impl Wallet {
         self.identity.as_ref()
     }
 
+    // Keep serialization/readback buffers out of the caller's keygen frame.
+    // Storage runs after generation; inlining would reserve both sets at once.
+    #[inline(never)]
     pub fn install(
         &mut self,
         storage: &mut impl Storage,

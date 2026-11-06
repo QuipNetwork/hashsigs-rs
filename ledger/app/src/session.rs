@@ -68,6 +68,9 @@ impl VerificationSession {
         upload.bytes.extend_from_slice(chunk);
         Ok((upload.bytes.len() as u16).to_be_bytes())
     }
+    // Verification scratch is needed only for this command, not for keygen
+    // or every iteration of the main loop after LTO inlining.
+    #[inline(never)]
     pub fn finish(&mut self, data: &[u8]) -> Result<u8, AppSW> {
         let upload = self.upload.as_ref().ok_or(AppSW::BadState)?;
         if data != upload.id.to_be_bytes() {
