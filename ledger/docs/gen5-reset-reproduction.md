@@ -1,9 +1,9 @@
 # Gen5 stall and factory-reset reproduction plan
 
-Prepared 2026-11-05. This is an experimental protocol, not a completed run.
-The operator selected **this Gen5 with a fresh, unfunded test wallet** for a
-future reproduction. No device setup, installation, or replay has been performed
-under this plan. Keep ordinary hardware acceptance and signing suspended.
+Prepared 2026-11-05; resumed 2026-11-06. This protocol is being exercised on
+**this Gen5 with a fresh, unfunded test wallet**, confirmed by the operator.
+The [dated evidence report](gen5-reset-20261106.md) separates completed cases
+from untested conditions. Keep ordinary hardware acceptance and signing suspended.
 
 ## Question and current evidence
 

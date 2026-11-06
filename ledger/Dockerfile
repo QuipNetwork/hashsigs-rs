@@ -49,6 +49,16 @@ COPY ledger/hw-check/ hw-check/
 WORKDIR /repo/ledger/hw-check
 RUN cargo ledger build apex_p -- --locked
 WORKDIR /repo/ledger
+# Minimal SDK-only launch/lock/exit control for the reset investigation.
+COPY ledger/launch-check/ launch-check/
+WORKDIR /repo/ledger/launch-check
+RUN cargo ledger build apex_p -- --locked
+WORKDIR /repo/ledger
+# Maximum-budget timing app: no wallet storage or secret export.
+COPY ledger/keygen-bench/ keygen-bench/
+WORKDIR /repo/ledger/keygen-bench
+RUN cargo ledger build apex_p -- --locked
+WORKDIR /repo/ledger
 # Ragger discovers ledger_app.toml from this container-local Git root.
 RUN git init --quiet /repo/ledger
 ENTRYPOINT []

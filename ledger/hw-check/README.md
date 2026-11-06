@@ -4,9 +4,10 @@
 factory reset following a held power button.** The device showed initialization
 pages for a name and PIN. The cause is unresolved. Original-wallet preservation
 was not verified after this run. Keep the evidence below, but do not treat this
-as successful hardware acceptance or repeat this candidate on the device.
-The [reproduction plan](../docs/gen5-reset-reproduction.md) now scopes any future
-replay to this Gen5 with a fresh, unfunded test wallet. It has not been executed.
+as successful hardware acceptance. The
+[reproduction plan](../docs/gen5-reset-reproduction.md) scopes controlled replay
+to this Gen5 with a fresh, unfunded test wallet. The operator confirmed that
+setup on November 6; see the [ongoing evidence](../docs/gen5-reset-20261106.md).
 
 `SHRINCS HW Check` 0.1.0 measures the wallet's key generation, event servicing,
 heap/stack peaks, derivation permissions, and rejection behavior in a separate
@@ -225,10 +226,14 @@ shown otherwise; ordinary recovery-phrase restoration does not restore the
 SHRINCS app's generation ID and persistent counter history. There is no
 supported import or same-key counter reconstruction path.
 
-The next task is the offline preparation in the
-[reproduction plan](../docs/gen5-reset-reproduction.md), followed by scoped
-launch/approval controls on a fresh unfunded wallet when device work resumes.
-The operator selected that setup; no replay has started. The 4 KiB stack target
+Controlled replay resumed on November 6 with a fresh unfunded wallet, durable
+APDU logs, and an SDK-only launch control. See the
+[dated evidence](../docs/gen5-reset-20261106.md) for the completed launch,
+creation, and auto-lock comparisons. The bounded run ended after an ambiguous
+opening-warning report, a visible lock screen, and normal unlock to the device
+home screen. No persistent freeze or reset was confirmed in this replay; the
+broader matrix remains incomplete. Offline review of the reproducible creation
+stack-budget failure is next. The 4 KiB stack target
 stays unchanged, and ordinary hardware acceptance remains suspended.
 In-flight NVM interruption, ordering/durability, and physical erase-isolation
 evidence remain separate signing prerequisites. These measurements do not

@@ -1,0 +1,32 @@
+[package]
+name = "hashsigs-ledger-keygen-bench"
+version = "0.1.0"
+authors = ["hashsigs-rs contributors"]
+edition = "2021"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[workspace]
+
+[features]
+sdk-heap = ["ledger_device_sdk/heap"]
+# Used by the shared UI source's conditional diagnostics; keep disabled here.
+hardware-tests = []
+
+[dependencies]
+hashsigs-rs = { path = "../..", default-features = false, features = ["alloc", "profile-256s-sha2", "heap-buffers"] }
+ledger_device_sdk = { version = "=1.36.1", default-features = false, features = ["io_new", "sys"] }
+zeroize = { version = "=1.9.0", default-features = false }
+embedded-alloc = "=0.5.1"
+critical-section = "=1.2.0"
+
+[package.metadata.ledger]
+name = "SHRINCS Keygen"
+curve = ["slip21"]
+path = []
+path_slip21 = ["quip.network/SHRINCS/KEYGEN-BENCH/v1"]
+flags = "0"
+apex_p = { icon = "../app/icons/crab_32x32.png" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("apex_p"))'] }

@@ -11,7 +11,7 @@ WALLET_ARGS ?=
 WALLET_TIMEOUT ?= 180
 RUN = $(DOCKER) run --rm --network none --user "$$(id -u):$$(id -g)"
 
-.PHONY: help check-docker build check test run test-hardware wallet-hardware bench-hardware measure build-nvm-diag test-nvm-diag build-hw-check test-hw-check
+.PHONY: help check-docker build check test run test-hardware wallet-hardware bench-hardware measure build-nvm-diag test-nvm-diag build-hw-check test-hw-check build-launch-check test-launch-check build-keygen-bench test-keygen-bench
 .DEFAULT_GOAL := help
 
 help:
@@ -22,6 +22,8 @@ help:
 	@echo 'make -C ledger measure        Build a separate metrics ELF and measure keygen in Speculos'
 	@echo 'make -C ledger test-nvm-diag   Build and test the separate PUBLIC-fixture storage diagnostic app'
 	@echo 'make -C ledger test-hw-check   Build and test the separate resource/permission app'
+	@echo 'make -C ledger test-launch-check Build and test the SDK-only launch/exit control'
+	@echo 'make -C ledger test-keygen-bench Build and test full-budget (4096 signatures) key generation'
 	@echo 'make -C ledger run            Open Speculos at http://localhost:5000'
 	@echo 'make -C ledger test-hardware USB_DEVICE=/dev/bus/usb/BBB/DDD'
 	@echo 'make -C ledger wallet-hardware USB_DEVICE=/dev/bus/usb/BBB/DDD BENCH_OUTPUT=... WALLET_ARGS="snapshot --output /out/state.json"'
@@ -42,8 +44,10 @@ check: build
 	$(RUN) $(IMAGE) cargo fmt --manifest-path common/Cargo.toml --check
 	$(RUN) $(IMAGE) cargo fmt --manifest-path nvm-diag/Cargo.toml --check
 	$(RUN) $(IMAGE) cargo fmt --manifest-path hw-check/Cargo.toml --check
+	$(RUN) $(IMAGE) cargo fmt --manifest-path launch-check/Cargo.toml --check
+	$(RUN) $(IMAGE) cargo fmt --manifest-path keygen-bench/Cargo.toml --check
 	$(DOCKER) run --rm --network none $(IMAGE) cargo test --locked --release --manifest-path common/Cargo.toml
-	$(RUN) $(IMAGE) python -B -m pytest hardware/test_wallet_check.py --confcutdir=hardware -q
+	$(RUN) $(IMAGE) python -B -m pytest hardware --confcutdir=hardware -q
 
 test: check
 	$(RUN) $(IMAGE) python -m pytest --device apex_p --backend speculos $(PYTEST_ARGS)
@@ -63,6 +67,22 @@ build-hw-check: build
 
 test-hw-check: build-hw-check
 	$(RUN) $(IMAGE) python -B -m pytest hw-check/tests --confcutdir=hw-check -v $(PYTEST_ARGS)
+
+build-launch-check: build
+	mkdir -p $(LEDGER_DIR)/artifacts/launch-check
+	$(RUN) --mount "type=bind,src=$(LEDGER_DIR)/artifacts/launch-check,dst=/out" $(IMAGE) \
+		sh -c 'cp /repo/ledger/launch-check/target/apex_p/release/hashsigs-ledger-launch-check /out/app.elf && cp /repo/ledger/launch-check/target/apex_p/release/*.apdu /out/ && cd /out && sha256sum app.elf > SHA256SUMS'
+
+test-launch-check: build-launch-check
+	$(RUN) $(IMAGE) python -B -m pytest launch-check/tests --confcutdir=launch-check -v $(PYTEST_ARGS)
+
+build-keygen-bench: build
+	mkdir -p $(LEDGER_DIR)/artifacts/keygen-bench
+	$(RUN) --mount "type=bind,src=$(LEDGER_DIR)/artifacts/keygen-bench,dst=/out" $(IMAGE) \
+		sh -c 'cp /repo/ledger/keygen-bench/target/apex_p/release/hashsigs-ledger-keygen-bench /out/app.elf && cp /repo/ledger/keygen-bench/target/apex_p/release/*.apdu /out/ && cd /out && sha256sum app.elf > SHA256SUMS'
+
+test-keygen-bench: build-keygen-bench
+	$(RUN) $(IMAGE) python -B -m pytest keygen-bench/tests --confcutdir=keygen-bench -v -s --timeout=1800 $(PYTEST_ARGS)
 
 run: build
 	$(DOCKER) run --rm -it --user "$$(id -u):$$(id -g)" --publish 127.0.0.1:5000:5000 $(IMAGE) \

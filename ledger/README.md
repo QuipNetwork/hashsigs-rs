@@ -22,10 +22,19 @@ the core ABI decoder creates temporary copies of the much larger stateless
 envelope. Passing these tests is an embedded portability result, not a complete
 hardware-wallet signer or an independent cryptographic audit.
 
-**2026-11-05 incident:** physical testing is stopped after the operator reported
+**2026-11-05 incident:** ordinary hardware acceptance is suspended after the operator reported
 a stall and factory reset following a held power button during the separate
 HW Check session. The cause is unresolved; no final original-wallet snapshot
 was obtained. See the [incident record](hw-check/README.md#stall-and-reset-incident).
+Controlled reproduction resumed on November 6 using a fresh, unfunded wallet,
+the archived HW Check ELF, durable APDU logging, and a separate SDK-only control.
+See the [dated results](docs/gen5-reset-20261106.md).
+
+A separately requested [full-budget keygen benchmark](keygen-bench/README.md)
+completed on the Gen5 at capacity 4,096 in **20 min 49.6 s**, with 2,808 bytes
+peak heap and 8,616 bytes app-stack headroom. It generates an ephemeral key
+without application storage; the wallet's capacity-four contract and acceptance
+status are unchanged. See the [measurement](docs/gen5-full-keygen-20261106.md).
 
 ## Build and test
 
