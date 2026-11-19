@@ -243,7 +243,11 @@ class SphincsPlusC:
         return _sphincs_keys_from_secret_bytes(self._ext.sphincs_plus_c_keygen(seed))
 
     def sign(self, message: bytes, keys: SphincsPlusCKeys) -> bytes:
-        """Sign a 32-byte message. Stateless: ``keys`` is never modified."""
+        """Sign a 32-byte message. Stateless: ``keys`` is never modified.
+
+        Recomputes the hypertree root from the seeds and rejects a mismatch
+        with ``ERR_IMPORT_INVALID``.
+        """
         return self._ext.sphincs_plus_c_sign(
             message, _sphincs_keys_to_secret_bytes(keys)
         )

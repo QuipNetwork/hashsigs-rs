@@ -85,6 +85,10 @@ const sig = sphincsPlusC.sign(message32, keys);      // never mutates keys
 const ok = sphincsPlusC.verify(sig, message32, keys.publicKey); // boolean
 ```
 
+`sphincsPlusC.sign` validates `keys` first and throws `ERR_IMPORT_INVALID`
+when `keys.publicKey.root` is not the root the seeds produce under the loaded
+profile.
+
 ### SHRINCS (stateful, with stateless recovery)
 
 ```ts

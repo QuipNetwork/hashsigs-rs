@@ -156,6 +156,21 @@ for (const [name, load] of loaders) {
       (e) => e instanceof Error && e.code === "ERR_BAD_LENGTH",
     );
   });
+
+  test(`${name}: sphincsPlusC sign rejects a root that does not match the seeds`, async () => {
+    const { sphincsPlusC } = await loadHashSigsFor(load);
+    const keys = sphincsPlusC.keygen(SEED);
+    const root = new Uint8Array(keys.publicKey.root);
+    root[0] ^= 1;
+    const tampered = {
+      secret: keys.secret,
+      publicKey: { pkSeed: keys.publicKey.pkSeed, root },
+    };
+    assert.throws(
+      () => sphincsPlusC.sign(MSG, tampered),
+      (e) => e instanceof Error && e.code === "ERR_IMPORT_INVALID",
+    );
+  });
 }
 
 // ── noble-style API: shrincs ─────────────────────────────────────────────

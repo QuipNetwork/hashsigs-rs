@@ -37,6 +37,7 @@ use core::fmt;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::hash::word32;
+use crate::profile::Profile;
 use crate::HASH_LEN;
 
 /// PrivateKey `SK.seed` material: derives FORS-C and hypertree WOTS-C secrets.
@@ -313,6 +314,9 @@ impl Key {
         out
     }
     /// Parse the 128-byte flat layout; `None` on wrong length.
+    ///
+    /// This is a structural parse. [`Key::root_matches_seeds`] or the
+    /// validating import checks the root.
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
         if bytes.len() != 128 {
             return None;
@@ -321,6 +325,21 @@ impl Key {
             secret: PrivateKey::from_bytes(bytes.get(..64)?)?,
             public_key: PublicKey::from_bytes(bytes.get(64..)?)?,
         })
+    }
+
+    /// Recompute the hypertree root from `sk_seed` and `pk_seed` and compare
+    /// it to the stored `public_key.root`. `prf_seed` only drives signing
+    /// randomness, so it does not enter the root and is not checked. Costs
+    /// one top-layer tree build, the same work as `keygen`. A failure to
+    /// build that tree is not a match.
+    pub fn root_matches_seeds<P: Profile, const NUM_LAYERS: usize>(&self) -> bool {
+        let Some(recomputed) = super::hypertree::try_hypertree_public_root::<P, NUM_LAYERS>(
+            self.secret.sk_seed.as_bytes(),
+            self.public_key.pk_seed.as_bytes(),
+        ) else {
+            return false;
+        };
+        &recomputed == self.public_key.root.as_bytes()
     }
 }
 
@@ -335,6 +354,13 @@ impl TryFrom<&[u8]> for Key {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    )))]
+    use crate::profiles::selected::{SelectedProfile, NUM_LAYERS};
 
     fn sample_key() -> Key {
         Key::new(
@@ -374,5 +400,40 @@ mod tests {
         let shown = alloc::format!("{:?}", key.secret());
         assert!(!shown.contains("01"));
         assert!(shown.contains("redacted"));
+    }
+
+    #[cfg(not(any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    )))]
+    #[test]
+    fn root_matches_seeds_accepts_keygen_output() {
+        let key =
+            super::super::keygen::<SelectedProfile, NUM_LAYERS>([1u8; 32], [2u8; 32], [3u8; 32]);
+        assert!(key.root_matches_seeds::<SelectedProfile, NUM_LAYERS>());
+    }
+
+    #[cfg(not(any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    )))]
+    #[test]
+    fn root_matches_seeds_rejects_a_root_that_does_not_match() {
+        let key =
+            super::super::keygen::<SelectedProfile, NUM_LAYERS>([1u8; 32], [2u8; 32], [3u8; 32]);
+        let mut root = *key.public_key.root.as_bytes();
+        root[0] ^= 0x01;
+        let tampered = Key::new(
+            key.secret().clone(),
+            PublicKey {
+                pk_seed: key.public_key.pk_seed,
+                root: Root::new(root),
+            },
+        );
+        assert!(!tampered.root_matches_seeds::<SelectedProfile, NUM_LAYERS>());
     }
 }

@@ -141,7 +141,10 @@ function makeSphincsPlusC(wasm: ShrincsWasmModule) {
       const keys = wasm.sphincsPlusCKeygen(seed);
       return sphincsPlusCKeysFromSecretBytes(keys.secretKey);
     },
-    /** Stateless: never mutates `keys`. */
+    /**
+     * Stateless: never mutates `keys`. Throws `ERR_IMPORT_INVALID` when
+     * `keys.publicKey.root` is not the root the seeds produce.
+     */
     sign(message: Uint8Array, keys: SphincsPlusCKeys): Uint8Array {
       return wasm.sphincsPlusCSign(message, sphincsPlusCKeysToSecretBytes(keys));
     },

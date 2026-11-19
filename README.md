@@ -677,7 +677,12 @@ const sig = sphincsPlusC.sign(message32, keys);
 const ok = sphincsPlusC.verify(sig, message32, keys.publicKey); // boolean
 ```
 
-`sign` is stateless: it never mutates `keys`. `verify` never throws — a
+`sign` is stateless: it never mutates `keys`.
+`sign` validates `keys` first and throws `ERR_IMPORT_INVALID` when
+`keys.publicKey.root` is not the root the seeds produce under the loaded
+profile.
+
+`verify` never throws — a
 malformed signature or wrong-length input is simply `false`.
 
 ### SHRINCS (hybrid, stateful with stateless recovery)
