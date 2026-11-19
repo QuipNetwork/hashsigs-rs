@@ -643,6 +643,15 @@ mod tests {
     /// root different from the one the honest signature reconstructs. The
     /// only prior coverage was indirect, through the committed golden vector
     /// (`shrincs::vector_conformance`'s `tamperedFors` case).
+    #[cfg_attr(
+        any(
+            shrincs_default_profile_128s_q18,
+            shrincs_default_profile_128s_q20,
+            shrincs_default_profile_128s_q18_sha2,
+            shrincs_default_profile_128s_q20_sha2
+        ),
+        ignore = "128s key generation takes minutes; local run with --include-ignored. CI verifies the committed vectors"
+    )]
     #[test]
     fn verify_rejects_tampered_secret_auth_path_and_counter() {
         let key = crate::sphincs_plus_c::keygen::<SelectedProfile, NUM_LAYERS>(

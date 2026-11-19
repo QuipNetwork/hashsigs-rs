@@ -359,6 +359,13 @@ mod interface_tests {
             .expect("keygen must succeed for a valid seed/budget")
     }
 
+    /// Key pair with a placeholder hypertree root, for tests that never sign
+    /// statelessly. It runs on every profile because it skips the hypertree
+    /// key generation.
+    fn stateful_only_keypair(seed: &[u8]) -> (crate::shrincs::Keys, PublicKey) {
+        crate::test_support::stateful_only_key::<SelectedProfile, NUM_CHAINS>(seed, 4)
+    }
+
     fn commitment_of(public_key: &PublicKey) -> Vec<u8> {
         public_key.public_key_commitment.clone()
     }
@@ -426,7 +433,7 @@ mod interface_tests {
 
     #[test]
     fn verify_accepts_a_valid_stateful_signature_over_the_raw_hash() {
-        let (mut signing_key, public_key) = keypair(b"verifier stateful accept seed");
+        let (mut signing_key, public_key) = stateful_only_keypair(b"verifier stateful accept seed");
         let hash = [0x42u8; HASH_LEN];
         let signature = ShrincsSigner::sign_stateful_adapter::<SelectedProfile, NUM_CHAINS>(
             &mut signing_key,
@@ -442,7 +449,7 @@ mod interface_tests {
 
     #[test]
     fn verify_rejects_a_signature_over_a_different_hash() {
-        let (mut signing_key, public_key) = keypair(b"verifier stateful reject seed");
+        let (mut signing_key, public_key) = stateful_only_keypair(b"verifier stateful reject seed");
         let hash = [0x11u8; HASH_LEN];
         let signature = ShrincsSigner::sign_stateful_adapter::<SelectedProfile, NUM_CHAINS>(
             &mut signing_key,
@@ -460,7 +467,8 @@ mod interface_tests {
 
     #[test]
     fn verify_rejects_a_wrong_length_key() {
-        let (mut signing_key, public_key) = keypair(b"verifier stateful wrong key seed");
+        let (mut signing_key, public_key) =
+            stateful_only_keypair(b"verifier stateful wrong key seed");
         let hash = [0x33u8; HASH_LEN];
         let signature = ShrincsSigner::sign_stateful_raw::<SelectedProfile, NUM_CHAINS>(
             &mut signing_key,
@@ -477,7 +485,8 @@ mod interface_tests {
 
     #[test]
     fn verify_reports_a_truncated_envelope_as_malformed() {
-        let (mut signing_key, public_key) = keypair(b"verifier stateful malformed seed");
+        let (mut signing_key, public_key) =
+            stateful_only_keypair(b"verifier stateful malformed seed");
         let hash = [0x44u8; HASH_LEN];
         let signature = ShrincsSigner::sign_stateful_raw::<SelectedProfile, NUM_CHAINS>(
             &mut signing_key,
@@ -496,7 +505,7 @@ mod interface_tests {
 
     #[test]
     fn verify_reports_an_empty_envelope_as_malformed() {
-        let (_signing_key, public_key) = keypair(b"verifier stateful empty seed");
+        let (_signing_key, public_key) = stateful_only_keypair(b"verifier stateful empty seed");
         let hash = [0x55u8; HASH_LEN];
         let outcome = ShrincsVerifier::new().verify(&commitment_of(&public_key), &hash, &[]);
         assert_eq!(outcome, VerifyOutcome::Malformed);
@@ -504,7 +513,8 @@ mod interface_tests {
 
     #[test]
     fn verify_reports_a_mismatched_commitment_as_invalid_not_malformed() {
-        let (mut signing_key, public_key) = keypair(b"verifier stateful wrong commitment seed");
+        let (mut signing_key, public_key) =
+            stateful_only_keypair(b"verifier stateful wrong commitment seed");
         let hash = [0x5du8; HASH_LEN];
         let signature = ShrincsSigner::sign_stateful_raw::<SelectedProfile, NUM_CHAINS>(
             &mut signing_key,
@@ -524,6 +534,15 @@ mod interface_tests {
 
     // --- stateless verify ------------------------------------------------
 
+    #[cfg_attr(
+        any(
+            shrincs_default_profile_128s_q18,
+            shrincs_default_profile_128s_q20,
+            shrincs_default_profile_128s_q18_sha2,
+            shrincs_default_profile_128s_q20_sha2
+        ),
+        ignore = "128s stateless signing takes minutes; local run with --include-ignored. CI verifies the committed vectors"
+    )]
     #[test]
     fn verify_stateless_accepts_a_valid_stateless_signature_over_the_raw_hash() {
         let (signing_key, public_key) = keypair(b"verifier stateless accept seed");
@@ -543,6 +562,15 @@ mod interface_tests {
         assert_eq!(outcome, VerifyOutcome::Valid);
     }
 
+    #[cfg_attr(
+        any(
+            shrincs_default_profile_128s_q18,
+            shrincs_default_profile_128s_q20,
+            shrincs_default_profile_128s_q18_sha2,
+            shrincs_default_profile_128s_q20_sha2
+        ),
+        ignore = "128s stateless signing takes minutes; local run with --include-ignored. CI verifies the committed vectors"
+    )]
     #[test]
     fn verify_stateless_rejects_a_signature_under_a_sibling_commitment() {
         let (signing_key, public_key) = keypair(b"verifier stateless sibling seed");
@@ -570,6 +598,15 @@ mod interface_tests {
         assert_eq!(outcome, VerifyOutcome::Invalid);
     }
 
+    #[cfg_attr(
+        any(
+            shrincs_default_profile_128s_q18,
+            shrincs_default_profile_128s_q20,
+            shrincs_default_profile_128s_q18_sha2,
+            shrincs_default_profile_128s_q20_sha2
+        ),
+        ignore = "128s stateless signing takes minutes; local run with --include-ignored. CI verifies the committed vectors"
+    )]
     #[test]
     fn verify_stateless_rejects_a_signature_over_a_different_hash() {
         let (signing_key, public_key) = keypair(b"verifier stateless reject seed");
@@ -591,6 +628,15 @@ mod interface_tests {
         assert_eq!(outcome, VerifyOutcome::Invalid);
     }
 
+    #[cfg_attr(
+        any(
+            shrincs_default_profile_128s_q18,
+            shrincs_default_profile_128s_q20,
+            shrincs_default_profile_128s_q18_sha2,
+            shrincs_default_profile_128s_q20_sha2
+        ),
+        ignore = "128s stateless signing takes minutes; local run with --include-ignored. CI verifies the committed vectors"
+    )]
     #[test]
     fn verify_stateless_rejects_a_wrong_length_key() {
         let (signing_key, public_key) = keypair(b"verifier stateless wrong key seed");
@@ -607,6 +653,15 @@ mod interface_tests {
         assert_eq!(outcome, VerifyOutcome::Invalid);
     }
 
+    #[cfg_attr(
+        any(
+            shrincs_default_profile_128s_q18,
+            shrincs_default_profile_128s_q20,
+            shrincs_default_profile_128s_q18_sha2,
+            shrincs_default_profile_128s_q20_sha2
+        ),
+        ignore = "128s stateless signing takes minutes; local run with --include-ignored. CI verifies the committed vectors"
+    )]
     #[test]
     fn verify_stateless_reports_a_mismatched_commitment_as_invalid_not_malformed() {
         let (signing_key, public_key) = keypair(b"verifier stateless wrong commitment seed");
@@ -623,6 +678,15 @@ mod interface_tests {
         assert_eq!(outcome, VerifyOutcome::Invalid);
     }
 
+    #[cfg_attr(
+        any(
+            shrincs_default_profile_128s_q18,
+            shrincs_default_profile_128s_q20,
+            shrincs_default_profile_128s_q18_sha2,
+            shrincs_default_profile_128s_q20_sha2
+        ),
+        ignore = "128s stateless signing takes minutes; local run with --include-ignored. CI verifies the committed vectors"
+    )]
     #[test]
     fn verify_stateless_reports_a_truncated_envelope_as_malformed() {
         let (signing_key, public_key) = keypair(b"verifier stateless malformed seed");
@@ -642,7 +706,7 @@ mod interface_tests {
 
     #[test]
     fn verify_stateless_reports_an_empty_envelope_as_malformed() {
-        let (_signing_key, public_key) = keypair(b"verifier stateless empty seed");
+        let (_signing_key, public_key) = stateful_only_keypair(b"verifier stateless empty seed");
         let hash = [0xccu8; HASH_LEN];
         let outcome = ShrincsVerifier::new().verify_stateless_signature(
             &commitment_of(&public_key),

@@ -311,6 +311,66 @@ fn stateless_golden_vector_accepts_valid_and_rejects_tampered() {
     }
 }
 
+/// Drive the public verifier entry point (`verify_stateless_signature`, the
+/// path the ERC-7913 adapter uses) with the committed stateless vector: the
+/// envelope is encoded from the committed public key and signature, and the
+/// caller hash is the one the generator signs for (keccak-256 of a fixed
+/// label; the other vectors also record it as `callerHash`). Not compiled for
+/// the two 128s sha2 profiles: their committed vectors were generated before
+/// the generator signed the commitment-bound adapter digest, so their `message`
+/// is the bare caller hash and the entry point cannot verify them. Runs on the
+/// other profiles, including 128s keccak, because it only reads committed data
+/// and never generates a key.
+#[cfg(not(any(
+    shrincs_default_profile_128s_q18_sha2,
+    shrincs_default_profile_128s_q20_sha2
+)))]
+#[test]
+fn committed_vector_verifies_through_the_public_verifier_entry_point() {
+    use crate::hash::keccak_packed;
+    use crate::shrincs::signature::encode_stateless_envelope;
+    use crate::shrincs::ShrincsVerifierExt as _;
+    use crate::verifier::VerifyOutcome;
+
+    let vectors = load_vectors();
+    let section = &vectors["stateless"];
+    let public_key = parse_public_key(&section["publicKey"]);
+    let signature = parse_stateless_signature(&section["signature"]);
+    // Same derivation as `hash_word` in `tests/generate_shrincs_vectors.rs`.
+    // The sha2 vectors do not record `callerHash`, so derive it for every
+    // profile; the digest assertion below ties it to the committed message.
+    let caller_hash = keccak_packed(&[b"shrincs solidity stateless message".as_slice()]);
+    let commitment = public_key.public_key_commitment.clone();
+    let commitment_word: [u8; HASH_LEN] = commitment
+        .clone()
+        .try_into()
+        .expect("commitment must be 32 bytes");
+    let envelope = encode_stateless_envelope(&public_key, &signature);
+    let verifier = ShrincsVerifier::new();
+
+    // The signed message is the commitment-bound digest of the caller hash.
+    assert_eq!(
+        verifier
+            .stateless_raw_message_hash(commitment_word, caller_hash)
+            .to_vec(),
+        hex_to_vec(&section["message"]),
+        "committed message must be the digest of the committed caller hash"
+    );
+    assert_eq!(
+        verifier.verify_stateless_signature(&commitment, &caller_hash, &envelope),
+        VerifyOutcome::Valid,
+        "the committed stateless vector must verify through the public entry point"
+    );
+
+    let mut other_hash = caller_hash;
+    other_hash[0] ^= 1;
+    assert_eq!(
+        verifier.verify_stateless_signature(&commitment, &other_hash, &envelope),
+        VerifyOutcome::Invalid,
+        "a changed caller hash must be rejected"
+    );
+}
+
 #[cfg(any(
     shrincs_default_profile_128s_q18,
     shrincs_default_profile_128s_q20,

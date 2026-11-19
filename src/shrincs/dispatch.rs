@@ -290,6 +290,13 @@ mod tests {
             .expect("keygen must succeed for a valid seed/budget")
     }
 
+    /// Key pair with a placeholder hypertree root, for tests that never sign
+    /// statelessly. It runs on every profile because it skips the hypertree
+    /// key generation.
+    fn stateful_only_keypair(seed: &[u8]) -> (crate::shrincs::Keys, PublicKey) {
+        crate::test_support::stateful_only_key::<SelectedProfile, NUM_CHAINS>(seed, 4)
+    }
+
     fn sample_context() -> ActionContext {
         ActionContext {
             domain_separator: [1u8; HASH_LEN],
@@ -335,7 +342,7 @@ mod tests {
     ))]
     #[test]
     fn valid_public_key_rejects_a_dirty_stateful_root() {
-        let (_signing_key, mut public_key) = keypair(b"dispatch dirty stateful root");
+        let (_signing_key, mut public_key) = stateful_only_keypair(b"dispatch dirty stateful root");
         let dirty_index = HASH_LEN + SelectedProfile::HASH_TRUNC_LEN;
         public_key.stateful_public_key[dirty_index] = 1;
         let commitment = public_key
@@ -346,6 +353,15 @@ mod tests {
         assert!(!valid_public_key::<SelectedProfile>(&public_key));
     }
 
+    #[cfg_attr(
+        any(
+            shrincs_default_profile_128s_q18,
+            shrincs_default_profile_128s_q20,
+            shrincs_default_profile_128s_q18_sha2,
+            shrincs_default_profile_128s_q20_sha2
+        ),
+        ignore = "128s stateless signing takes minutes; local run with --include-ignored. CI verifies the committed vectors"
+    )]
     #[test]
     fn prepare_stateless_delegation_rejects_a_mismatched_commitment() {
         let (signing_key, public_key) =
@@ -368,7 +384,7 @@ mod tests {
     #[test]
     fn prepare_stateless_delegation_rejects_a_malformed_envelope() {
         let (_signing_key, public_key) =
-            keypair(b"dispatch prepare_stateless_delegation malformed envelope");
+            stateful_only_keypair(b"dispatch prepare_stateless_delegation malformed envelope");
         let commitment: [u8; HASH_LEN] = public_key
             .public_key_commitment
             .try_into()
