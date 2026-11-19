@@ -127,6 +127,26 @@ def test_importing_a_key_under_the_wrong_profile_is_rejected():
     assert excinfo.value.code == "ERR_IMPORT_INVALID"
 
 
+def test_importing_a_sphincs_plus_c_key_under_the_wrong_profile_is_rejected():
+    """Persisted SPHINCS+C bytes carry no profile tag, so the root has to catch it.
+
+    Feeding a 256s-keccak secret to its sha2 twin must fail the root check
+    rather than produce a signature under the wrong profile. Sign is the
+    import: this package has no separate SPHINCS+C import call.
+    """
+    keccak = load("p256s")
+    sha2 = load("p256s_sha2")
+
+    keys = keccak.sphincs_plus_c.keygen(bytes(32))
+    message = hash32("sphincs-cross-profile-rejection")
+
+    signature = keccak.sphincs_plus_c.sign(message, keys)
+    assert keccak.sphincs_plus_c.verify(signature, message, keys.public_key)
+    with pytest.raises(hashsigs.HashSigsError) as excinfo:
+        sha2.sphincs_plus_c.sign(message, keys)
+    assert excinfo.value.code == "ERR_IMPORT_INVALID"
+
+
 @pytest.mark.parametrize("module", FAST_MODULES)
 def test_round_trip_through_each_fast_profile(module):
     profile = load(module)

@@ -359,6 +359,26 @@ mod tests {
         ));
     }
 
+    // `.unwrap_err()`/`error.code` on the rejection path needs a real JS
+    // engine (see the comment on `sphincs_plus_c_noble_keygen_rejects_wrong_length_seed`
+    // above) — wasm32-gated.
+    #[cfg(all(feature = "wasm-bindings", target_arch = "wasm32"))]
+    #[wasm_bindgen_test]
+    fn sphincs_plus_c_noble_sign_rejects_a_root_that_does_not_match_the_seeds() {
+        let keys = super::sphincs_plus_c_keygen(&[0x44u8; 32]).unwrap();
+        let mut secret_key = keys.secret_key();
+        // Byte 96 is the first byte of the root (sk 0..32, prf 32..64, pk 64..96).
+        secret_key[96] ^= 0x01;
+        let err = expect_err(super::sphincs_plus_c_sign(&[0x01u8; 32], &secret_key));
+        assert_eq!(
+            js_sys::Reflect::get(&err, &JsValue::from_str("code"))
+                .unwrap()
+                .as_string()
+                .unwrap(),
+            ErrorCode::ImportInvalid.as_str(),
+        );
+    }
+
     #[cfg(feature = "wasm-bindings")]
     #[test]
     fn sphincs_plus_c_noble_keygen_is_deterministic_for_the_same_seed() {

@@ -7,6 +7,9 @@ This file records changes to this project, in the
 
 ### Added
 
+- `sphincs_plus_c::Key::root_matches_seeds` recomputes the hypertree root
+  from the seeds and compares it with the stored root.
+
 - Explicit-leaf stateful signing on the wasm surface: `shrincsSignAtLeaf`
   (commitment-bound, like `shrincsSign`) and `shrincsSignStatefulRawAt`
   (signs the message as-is, for callers whose canonical hashes already bind
@@ -134,6 +137,16 @@ This file records changes to this project, in the
   `from_bytes::<P>` constructor for the profile they target.
 
 ### Fixed
+
+- `sphincsPlusCSign` on the wasm surface and `sphincs_plus_c_sign` in the
+  Python extension check the secret key before signing. Both recompute
+  the hypertree root from the seeds and raise `ERR_IMPORT_INVALID` on a
+  mismatch, the same check `shrincsImportSigningKey` already made. The
+  binding-level `sphincs_plus_c_sign` trusts its `Key` argument and does
+  not recompute the root. Persisted bytes must go through
+  `sphincs_plus_c_import_secret_key`. Rust callers import once and sign
+  many times. The wasm and Python wrappers take bytes and import on every
+  call, and they reject a wrong-length message before that import.
 
 - The shared helper `root_from_auth_path` now rejects an auth path longer
   than the tree height. Before this change, the helper walked the first
