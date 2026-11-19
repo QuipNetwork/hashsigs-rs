@@ -77,6 +77,12 @@ default:
 # off maturin passed py-tests and failed release:validate at the publish gate.
 .install-python-build:
   before_script:
+    # rust-toolchain.toml lists rustfmt and clippy, and the image carries
+    # neither. The Python build starts several cargo processes at once, and
+    # each one tries to install the missing components. Two of them collide
+    # ("detected conflict: 'bin/cargo-clippy'") and the build fails. Install
+    # the components once, before any cargo process starts.
+    - rustup component add rustfmt clippy
     - apt-get update -qq && apt-get install -y -qq python3-venv > /dev/null
     - python3 -m venv /tmp/py-venv
     - /tmp/py-venv/bin/pip install --quiet build pytest
