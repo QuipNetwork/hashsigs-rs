@@ -124,7 +124,7 @@ wasm-bindings = [
 parallel = ["std", "dep:rayon"]
 
 [dependencies]
-solana-program = { version = "4.0", optional = true }
+solana-program = { version = "5.2", optional = true }
 # Portable hash backends (no_std-capable). Used when not on Solana / without
 # the `solana` feature. Keep in lockstep with the build-dep sha3 major line.
 sha3 = { version = "0.10", default-features = false }
@@ -147,14 +147,14 @@ wasm-bindgen-test = "0.3.50"
 # generators hash the same inputs via solana-program directly and assert
 # byte-identical output against hash_backend's default (non-`solana`-feature)
 # sha3/sha2 path. Dev-only — never ships in the published library artifact.
-solana-program = "4.0"
+solana-program = "5.2"
 # Compile-fail harness: proves assert_widths rejects a mismatched const
 # generic width at compile time (see tests/compile_fail.rs).
 trybuild = "1.0.120"
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 getrandom = { version = "0.3.3", features = ["wasm_js"] }
-# The solana-program 4.x dev-dep (hash-backend oracle) reaches getrandom 0.2
+# The solana-program dev-dep (hash-backend oracle) reaches getrandom 0.2
 # via solana-secp256k1-recover -> k256 -> rand_core. getrandom 0.2 refuses to
 # build for wasm32-unknown-unknown unless its "js" feature is on. This renamed
 # dep exists only to switch that feature on for wasm32 test compiles; the

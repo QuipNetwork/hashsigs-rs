@@ -209,8 +209,8 @@ pub(crate) fn naive_tree_root_and_auth_path(
             .expect("full power-of-two level has a sibling at index^1");
         auth_path.push(sibling);
         let mut parents = Vec::with_capacity(level.len() / 2);
-        for (parent_index, pair) in level.chunks_exact(2).enumerate() {
-            parents.push(parent(node_height, parent_index as u64, pair[0], pair[1]));
+        for (parent_index, [left, right]) in level.as_chunks::<2>().0.iter().enumerate() {
+            parents.push(parent(node_height, parent_index as u64, *left, *right));
         }
         level = parents;
         index >>= 1;

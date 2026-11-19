@@ -53,6 +53,18 @@ This file records changes to this project, in the
 
 ### Changed
 
+- The development toolchain is Rust 1.100.0, up from 1.95.0. The
+  `rust-toolchain.toml` pin and the CI images move together. The minimum
+  supported Rust version stays 1.95, and the `msrv` job now forces that
+  compiler so the pin cannot replace it. The Solana dependencies move to
+  `solana-program` 5.2 and `solana-program-test` 4.4, which need the newer
+  compiler. That update removes `k256` 0.13 and `crypto-bigint` 0.5.5 from
+  the lockfile, so `deny.toml` no longer ignores RUSTSEC-2026-0387. The
+  `solana` feature of `hashsigs-rs` now depends on `solana-program` 5.2. In
+  the Solana program, `Sign` reads the rent sysvar on-chain as before. A
+  native build uses the default rent, because the 5.x SDK does not serve
+  sysvars outside the Solana runtime.
+
 - The FORS message digest binds to the profile. Both digest regimes hash
   `P::PROFILE_ID` into the preimage, which is now
   `H("fors-digest" || PROFILE_ID || pkSeed || hypertreeRoot || randomizer ||

@@ -922,8 +922,10 @@ RUST_BACKTRACE=1 cargo test-sbf -- --nocapture 2>&1 | grep "compute units:"
 
 ## Development requirements
 
-- Rust 1.95 or later, matching `rust-version` in Cargo.toml, the
-  `rust-toolchain.toml` pin, and the CI `msrv` job
+- Rust 1.95 or later to build the library, matching `rust-version` in
+  Cargo.toml and the CI `msrv` job
+- Rust 1.100.0, the `rust-toolchain.toml` pin, to run the tests. The Solana
+  test dependencies require Rust 1.98.1 or later
 - Solana/Agave SBF cargo subcommands, including `cargo build-sbf` and
   `cargo test-sbf`, for Solana program development: https://solana.com/docs/intro/installation
 

@@ -1152,7 +1152,7 @@ mod tests {
         match result {
             Err(solana_transaction_error::TransactionError::InstructionError(
                 _,
-                solana_instruction::error::InstructionError::Custom(code),
+                solana_instruction_error::InstructionError::Custom(code),
             )) => {
                 assert_eq!(*code, expected as u32, "unexpected custom error code");
             }
@@ -1165,18 +1165,18 @@ mod tests {
         match result {
             Err(solana_transaction_error::TransactionError::InstructionError(
                 _,
-                solana_instruction::error::InstructionError::MissingRequiredSignature,
+                solana_instruction_error::InstructionError::MissingRequiredSignature,
             )) => {}
             other => panic!("expected MissingRequiredSignature, got {other:?}"),
         }
     }
 
     /// Assert the transaction aborted with the given non-custom
-    /// [`solana_instruction::error::InstructionError`] variant (e.g.
+    /// [`solana_instruction_error::InstructionError`] variant (e.g.
     /// `InvalidSeeds`, `AccountAlreadyInitialized`).
     fn assert_instruction_error(
         result: &Result<(), solana_transaction_error::TransactionError>,
-        expected: solana_instruction::error::InstructionError,
+        expected: solana_instruction_error::InstructionError,
     ) {
         match result {
             Err(solana_transaction_error::TransactionError::InstructionError(_, err)) => {
@@ -1280,7 +1280,7 @@ mod tests {
             .unwrap();
         assert_instruction_error(
             &result.result,
-            solana_instruction::error::InstructionError::InvalidSeeds,
+            solana_instruction_error::InstructionError::InvalidSeeds,
         );
     }
 
@@ -1321,7 +1321,7 @@ mod tests {
             .unwrap();
         assert_instruction_error(
             &result.result,
-            solana_instruction::error::InstructionError::AccountAlreadyInitialized,
+            solana_instruction_error::InstructionError::AccountAlreadyInitialized,
         );
     }
 
@@ -4068,7 +4068,7 @@ mod tests {
             .unwrap();
         assert_instruction_error(
             &result.result,
-            solana_instruction::error::InstructionError::InvalidInstructionData,
+            solana_instruction_error::InstructionError::InvalidInstructionData,
         );
     }
 
@@ -4119,7 +4119,7 @@ mod tests {
             .unwrap();
         assert_instruction_error(
             &result.result,
-            solana_instruction::error::InstructionError::IncorrectProgramId,
+            solana_instruction_error::InstructionError::IncorrectProgramId,
         );
     }
 
@@ -4165,7 +4165,7 @@ mod tests {
             .unwrap();
         assert_instruction_error(
             &result.result,
-            solana_instruction::error::InstructionError::InvalidAccountData,
+            solana_instruction_error::InstructionError::InvalidAccountData,
         );
     }
 }
