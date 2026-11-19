@@ -123,14 +123,17 @@ This file records changes to this project, in the
 
 ### Fixed
 
-- `root_from_auth_path` rejects an auth path longer than the tree height.
-  Before this change, it walked the first `height` siblings and ignored the
-  rest. The hypertree and FORS verifiers inherit the check. The stateful
-  UXMSS verifier derives its leaf index through `Signature::leaf_index`,
-  which documents the unbalanced-tree invariant: leaf `n` carries `n`
-  siblings. New tests check that the verifier rejects a path with a sibling
-  added or removed, and a leaf past the verifier budget. The wire format
-  does not change.
+- The shared helper `root_from_auth_path` now rejects an auth path longer
+  than the tree height. Before this change, the helper walked the first
+  `height` siblings and ignored the rest. The hypertree and FORS verifiers
+  already required an exact path length before they called the helper.
+  Verification results for those two verifiers do not change. The stateful
+  UXMSS verifier reads its leaf index from `Signature::leaf_index`. That
+  method returns `None` when the path length does not fit in `u32`.
+  Otherwise the method returns the path length. A signature for leaf `n`
+  carries `n` siblings. New tests check that the verifier rejects a path
+  with a sibling added or removed, and a leaf past the verifier budget.
+  The wire format stays the same.
 
 - The `hashsigs` wheel carries a `manylinux` platform tag again. The build
   moved from the maturin command line to `python -m build`, which builds the

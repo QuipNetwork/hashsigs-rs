@@ -69,14 +69,10 @@ impl Signature {
     /// rejects an index outside `1..=max_signatures`, and the path climb
     /// rejects a sibling count that differs from the index.
     ///
-    /// A path too long for `u32` saturates to `u32::MAX`. The range check
-    /// rejects it unless `max_signatures` is also `u32::MAX`, and the path
-    /// climb rejects it in every case, because the sibling count no longer
-    /// equals the index. The ABI decoder caps the path at
-    /// `MAX_STATEFUL_AUTH_PATH_LEN`, so only an in-process caller can build
-    /// one that long.
-    pub fn leaf_index(&self) -> u32 {
-        u32::try_from(self.auth_path.len()).unwrap_or(u32::MAX)
+    /// Returns `None` when the auth-path length does not fit in `u32`.
+    /// The verifier rejects `None` before it hashes.
+    pub fn leaf_index(&self) -> Option<u32> {
+        u32::try_from(self.auth_path.len()).ok()
     }
 
     /// ABI-encode the signature body (two static words plus two `bytes32[]`
@@ -275,10 +271,10 @@ mod tests {
 
     #[test]
     fn leaf_index_is_the_auth_path_length() {
-        assert_eq!(sample_stateful_signature().leaf_index(), 2);
+        assert_eq!(sample_stateful_signature().leaf_index(), Some(2));
         let mut empty = sample_stateful_signature();
         empty.auth_path.clear();
-        assert_eq!(empty.leaf_index(), 0);
+        assert_eq!(empty.leaf_index(), Some(0));
     }
 
     #[test]

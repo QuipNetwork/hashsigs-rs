@@ -693,6 +693,13 @@ mod tests {
         let mut tampered_counter = signed.signature.clone();
         tampered_counter.counter = tampered_counter.counter.wrapping_add(1);
         assert_ne!(recomputed_root(&tampered_counter), Some(signed.root));
+
+        // One sibling more than the FORS tree height: the length guard
+        // rejects the signature outright. Checked here so the 128s profiles
+        // do not pay for a second keygen.
+        let mut long_auth = signed.signature.clone();
+        long_auth.entries[0].auth_path.push([0xEEu8; HASH_LEN]);
+        assert_eq!(recomputed_root(&long_auth), None);
     }
 }
 

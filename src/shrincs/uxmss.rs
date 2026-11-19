@@ -104,7 +104,9 @@ pub(crate) fn verify_stateful_unsafe_raw<P: Profile, const NUM_CHAINS: usize>(
     message: &[u8],
     signature: &Signature,
 ) -> bool {
-    let leaf_index = signature.leaf_index();
+    let Some(leaf_index) = signature.leaf_index() else {
+        return false;
+    };
     if leaf_index < INITIAL_STATEFUL_LEAF_INDEX || leaf_index > stateful_key.max_signatures {
         return false;
     }
@@ -987,10 +989,9 @@ mod stateful_core_tests {
         ));
 
         // One extra sibling moves the derived leaf index from 4 to 5, which
-        // is still inside the budget. Every hash in the WOTS-C walk and the
-        // path climb binds the index, so the root no longer matches.
+        // is still inside the budget. Verification rejects the signature.
         sig.auth_path.push([0xEEu8; HASH_LEN]);
-        assert_eq!(sig.leaf_index(), 5);
+        assert_eq!(sig.leaf_index(), Some(5));
         assert!(!verify_stateful_unsafe_raw::<SelectedProfile, NUM_CHAINS>(
             &pk, message, &sig
         ));
@@ -1009,7 +1010,7 @@ mod stateful_core_tests {
         ));
 
         sig.auth_path.pop();
-        assert_eq!(sig.leaf_index(), 3);
+        assert_eq!(sig.leaf_index(), Some(3));
         assert!(!verify_stateful_unsafe_raw::<SelectedProfile, NUM_CHAINS>(
             &pk, message, &sig
         ));
@@ -1029,7 +1030,7 @@ mod stateful_core_tests {
 
         // Leaf 0 does not exist: the range check rejects before any hashing.
         sig.auth_path.clear();
-        assert_eq!(sig.leaf_index(), 0);
+        assert_eq!(sig.leaf_index(), Some(0));
         assert!(!verify_stateful_unsafe_raw::<SelectedProfile, NUM_CHAINS>(
             &pk, message, &sig
         ));
@@ -1047,9 +1048,12 @@ mod stateful_core_tests {
             &pk, message, &sig
         ));
 
-        // Leaf max + 1 is outside the key's budget.
+        // A path one past the budget is rejected. The added sibling also
+        // breaks the root, so this test does not pin the `max_signatures`
+        // bound. `verify_rejects_a_leaf_past_the_verifier_budget` pins that
+        // bound.
         sig.auth_path.push([0xEEu8; HASH_LEN]);
-        assert_eq!(sig.leaf_index(), max + 1);
+        assert_eq!(sig.leaf_index(), Some(max + 1));
         assert!(!verify_stateful_unsafe_raw::<SelectedProfile, NUM_CHAINS>(
             &pk, message, &sig
         ));
@@ -1097,6 +1101,34 @@ mod stateful_core_tests {
         assert_eq!(
             root_from_unbalanced_path::<SelectedProfile>(
                 pk_seed, leaf_index, leaf_hash, short_path
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn root_from_unbalanced_path_rejects_long_sibling_list() {
+        let max = 8u32;
+        let key = test_key(b"long-path", max);
+        let message = b"long auth path";
+        let leaf_index = 4u32;
+        let sig =
+            sign_stateful_raw_at_leaf::<SelectedProfile, NUM_CHAINS>(&key, leaf_index, message)
+                .expect("sign");
+        let pk_seed = *key.public_key().pk_seed.as_bytes();
+        let leaf_hash = compact_stateful_wots_public_key_from_signature::<
+            SelectedProfile,
+            NUM_CHAINS,
+        >(pk_seed, leaf_index, message, &sig)
+        .expect("wots pk hash");
+
+        // One sibling past what `leaf_index` requires: the length guard
+        // must reject rather than silently reconstruct a wrong root.
+        let mut long_path = sig.auth_path.clone();
+        long_path.push([0xEE; HASH_LEN]);
+        assert_eq!(
+            root_from_unbalanced_path::<SelectedProfile>(
+                pk_seed, leaf_index, leaf_hash, &long_path
             ),
             None
         );

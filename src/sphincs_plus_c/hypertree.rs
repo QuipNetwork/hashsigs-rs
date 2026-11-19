@@ -1031,6 +1031,16 @@ mod tests {
             },
             &layers,
         ));
+        // One extra auth-path sibling must not verify.
+        let mut long_path = layers.clone();
+        long_path[0].auth_path.push([0xEE; HASH_LEN]);
+        assert!(!verify_hypertree::<SelectedProfile, NUM_CHAINS>(
+            key.public_key.pk_seed.as_bytes(),
+            key.public_key.root.as_bytes(),
+            fors_root,
+            seed,
+            &long_path,
+        ));
     }
 
     #[test]
