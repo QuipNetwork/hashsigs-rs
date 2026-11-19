@@ -103,7 +103,9 @@ where
 /// `parent_hash(level, parent_index, left, right)` where `level` runs
 /// `1..=height` and `parent_index` is the index at that level. Domain
 /// separation (tag, address-word derivation) is entirely caller-owned via
-/// `parent_hash`. Returns `None` if `auth_path` is shorter than `height`.
+/// `parent_hash`. Returns `None` unless `auth_path` holds exactly `height`
+/// siblings: a short path cannot reach the root, and a long path would be
+/// silently truncated to the first `height` entries.
 pub(crate) fn root_from_auth_path(
     height: u32,
     leaf_index: u32,
@@ -111,7 +113,7 @@ pub(crate) fn root_from_auth_path(
     auth_path: &[[u8; HASH_LEN]],
     parent_hash: impl Fn(u32, u32, &[u8; HASH_LEN], &[u8; HASH_LEN]) -> [u8; HASH_LEN],
 ) -> Option<[u8; HASH_LEN]> {
-    if (auth_path.len() as u32) < height {
+    if auth_path.len() != height as usize {
         return None;
     }
     let mut node = leaf;
@@ -339,6 +341,24 @@ mod tests {
             root_from_auth_path(height, selected_leaf, leaf, short_auth, test_parent_ref),
             None,
             "an auth path shorter than height must be rejected, not silently truncated"
+        );
+    }
+
+    #[test]
+    fn root_from_auth_path_rejects_a_long_sibling_list() {
+        let height = 4;
+        let selected_leaf = 6;
+        let (_root, mut auth) =
+            treehash_root_and_auth_path(height, selected_leaf, |i| test_leaf(9, i), test_parent);
+        let leaf = test_leaf(9, selected_leaf);
+
+        // One sibling more than height. The loop would read only `height`
+        // of them and reconstruct the true root from a malformed path.
+        auth.push([0xEEu8; HASH_LEN]);
+        assert_eq!(
+            root_from_auth_path(height, selected_leaf, leaf, &auth, test_parent_ref),
+            None,
+            "an auth path longer than height must be rejected, not silently truncated"
         );
     }
 }

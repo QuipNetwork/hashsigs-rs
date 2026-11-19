@@ -425,9 +425,6 @@ fn hypertree_root_from_path32<P: Profile>(
     leaf: [u8; HASH_LEN],
     auth_path: &[[u8; HASH_LEN]],
 ) -> Option<[u8; HASH_LEN]> {
-    if auth_path.len() != height as usize {
-        return None;
-    }
     let pk_seed = word32(pk_seed)?;
     crate::treehash::root_from_auth_path(
         height,
@@ -1044,6 +1041,16 @@ mod tests {
                 leaf_index: seed.leaf_index ^ 1,
             },
             &layers,
+        ));
+        // One extra auth-path sibling must not verify.
+        let mut long_path = layers.clone();
+        long_path[0].auth_path.push([0xEE; HASH_LEN]);
+        assert!(!verify_hypertree::<SelectedProfile, NUM_CHAINS>(
+            key.public_key.pk_seed.as_bytes(),
+            key.public_key.root.as_bytes(),
+            fors_root,
+            seed,
+            &long_path,
         ));
     }
 

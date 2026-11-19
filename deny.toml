@@ -12,6 +12,13 @@ ignore = [
     # bincode unmaintained — transitive via the Solana dep tree only, no
     # upstream fix, no known vulnerability, not on any hashsigs code path.
     "RUSTSEC-2025-0141",
+    # crypto-bigint 0.5.5 timing variability (published after the last release).
+    # The fix is 0.7.6, but elliptic-curve 0.13 -> k256 0.13 ->
+    # solana-secp256k1-recover -> solana-program 4.x requires the 0.5 line, so
+    # no compatible upgrade exists. hashsigs-rs reaches it only through the
+    # optional/dev solana-program dependency and never passes secret integers to
+    # it. Added 2026-10-30; remove when solana-program moves off k256 0.13.
+    "RUSTSEC-2026-0387",
     # libsecp256k1 (RUSTSEC-2025-0161, unmaintained) is dev-only via
     # solana-program-test and is not flagged at that graph position, so it
     # needs no entry here. SECURITY.md documents it.
