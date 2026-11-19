@@ -110,6 +110,10 @@ pub fn message_hash(message: &[u8]) -> Result<[u8; HASH_LEN], BindingError> {
 /// ‖ pkSeed(32) ‖ hypertreeRoot(32)`, 128 bytes total (the field order of
 /// `sphincs_plus_c::Key::to_bytes`). The layout carries no profile-dependent
 /// width, so this needs no `P`.
+///
+/// Structural parse only, WITHOUT validating the root — callers MUST run
+/// persisted bytes through [`sphincs_plus_c_import_secret_key`] before
+/// trusting the key (this only checks the length and slices the fields).
 pub fn deserialize_sphincs_plus_c_signing_key(
     bytes: &[u8],
 ) -> Result<crate::sphincs_plus_c::Key, BindingError> {
@@ -129,9 +133,19 @@ pub fn sphincs_plus_c_import_secret_key<P: Profile, const NUM_LAYERS: usize>(
 ) -> Result<crate::sphincs_plus_c::Key, BindingError> {
     let candidate = deserialize_sphincs_plus_c_signing_key(secret_key)?;
     if !candidate.root_matches_seeds::<P, NUM_LAYERS>() {
-        return Err(import_invalid());
+        return Err(sphincs_plus_c_import_invalid());
     }
     Ok(candidate)
+}
+
+/// `ERR_IMPORT_INVALID` for a SPHINCS+C secret whose root the seeds do not
+/// produce. SPHINCS+C has no counter, so this does not share the SHRINCS
+/// wording.
+fn sphincs_plus_c_import_invalid() -> BindingError {
+    BindingError {
+        code: ErrorCode::ImportInvalid.as_str(),
+        message: "secretKey failed validation: root does not match the seeds".into(),
+    }
 }
 
 /// `pkSeed ‖ hypertreeRoot` (64 bytes), the verifier-interface public key
@@ -196,11 +210,11 @@ pub fn sphincs_plus_c_keygen<P: Profile, const NUM_LAYERS: usize>(
     Ok(signing_key)
 }
 
-/// Sign a 32-byte message with a validated SPHINCS+C signing key under `P`.
-/// Takes the typed key that [`sphincs_plus_c_import_secret_key`] or
-/// [`sphincs_plus_c_keygen`] returns, so an invalid key is rejected before
-/// any signature is made. A Rust caller can import once and sign many
-/// times. The wasm and Python wrappers take bytes and import on every call.
+/// Sign a 32-byte message with a SPHINCS+C signing key under `P`.
+/// Trusts the `Key` it is given and does not recompute the root. A key
+/// from persisted bytes must come from [`sphincs_plus_c_import_secret_key`].
+/// A Rust caller can import once and sign many times. The wasm and Python
+/// wrappers take bytes and import on every call.
 pub fn sphincs_plus_c_sign<P: Profile, const NUM_LAYERS: usize>(
     message: &[u8],
     signing_key: &crate::sphincs_plus_c::Key,
@@ -510,12 +524,31 @@ pub fn shrincs_recover_public_key_commitment<P: Profile>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::profiles::selected::{SelectedProfile, NUM_CHAINS, NUM_LAYERS};
+    #[cfg(not(any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    )))]
+    use crate::profiles::selected::NUM_CHAINS;
+    use crate::profiles::selected::{SelectedProfile, NUM_LAYERS};
 
+    #[cfg(not(any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    )))]
     fn keygen() -> crate::sphincs_plus_c::Key {
         sphincs_plus_c_keygen::<SelectedProfile, NUM_LAYERS>(&[0x11u8; 32]).expect("keygen")
     }
 
+    #[cfg(not(any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    )))]
     #[test]
     fn sphincs_plus_c_import_accepts_keygen_output() {
         let key = keygen();
@@ -532,6 +565,12 @@ mod tests {
         assert_eq!(err.code, ErrorCode::BadLength.as_str());
     }
 
+    #[cfg(not(any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    )))]
     #[test]
     fn sphincs_plus_c_import_rejects_a_root_that_does_not_match_the_seeds() {
         let mut bytes = keygen().to_bytes();
@@ -542,6 +581,44 @@ mod tests {
         assert_eq!(err.code, ErrorCode::ImportInvalid.as_str());
     }
 
+    #[cfg(not(any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    )))]
+    #[test]
+    fn sphincs_plus_c_import_rejects_an_sk_seed_that_does_not_match_the_root() {
+        let mut bytes = keygen().to_bytes();
+        // Byte 0 is the first byte of `sk_seed`.
+        bytes[0] ^= 0x01;
+        let err = sphincs_plus_c_import_secret_key::<SelectedProfile, NUM_LAYERS>(&bytes)
+            .expect_err("an sk_seed that does not match the root must fail");
+        assert_eq!(err.code, ErrorCode::ImportInvalid.as_str());
+    }
+
+    #[cfg(not(any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    )))]
+    #[test]
+    fn sphincs_plus_c_import_rejects_a_pk_seed_that_does_not_match_the_root() {
+        let mut bytes = keygen().to_bytes();
+        // Byte 64 is the first byte of `pk_seed` (sk 0..32, prf 32..64, pk 64..96).
+        bytes[64] ^= 0x01;
+        let err = sphincs_plus_c_import_secret_key::<SelectedProfile, NUM_LAYERS>(&bytes)
+            .expect_err("a pk_seed that does not match the root must fail");
+        assert_eq!(err.code, ErrorCode::ImportInvalid.as_str());
+    }
+
+    #[cfg(not(any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    )))]
     #[test]
     fn sphincs_plus_c_import_accepts_a_key_with_a_different_prf_seed() {
         let mut bytes = keygen().to_bytes();
@@ -560,6 +637,12 @@ mod tests {
         ));
     }
 
+    #[cfg(not(any(
+        shrincs_default_profile_128s_q18,
+        shrincs_default_profile_128s_q20,
+        shrincs_default_profile_128s_q18_sha2,
+        shrincs_default_profile_128s_q20_sha2
+    )))]
     #[test]
     fn sphincs_plus_c_sign_takes_the_typed_key_and_verifies() {
         let key = keygen();

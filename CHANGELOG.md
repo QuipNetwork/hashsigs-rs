@@ -7,6 +7,9 @@ This file records changes to this project, in the
 
 ### Added
 
+- `sphincs_plus_c::Key::root_matches_seeds` recomputes the hypertree root
+  from the seeds and compares it with the stored root.
+
 - Explicit-leaf stateful signing on the wasm surface: `shrincsSignAtLeaf`
   (commitment-bound, like `shrincsSign`) and `shrincsSignStatefulRawAt`
   (signs the message as-is, for callers whose canonical hashes already bind
@@ -127,10 +130,11 @@ This file records changes to this project, in the
   Python extension check the secret key before signing. Both recompute
   the hypertree root from the seeds and raise `ERR_IMPORT_INVALID` on a
   mismatch, the same check `shrincsImportSigningKey` already made. The
-  binding-level `sphincs_plus_c_sign` now takes the typed key that
-  `sphincs_plus_c_import_secret_key` returns, so a Rust caller imports once
-  and signs many times. The wasm and Python wrappers take bytes and import
-  on every call.
+  binding-level `sphincs_plus_c_sign` trusts its `Key` argument and does
+  not recompute the root. Persisted bytes must go through
+  `sphincs_plus_c_import_secret_key`. Rust callers import once and sign
+  many times. The wasm and Python wrappers take bytes and import on every
+  call, and they reject a wrong-length message before that import.
 
 - The `hashsigs` wheel carries a `manylinux` platform tag again. The build
   moved from the maturin command line to `python -m build`, which builds the

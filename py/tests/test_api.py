@@ -213,6 +213,15 @@ def test_sphincs_plus_c_sign_rejects_a_root_that_does_not_match_the_seeds():
     assert excinfo.value.code == "ERR_IMPORT_INVALID"
 
 
+def test_sphincs_plus_c_sign_rejects_a_wrong_length_message():
+    keys = sphincs_plus_c.keygen(SEED)
+    with pytest.raises(HashSigsError) as excinfo:
+        sphincs_plus_c.sign(b"not thirty two bytes", keys)
+    assert excinfo.value.code == "ERR_BAD_LENGTH"
+    # The message must never be echoed back: it reaches logs.
+    assert "not thirty two bytes" not in str(excinfo.value)
+
+
 def test_a_wrong_length_message_is_rejected_when_signing():
     keys = shrincs.keygen(SEED, 4)
     with pytest.raises(HashSigsError) as excinfo:

@@ -123,6 +123,7 @@ macro_rules! wasm_profile_surface {
             message: &[u8],
             secret_key: &[u8],
         ) -> Result<alloc::vec::Vec<u8>, JsValue> {
+            $crate::bindings::message_hash(message).map_err($crate::wasm::js_error)?;
             let signing_key = $crate::bindings::sphincs_plus_c_import_secret_key::<
                 $profile,
                 PROFILE_NUM_LAYERS,
