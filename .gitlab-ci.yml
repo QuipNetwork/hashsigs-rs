@@ -55,11 +55,13 @@ variables:
   WASM_BINDGEN_SHA256: "63d6a38deb65bd7023c02bdf382ab66b0d2c0241c8582fd3413b5a808b8aeb5b"
   # cargo-deny / cargo-semver-checks prebuilt musl binaries, pinned like
   # wasm-bindgen above. SHA256 is of the x86_64-unknown-linux-musl release
-  # tarball, verified by downloading the asset (2026-07-25).
+  # tarball, verified by downloading the asset (cargo-deny 2026-07-25,
+  # cargo-semver-checks 2026-11-19). cargo-semver-checks must read the rustdoc
+  # JSON format of the pinned toolchain: 0.49.0 rejects the Rust 1.100 format.
   CARGO_DENY_VERSION: "0.20.2"
   CARGO_DENY_SHA256: "9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f"
-  CARGO_SEMVER_CHECKS_VERSION: "0.49.0"
-  CARGO_SEMVER_CHECKS_SHA256: "f25b4fcf842fc8a18fd6f1d9475513dc74ef2c9df201252b9b9d2f6edb6ab6a2"
+  CARGO_SEMVER_CHECKS_VERSION: "0.51.0"
+  CARGO_SEMVER_CHECKS_SHA256: "396c8508d973c83de52660943a057e971b586f7511c3ba695762373452b43d5b"
   # Node 22 LTS; install from nodejs.org tarball so the major is fixed (not
   # whatever Debian ships under apt `nodejs`).
   NODE_MAJOR: "22"
