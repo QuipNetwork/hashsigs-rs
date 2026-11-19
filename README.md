@@ -500,6 +500,12 @@ these two profiles yet. Raise them to a full `cargo test` once
 `tests/test_vectors/shrincs_account_wrapper_vectors_128s_q{18,20}_sha2.json.gz`
 land.
 
+Under the 128s profiles, the tests that run a full key generation or a
+stateless signature are ignored, because each takes minutes. CI runs the rest,
+including the verification of the committed 128s vectors. To run the ignored
+tests locally, add `-- --ignored`, or set `INCLUDE_IGNORED_128S=1` when you run
+`bin/test-shrincs-profiles.sh`.
+
 For a fast compile-only check:
 
 ```bash

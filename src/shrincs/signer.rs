@@ -1060,6 +1060,15 @@ mod tests {
         ));
     }
 
+    #[cfg_attr(
+        any(
+            shrincs_default_profile_128s_q18,
+            shrincs_default_profile_128s_q20,
+            shrincs_default_profile_128s_q18_sha2,
+            shrincs_default_profile_128s_q20_sha2
+        ),
+        ignore = "128s key generation takes minutes; local run with --include-ignored. CI verifies the committed vectors"
+    )]
     #[test]
     fn import_round_trips_a_keygen_key() {
         let (key, pk) = ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(
@@ -1091,6 +1100,15 @@ mod tests {
         )
     }
 
+    #[cfg_attr(
+        any(
+            shrincs_default_profile_128s_q18,
+            shrincs_default_profile_128s_q20,
+            shrincs_default_profile_128s_q18_sha2,
+            shrincs_default_profile_128s_q20_sha2
+        ),
+        ignore = "128s key generation takes minutes; local run with --include-ignored. CI verifies the committed vectors"
+    )]
     #[test]
     fn import_accepts_advanced_and_exhausted_counters() {
         let (key, _) = ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(
@@ -1122,6 +1140,15 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        any(
+            shrincs_default_profile_128s_q18,
+            shrincs_default_profile_128s_q20,
+            shrincs_default_profile_128s_q18_sha2,
+            shrincs_default_profile_128s_q20_sha2
+        ),
+        ignore = "128s key generation takes minutes; local run with --include-ignored. CI verifies the committed vectors"
+    )]
     #[test]
     fn import_rejects_out_of_range_counters_and_budgets() {
         let (key, _) = ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(
@@ -1187,6 +1214,15 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        any(
+            shrincs_default_profile_128s_q18,
+            shrincs_default_profile_128s_q20,
+            shrincs_default_profile_128s_q18_sha2,
+            shrincs_default_profile_128s_q20_sha2
+        ),
+        ignore = "128s key generation takes minutes; local run with --include-ignored. CI verifies the committed vectors"
+    )]
     #[test]
     fn import_rejects_tampered_roots() {
         let (key, _) = ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(
@@ -1253,6 +1289,15 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        any(
+            shrincs_default_profile_128s_q18,
+            shrincs_default_profile_128s_q20,
+            shrincs_default_profile_128s_q18_sha2,
+            shrincs_default_profile_128s_q20_sha2
+        ),
+        ignore = "128s key generation takes minutes; local run with --include-ignored. CI verifies the committed vectors"
+    )]
     #[test]
     fn imported_key_signs_and_verifies() {
         let (key, _) = ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(

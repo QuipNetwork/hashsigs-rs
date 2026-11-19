@@ -506,8 +506,27 @@ mod tests {
         .expect("keygen")
     }
 
+    /// Same shape as `production_keys` with a placeholder hypertree root, for
+    /// tests that never import the key or sign statelessly. It runs on every
+    /// profile because it skips the hypertree key generation.
+    fn stateful_only_keys() -> (Keys, crate::shrincs::key::PublicKey) {
+        crate::test_support::stateful_only_key::<SelectedProfile, NUM_CHAINS>(
+            b"keys import cross-check",
+            4,
+        )
+    }
+
     /// `compute_commitment` must match the commitment production `keygen`
     /// installs in the public key — same preimage, same keccak.
+    #[cfg_attr(
+        any(
+            shrincs_default_profile_128s_q18,
+            shrincs_default_profile_128s_q20,
+            shrincs_default_profile_128s_q18_sha2,
+            shrincs_default_profile_128s_q20_sha2
+        ),
+        ignore = "128s key generation takes minutes; local run with --include-ignored. CI verifies the committed vectors"
+    )]
     #[test]
     fn commitment_matches_production_keygen() {
         let (keys, pk) = production_keys();
@@ -517,6 +536,15 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        any(
+            shrincs_default_profile_128s_q18,
+            shrincs_default_profile_128s_q20,
+            shrincs_default_profile_128s_q18_sha2,
+            shrincs_default_profile_128s_q20_sha2
+        ),
+        ignore = "128s key generation takes minutes; local run with --include-ignored. CI verifies the committed vectors"
+    )]
     #[test]
     fn import_accepts_valid_seed_derived_key() {
         let (keys, _) = production_keys();
@@ -526,6 +554,15 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        any(
+            shrincs_default_profile_128s_q18,
+            shrincs_default_profile_128s_q20,
+            shrincs_default_profile_128s_q18_sha2,
+            shrincs_default_profile_128s_q20_sha2
+        ),
+        ignore = "128s key generation takes minutes; local run with --include-ignored. CI verifies the committed vectors"
+    )]
     #[test]
     fn import_rejects_tampered_stateful_root() {
         let (keys, _) = production_keys();
@@ -534,6 +571,15 @@ mod tests {
         assert!(Keys::import::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(&bytes).is_none());
     }
 
+    #[cfg_attr(
+        any(
+            shrincs_default_profile_128s_q18,
+            shrincs_default_profile_128s_q20,
+            shrincs_default_profile_128s_q18_sha2,
+            shrincs_default_profile_128s_q20_sha2
+        ),
+        ignore = "128s key generation takes minutes; local run with --include-ignored. CI verifies the committed vectors"
+    )]
     #[test]
     fn import_rejects_tampered_hypertree_root() {
         let (keys, _) = production_keys();
@@ -542,6 +588,15 @@ mod tests {
         assert!(Keys::import::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(&bytes).is_none());
     }
 
+    #[cfg_attr(
+        any(
+            shrincs_default_profile_128s_q18,
+            shrincs_default_profile_128s_q20,
+            shrincs_default_profile_128s_q18_sha2,
+            shrincs_default_profile_128s_q20_sha2
+        ),
+        ignore = "128s key generation takes minutes; local run with --include-ignored. CI verifies the committed vectors"
+    )]
     #[test]
     fn import_rejects_out_of_bounds_max() {
         let (keys, _) = production_keys();
@@ -550,6 +605,15 @@ mod tests {
         assert!(Keys::import::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(&bytes).is_none());
     }
 
+    #[cfg_attr(
+        any(
+            shrincs_default_profile_128s_q18,
+            shrincs_default_profile_128s_q20,
+            shrincs_default_profile_128s_q18_sha2,
+            shrincs_default_profile_128s_q20_sha2
+        ),
+        ignore = "128s key generation takes minutes; local run with --include-ignored. CI verifies the committed vectors"
+    )]
     #[test]
     fn import_accepts_exhausted_counter() {
         let (keys, _) = production_keys();
@@ -560,6 +624,15 @@ mod tests {
         assert!(Keys::import::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(&bytes).is_some());
     }
 
+    #[cfg_attr(
+        any(
+            shrincs_default_profile_128s_q18,
+            shrincs_default_profile_128s_q20,
+            shrincs_default_profile_128s_q18_sha2,
+            shrincs_default_profile_128s_q20_sha2
+        ),
+        ignore = "128s key generation takes minutes; local run with --include-ignored. CI verifies the committed vectors"
+    )]
     #[test]
     fn reset_generates_fresh_stateful_chain() {
         let (mut keys, _pk) = production_keys();
@@ -583,8 +656,8 @@ mod tests {
 
     #[test]
     fn reset_is_deterministic() {
-        let (mut keys_a, _) = production_keys();
-        let (mut keys_b, _) = production_keys();
+        let (mut keys_a, _) = stateful_only_keys();
+        let (mut keys_b, _) = stateful_only_keys();
 
         keys_a.reset::<SelectedProfile, NUM_CHAINS>(b"same reset seed");
         keys_b.reset::<SelectedProfile, NUM_CHAINS>(b"same reset seed");
@@ -600,6 +673,15 @@ mod tests {
     /// commitment `reset` installs, and be rejected against the stale
     /// pre-reset commitment -- the property that makes `reset` a real key
     /// rotation rather than a no-op relabeling.
+    #[cfg_attr(
+        any(
+            shrincs_default_profile_128s_q18,
+            shrincs_default_profile_128s_q20,
+            shrincs_default_profile_128s_q18_sha2,
+            shrincs_default_profile_128s_q20_sha2
+        ),
+        ignore = "128s key generation takes minutes; local run with --include-ignored. CI verifies the committed vectors"
+    )]
     #[test]
     fn reset_then_sign_verifies_against_new_commitment_and_rejects_old() {
         use crate::shrincs::signer::ShrincsSigner;
@@ -651,7 +733,7 @@ mod tests {
 
     #[test]
     fn recompute_commitment_matches_current_commitment() {
-        let (keys, _pk) = production_keys();
+        let (keys, _pk) = stateful_only_keys();
         assert_eq!(
             keys.recompute_commitment::<SelectedProfile>(),
             *keys.public_key_commitment()
@@ -660,7 +742,7 @@ mod tests {
 
     #[test]
     fn recover_commitment_from_envelope_matches_keygen_commitment() {
-        let (mut keys, pk) = production_keys();
+        let (mut keys, pk) = stateful_only_keys();
         let pre_sign_commitment = *keys.public_key_commitment();
         let sig = crate::shrincs::signer::ShrincsSigner::sign_stateful_raw::<
             SelectedProfile,
@@ -672,7 +754,7 @@ mod tests {
         let recovered = Keys::recover_commitment::<SelectedProfile>(&env).expect("recover");
 
         assert_eq!(recovered, pre_sign_commitment);
-        assert_eq!(recovered, *production_keys().0.public_key_commitment());
+        assert_eq!(recovered, *stateful_only_keys().0.public_key_commitment());
     }
 
     #[test]
@@ -686,7 +768,7 @@ mod tests {
     /// envelope bytes and could claim any commitment there.
     #[test]
     fn recover_commitment_ignores_tampered_commitment_field() {
-        let (mut keys, pk) = production_keys();
+        let (mut keys, pk) = stateful_only_keys();
         let real = *keys.public_key_commitment();
         let sig = crate::shrincs::signer::ShrincsSigner::sign_stateful_raw::<
             SelectedProfile,
