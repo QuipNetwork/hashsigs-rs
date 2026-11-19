@@ -5,7 +5,7 @@
 # OIDC trusted publishing works. A job's own `tags` replaces the default (no
 # merge), so the override is clean.
 default:
-  tags: [linux, x86_64]
+  tags: [linux, x86_64, amd64]
 
 # Shared cargo/target cache keyed on Cargo.lock + job name so stale deps cannot
 # drift under --locked and so jobs that select different profiles do not share a
