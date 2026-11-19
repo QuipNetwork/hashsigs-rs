@@ -21,10 +21,15 @@ build-test:
     # only when packaging via npm run build → build-wasm.sh.
     - cargo build --locked --release --target wasm32-unknown-unknown --features wasm-bindings
 
-# 128s profiles: full cargo test in release (not check-only). Unignored tests
-# build a 2^18-leaf hypertree; debug is unusable (>25 min without finishing a
-# test). Separate job so wall-clock is visible and so this parallelizes with
-# build-test / clippy / ts-conformance. Manual mirror: bin/test-shrincs-profiles.sh.
+# 128s profiles: cargo test in release (not check-only; debug is unusable).
+# The job verifies the committed 128s golden vectors (stateless signatures
+# through the verifier and the Solidity adapter vectors) and runs the cheap
+# tests. Tests that run a full 128s key generation or a stateless signature
+# are ignored under these profiles and are local-only: run them with
+# `cargo test --release --lib --features profile-128s-q18 -- --ignored`, or
+# with INCLUDE_IGNORED_128S=1 bin/test-shrincs-profiles.sh. Separate job so
+# wall-clock is visible and so this parallelizes with build-test / clippy /
+# ts-conformance. Manual mirror: bin/test-shrincs-profiles.sh.
 test-128s:
   stage: test
   image: rust:1.95.0

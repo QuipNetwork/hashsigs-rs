@@ -121,7 +121,7 @@ mod tests {
         fixture_entry_opt, fixture_pair, load_fixture_file, stateful_signer_fixture_path,
         TestKeyMode,
     };
-    use crate::shrincs::{Keys, PublicKey as SignerPublicKey, ShrincsSigner};
+    use crate::shrincs::{Keys, PublicKey as SignerPublicKey};
     use crate::ErrorCode;
     #[cfg(all(feature = "wasm-bindings", target_arch = "wasm32"))]
     use wasm_bindgen_test::wasm_bindgen_test;
@@ -138,12 +138,14 @@ mod tests {
         }
     }
 
+    /// Key pair for the flat-serialization tests. It uses a placeholder
+    /// hypertree root, so it runs on every profile without hypertree key
+    /// generation; byte round trips do not depend on the root being real.
     fn signing_key_and_public_key() -> (Keys, SignerPublicKey) {
-        ShrincsSigner::keygen::<SelectedProfile, NUM_CHAINS, NUM_LAYERS>(
+        crate::test_support::stateful_only_key::<SelectedProfile, NUM_CHAINS>(
             b"wasm verifier test seed",
             4,
         )
-        .unwrap()
     }
 
     #[cfg(all(feature = "wasm-bindings", target_arch = "wasm32"))]

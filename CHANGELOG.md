@@ -56,6 +56,15 @@ This file records changes to this project, in the
 
 ### Changed
 
+- Under the 128s profiles, the tests that run a full key generation or a
+  stateless signature are ignored, because each takes minutes. CI skips them
+  and verifies the committed 128s vectors, including a new test that sends
+  the committed stateless vector through the public verifier entry point on
+  the keccak profiles. Run the ignored tests locally with `-- --ignored`, or
+  with `INCLUDE_IGNORED_128S=1 bin/test-shrincs-profiles.sh`. Tests that only
+  need a stateful key now build one without the hypertree, so they run on
+  every profile.
+
 - The FORS message digest binds to the profile. Both digest regimes hash
   `P::PROFILE_ID` into the preimage, which is now
   `H("fors-digest" || PROFILE_ID || pkSeed || hypertreeRoot || randomizer ||
