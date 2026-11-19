@@ -603,14 +603,10 @@ pub(crate) fn hypertree_public_root<P: Profile, const NUM_LAYERS: usize>(
     stateless_sk_seed: &[u8; HASH_LEN],
     pk_seed: &[u8; HASH_LEN],
 ) -> [u8; HASH_LEN] {
-    match try_hypertree_public_root::<P, NUM_LAYERS>(stateless_sk_seed, pk_seed) {
-        Some(root) => root,
-        None => {
-            // Internal invariant: leaf 0 is always in range for the top-layer
-            // subtree rooted at tree index 0, so this path should be unreachable.
-            [0u8; HASH_LEN]
-        }
-    }
+    // Internal invariant: leaf 0 is always in range for the top-layer subtree
+    // rooted at tree index 0, so the fallback should be unreachable.
+    try_hypertree_public_root::<P, NUM_LAYERS>(stateless_sk_seed, pk_seed)
+        .unwrap_or([0u8; HASH_LEN])
 }
 
 /// The public root, or `None` when the top-layer subtree cannot be built.
