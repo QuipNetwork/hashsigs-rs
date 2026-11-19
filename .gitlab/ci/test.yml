@@ -1,6 +1,6 @@
 build-test:
   stage: test
-  image: rust:1.95.0
+  image: rust:1.100.0
   extends: .rust-cache
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -32,7 +32,7 @@ build-test:
 # ts-conformance. Manual mirror: bin/test-shrincs-profiles.sh.
 test-128s:
   stage: test
-  image: rust:1.95.0
+  image: rust:1.100.0
   extends: .rust-cache
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -59,7 +59,7 @@ test-128s:
 # harness; keep cost visible as its own job.
 test-solana:
   stage: test
-  image: rust:1.95.0
+  image: rust:1.100.0
   extends: .rust-cache
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -74,7 +74,7 @@ test-solana:
 # the `fmt` job below.
 clippy:
   stage: test
-  image: rust:1.95.0
+  image: rust:1.100.0
   extends: .rust-cache
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -89,7 +89,7 @@ clippy:
 # no build cache. The tree is fully rustfmt-clean; this keeps it that way.
 fmt:
   stage: test
-  image: rust:1.95.0
+  image: rust:1.100.0
   extends: .mr-default-rules
   before_script:
     - rustup component add rustfmt
@@ -100,7 +100,7 @@ fmt:
 # guarding the public-API docs and the runnable doc examples.
 rustdoc:
   stage: test
-  image: rust:1.95.0
+  image: rust:1.100.0
   extends: [.rust-cache, .mr-default-rules]
   variables:
     RUSTDOCFLAGS: "-D warnings"
@@ -108,12 +108,17 @@ rustdoc:
     - cargo doc --no-deps --locked
 
 # Minimum-supported-Rust-version floor. Pinned to the declared rust-version
-# (Cargo.toml `rust-version = "1.95"`) independently of any future bump to the
-# other jobs' image, so an accidental MSRV increase fails here first.
+# (Cargo.toml `rust-version = "1.95"`) independently of the other jobs' image
+# and of rust-toolchain.toml, so an accidental MSRV increase fails here first.
+# The other jobs run 1.100.0, which the Solana test dependencies require.
 msrv:
   stage: test
   image: rust:1.95.0
   extends: [.rust-cache, .mr-default-rules]
+  variables:
+    # rust-toolchain.toml pins the newer development toolchain, and rustup
+    # would install it over the image compiler. Force the floor here.
+    RUSTUP_TOOLCHAIN: "1.95.0"
   script:
     - cargo build --locked --features wasm-bindings
 
@@ -122,7 +127,7 @@ msrv:
 # .cargo-home/bin across runs (first cold run compiles it).
 supply-chain:
   stage: test
-  image: rust:1.95.0
+  image: rust:1.100.0
   extends: .rust-cache
   # Unlike the other static gates, this one also runs on tag pipelines:
   # advisories are time-dependent, so a lockfile that was clean when the SHA
@@ -144,7 +149,7 @@ supply-chain:
 # a not-yet-published crate simply yields an allowed failure.
 semver:
   stage: test
-  image: rust:1.95.0
+  image: rust:1.100.0
   extends: [.rust-cache, .mr-default-rules]
   allow_failure: true
   before_script:
@@ -173,7 +178,7 @@ semver:
 # takes about 53 seconds.
 ts-conformance:
   stage: test
-  image: rust:1.95.0
+  image: rust:1.100.0
   extends: .rust-cache
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -197,7 +202,7 @@ ts-conformance:
 # six, and signs on the 256s pair only -- 128s keygen costs tens of seconds.
 py-tests:
   stage: test
-  image: rust:1.95.0
+  image: rust:1.100.0
   extends: .rust-cache
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"

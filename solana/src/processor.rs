@@ -21,13 +21,8 @@ use solana_program::account_info::next_account_info;
 use solana_program::keccak::hash as keccak256_hash;
 use solana_program::program::set_return_data;
 use solana_program::{
-    account_info::AccountInfo,
-    entrypoint::ProgramResult,
-    msg,
-    program::invoke_signed,
-    program_error::ProgramError,
-    pubkey::Pubkey,
-    sysvar::{rent::Rent, Sysvar},
+    account_info::AccountInfo, entrypoint::ProgramResult, msg, program::invoke_signed,
+    program_error::ProgramError, pubkey::Pubkey, sysvar::rent::Rent,
 };
 use solana_system_interface::instruction::create_account;
 
@@ -173,6 +168,21 @@ fn process_generate_keypair(wots: &WOTSPlus, private_seed: [u8; 32]) -> ProgramR
     Ok(())
 }
 
+/// Reads the rent sysvar. Native (non-SBF) builds run under `solana-program-test`
+/// 4.4+, whose native processors cannot reach `Sysvar::get` (it always returns
+/// `UnsupportedSysvar`), so they use the default rent, which is the rent
+/// `solana-program-test` installs. On-chain builds still read the sysvar.
+#[cfg(target_os = "solana")]
+fn load_rent() -> Result<Rent, ProgramError> {
+    use solana_program::sysvar::Sysvar;
+    Rent::get()
+}
+
+#[cfg(not(target_os = "solana"))]
+fn load_rent() -> Result<Rent, ProgramError> {
+    Ok(Rent::default())
+}
+
 fn process_sign(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
@@ -204,7 +214,7 @@ fn process_sign(
         (constants::NUM_SIGNATURE_CHUNKS * constants::HASH_LEN); // actual signature data
 
     // Calculate rent
-    let rent = Rent::get()?;
+    let rent = load_rent()?;
     let rent_lamports = rent.minimum_balance(account_size);
 
     // Create the account if it doesn't exist

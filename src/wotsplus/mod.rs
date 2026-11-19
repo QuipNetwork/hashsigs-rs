@@ -189,14 +189,7 @@ impl SignatureBuffer {
             "SignatureBuffer length {} is not chunk-aligned",
             slice.len()
         );
-        slice
-            .chunks_exact(constants::HASH_LEN)
-            .map(|chunk| {
-                let mut arr = [0u8; constants::HASH_LEN];
-                arr.copy_from_slice(chunk);
-                arr
-            })
-            .collect()
+        slice.as_chunks::<{ constants::HASH_LEN }>().0.to_vec()
     }
 }
 
