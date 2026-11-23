@@ -23,8 +23,6 @@ ignore = [
     # Unmaintained crates - these are warnings, not vulnerabilities
     # These come from Solana's transitive dependencies and don't pose immediate
     # security risks, just maintenance concerns.
-    "RUSTSEC-2024-0375",  # atty is unmaintained
     "RUSTSEC-2024-0388",  # derivative is unmaintained
     "RUSTSEC-2024-0436",  # paste is unmaintained
-    "RUSTSEC-2021-0145"   # atty potential unaligned read (unsound)
 ]
